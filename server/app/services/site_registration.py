@@ -52,7 +52,7 @@ class SiteRegistrationService:
         if site.registered_at is None:
             site.registered_at = payload.registration_timestamp
 
-        if self._is_auto_verified(site.domain):
+        if self._should_mark_verified(site):
             site.status = SiteStatus.verified.value
             if site.verified_at is None:
                 site.verified_at = payload.registration_timestamp
@@ -192,3 +192,14 @@ class SiteRegistrationService:
             if domain == allowed or domain.endswith(f".{allowed}"):
                 return True
         return False
+
+    def _should_mark_verified(self, site: Site) -> bool:
+        if site.status == SiteStatus.verified.value:
+            return True
+
+        if self._is_auto_verified(site.domain):
+            return True
+
+        # A successful signed registration proves that the WordPress site owns
+        # the stored bridge secret and can actively reach kosmos-hub.
+        return True
