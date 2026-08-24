@@ -51,7 +51,7 @@ jobs:
           {
             "name": "Kosmos Bridge",
             "version": "$VERSION",
-            "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$ZIP_NAME",
+            "download_url": "https://plugins.kosmos-medien.de/kosmos-bridge/$ZIP_NAME",
             "homepage": "https://github.com/${GITHUB_REPOSITORY}",
             "requires": "6.9",
             "tested": "6.9",
