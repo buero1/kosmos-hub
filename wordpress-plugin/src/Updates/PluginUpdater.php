@@ -12,7 +12,7 @@ class PluginUpdater {
 	const PLUGIN_SLUG          = 'kosmos-bridge';
 	const DEFAULT_HOMEPAGE     = 'https://kosmos-hub.31-70-92-95.sslip.io';
 	const PRIMARY_METADATA_URL = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
-	const FALLBACK_METADATA_URL = 'https://github.com/buero1/kosmos-hub/releases/latest/download/metadata.json';
+	const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/buero1/kosmos-hub/releases/latest';
 
 	/**
 	 * @var string|null
@@ -138,10 +138,55 @@ class PluginUpdater {
 	 * @return array<int, string>
 	 */
 	private function get_metadata_urls() {
-		return array(
+		$urls = array(
 			self::PRIMARY_METADATA_URL,
-			self::FALLBACK_METADATA_URL,
 		);
+
+		$github_metadata_url = $this->get_github_release_metadata_url();
+		if ( '' !== $github_metadata_url ) {
+			$urls[] = $github_metadata_url;
+		}
+
+		return $urls;
+	}
+
+	/**
+	 * @return string
+	 */
+	private function get_github_release_metadata_url() {
+		$response = wp_remote_get(
+			self::GITHUB_RELEASES_API_URL,
+			array(
+				'timeout'     => 10,
+				'redirection' => 3,
+				'headers'     => array(
+					'Accept'     => 'application/vnd.github+json',
+					'User-Agent' => 'Kosmos-Bridge/' . Options::get_bridge_version(),
+				),
+			)
+		);
+
+		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+			return '';
+		}
+
+		$release = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $release ) || empty( $release['assets'] ) || ! is_array( $release['assets'] ) ) {
+			return '';
+		}
+
+		foreach ( $release['assets'] as $asset ) {
+			if ( ! is_array( $asset ) || 'metadata.json' !== (string) ( $asset['name'] ?? '' ) ) {
+				continue;
+			}
+
+			$download_url = esc_url_raw( (string) ( $asset['browser_download_url'] ?? '' ) );
+			if ( '' !== $download_url ) {
+				return $download_url;
+			}
+		}
+
+		return '';
 	}
 
 	/**

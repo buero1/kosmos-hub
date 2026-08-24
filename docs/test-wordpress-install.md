@@ -11,7 +11,7 @@ Stand: 2026-08-24
 
 Fuer den aktuellen Test ist das Upload-Paket:
 
-- `dist/kosmos-bridge-0.3.1.zip`
+- `dist/kosmos-bridge-0.3.2.zip`
 
 ## Installation
 
@@ -30,7 +30,8 @@ Sobald das Release auf `plugins.kosmos-medien.de` veroeffentlicht ist, kann
 aktualisiert werden. Die Site braucht dann keine manuelle Hub-Konfiguration.
 
 Falls der Plugin-Host spaeter kurzzeitig stoert, kann `Kosmos Bridge` fuer die
-Update-Metadaten auf den GitHub-Release-Fallback ausweichen.
+Update-Metadaten ueber die GitHub-Release-API auf das neueste Release
+ausweichen.
 
 ## Erwartetes Verhalten
 
