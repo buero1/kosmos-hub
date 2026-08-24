@@ -2,8 +2,9 @@
 /**
  * Plugin Name:       Kosmos Bridge
  * Description:       Registers a WordPress site with kosmos-hub and prepares future MCP connectivity.
- * Version:           0.3.3
- * Requires at least: 6.9
+ * Version:           0.3.4
+ * Requires at least: 5.8
+ * Tested up to:      7.1
  * Requires PHP:      7.4
  * Author:            Kosmos
  * License:           GPL-2.0-or-later

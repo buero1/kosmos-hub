@@ -53,8 +53,8 @@ jobs:
             "version": "$VERSION",
             "download_url": "https://plugins.kosmos-medien.de/kosmos-bridge/$ZIP_NAME",
             "homepage": "https://github.com/${GITHUB_REPOSITORY}",
-            "requires": "6.9",
-            "tested": "6.9",
+            "requires": "5.8",
+            "tested": "7.1",
             "requires_php": "7.4",
             "last_updated": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
             "sections": {

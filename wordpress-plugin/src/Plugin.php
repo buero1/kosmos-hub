@@ -14,6 +14,8 @@ defined( 'ABSPATH' ) || exit;
 class Plugin {
 	const REGISTER_HOOK  = 'kosmos_bridge_register_site';
 	const HEARTBEAT_HOOK = 'kosmos_bridge_daily_heartbeat';
+	const REGISTER_RETRY_DELAY    = 300;
+	const REGISTER_RETRY_THROTTLE = 900;
 
 	/**
 	 * @var Registrar|null
@@ -30,6 +32,7 @@ class Plugin {
 
 		add_action( 'plugins_loaded', array( self::class, 'ensure_identity' ) );
 		add_action( 'plugins_loaded', array( PluginUpdater::class, 'boot' ) );
+		add_action( 'init', array( self::class, 'maybe_retry_registration' ) );
 		add_action( 'wp_abilities_api_categories_init', array( AbilityRegistry::class, 'register_categories' ) );
 		add_action( 'wp_abilities_api_init', array( AbilityRegistry::class, 'register_abilities' ) );
 		add_action( self::REGISTER_HOOK, array( self::class, 'run_registration' ) );
@@ -51,9 +54,7 @@ class Plugin {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::HEARTBEAT_HOOK );
 		}
 
-		if ( ! wp_next_scheduled( self::REGISTER_HOOK ) ) {
-			wp_schedule_single_event( time() + MINUTE_IN_SECONDS, self::REGISTER_HOOK );
-		}
+		self::schedule_registration_retry( time() + MINUTE_IN_SECONDS );
 
 		// Try the first registration immediately so mass activation needs no
 		// follow-up click. The scheduled retry remains as a fallback.
@@ -79,14 +80,49 @@ class Plugin {
 	 * @return void
 	 */
 	public static function run_registration() {
-		self::registrar()->register( false );
+		$success = self::registrar()->register( false );
+
+		if ( $success ) {
+			wp_clear_scheduled_hook( self::REGISTER_HOOK );
+			return true;
+		}
+
+		self::schedule_registration_retry();
+		return false;
 	}
 
 	/**
 	 * @return void
 	 */
 	public static function run_heartbeat() {
-		self::registrar()->register( true );
+		$success = self::registrar()->register( true );
+
+		if ( ! $success ) {
+			self::schedule_registration_retry();
+		}
+	}
+
+	/**
+	 * @return void
+	 */
+	public static function maybe_retry_registration() {
+		if ( '' !== Options::get_last_success_at() ) {
+			return;
+		}
+
+		if ( wp_doing_cron() || wp_doing_ajax() ) {
+			return;
+		}
+
+		if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
+			return;
+		}
+
+		if ( ! self::should_attempt_registration_now() ) {
+			return;
+		}
+
+		self::run_registration();
 	}
 
 	/**
@@ -132,5 +168,38 @@ class Plugin {
 		}
 
 		return self::$registrar;
+	}
+
+	/**
+	 * @param int|null $timestamp Unix timestamp for the retry.
+	 * @return void
+	 */
+	private static function schedule_registration_retry( $timestamp = null ) {
+		$next_scheduled = wp_next_scheduled( self::REGISTER_HOOK );
+		$target_time    = is_int( $timestamp ) ? $timestamp : time() + self::REGISTER_RETRY_DELAY;
+
+		if ( false !== $next_scheduled && $next_scheduled <= $target_time ) {
+			return;
+		}
+
+		wp_schedule_single_event( $target_time, self::REGISTER_HOOK );
+	}
+
+	/**
+	 * @return bool
+	 */
+	private static function should_attempt_registration_now() {
+		$last_attempt = Options::get_last_registered_at();
+
+		if ( '' === $last_attempt ) {
+			return true;
+		}
+
+		$last_attempt_ts = strtotime( $last_attempt );
+		if ( false === $last_attempt_ts ) {
+			return true;
+		}
+
+		return ( time() - $last_attempt_ts ) >= self::REGISTER_RETRY_THROTTLE;
 	}
 }
