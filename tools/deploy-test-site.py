@@ -94,7 +94,12 @@ def remote_file_exists(ftp: FTP, remote_path: str) -> bool:
         ftp.size(remote_path)
         return True
     except error_perm:
-        return False
+        # Some hosting FTP servers disable SIZE for PHP files even though the
+        # file is present. NLST is broadly supported and sufficient here.
+        try:
+            return bool(ftp.nlst(remote_path))
+        except error_perm:
+            return False
 
 
 def detect_remote_root(ftp: FTP, plugin_slug: str) -> str:
