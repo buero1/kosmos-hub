@@ -14,6 +14,7 @@ from app.schemas.inventory import (
     StoredSiteCapabilityResponse,
 )
 from app.schemas.site import SiteDetailResponse
+from app.services.fleet_inventory import FleetInventoryService
 from app.services.site_inventory import SiteInventoryService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 
@@ -186,3 +187,73 @@ def refresh_site_state_snapshot(site_id: int) -> dict[str, Any]:
             snapshot=SiteStateSnapshotResponse.model_validate(payload["snapshot"]),
         ).model_dump(mode="json")
         return {"ok": True, "payload": response}
+
+
+@hub_mcp.tool()
+def search_site_inventory(
+    query: str = "",
+    plugin: str = "",
+    wordpress_version: str = "",
+    bridge_version: str = "",
+    inventory_state: str = "all",
+) -> dict[str, Any]:
+    """Find sites by stored WordPress, Bridge, and active-plugin inventory data."""
+    if inventory_state not in {"all", "present", "missing"}:
+        return _proxy_error_payload(
+            SiteMcpProxyError(
+                "INVALID_INVENTORY_STATE",
+                "inventory_state must be all, present, or missing.",
+                status_code=422,
+            )
+        )
+
+    with SessionLocal() as db:
+        service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+        items = service.filter_items(
+            service.list_items(limit=200),
+            query=query,
+            plugin=plugin,
+            inventory_state=inventory_state,
+            wordpress_version=wordpress_version,
+            bridge_version=bridge_version,
+        )
+        return {
+            "ok": True,
+            "payload": {
+                "items": [
+                    {
+                        "site_id": item.site.id,
+                        "domain": item.site.domain,
+                        "status": item.site.status,
+                        "wordpress_version": item.site.wordpress_version,
+                        "php_version": item.site.php_version,
+                        "bridge_version": item.site.bridge_version,
+                        "inventory_captured_at": item.snapshot.captured_at if item.snapshot else None,
+                        "active_plugin_count": item.plugin_count,
+                        "plugins": [
+                            {
+                                "name": plugin.get("name"),
+                                "plugin_file": plugin.get("plugin_file"),
+                                "version": plugin.get("version"),
+                            }
+                            for plugin in item.plugins
+                        ],
+                    }
+                    for item in items
+                ],
+                "summary": service.summarize(items),
+            },
+        }
+
+
+@hub_mcp.tool()
+def refresh_verified_site_inventories(limit: int = 25) -> dict[str, Any]:
+    """Read and store environment and active-plugin snapshots for verified WordPress sites."""
+    if limit < 1 or limit > 100:
+        return _proxy_error_payload(
+            SiteMcpProxyError("INVALID_LIMIT", "limit must be between 1 and 100.", status_code=422)
+        )
+
+    with SessionLocal() as db:
+        service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+        return {"ok": True, "payload": service.refresh_verified_site_states(limit=limit)}

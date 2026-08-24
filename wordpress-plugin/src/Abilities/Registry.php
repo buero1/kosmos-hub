@@ -136,6 +136,80 @@ class Registry {
 	}
 
 	/**
+	 * Provide the read-only core abilities on WordPress versions without the
+	 * native Abilities API so older managed sites use the same MCP contract.
+	 *
+	 * @return array
+	 */
+	public static function get_fallback_abilities() {
+		return array(
+			array(
+				'name'          => 'kosmos-bridge/get-site-info',
+				'label'         => __( 'Get Site Info', 'kosmos-bridge' ),
+				'description'   => __( 'Returns basic information about this WordPress site.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::site_info_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/get-environment-info',
+				'label'         => __( 'Get Environment Info', 'kosmos-bridge' ),
+				'description'   => __( 'Returns software versions and runtime information for this WordPress site.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::environment_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/list-active-plugins',
+				'label'         => __( 'List Active Plugins', 'kosmos-bridge' ),
+				'description'   => __( 'Returns active plugin metadata for this WordPress site.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::active_plugins_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+		);
+	}
+
+	/**
+	 * @param string $ability_name Ability identifier.
+	 * @return array|null
+	 */
+	public static function get_fallback_ability( $ability_name ) {
+		foreach ( self::get_fallback_abilities() as $ability ) {
+			if ( $ability_name === $ability['name'] ) {
+				return $ability;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * @param string $ability_name Ability identifier.
+	 * @param mixed  $input Ability input.
+	 * @return array|null
+	 */
+	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( null !== $input && ! empty( $input ) ) {
+			return null;
+		}
+
+		switch ( $ability_name ) {
+			case 'kosmos-bridge/get-site-info':
+				return self::execute_get_site_info();
+			case 'kosmos-bridge/get-environment-info':
+				return self::execute_get_environment_info();
+			case 'kosmos-bridge/list-active-plugins':
+				return self::execute_list_active_plugins();
+		}
+
+		return null;
+	}
+
+	/**
 	 * @param object $ability Ability instance.
 	 * @return bool
 	 */

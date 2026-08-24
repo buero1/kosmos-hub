@@ -65,6 +65,27 @@ class SiteRepository:
         )
         return self.db.scalar(statement)
 
+    def get_latest_snapshots_by_site_ids(self, site_ids: list[int]) -> dict[int, SiteSnapshot]:
+        if not site_ids:
+            return {}
+
+        latest_captured_at = (
+            select(
+                SiteSnapshot.site_id,
+                func.max(SiteSnapshot.captured_at).label("captured_at"),
+            )
+            .where(SiteSnapshot.site_id.in_(site_ids))
+            .group_by(SiteSnapshot.site_id)
+            .subquery()
+        )
+        statement = select(SiteSnapshot).join(
+            latest_captured_at,
+            (SiteSnapshot.site_id == latest_captured_at.c.site_id)
+            & (SiteSnapshot.captured_at == latest_captured_at.c.captured_at),
+        )
+        snapshots = self.db.scalars(statement).all()
+        return {snapshot.site_id: snapshot for snapshot in snapshots}
+
     def create_site_snapshot(
         self,
         *,

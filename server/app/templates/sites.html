@@ -1,36 +1,119 @@
 {% extends "base.html" %}
-{% block title %}Sites · kosmos-hub{% endblock %}
+{% block title %}Inventory · kosmos-hub{% endblock %}
 {% block content %}
   <section>
-    <h2>Registered sites</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Domain</th>
-          <th>Status</th>
-          <th>Home URL</th>
-          <th>Provider</th>
-          <th>WordPress</th>
-          <th>Updated</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for site in sites %}
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Fleet inventory</p>
+        <h2>Software, Bridge and plugins</h2>
+        <p class="subtle">{{ inventory_summary.inventoried_sites }} of {{ inventory_summary.total_sites }} sites have a stored state snapshot.</p>
+      </div>
+      <div class="inventory-totals">
+        <span><strong>{{ inventory_summary.active_plugins }}</strong> active plugins</span>
+        <span><strong>{{ inventory_summary.missing_inventory_sites }}</strong> without inventory</span>
+      </div>
+    </div>
+
+    <form class="filter-panel" method="get" action="/sites">
+      <label>
+        <span>Site</span>
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Domain search">
+      </label>
+      <label>
+        <span>Plugin</span>
+        <input type="search" name="plugin" value="{{ filters.plugin }}" placeholder="e.g. Elementor">
+      </label>
+      <label>
+        <span>Inventory</span>
+        <select name="inventory">
+          <option value="all" {% if filters.inventory == "all" %}selected{% endif %}>All sites</option>
+          <option value="present" {% if filters.inventory == "present" %}selected{% endif %}>Available</option>
+          <option value="missing" {% if filters.inventory == "missing" %}selected{% endif %}>Not collected</option>
+        </select>
+      </label>
+      <label>
+        <span>WordPress</span>
+        <select name="wordpress">
+          <option value="">All versions</option>
+          {% for version in filter_options.wordpress_versions %}
+            <option value="{{ version }}" {% if filters.wordpress == version %}selected{% endif %}>{{ version }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Bridge</span>
+        <select name="bridge">
+          <option value="">All versions</option>
+          {% for version in filter_options.bridge_versions %}
+            <option value="{{ version }}" {% if filters.bridge == version %}selected{% endif %}>{{ version }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select name="status">
+          <option value="">All statuses</option>
+          {% for item_status in filter_options.statuses %}
+            <option value="{{ item_status }}" {% if filters.status == item_status %}selected{% endif %}>{{ item_status }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="filter-actions">
+        <button class="button" type="submit">Apply filters</button>
+        <a href="/sites">Reset</a>
+      </div>
+    </form>
+
+    <p class="result-count">{{ items | length }} matching sites</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
           <tr>
-            <td><a href="/sites/{{ site.id }}">{{ site.domain }}</a></td>
-            <td><span class="pill">{{ site.status }}</span></td>
-            <td>{{ site.home_url }}</td>
-            <td>{{ site.connections[0].provider if site.connections else "-" }}</td>
-            <td>{{ site.wordpress_version or "-" }}</td>
-            <td>{{ site.updated_at }}</td>
+            <th>Domain</th>
+            <th>Status</th>
+            <th>Inventory</th>
+            <th>WordPress / PHP</th>
+            <th>Bridge</th>
+            <th>Active plugins</th>
           </tr>
-        {% else %}
-          <tr>
-            <td colspan="6">Noch keine Eintraege vorhanden.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <td>
+                <a href="/sites/{{ item.site.id }}">{{ item.site.domain }}</a>
+                <p class="subtle table-note">{{ item.site.home_url }}</p>
+              </td>
+              <td><span class="pill pill-{{ item.site.status }}">{{ item.site.status }}</span></td>
+              <td>
+                {% if item.snapshot %}
+                  <strong>Stored</strong>
+                  <p class="subtle table-note">{{ item.snapshot.captured_at }}</p>
+                {% else %}
+                  <span class="pill pill-missing">Not collected</span>
+                {% endif %}
+              </td>
+              <td>{{ item.site.wordpress_version or "-" }}<br><span class="subtle">PHP {{ item.site.php_version or "-" }}</span></td>
+              <td>{{ item.site.bridge_version or "-" }}</td>
+              <td>
+                {% if item.snapshot %}
+                  <strong>{{ item.plugin_count }}</strong>
+                  {% set matches = item.matching_plugin_names(filters.plugin) %}
+                  {% if matches %}
+                    <p class="subtle table-note">{{ matches | join(", ") }}</p>
+                  {% endif %}
+                {% else %}
+                  -
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="6">No sites match the selected filters.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 {% endblock %}
-

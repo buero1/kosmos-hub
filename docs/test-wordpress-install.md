@@ -11,7 +11,7 @@ Stand: 2026-08-24
 
 Fuer den aktuellen Test ist das Upload-Paket:
 
-- `dist/kosmos-bridge-0.3.4.zip`
+- `dist/kosmos-bridge-0.3.5.zip`
 
 ## Installation
 
