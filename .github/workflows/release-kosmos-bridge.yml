@@ -51,7 +51,7 @@ jobs:
           {
             "name": "Kosmos Bridge",
             "version": "$VERSION",
-            "download_url": "https://plugins.kosmos-medien.de/kosmos-bridge/$ZIP_NAME",
+            "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$ZIP_NAME",
             "homepage": "https://github.com/${GITHUB_REPOSITORY}",
             "requires": "6.9",
             "tested": "6.9",
@@ -70,7 +70,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "${{ steps.package.outputs.zip_name }}#Plugin-ZIP" \
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.package.outputs.zip_name }}#Plugin-ZIP" \
+            "metadata.json#Update-Metadata" \
             --title "Kosmos Bridge ${{ steps.version.outputs.version }}" \
             --generate-notes
 

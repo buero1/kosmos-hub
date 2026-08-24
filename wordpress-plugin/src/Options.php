@@ -12,7 +12,7 @@ class Options {
 	const LAST_SUCCESS_AT           = 'kosmos_bridge_last_success_at';
 	const LAST_REQUEST_ID           = 'kosmos_bridge_last_request_id';
 	const SERVER_BASE_URL           = 'kosmos_bridge_server_base_url';
-	const BRIDGE_VERSION            = '0.3.0';
+	const BRIDGE_VERSION            = '0.3.1';
 	const DEFAULT_SERVER_BASE_URL   = 'https://kosmos-hub.31-70-92-95.sslip.io';
 
 	/**

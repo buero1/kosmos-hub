@@ -11,7 +11,7 @@ Stand: 2026-08-24
 
 Fuer den aktuellen Test ist das Upload-Paket:
 
-- `dist/kosmos-bridge-0.3.0.zip`
+- `dist/kosmos-bridge-0.3.1.zip`
 
 ## Installation
 
@@ -28,6 +28,9 @@ Fuer den aktuellen Test ist das Upload-Paket:
 Sobald das Release auf `plugins.kosmos-medien.de` veroeffentlicht ist, kann
 `Kosmos Bridge` wie ein normales WordPress-Plugin ueber die Update-Ansicht
 aktualisiert werden. Die Site braucht dann keine manuelle Hub-Konfiguration.
+
+Falls der Plugin-Host spaeter kurzzeitig stoert, kann `Kosmos Bridge` fuer die
+Update-Metadaten auf den GitHub-Release-Fallback ausweichen.
 
 ## Erwartetes Verhalten
 
