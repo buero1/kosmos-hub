@@ -9,15 +9,9 @@ defined( 'ABSPATH' ) || exit;
  * Supplies WordPress with trusted update metadata from the Kosmos endpoint.
  */
 class PluginUpdater {
-	const PLUGIN_SLUG          = 'kosmos-bridge';
-	const DEFAULT_HOMEPAGE     = 'https://kosmos-hub.31-70-92-95.sslip.io';
-	const PRIMARY_METADATA_URL = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
-	const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/buero1/kosmos-hub/releases/latest';
-
-	/**
-	 * @var string|null
-	 */
-	private $metadata_source_url = null;
+	const PLUGIN_SLUG      = 'kosmos-bridge';
+	const DEFAULT_HOMEPAGE = 'https://kosmos-hub.31-70-92-95.sslip.io';
+	const METADATA_URL     = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
 
 	/**
 	 * @return void
@@ -55,7 +49,7 @@ class PluginUpdater {
 		}
 
 		$transient->response[ $plugin_file ] = (object) array(
-			'id'           => $this->metadata_source_url ?: self::PRIMARY_METADATA_URL,
+			'id'           => self::METADATA_URL,
 			'slug'         => self::PLUGIN_SLUG,
 			'plugin'       => $plugin_file,
 			'new_version'  => (string) $metadata['version'],
@@ -105,88 +99,25 @@ class PluginUpdater {
 	 * @return array<string, mixed>|null
 	 */
 	private function get_metadata() {
-		foreach ( $this->get_metadata_urls() as $metadata_url ) {
-			$response = wp_remote_get(
-				$metadata_url,
-				array(
-					'timeout'     => 10,
-					'redirection' => 3,
-					'headers'     => array(
-						'Accept' => 'application/json',
-					),
-				)
-			);
-
-			if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-				continue;
-			}
-
-			$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
-			$metadata = is_array( $metadata ) ? $metadata : array();
-			$metadata = $this->sanitize_metadata( $metadata );
-
-			if ( ! empty( $metadata ) ) {
-				$this->metadata_source_url = $metadata_url;
-				return $metadata;
-			}
-		}
-
-		return null;
-	}
-
-	/**
-	 * @return array<int, string>
-	 */
-	private function get_metadata_urls() {
-		$urls = array(
-			self::PRIMARY_METADATA_URL,
-		);
-
-		$github_metadata_url = $this->get_github_release_metadata_url();
-		if ( '' !== $github_metadata_url ) {
-			$urls[] = $github_metadata_url;
-		}
-
-		return $urls;
-	}
-
-	/**
-	 * @return string
-	 */
-	private function get_github_release_metadata_url() {
 		$response = wp_remote_get(
-			self::GITHUB_RELEASES_API_URL,
+			self::METADATA_URL,
 			array(
 				'timeout'     => 10,
 				'redirection' => 3,
 				'headers'     => array(
-					'Accept'     => 'application/vnd.github+json',
-					'User-Agent' => 'Kosmos-Bridge/' . Options::get_bridge_version(),
+					'Accept' => 'application/json',
 				),
 			)
 		);
 
 		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-			return '';
+			return null;
 		}
 
-		$release = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! is_array( $release ) || empty( $release['assets'] ) || ! is_array( $release['assets'] ) ) {
-			return '';
-		}
+		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
+		$metadata = is_array( $metadata ) ? $metadata : array();
 
-		foreach ( $release['assets'] as $asset ) {
-			if ( ! is_array( $asset ) || 'metadata.json' !== (string) ( $asset['name'] ?? '' ) ) {
-				continue;
-			}
-
-			$download_url = esc_url_raw( (string) ( $asset['browser_download_url'] ?? '' ) );
-			if ( '' !== $download_url ) {
-				return $download_url;
-			}
-		}
-
-		return '';
+		return $this->sanitize_metadata( $metadata );
 	}
 
 	/**
@@ -202,7 +133,7 @@ class PluginUpdater {
 			return null;
 		}
 
-		if ( ! $this->is_allowed_download_url( $download_url ) || 0 !== strpos( $homepage, 'https://' ) ) {
+		if ( 0 !== strpos( $download_url, 'https://plugins.kosmos-medien.de/kosmos-bridge/' ) || 0 !== strpos( $homepage, 'https://' ) ) {
 			return null;
 		}
 
@@ -222,25 +153,5 @@ class PluginUpdater {
 				'changelog'   => wp_kses_post( $sections['changelog'] ?? '' ),
 			),
 		);
-	}
-
-	/**
-	 * @param string $download_url Candidate download url.
-	 * @return bool
-	 */
-	private function is_allowed_download_url( $download_url ) {
-		if ( 0 === strpos( $download_url, 'https://plugins.kosmos-medien.de/kosmos-bridge/' ) ) {
-			return true;
-		}
-
-		if ( 0 === strpos( $download_url, 'https://github.com/buero1/kosmos-hub/releases/download/' ) ) {
-			return true;
-		}
-
-		if ( 0 === strpos( $download_url, 'https://github.com/buero1/kosmos-hub/releases/latest/download/' ) ) {
-			return true;
-		}
-
-		return false;
 	}
 }

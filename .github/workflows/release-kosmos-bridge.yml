@@ -72,7 +72,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "${{ steps.package.outputs.zip_name }}#Plugin-ZIP" \
-            "metadata.json#Update-Metadata" \
             --title "Kosmos Bridge ${{ steps.version.outputs.version }}" \
             --generate-notes
 
