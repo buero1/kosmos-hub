@@ -1,0 +1,31 @@
+[project]
+name = "kosmos-hub-server"
+version = "0.1.0"
+description = "Central registry and control-plane backend for the Kosmos Hub platform."
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.16,<2.0",
+  "cryptography>=45,<46",
+  "fastapi>=0.116,<1.0",
+  "jinja2>=3.1,<4.0",
+  "mcp>=2.0,<3.0",
+  "pydantic-settings>=2.10,<3.0",
+  "pymysql>=1.1,<2.0",
+  "sqlalchemy>=2.0,<3.0",
+  "uvicorn[standard]>=0.35,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1.0",
+  "pytest>=8.4,<9.0",
+]
+
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+

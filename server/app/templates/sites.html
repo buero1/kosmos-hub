@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Sites · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <h2>Registered sites</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Status</th>
+          <th>Home URL</th>
+          <th>Provider</th>
+          <th>WordPress</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for site in sites %}
+          <tr>
+            <td><a href="/sites/{{ site.id }}">{{ site.domain }}</a></td>
+            <td><span class="pill">{{ site.status }}</span></td>
+            <td>{{ site.home_url }}</td>
+            <td>{{ site.connections[0].provider if site.connections else "-" }}</td>
+            <td>{{ site.wordpress_version or "-" }}</td>
+            <td>{{ site.updated_at }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">Noch keine Eintraege vorhanden.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}
+

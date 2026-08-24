@@ -1,0 +1,91 @@
+name: Release Kosmos Bridge
+
+on:
+  push:
+    tags:
+      - 'bridge-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#bridge-v}"
+          HEADER_VERSION="$(sed -n 's/^ \* Version:[[:space:]]*//p' wordpress-plugin/kosmos-bridge.php)"
+          CONSTANT_VERSION="$(sed -n "s/^[[:space:]]*const BRIDGE_VERSION[[:space:]]*=[[:space:]]*'\\([^']*\\)';$/\\1/p" wordpress-plugin/src/Options.php)"
+
+          test -n "$VERSION"
+          test "$VERSION" = "$HEADER_VERSION"
+          test "$VERSION" = "$CONSTANT_VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin package and metadata
+        id: package
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP_NAME="kosmos-bridge-${VERSION}.zip"
+          PACKAGE_DIR="dist/kosmos-bridge"
+
+          rm -rf dist metadata.json "$ZIP_NAME"
+          mkdir -p "$PACKAGE_DIR"
+          rsync -a \
+            --exclude='vendor' \
+            --exclude='composer.lock' \
+            --exclude='*.zip' \
+            wordpress-plugin/ "$PACKAGE_DIR/"
+          ( cd dist && zip -rq "../$ZIP_NAME" kosmos-bridge )
+
+          cat > metadata.json <<EOF
+          {
+            "name": "Kosmos Bridge",
+            "version": "$VERSION",
+            "download_url": "https://plugins.kosmos-medien.de/kosmos-bridge/$ZIP_NAME",
+            "homepage": "https://github.com/${GITHUB_REPOSITORY}",
+            "requires": "6.9",
+            "tested": "6.9",
+            "requires_php": "7.4",
+            "last_updated": "$(date -u '+%Y-%m-%d %H:%M:%S UTC')",
+            "sections": {
+              "description": "WordPress-Bridge fuer die zentrale Kosmos-Plattform mit Site-Registrierung, Heartbeat und spaeteren MCP-Operationen.",
+              "changelog": "<p>Details stehen in der jeweiligen GitHub-Release-Notiz.</p>"
+            }
+          }
+          EOF
+
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.package.outputs.zip_name }}#Plugin-ZIP" \
+            --title "Kosmos Bridge ${{ steps.version.outputs.version }}" \
+            --generate-notes
+
+      - name: Publish update package
+        env:
+          FTP_HOST: ${{ secrets.KOSMOS_BRIDGE_UPDATE_FTP_HOST }}
+          FTP_USER: ${{ secrets.KOSMOS_BRIDGE_UPDATE_FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.KOSMOS_BRIDGE_UPDATE_FTP_PASSWORD }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+        run: |
+          curl --fail --silent --show-error --ftp-create-dirs \
+            --user "$FTP_USER:$FTP_PASSWORD" \
+            --upload-file "$ZIP_NAME" \
+            "ftp://$FTP_HOST/html/kosmos-bridge/$ZIP_NAME"
+          curl --fail --silent --show-error --ftp-create-dirs \
+            --user "$FTP_USER:$FTP_PASSWORD" \
+            --upload-file metadata.json \
+            "ftp://$FTP_HOST/html/kosmos-bridge/metadata.json"

@@ -1,0 +1,13 @@
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+dist/
+server/.env
+server/.venv/
+wordpress-plugin/vendor/
+wordpress-plugin/composer.lock

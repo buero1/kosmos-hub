@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="grid">
+    <article class="card">
+      <p class="subtle">Total sites</p>
+      <p class="metric">{{ summary.total_sites }}</p>
+    </article>
+    <article class="card">
+      <p class="subtle">Pending</p>
+      <p class="metric">{{ summary.pending_sites }}</p>
+    </article>
+    <article class="card">
+      <p class="subtle">Verified</p>
+      <p class="metric">{{ summary.verified_sites }}</p>
+    </article>
+    <article class="card">
+      <p class="subtle">Unknown / stale</p>
+      <p class="metric">{{ summary.unknown_sites }}</p>
+    </article>
+  </section>
+
+  <section>
+    <h2>Latest sites</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Status</th>
+          <th>WordPress</th>
+          <th>PHP</th>
+          <th>Bridge</th>
+          <th>Last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for site in sites %}
+          <tr>
+            <td><a href="/sites/{{ site.id }}">{{ site.domain }}</a></td>
+            <td><span class="pill">{{ site.status }}</span></td>
+            <td>{{ site.wordpress_version or "-" }}</td>
+            <td>{{ site.php_version or "-" }}</td>
+            <td>{{ site.bridge_version or "-" }}</td>
+            <td>{{ site.last_seen_at or "-" }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">Noch keine Sites registriert.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}
+

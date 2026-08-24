@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ site.domain }} · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="detail-list">
+    <article class="card">
+      <h2>{{ site.domain }}</h2>
+      <p><strong>Status:</strong> {{ site.status }}</p>
+      <p><strong>UUID:</strong> {{ site.uuid }}</p>
+      <p><strong>Home URL:</strong> {{ site.home_url }}</p>
+      <p><strong>Site URL:</strong> {{ site.site_url }}</p>
+    </article>
+    <article class="card">
+      <h3>Software</h3>
+      <p><strong>WordPress:</strong> {{ site.wordpress_version or "-" }}</p>
+      <p><strong>PHP:</strong> {{ site.php_version or "-" }}</p>
+      <p><strong>Bridge:</strong> {{ site.bridge_version or "-" }}</p>
+      <p><strong>Last seen:</strong> {{ site.last_seen_at or "-" }}</p>
+    </article>
+    <article class="card">
+      <h3>Latest Snapshot</h3>
+      {% set latest_snapshot = site.snapshots[0] if site.snapshots else None %}
+      {% if latest_snapshot %}
+        <p><strong>Captured:</strong> {{ latest_snapshot.captured_at }}</p>
+        <p><strong>WordPress:</strong> {{ latest_snapshot.wordpress_version or "-" }}</p>
+        <p><strong>PHP:</strong> {{ latest_snapshot.php_version or "-" }}</p>
+        <p><strong>Active plugins:</strong> {{ latest_snapshot.plugins_json | length }}</p>
+      {% else %}
+        <p>No stored state snapshot yet.</p>
+      {% endif %}
+    </article>
+    <article class="card">
+      <h3>Connections</h3>
+      {% for connection in site.connections %}
+        <p><strong>{{ connection.provider }}</strong></p>
+        <p>{{ connection.endpoint }}</p>
+        <p class="subtle">{{ connection.auth_type }} · {{ connection.status }}</p>
+      {% else %}
+        <p>No connections stored yet.</p>
+      {% endfor %}
+    </article>
+    <article class="card">
+      <h3>Stored Capabilities</h3>
+      <p><strong>Count:</strong> {{ site.capabilities | length }}</p>
+      {% for capability in site.capabilities[:8] %}
+        <p><strong>{{ capability.ability_name }}</strong></p>
+        <p class="subtle">{{ capability.provider }} · readonly={{ capability.read_only }} · destructive={{ capability.destructive }}</p>
+      {% else %}
+        <p>No capability inventory stored yet.</p>
+      {% endfor %}
+    </article>
+  </section>
+  <a class="button" href="/sites">Back to sites</a>
+{% endblock %}
