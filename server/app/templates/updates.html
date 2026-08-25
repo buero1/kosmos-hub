@@ -96,7 +96,17 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="8">No updates match the selected filters.</td>
+              <td colspan="8">
+                <strong>No update entries match the selected filters.</strong>
+                {% if matching_sites %}
+                  <p class="subtle table-note">The matching site is registered, but has no currently matching update entry. This workbench only lists available WordPress, plugin and theme updates.</p>
+                  <p class="table-note">
+                    {% for site in matching_sites %}
+                      <a href="/sites/{{ site.id }}">{{ site.domain }}</a>{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                  </p>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

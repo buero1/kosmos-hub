@@ -102,13 +102,15 @@ def update_workbench_page(
     activity: Literal["all", "active", "inactive"] = "all",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    entries = inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
+    all_items = inventory_service.list_items(limit=200)
+    entries = inventory_service.build_update_workbench(all_items)
     filtered_entries = inventory_service.filter_update_workbench(
         entries,
         query=q,
         kind=kind,
         activity=activity,
     )
+    matching_sites = inventory_service.filter_items(all_items, query=q) if q.strip() else []
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -117,6 +119,7 @@ def update_workbench_page(
             "summary": inventory_service.summarize_update_workbench(entries),
             "filters": {"q": q, "kind": kind, "activity": activity},
             "csrf_token": get_csrf_token(request),
+            "matching_sites": matching_sites,
         },
     )
 
