@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.templating import Jinja2Templates
 
-from app.core.config import get_settings
+from app.api.routes.accounts import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
 from app.db.session import get_db
 from app.repositories.site_repository import SiteRepository
@@ -116,7 +116,7 @@ def update_workbench_page(
             "entries": filtered_entries,
             "summary": inventory_service.summarize_update_workbench(entries),
             "filters": {"q": q, "kind": kind, "activity": activity},
-            "plan_creation_enabled": get_settings().hub_access_enabled,
+            "csrf_token": get_csrf_token(request),
         },
     )
 
@@ -129,7 +129,6 @@ def update_plans_page(request: Request, db: Annotated[Session, Depends(get_db)])
         "update_plans.html",
         {
             "plans": service.list_plans(),
-            "plan_creation_enabled": get_settings().hub_access_enabled,
         },
     )
 
@@ -141,12 +140,15 @@ def create_update_plan(
     name: Annotated[str, Form()] = "",
     notes: Annotated[str, Form()] = "",
     selected: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
 ):
-    if not get_settings().hub_access_enabled:
-        raise HTTPException(status_code=403, detail="Enable HUB_ACCESS_USERNAME and HUB_ACCESS_PASSWORD before creating plans.")
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
 
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    created_by = getattr(request.state, "hub_access_username", "operator")
+    created_by = user.username
     try:
         plan = service.create_draft(
             name=name,

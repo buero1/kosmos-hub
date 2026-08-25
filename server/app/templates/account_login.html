@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Sign in · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Protected control plane</p>
+        <h2>Sign in to kosmos-hub</h2>
+        <p class="subtle">Use your personal Hub account. There is no public registration.</p>
+      </div>
+    </div>
+    {% if request.query_params.get("setup") == "complete" %}
+      <p class="notice-success">Your administrator account has been created. You can sign in now.</p>
+    {% endif %}
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <form class="account-panel" method="post" action="/account/login">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>
+        <span>Username</span>
+        <input name="username" autocomplete="username" required>
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button class="button" type="submit">Sign in</button>
+    </form>
+  </section>
+{% endblock %}

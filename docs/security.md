@@ -1,6 +1,6 @@
 # Kosmos Hub Security
 
-Stand: 2026-08-24
+Stand: 2026-08-25
 
 ## Sicherheitsziele
 
@@ -119,19 +119,25 @@ Nicht geloggt werden:
 - vollstaendige Authorization-Header
 - Passwoerter
 
-### 7. Einfache Weboberflaeche
+### 7. Hub-Benutzerkonten und Sitzungen
 
-Fuer das interne MVP ist zunaechst kein vollwertiges Login-System vorgesehen.
-Der Hub unterstuetzt dafuer eine einfache Basic-Auth-Sperre mit
-`HUB_ACCESS_USERNAME` und `HUB_ACCESS_PASSWORD`. Beide Werte muessen gemeinsam
-in der geschuetzten Server-Environment gesetzt werden; unvollstaendige Werte
-verhindern den Start.
+Die Weboberflaeche und internen APIs sind durch ein eigenes Hub-Konto geschuetzt.
+Ausgenommen bleiben ausschliesslich der Health-Endpoint und die HMAC-gesicherte
+Site-Registrierung. Passwoerter werden mit `PBKDF2-HMAC-SHA256`, einem eigenen
+zufaelligen Salt und 600.000 Iterationen gespeichert; Klartextpasswoerter werden
+nicht persistiert oder geloggt.
 
-Solange diese Sperre nicht aktiv ist, bleibt die Workbench rein lesend und das
-Speichern von Update-Entwuerfen wird serverseitig mit `403` blockiert. Bevor
-echte Produktionsdaten oder schreibende Aktionen darueber erreichbar werden,
-muss mindestens diese Sperre oder ein gleichwertiger Reverse-Proxy-Schutz aktiv
-sein.
+Der erste Administrator wird nicht ueber eine oeffentliche Registrierung
+angelegt. Der Server erzeugt dafuer auf einem direkten lokalen Aufruf einen
+zufaelligen, einmalig nutzbaren Einrichtungslink, der nach 20 Minuten ablaeuft.
+Der Token liegt nur als HMAC-Hash in der Datenbank und wird im Link-Fragment
+transportiert, damit er nicht in Webserver-URLs landet.
+
+Sitzungen sind signierte, nur ueber HTTPS uebertragene Cookies mit `SameSite=Lax`
+und einer maximalen Laufzeit von 12 Stunden. Jede Sitzung enthaelt eine
+Versionsnummer. Ein Passwortwechsel erhoeht diese Nummer und macht damit andere
+bestehende Sitzungen ungueltig. Formulare mit schreibender Wirkung sind zusaetzlich
+mit serverseitig gespeicherten CSRF-Tokens geschuetzt.
 
 ## Sicherheitsregeln fuer spaetere MCP-Endpunkte
 
@@ -146,6 +152,6 @@ Fuer Phase 2+ sind bereits jetzt verbindlich:
 ## Offene Sicherheitsaufgaben nach Phase 1
 
 - asymmetrisches oder tokenbasiertes Erst-Onboarding
-- feinere Rollen fuer die Weboberflaeche
+- feinere Rollen und getrennte Benutzerverwaltung fuer die Weboberflaeche
 - Capability-spezifische Write-Gates
 - strukturierte Alarmierung bei wiederholten Auth-Fehlern

@@ -11,13 +11,6 @@
       <a class="button button-secondary" href="/updates">Open workbench</a>
     </div>
 
-    {% if not plan_creation_enabled %}
-      <div class="plan-panel plan-panel-locked">
-        <p><strong>Plan creation is locked.</strong></p>
-        <p class="subtle">Configure Hub Basic Auth first. This prevents unauthenticated visitors from creating review records.</p>
-      </div>
-    {% endif %}
-
     <div class="table-scroll">
       <table>
         <thead>

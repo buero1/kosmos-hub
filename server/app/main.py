@@ -1,18 +1,18 @@
 import asyncio
 import logging
-from base64 import b64decode
-from binascii import Error as BinasciiError
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from secrets import compare_digest
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
+from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import health, registrations, site_abilities, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, health, registrations, site_abilities, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.mcp_server import hub_mcp, mcp_asgi_app
+from app.services.hub_accounts import HubAccountService
 from app.services.fleet_inventory import FleetInventoryService
 from app.core.security import get_secret_cipher
 
@@ -71,19 +71,21 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def protect_hub_and_prevent_stale_web_pages(request: Request, call_next):
-        if settings.hub_access_enabled and not _is_public_hub_path(request.url.path):
-            username = _authenticated_hub_username(request, settings)
-            if username is None:
-                return PlainTextResponse(
-                    "Authentication required.",
-                    status_code=401,
-                    headers={"WWW-Authenticate": 'Basic realm="kosmos-hub"', "Cache-Control": "no-store"},
-                )
-            request.state.hub_access_username = username
+        if not _is_public_hub_path(request.url.path):
+            user = _authenticated_hub_user(request)
+            if user is None:
+                if request.method == "GET" and _prefers_html(request):
+                    next_url = request.url.path
+                    if request.url.query:
+                        next_url = f"{next_url}?{request.url.query}"
+                    return RedirectResponse(url=f"/account/login?{urlencode({'next': next_url})}", status_code=303)
+                return PlainTextResponse("Authentication required.", status_code=401, headers={"Cache-Control": "no-store"})
+            request.state.hub_user = user
 
         response = await call_next(request)
         if (
             request.url.path == "/"
+            or request.url.path.startswith("/account")
             or request.url.path.startswith("/sites")
             or request.url.path == "/updates"
             or request.url.path.startswith("/update-plans")
@@ -94,12 +96,22 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(registrations.router)
+    app.include_router(accounts.router)
+    app.include_router(accounts.bootstrap_router)
     app.include_router(sites.router)
     app.include_router(site_abilities.router)
     app.include_router(site_inventory.router)
     app.include_router(site_updates.router)
     app.include_router(web.router)
     app.mount("/mcp", mcp_asgi_app)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.app_secret_key,
+        session_cookie="kosmos_hub_session",
+        max_age=12 * 60 * 60,
+        same_site="lax",
+        https_only=settings.public_base_url.startswith("https://"),
+    )
     return app
 
 
@@ -107,25 +119,22 @@ app = create_app()
 
 
 def _is_public_hub_path(path: str) -> bool:
-    return path in {"/healthz", "/api/v1/registrations"}
+    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"}
 
 
-def _authenticated_hub_username(request: Request, settings) -> str | None:
-    authorization = request.headers.get("authorization", "")
-    scheme, _, encoded_credentials = authorization.partition(" ")
-    if scheme.lower() != "basic" or not encoded_credentials:
+def _authenticated_hub_user(request: Request):
+    user_id = request.session.get("user_id")
+    session_version = request.session.get("session_version")
+    if not isinstance(user_id, int) or not isinstance(session_version, int):
         return None
+    with SessionLocal() as db:
+        service = HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+        user = service.get_user(user_id)
+        if user is None or not user.is_active or user.session_version != session_version:
+            return None
+        db.expunge(user)
+        return user
 
-    try:
-        decoded_credentials = b64decode(encoded_credentials, validate=True).decode("utf-8")
-    except (BinasciiError, UnicodeDecodeError):
-        return None
 
-    username, separator, password = decoded_credentials.partition(":")
-    if not separator or settings.hub_access_password is None:
-        return None
-
-    expected_password = settings.hub_access_password.get_secret_value()
-    if not compare_digest(username, settings.hub_access_username) or not compare_digest(password, expected_password):
-        return None
-    return username
+def _prefers_html(request: Request) -> bool:
+    return "text/html" in request.headers.get("accept", "")

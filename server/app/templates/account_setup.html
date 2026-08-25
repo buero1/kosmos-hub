@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Set up account · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">One-time secure setup</p>
+        <h2>Create the first administrator account</h2>
+        <p class="subtle">This link is valid for 20 minutes. Use a unique password with at least 14 characters.</p>
+      </div>
+    </div>
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <form class="account-panel" method="post" action="/account/setup">
+      <input id="setup-token" type="hidden" name="setup_token">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>
+        <span>Administrator username</span>
+        <input name="username" autocomplete="username" pattern="[a-z0-9][a-z0-9._-]{2,63}" required>
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="new-password" minlength="14" required>
+      </label>
+      <label>
+        <span>Confirm password</span>
+        <input type="password" name="password_confirmation" autocomplete="new-password" minlength="14" required>
+      </label>
+      <button class="button" type="submit">Create administrator account</button>
+    </form>
+  </section>
+  <script>
+    const setupToken = new URLSearchParams(window.location.hash.slice(1)).get("token");
+    document.getElementById("setup-token").value = setupToken || "";
+  </script>
+{% endblock %}

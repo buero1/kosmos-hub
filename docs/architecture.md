@@ -1,6 +1,6 @@
 # Kosmos Hub Architecture
 
-Stand: 2026-08-24
+Stand: 2026-08-25
 
 ## Ziel
 
@@ -135,6 +135,12 @@ Noch nicht Bestandteil von Phase 1:
 - `app/repositories/`: Datenzugriff
 - `app/services/`: Registrierungs-, Verschluesselungs- und Audit-Logik
 - `app/templates/`: einfache serverseitige HTML-Ausgabe
+
+Die Hub-Weboberflaeche nutzt ein datenbankgestuetztes Benutzerkonto statt einer
+statischen Server-Basic-Auth. Der erste Administrator wird ueber einen nur auf
+dem Host erzeugbaren Einmal-Link eingerichtet. Danach schuetzen signierte
+HTTPS-Sitzungen die Hub-Seiten und internen APIs; die HMAC-Registrierung der
+WordPress-Sites bleibt davon bewusst getrennt.
 
 ## Datenmodell in Phase 1
 

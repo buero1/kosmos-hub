@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Account · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Account security</p>
+        <h2>Your Hub account</h2>
+        <p class="subtle">Signed in as <strong>{{ user.username }}</strong> with the {{ user.role }} role.</p>
+      </div>
+    </div>
+    {% if request.query_params.get("password") == "changed" %}
+      <p class="notice-success">Your password was changed. Other active sessions are no longer valid.</p>
+    {% endif %}
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <form class="account-panel" method="post" action="/account/password">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>Change password</h3>
+      <label>
+        <span>Current password</span>
+        <input type="password" name="current_password" autocomplete="current-password" required>
+      </label>
+      <label>
+        <span>New password</span>
+        <input type="password" name="new_password" autocomplete="new-password" minlength="14" required>
+      </label>
+      <label>
+        <span>Confirm new password</span>
+        <input type="password" name="password_confirmation" autocomplete="new-password" minlength="14" required>
+      </label>
+      <button class="button" type="submit">Change password</button>
+    </form>
+    <form method="post" action="/account/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button button-secondary" type="submit">Sign out</button>
+    </form>
+  </section>
+{% endblock %}

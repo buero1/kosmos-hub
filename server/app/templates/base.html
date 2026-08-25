@@ -149,6 +149,43 @@
       }
       .plan-panel textarea { resize: vertical; }
       .plan-panel-locked { grid-template-columns: 1fr; }
+      .account-panel {
+        max-width: 42rem;
+        display: grid;
+        gap: 0.9rem;
+        margin: 1.25rem 0;
+        padding: 1.15rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.82);
+      }
+      .account-panel label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .account-panel input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: #fffdf8;
+        color: var(--ink);
+        font: inherit;
+        padding: 0.58rem 0.65rem;
+      }
+      .notice-error {
+        border-left: 4px solid #a34a2b;
+        padding: 0.7rem 0.85rem;
+        background: #f7e5db;
+        color: #71341f;
+      }
+      .notice-success {
+        border-left: 4px solid var(--accent);
+        padding: 0.7rem 0.85rem;
+        background: var(--accent-soft);
+        color: #075f4e;
+      }
       .filter-actions {
         display: flex;
         align-items: center;
@@ -164,6 +201,10 @@
         color: white;
         padding: 0.75rem 1rem;
         border-radius: 999px;
+      }
+      button.button.button-secondary {
+        background: transparent;
+        color: var(--accent);
       }
       .button-secondary {
         border: 1px solid var(--accent);
@@ -282,6 +323,7 @@
           <a href="/sites">Sites</a>
           <a href="/updates">Update workbench</a>
           <a href="/update-plans">Plans</a>
+          <a href="/account">Account</a>
           <a href="/healthz">Health</a>
         </nav>
       </div>

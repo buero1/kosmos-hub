@@ -1,6 +1,6 @@
 # Kosmos Hub Development Plan
 
-Stand: 2026-08-24
+Stand: 2026-08-25
 
 ## Ziel fuer den naechsten Build-Zyklus
 
@@ -84,6 +84,8 @@ Stand im aktuellen Build:
   Audit-Eintraegen
 - Preflight fuer verifizierte Site, weiterhin verfuegbares Update und
   Backupanbindung; ohne Backup bleibt Ausfuehrung blockiert
+- geschuetzte Hub-Weboberflaeche mit erstem Administrator, Sitzungen und
+  Passwortwechsel
 - noch keine ausfuehrbaren Update-Aktionen, keine automatische Installation
   und keine persistierten Freigaben
 
