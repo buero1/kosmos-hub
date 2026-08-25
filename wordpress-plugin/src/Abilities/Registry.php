@@ -8,6 +8,8 @@ class Registry {
 	const UPDATE_LOOPBACK_TTL    = 60;
 	const UPDATE_OFFER_CACHE_OPTION = 'kosmos_bridge_plugin_update_offers_v1';
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
+	const MAINWP_CHILD_PLUGIN_FILE  = 'mainwp-child/mainwp-child.php';
+	const UPDATE_BACKUP_MAX_AGE     = 604800;
 
 	/**
 	 * @return void
@@ -21,7 +23,7 @@ class Registry {
 			'kosmos-bridge',
 			array(
 				'label'       => __( 'Kosmos Bridge', 'kosmos-bridge' ),
-				'description' => __( 'Read-only abilities exposed for Kosmos Hub discovery and diagnostics.', 'kosmos-bridge' ),
+				'description' => __( 'Controlled site abilities exposed to the authenticated Kosmos Hub.', 'kosmos-bridge' ),
 			)
 		);
 	}
@@ -98,12 +100,36 @@ class Registry {
 				'meta'                => self::readonly_meta(),
 			)
 		);
+
+		wp_register_ability(
+			'kosmos-bridge/update-mainwp-child',
+			array(
+				'label'               => __( 'Update MainWP Child', 'kosmos-bridge' ),
+				'description'         => __( 'Updates the active MainWP Child plugin after a fresh full backup and version preflight.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::mainwp_child_update_input_schema(),
+				'output_schema'       => self::mainwp_child_update_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_mainwp_child' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
 	}
 
 	/**
 	 * @return bool
 	 */
 	public static function allow_readonly_access() {
+		return true;
+	}
+
+	/**
+	 * The MCP REST endpoint authenticates every request with the per-site HMAC
+	 * signature before WordPress evaluates an ability permission callback.
+	 *
+	 * @return bool
+	 */
+	public static function allow_mutation_access() {
 		return true;
 	}
 
@@ -233,6 +259,134 @@ class Registry {
 		$result['message']    = $result['available'] ? 'Complete UpdraftPlus backup found.' : 'A complete backup was found without a usable timestamp.';
 
 		return $result;
+	}
+
+	/**
+	 * Update exactly one approved standard WordPress plugin. This ability does
+	 * not accept an arbitrary plugin identifier, package URL, or version range.
+	 * It repeats the backup and update-offer checks on the site immediately
+	 * before WordPress downloads anything.
+	 *
+	 * @param mixed $input Expected current and target version from the Hub plan.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_mainwp_child( $input = array() ) {
+		$expected_current = self::get_input_string( $input, 'expected_current_version' );
+		$expected_target  = self::get_input_string( $input, 'expected_target_version' );
+
+		if ( '' === $expected_current || '' === $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_update_input',
+				'Expected current and target versions are required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		if ( ! function_exists( 'get_plugins' ) || ! function_exists( 'is_plugin_active' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$plugins = get_plugins();
+		if ( ! isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_mainwp_child_not_installed',
+				'MainWP Child is not installed on this site.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$current_version = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		if ( $current_version !== $expected_current ) {
+			return new \WP_Error(
+				'kosmos_bridge_update_version_mismatch',
+				sprintf( 'MainWP Child is at version %s, not the approved version %s.', $current_version, $expected_current ),
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( ! is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_mainwp_child_inactive',
+				'MainWP Child must be active before the Hub can update it.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$backup_status = self::execute_get_updraftplus_backup_status();
+		$backup_time   = isset( $backup_status['latest_backup_at'] ) ? strtotime( (string) $backup_status['latest_backup_at'] ) : false;
+		if (
+			empty( $backup_status['installed'] ) ||
+			empty( $backup_status['active'] ) ||
+			empty( $backup_status['available'] ) ||
+			empty( $backup_status['complete'] ) ||
+			false === $backup_time ||
+			$backup_time < ( time() - self::UPDATE_BACKUP_MAX_AGE )
+		) {
+			return new \WP_Error(
+				'kosmos_bridge_backup_preflight_failed',
+				'A fresh complete UpdraftPlus backup is required before this update.',
+				array( 'status' => 409 )
+			);
+		}
+
+		self::refresh_update_transients( $plugins );
+		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
+		$responses        = isset( $plugin_transient['response'] ) ? self::to_array( $plugin_transient['response'] ) : array();
+		$offer            = isset( $responses[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ? self::to_array( $responses[ self::MAINWP_CHILD_PLUGIN_FILE ] ) : array();
+		$offered_version  = self::get_update_version( $offer );
+		$package          = isset( $offer['package'] ) ? trim( (string) $offer['package'] ) : '';
+
+		if ( $offered_version !== $expected_target || '' === $package ) {
+			return new \WP_Error(
+				'kosmos_bridge_update_offer_changed',
+				'The approved MainWP Child update offer is no longer available.',
+				array( 'status' => 409 )
+			);
+		}
+
+		self::load_plugin_upgrader();
+		if ( ! class_exists( '\Plugin_Upgrader' ) || ! class_exists( '\Automatic_Upgrader_Skin' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_upgrader_unavailable',
+				'WordPress could not load its plugin updater.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$upgrader = new \Plugin_Upgrader( new \Automatic_Upgrader_Skin() );
+		$result   = $upgrader->upgrade( self::MAINWP_CHILD_PLUGIN_FILE, array( 'clear_update_cache' => true ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( true !== $result ) {
+			return new \WP_Error(
+				'kosmos_bridge_update_failed',
+				'WordPress did not confirm the MainWP Child update.',
+				array( 'status' => 500 )
+			);
+		}
+
+		if ( function_exists( 'wp_clean_plugins_cache' ) ) {
+			wp_clean_plugins_cache( true );
+		}
+		$plugins         = get_plugins();
+		$installed_after = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		if ( $installed_after !== $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_update_verification_failed',
+				'WordPress completed the update but the installed MainWP Child version could not be verified.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return array(
+			'updated'          => true,
+			'plugin_file'      => self::MAINWP_CHILD_PLUGIN_FILE,
+			'previous_version' => $current_version,
+			'installed_version' => $installed_after,
+			'active'           => is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ),
+			'backup_at'        => (string) $backup_status['latest_backup_at'],
+		);
 	}
 
 	/**
@@ -529,6 +683,15 @@ class Registry {
 				'output_schema' => self::updraftplus_backup_status_output_schema(),
 				'meta'          => self::readonly_meta(),
 			),
+			array(
+				'name'          => 'kosmos-bridge/update-mainwp-child',
+				'label'         => __( 'Update MainWP Child', 'kosmos-bridge' ),
+				'description'   => __( 'Updates the active MainWP Child plugin after a fresh full backup and version preflight.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::mainwp_child_update_input_schema(),
+				'output_schema' => self::mainwp_child_update_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
 		);
 	}
 
@@ -552,6 +715,10 @@ class Registry {
 	 * @return array|null
 	 */
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( 'kosmos-bridge/update-mainwp-child' === $ability_name ) {
+			return self::execute_update_mainwp_child( $input );
+		}
+
 		if ( null !== $input && ! empty( $input ) ) {
 			return null;
 		}
@@ -620,6 +787,53 @@ class Registry {
 				'destructive' => false,
 				'idempotent'  => true,
 			),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function mutation_meta() {
+		return array(
+			'public'       => true,
+			'show_in_rest' => true,
+			'annotations'  => array(
+				'readonly'    => false,
+				'destructive' => false,
+				'idempotent'  => false,
+			),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function mainwp_child_update_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'expected_current_version' => array( 'type' => 'string' ),
+				'expected_target_version'  => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'expected_current_version', 'expected_target_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function mainwp_child_update_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'updated'           => array( 'type' => 'boolean' ),
+				'plugin_file'       => array( 'type' => 'string' ),
+				'previous_version'  => array( 'type' => 'string' ),
+				'installed_version' => array( 'type' => 'string' ),
+				'active'            => array( 'type' => 'boolean' ),
+				'backup_at'         => array( 'type' => 'string', 'format' => 'date-time' ),
+			),
+			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active', 'backup_at' ),
 		);
 	}
 
@@ -1130,6 +1344,30 @@ class Registry {
 		}
 
 		set_site_transient( $transient_name, $current );
+	}
+
+	/**
+	 * @return void
+	 */
+	private static function load_plugin_upgrader() {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/misc.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader-skins.php';
+		require_once ABSPATH . 'wp-admin/includes/class-plugin-upgrader.php';
+	}
+
+	/**
+	 * @param mixed  $input Ability input.
+	 * @param string $key Input field name.
+	 * @return string
+	 */
+	private static function get_input_string( $input, $key ) {
+		if ( ! is_array( $input ) || ! isset( $input[ $key ] ) ) {
+			return '';
+		}
+
+		return trim( (string) $input[ $key ] );
 	}
 
 	/**

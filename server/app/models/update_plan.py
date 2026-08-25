@@ -11,6 +11,8 @@ class UpdatePlanStatus(StrEnum):
     draft = "draft"
     approved = "approved"
     blocked = "blocked"
+    executed = "executed"
+    failed = "failed"
 
 
 class UpdatePlan(TimestampMixin, Base):

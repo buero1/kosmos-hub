@@ -11,6 +11,10 @@ from app.repositories.site_repository import SiteRepository
 from app.repositories.update_plan_repository import UpdatePlanRepository
 from app.services.audit import write_audit_log
 from app.services.fleet_inventory import FleetInventoryService, UpdateWorkbenchEntry
+from app.services.site_backups import SiteBackupService
+from app.services.site_inventory import SiteInventoryService
+from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
+from app.services.site_updates import SiteUpdateService
 
 
 @dataclass(frozen=True)
@@ -46,10 +50,19 @@ class UpdatePlanPreflightItem:
             return "Create and verify a complete backup"
         if self.backup_status == "backup stale":
             return "Create and verify a fresh backup"
-        return "Backup is ready. Approval and execution are still disabled"
+        return "Backup is ready. A scoped update can now be approved when enabled."
+
+
+@dataclass(frozen=True)
+class UpdatePlanExecutionResult:
+    result: str
+    message: str
 
 
 class UpdatePlanService:
+    MAINWP_CHILD_PLUGIN = "mainwp-child/mainwp-child.php"
+    MAINWP_CHILD_ABILITY = "kosmos-bridge/update-mainwp-child"
+
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
         self.cipher = cipher
@@ -99,6 +112,171 @@ class UpdatePlanService:
 
     def get_plan(self, plan_id: int) -> UpdatePlan | None:
         return self.repository.get(plan_id)
+
+    def mainwp_child_scope_error(self, plan: UpdatePlan) -> str | None:
+        if len(plan.items) != 1:
+            return "This execution path only accepts a plan with exactly one update."
+
+        item = plan.items[0]
+        if item.update_type != "plugin" or item.update_identifier != self.MAINWP_CHILD_PLUGIN:
+            return "This execution path is restricted to the MainWP Child plugin."
+        if item.is_active is not True:
+            return "MainWP Child must be active before it can be updated by the Hub."
+        if not item.current_version or not item.target_version:
+            return "The MainWP Child update must include both current and target versions."
+        return None
+
+    def approve_mainwp_child(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+        plan = self._require_plan(plan_id)
+        if plan.status != "draft":
+            return UpdatePlanExecutionResult("blocked", "Only a draft plan can be approved.")
+
+        scope_error = self.mainwp_child_scope_error(plan)
+        if scope_error:
+            return UpdatePlanExecutionResult("blocked", scope_error)
+
+        try:
+            self._refresh_preflight_evidence(plan.items[0].site_id)
+        except SiteMcpProxyError as exc:
+            return self._block_plan(plan, actor, f"Approval blocked because the current preflight could not be refreshed: {exc.message}")
+
+        plan = self._require_plan(plan_id)
+        readiness_error = self._mainwp_child_readiness_error(plan)
+        if readiness_error:
+            return self._block_plan(plan, actor, readiness_error)
+
+        plan.status = "approved"
+        self._write_plan_audit(
+            plan,
+            actor=actor,
+            action="approve-mainwp-child-update",
+            result="approved",
+            detail=(
+                f"Approved MainWP Child {plan.items[0].current_version} -> "
+                f"{plan.items[0].target_version} after a fresh backup and update preflight."
+            ),
+        )
+        self.db.commit()
+        return UpdatePlanExecutionResult("approved", "MainWP Child was approved. No update has been run yet.")
+
+    def execute_mainwp_child(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+        plan = self._require_plan(plan_id)
+        if plan.status != "approved":
+            return UpdatePlanExecutionResult("blocked", "Only an approved MainWP Child plan can be executed.")
+
+        scope_error = self.mainwp_child_scope_error(plan)
+        if scope_error:
+            return self._block_plan(plan, actor, scope_error)
+
+        try:
+            self._refresh_preflight_evidence(plan.items[0].site_id)
+        except SiteMcpProxyError as exc:
+            return self._block_plan(plan, actor, f"Execution blocked because the current preflight could not be refreshed: {exc.message}")
+
+        plan = self._require_plan(plan_id)
+        readiness_error = self._mainwp_child_readiness_error(plan)
+        if readiness_error:
+            return self._block_plan(plan, actor, readiness_error)
+
+        item = plan.items[0]
+        try:
+            payload = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(
+                item.site_id,
+                self.MAINWP_CHILD_ABILITY,
+                {
+                    "expected_current_version": item.current_version,
+                    "expected_target_version": item.target_version,
+                },
+                timeout_seconds=180,
+            )
+        except SiteMcpProxyError as exc:
+            return self._fail_plan(plan, actor, f"MainWP Child update request failed: {exc.message}")
+
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return self._fail_plan(plan, actor, "MainWP Child returned no verifiable update result.")
+
+        if (
+            result.get("updated") is not True
+            or result.get("plugin_file") != self.MAINWP_CHILD_PLUGIN
+            or result.get("installed_version") != item.target_version
+            or result.get("active") is not True
+        ):
+            return self._fail_plan(plan, actor, "MainWP Child did not return the approved installed version and active state.")
+
+        refresh_note = ""
+        try:
+            SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(item.site_id)
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(item.site_id)
+        except SiteMcpProxyError as exc:
+            refresh_note = f" The update succeeded, but the follow-up scan failed: {exc.message}"
+
+        plan.status = "executed"
+        self._write_plan_audit(
+            plan,
+            actor=actor,
+            action="execute-mainwp-child-update",
+            result="executed",
+            detail=(
+                f"Updated MainWP Child {item.current_version} -> {item.target_version}. "
+                f"Bridge verified installed version {result.get('installed_version')}.{refresh_note}"
+            ),
+        )
+        self.db.commit()
+        return UpdatePlanExecutionResult("executed", f"MainWP Child was updated and verified.{refresh_note}")
+
+    def _require_plan(self, plan_id: int) -> UpdatePlan:
+        plan = self.repository.get(plan_id)
+        if plan is None:
+            raise ValueError("Update plan was not found.")
+        return plan
+
+    def _refresh_preflight_evidence(self, site_id: int) -> None:
+        SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(site_id)
+        SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(site_id)
+
+    def _mainwp_child_readiness_error(self, plan: UpdatePlan) -> str | None:
+        scope_error = self.mainwp_child_scope_error(plan)
+        if scope_error:
+            return scope_error
+
+        preflight = self.build_preflight(plan)
+        if len(preflight) != 1 or not preflight[0].execution_ready:
+            if not preflight:
+                return "The MainWP Child preflight could not be created."
+            return f"Execution remains blocked: {preflight[0].next_step}."
+        return None
+
+    def _block_plan(self, plan: UpdatePlan, actor: str, detail: str) -> UpdatePlanExecutionResult:
+        plan.status = "blocked"
+        self._write_plan_audit(plan, actor=actor, action="block-mainwp-child-update", result="blocked", detail=detail)
+        self.db.commit()
+        return UpdatePlanExecutionResult("blocked", detail)
+
+    def _fail_plan(self, plan: UpdatePlan, actor: str, detail: str) -> UpdatePlanExecutionResult:
+        plan.status = "failed"
+        self._write_plan_audit(plan, actor=actor, action="execute-mainwp-child-update", result="failed", detail=detail)
+        self.db.commit()
+        return UpdatePlanExecutionResult("failed", detail)
+
+    def _write_plan_audit(
+        self,
+        plan: UpdatePlan,
+        *,
+        actor: str,
+        action: str,
+        result: str,
+        detail: str,
+    ) -> None:
+        write_audit_log(
+            self.db,
+            site=plan.items[0].site if plan.items else None,
+            actor=actor,
+            source="hub-web",
+            action=action,
+            result=result,
+            detail=f"Plan {plan.id}: {detail}",
+        )
 
     def build_preflight(self, plan: UpdatePlan) -> list[UpdatePlanPreflightItem]:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)

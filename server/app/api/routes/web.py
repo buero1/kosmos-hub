@@ -171,18 +171,79 @@ def create_update_plan(
 
 
 @router.get("/update-plans/{plan_id}", response_class=HTMLResponse)
-def update_plan_detail_page(plan_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+def update_plan_detail_page(
+    plan_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    action: str = "",
+    message: str = "",
+):
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
     plan = service.get_plan(plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Update plan not found.")
+    preflight = service.build_preflight(plan)
+    scope_error = service.mainwp_child_scope_error(plan)
+    preflight_ready = len(preflight) == 1 and preflight[0].execution_ready
     return templates.TemplateResponse(
         request,
         "update_plan_detail.html",
         {
             "plan": plan,
-            "preflight": service.build_preflight(plan),
+            "preflight": preflight,
+            "csrf_token": get_csrf_token(request),
+            "scope_error": scope_error,
+            "can_approve": plan.status == "draft" and scope_error is None and preflight_ready,
+            "can_execute": plan.status == "approved" and scope_error is None and preflight_ready,
+            "action_result": action,
+            "action_message": message,
         },
+    )
+
+
+@router.post("/update-plans/{plan_id}/approve-mainwp-child")
+def approve_mainwp_child_update_plan(
+    plan_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
+    try:
+        outcome = service.approve_mainwp_child(plan_id=plan_id, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RedirectResponse(
+        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
+        status_code=303,
+    )
+
+
+@router.post("/update-plans/{plan_id}/execute-mainwp-child")
+def execute_mainwp_child_update_plan(
+    plan_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
+    try:
+        outcome = service.execute_mainwp_child(plan_id=plan_id, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RedirectResponse(
+        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
+        status_code=303,
     )
 
 

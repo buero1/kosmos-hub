@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ plan.name }} · kosmos-hub{% endblock %}
 {% block content %}
+  {% if action_message %}
+    <p class="notice-{{ "success" if action_result in ["approved", "executed"] else "error" }}">{{ action_message }}</p>
+  {% endif %}
   <section class="detail-list">
     <article class="card">
       <p class="eyebrow">Update plan</p>
@@ -12,8 +15,38 @@
     </article>
     <article class="card">
       <p class="eyebrow">Execution gate</p>
-      <h3>Not enabled</h3>
-      <p class="subtle">This plan is a review record. Execution remains blocked until access control, backup checks and an explicit approval workflow are in place.</p>
+      {% if scope_error %}
+        <h3>Review only</h3>
+        <p class="subtle">{{ scope_error }} WordPress core, themes and all other plugins remain review-only.</p>
+      {% elif plan.status == "executed" %}
+        <h3>Completed</h3>
+        <p class="subtle">The Bridge verified the approved MainWP Child version. The current site scan is recorded below.</p>
+      {% elif plan.status == "approved" %}
+        <h3>Approved, not yet executed</h3>
+        <p class="subtle">The next action repeats backup and update checks on the site, then updates only MainWP Child.</p>
+        {% if can_execute %}
+          <form method="post" action="/update-plans/{{ plan.id }}/execute-mainwp-child" onsubmit="return confirm('Update MainWP Child on {{ plan.items[0].site.domain }} now?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button" type="submit">Execute approved MainWP Child update</button>
+          </form>
+        {% else %}
+          <p class="notice-error">The current preflight is no longer ready. No update can be executed.</p>
+        {% endif %}
+      {% elif plan.status == "draft" %}
+        <h3>Approval required</h3>
+        <p class="subtle">Approval does not change the customer site. It refreshes the backup and update evidence, then unlocks one explicit execution step.</p>
+        {% if can_approve %}
+          <form method="post" action="/update-plans/{{ plan.id }}/approve-mainwp-child">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">Approve MainWP Child update</button>
+          </form>
+        {% else %}
+          <p class="notice-error">The current preflight must be ready before approval.</p>
+        {% endif %}
+      {% else %}
+        <h3>Execution closed</h3>
+        <p class="subtle">This plan is {{ plan.status }}. Create a new plan after resolving the reported preflight or execution issue.</p>
+      {% endif %}
     </article>
   </section>
 
@@ -22,7 +55,7 @@
       <div>
         <p class="eyebrow">Current preflight</p>
         <h2>Safety checks</h2>
-        <p class="subtle">The plan is compared with the current update inventory. Backup availability is intentionally a hard blocker for future execution.</p>
+        <p class="subtle">The plan is compared with the current update inventory. A fresh complete backup is a hard blocker for the scoped MainWP Child execution path.</p>
       </div>
     </div>
     <div class="table-scroll">
