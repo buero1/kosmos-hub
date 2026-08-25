@@ -168,6 +168,8 @@ class Registry {
 		$wordpress_updates          = array();
 		$plugin_updates             = array();
 		$theme_updates              = array();
+		$preferred_core_update      = null;
+		$site_locale                = function_exists( 'get_locale' ) ? get_locale() : '';
 
 		$core_transient = self::to_array( get_site_transient( 'update_core' ) );
 		$core_offers    = isset( $core_transient['updates'] ) ? (array) $core_transient['updates'] : array();
@@ -179,11 +181,19 @@ class Registry {
 				continue;
 			}
 
-			$wordpress_updates[] = array(
+			$candidate = array(
 				'current_version' => $current_wordpress_version,
 				'new_version'     => $version,
 				'locale'          => isset( $data['locale'] ) ? (string) $data['locale'] : '',
 			);
+
+			if ( self::is_preferred_core_update( $candidate, $preferred_core_update, $site_locale ) ) {
+				$preferred_core_update = $candidate;
+			}
+		}
+
+		if ( null !== $preferred_core_update ) {
+			$wordpress_updates[] = $preferred_core_update;
 		}
 
 		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
@@ -471,6 +481,30 @@ class Registry {
 			),
 			'required'   => array( 'reported_at', 'check_mode', 'wordpress', 'plugins', 'themes', 'summary' ),
 		);
+	}
+
+	/**
+	 * WordPress reports historical and language fallback packages alongside the
+	 * recommended core offer. The fleet only needs the one best next upgrade.
+	 *
+	 * @param array      $candidate Candidate core update.
+	 * @param array|null $current Current preferred core update.
+	 * @param string     $site_locale Site locale.
+	 * @return bool
+	 */
+	private static function is_preferred_core_update( $candidate, $current, $site_locale ) {
+		if ( null === $current ) {
+			return true;
+		}
+
+		$candidate_is_local = '' !== $site_locale && $candidate['locale'] === $site_locale;
+		$current_is_local   = '' !== $site_locale && $current['locale'] === $site_locale;
+
+		if ( $candidate_is_local !== $current_is_local ) {
+			return $candidate_is_local;
+		}
+
+		return version_compare( $candidate['new_version'], $current['new_version'], '>' );
 	}
 
 	/**
