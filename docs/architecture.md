@@ -69,6 +69,13 @@ Operationen werden nicht als freie Remote-Ability durchgereicht: Sie duerfen
 nur ueber einen zuvor gespeicherten, exakt abgegrenzten Hub-Plan mit
 Backup-Preflight, expliziter Freigabe und Postflight-Pruefung laufen.
 
+Der integrierte Kosmos Assistant ist die Hub-Oberflaeche fuer diese Daten: Er
+verwendet serverseitig einen OpenAI-Responses-Aufruf und erhaelt in seiner
+ersten Stufe nur einen gespeicherten, lesenden Hub-Snapshot. Er arbeitet nicht
+ueber einen freien Site-Proxy und kann keine Aenderung ausloesen. Codex bleibt
+parallel ein externer Entwicklungs- und MCP-Client; beide Wege verwenden
+dieselben zentralen Daten und Sicherheits-Gates.
+
 Ein Backup-Status ist ein Beispiel fuer eine gezielt kleine lokale Erweiterung:
 Die Bridge liest nur UpdraftPlus-Metadaten, waehrend Speicherung, Auswertung
 und spaetere Wartungsfreigaben im Hub verbleiben.

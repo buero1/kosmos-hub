@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Assistant · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">AI operations assistant</p>
+        <h2>Kosmos Assistant</h2>
+        <p class="subtle">Answers from the stored Hub inventory, update state and plans. This first version is read-only.</p>
+      </div>
+      <span class="pill pill-unknown">Read-only pilot</span>
+    </div>
+
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+
+    {% if not provider_configured %}
+      <section class="assistant-answer">
+        <p class="eyebrow">OpenAI connection required</p>
+        <h3>Connect your API key first</h3>
+        <p class="subtle">The key is encrypted on the Hub server and is never shown again. It is not stored in this browser or in Git.</p>
+        <a class="button" href="/account">Open Account</a>
+      </section>
+    {% else %}
+      <form class="assistant-panel" method="post" action="/assistant">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="assistant-question">What should Kosmos Hub analyse?</label>
+        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Which websites have the most pending updates, and what should I review first?">{{ question }}</textarea>
+        <p class="subtle">Examples: “Which sites have no recent update check?” or “Summarise the open update plans.”</p>
+        <p class="subtle">The required Hub snapshot is sent server-side to OpenAI for the answer. Never enter customer credentials or other secrets here.</p>
+        <button class="button" type="submit">Analyse Hub data</button>
+      </form>
+    {% endif %}
+
+    {% if answer %}
+      <section class="assistant-answer">
+        <p class="eyebrow">Assistant answer</p>
+        <div class="assistant-text">{{ answer.text }}</div>
+        <p class="subtle">Generated {{ answer.generated_at }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at }}{% endif %}.</p>
+      </section>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 from starlette.templating import Jinja2Templates
 
 from app.core.config import get_settings
+from app.core.security import get_secret_cipher
 from app.db.session import get_db
 from app.services.audit import write_audit_log
+from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.hub_accounts import HubAccountService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -218,6 +220,71 @@ def revoke_mcp_token(
     return RedirectResponse(url="/account?mcp_token=revoked", status_code=303)
 
 
+@router.post("/openai")
+def configure_openai(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    api_key: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    provider_service = AiProviderConfigService(db=db, cipher=get_secret_cipher())
+    try:
+        config = provider_service.configure_openai(actor=user, api_key=api_key)
+    except AiProviderConfigError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-openai",
+        result="success",
+        detail=f"Configured encrypted OpenAI access with model {config.model}.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?openai=configured", status_code=303)
+
+
+@router.post("/openai/remove")
+def remove_openai(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    provider_service = AiProviderConfigService(db=db, cipher=get_secret_cipher())
+    try:
+        provider_service.remove_openai(actor=user)
+    except AiProviderConfigError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="remove-openai",
+        result="success",
+        detail="Removed encrypted OpenAI access.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?openai=removed", status_code=303)
+
+
 @bootstrap_router.post("/internal/bootstrap-token")
 def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_db)]):
     # This endpoint is only reachable from an SSH shell on the Hub host, never through the public proxy.
@@ -251,6 +318,7 @@ def _account_context(
         "error": error,
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
+        "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
     }
 
 

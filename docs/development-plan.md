@@ -95,7 +95,9 @@ Stand im aktuellen Build:
 - ein explizit freigegebener Ein-Plugin-Updatepfad mit frischem Backup,
   Versions-/Aktivstatuspruefung und Postflight fuer Startseite und REST-API
 - MCP kann keine freien schreibenden Site-Abilities ausfuehren; der gleiche
-  planbasierte Sicherheitsablauf gilt auch fuer MCP-gestuetzte Updates
+planbasierte Sicherheitsablauf gilt auch fuer MCP-gestuetzte Updates
+- erster integrierter, lesender Kosmos Assistant mit verschluesselter
+  OpenAI-Konfiguration; Schreibaktionen bleiben weiterhin Hub-Plan-Aktionen
 
 ## Phase 5
 

@@ -1,4 +1,5 @@
 from app.models.audit_log import AuditLog
+from app.models.ai_provider_config import AiProviderConfig
 from app.models.customer import Customer
 from app.models.hub_access_token import HubAccessToken
 from app.models.hub_setup_token import HubSetupToken
@@ -15,6 +16,7 @@ from app.models.base import Base
 
 __all__ = [
     "AuditLog",
+    "AiProviderConfig",
     "Base",
     "Customer",
     "HubAccessToken",

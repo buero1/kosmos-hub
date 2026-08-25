@@ -168,6 +168,27 @@ Jeder MCP-Tool-Aufruf wird mit MCP-Akteur, Tool-Name und Ergebnis im zentralen
 Audit erfasst. Klartext-Tokens und Tool-Parameter werden nicht in den
 Audit-Details gespeichert.
 
+### 10. Integrierter Kosmos Assistant
+
+Der erste Assistant im Hub ist ausschliesslich lesend: Er erhaelt einen
+serverseitig erzeugten Snapshot aus Websites, gespeicherten Update-Zustaenden
+und Update-Plaenen. Er kann keine Site-Ability, keinen Refresh und keine
+Plan-Aktion ausloesen. Die OpenAI-API-Anfrage laeuft serverseitig mit
+`store=false`; die Chatfrage wird nicht in der Hub-Datenbank oder im Audit
+gespeichert.
+
+Der OpenAI-Key wird nur nach erfolgreicher Hub-Authentifizierung von einem
+Administrator eingegeben, mit dem bestehenden Fernet-Cipher verschluesselt und
+nie wieder angezeigt. Ein Austausch oder Entfernen loescht den vorherigen
+verschluesselten Wert. Klartext-Keys gehoeren weder in den Browser-Code, in Git
+noch in Audit-Daten.
+
+Fuer eine Assistant-Antwort werden nur die benoetigten Hub-Snapshotdaten wie
+Domains, Versionen, Update-Metadaten und Planstatus serverseitig an OpenAI
+gesendet. Website-Verbindungssecrets, Bridge-Keys und der OpenAI-Key selbst
+werden nie als Modellkontext uebermittelt. Die Oberflaeche weist darauf hin,
+dass keine Kunden-Zugangsdaten in Fragen gehoeren.
+
 ## Sicherheitsregeln fuer spaetere MCP-Endpunkte
 
 Fuer Phase 2+ sind bereits jetzt verbindlich:

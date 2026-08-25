@@ -15,6 +15,12 @@
     {% if request.query_params.get("mcp_token") == "revoked" %}
       <p class="notice-success">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
     {% endif %}
+    {% if request.query_params.get("openai") == "configured" %}
+      <p class="notice-success">OpenAI is connected. The API key is encrypted and never shown again.</p>
+    {% endif %}
+    {% if request.query_params.get("openai") == "removed" %}
+      <p class="notice-success">The stored OpenAI API key was removed.</p>
+    {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -80,6 +86,33 @@
           </tbody>
         </table>
       </div>
+    </section>
+    <section class="account-panel">
+      <div>
+        <p class="eyebrow">AI provider</p>
+        <h3>OpenAI for Kosmos Assistant</h3>
+        {% if openai_config and openai_config.enabled %}
+          <p class="subtle">Connected with <strong>{{ openai_config.model }}</strong>. Last used: {{ openai_config.last_used_at or "Never" }}.</p>
+          {% if openai_config.last_error %}<p class="notice-error">Last assistant request: {{ openai_config.last_error }}</p>{% endif %}
+        {% else %}
+          <p class="subtle">Not connected yet. The assistant remains unavailable until an API key is saved.</p>
+        {% endif %}
+      </div>
+      <form method="post" action="/account/openai">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>{% if openai_config %}Replace OpenAI API key{% else %}OpenAI API key{% endif %}</span>
+          <input type="password" name="api_key" autocomplete="new-password" minlength="20" maxlength="512" required>
+        </label>
+        <p class="subtle">Saved encrypted on the server. The key is never displayed or stored in Git.</p>
+        <button class="button" type="submit">Save OpenAI key</button>
+      </form>
+      {% if openai_config %}
+        <form method="post" action="/account/openai/remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-secondary" type="submit">Remove OpenAI key</button>
+        </form>
+      {% endif %}
     </section>
     <form method="post" action="/account/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

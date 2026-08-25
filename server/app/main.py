@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import accounts, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, assistant, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.db.base import Base
@@ -109,6 +109,7 @@ def create_app() -> FastAPI:
             or request.url.path.startswith("/sites")
             or request.url.path == "/updates"
             or request.url.path.startswith("/update-plans")
+            or request.url.path.startswith("/assistant")
         ):
             # Inventory and update data must not be served from a browser cache.
             response.headers["Cache-Control"] = "no-store"
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(registrations.router)
     app.include_router(accounts.router)
     app.include_router(accounts.bootstrap_router)
+    app.include_router(assistant.router)
     app.include_router(sites.router)
     app.include_router(site_abilities.router)
     app.include_router(site_backups.router)
