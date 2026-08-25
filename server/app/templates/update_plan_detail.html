@@ -25,7 +25,7 @@
         <h3>Approved, not yet executed</h3>
         <p class="subtle">The next action repeats backup and update checks on the site, then updates only {{ plan.items[0].update_name }}.</p>
         {% if can_execute %}
-          <form method="post" action="/update-plans/{{ plan.id }}/execute-plugin-update" onsubmit="return confirm('Update {{ plan.items[0].update_name }} on {{ plan.items[0].site.domain }} now?');">
+          <form method="post" action="/update-plans/{{ plan.id }}/execute-plugin-update">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="button" type="submit">Execute approved plugin update</button>
           </form>
