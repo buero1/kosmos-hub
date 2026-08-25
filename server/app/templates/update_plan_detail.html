@@ -17,17 +17,17 @@
       <p class="eyebrow">Execution gate</p>
       {% if scope_error %}
         <h3>Review only</h3>
-        <p class="subtle">{{ scope_error }} WordPress core, themes and all other plugins remain review-only.</p>
+        <p class="subtle">{{ scope_error }} WordPress core and themes remain review-only.</p>
       {% elif plan.status == "executed" %}
         <h3>Completed</h3>
-        <p class="subtle">The Bridge verified the approved MainWP Child version. The current site scan is recorded below.</p>
+        <p class="subtle">The Bridge verified the approved plugin version. The current site scan is recorded below.</p>
       {% elif plan.status == "approved" %}
         <h3>Approved, not yet executed</h3>
-        <p class="subtle">The next action repeats backup and update checks on the site, then updates only MainWP Child.</p>
+        <p class="subtle">The next action repeats backup and update checks on the site, then updates only {{ plan.items[0].update_name }}.</p>
         {% if can_execute %}
-          <form method="post" action="/update-plans/{{ plan.id }}/execute-mainwp-child" onsubmit="return confirm('Update MainWP Child on {{ plan.items[0].site.domain }} now?');">
+          <form method="post" action="/update-plans/{{ plan.id }}/execute-plugin-update" onsubmit="return confirm('Update {{ plan.items[0].update_name }} on {{ plan.items[0].site.domain }} now?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button" type="submit">Execute approved MainWP Child update</button>
+            <button class="button" type="submit">Execute approved plugin update</button>
           </form>
         {% else %}
           <p class="notice-error">The current preflight is no longer ready. No update can be executed.</p>
@@ -36,20 +36,20 @@
         <h3>Approval required</h3>
         <p class="subtle">Approval does not change the customer site. It refreshes the backup and update evidence, then unlocks one explicit execution step.</p>
         {% if can_approve %}
-          <form method="post" action="/update-plans/{{ plan.id }}/approve-mainwp-child">
+          <form method="post" action="/update-plans/{{ plan.id }}/approve-plugin-update">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-secondary" type="submit">Approve MainWP Child update</button>
+            <button class="button button-secondary" type="submit">Approve selected plugin update</button>
           </form>
         {% else %}
           <p class="notice-error">The current preflight must be ready before approval.</p>
         {% endif %}
       {% elif plan.status == "failed" %}
         <h3>Recovery required</h3>
-        <p class="subtle">The earlier update may have reached its approved version but requires verified reactivation. This action activates only MainWP Child at the exact version recorded in this plan. It does not run another update.</p>
+        <p class="subtle">The earlier update may have reached its approved version but requires verified reactivation. This action activates only {{ plan.items[0].update_name }} at the exact version recorded in this plan. It does not run another update.</p>
         {% if can_recover %}
-          <form method="post" action="/update-plans/{{ plan.id }}/recover-mainwp-child-activation" onsubmit="return confirm('Reactivate MainWP Child on {{ plan.items[0].site.domain }} now? This will not run another update.');">
+          <form method="post" action="/update-plans/{{ plan.id }}/recover-plugin-activation" onsubmit="return confirm('Reactivate {{ plan.items[0].update_name }} on {{ plan.items[0].site.domain }} now? This will not run another update.');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button" type="submit">Reactivate verified MainWP Child</button>
+            <button class="button" type="submit">Reactivate verified plugin</button>
           </form>
         {% else %}
           <p class="notice-error">{{ recovery_scope_error or "This plan cannot use the restricted recovery action." }}</p>
@@ -66,7 +66,7 @@
       <div>
         <p class="eyebrow">Current preflight</p>
         <h2>Safety checks</h2>
-        <p class="subtle">The plan is compared with the current update inventory. A fresh complete backup is a hard blocker for the scoped MainWP Child execution path.</p>
+        <p class="subtle">The plan is compared with the current update inventory. A fresh complete backup is a hard blocker for the scoped one-plugin execution path.</p>
       </div>
     </div>
     <div class="table-scroll">

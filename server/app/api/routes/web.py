@@ -183,8 +183,8 @@ def update_plan_detail_page(
     if plan is None:
         raise HTTPException(status_code=404, detail="Update plan not found.")
     preflight = service.build_preflight(plan)
-    scope_error = service.mainwp_child_scope_error(plan)
-    recovery_scope_error = service.mainwp_child_recovery_scope_error(plan)
+    scope_error = service.plugin_update_scope_error(plan)
+    recovery_scope_error = service.plugin_recovery_scope_error(plan)
     preflight_ready = len(preflight) == 1 and preflight[0].execution_ready
     return templates.TemplateResponse(
         request,
@@ -204,8 +204,8 @@ def update_plan_detail_page(
     )
 
 
-@router.post("/update-plans/{plan_id}/approve-mainwp-child")
-def approve_mainwp_child_update_plan(
+@router.post("/update-plans/{plan_id}/approve-plugin-update")
+def approve_plugin_update_plan(
     plan_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -218,7 +218,7 @@ def approve_mainwp_child_update_plan(
 
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
     try:
-        outcome = service.approve_mainwp_child(plan_id=plan_id, actor=user.username)
+        outcome = service.approve_plugin_update(plan_id=plan_id, actor=user.username)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RedirectResponse(
@@ -227,8 +227,8 @@ def approve_mainwp_child_update_plan(
     )
 
 
-@router.post("/update-plans/{plan_id}/execute-mainwp-child")
-def execute_mainwp_child_update_plan(
+@router.post("/update-plans/{plan_id}/execute-plugin-update")
+def execute_plugin_update_plan(
     plan_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -241,7 +241,7 @@ def execute_mainwp_child_update_plan(
 
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
     try:
-        outcome = service.execute_mainwp_child(plan_id=plan_id, actor=user.username)
+        outcome = service.execute_plugin_update(plan_id=plan_id, actor=user.username)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RedirectResponse(
@@ -250,8 +250,8 @@ def execute_mainwp_child_update_plan(
     )
 
 
-@router.post("/update-plans/{plan_id}/recover-mainwp-child-activation")
-def recover_mainwp_child_activation(
+@router.post("/update-plans/{plan_id}/recover-plugin-activation")
+def recover_plugin_activation(
     plan_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -264,7 +264,7 @@ def recover_mainwp_child_activation(
 
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
     try:
-        outcome = service.recover_mainwp_child_activation(plan_id=plan_id, actor=user.username)
+        outcome = service.recover_plugin_activation(plan_id=plan_id, actor=user.username)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RedirectResponse(

@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -60,9 +61,8 @@ class UpdatePlanExecutionResult:
 
 
 class UpdatePlanService:
-    MAINWP_CHILD_PLUGIN = "mainwp-child/mainwp-child.php"
-    MAINWP_CHILD_ABILITY = "kosmos-bridge/update-mainwp-child"
-    MAINWP_CHILD_ACTIVATION_ABILITY = "kosmos-bridge/activate-mainwp-child"
+    PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
+    PLUGIN_ACTIVATION_ABILITY = "kosmos-bridge/activate-plugin"
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -114,36 +114,36 @@ class UpdatePlanService:
     def get_plan(self, plan_id: int) -> UpdatePlan | None:
         return self.repository.get(plan_id)
 
-    def mainwp_child_scope_error(self, plan: UpdatePlan) -> str | None:
+    def plugin_update_scope_error(self, plan: UpdatePlan) -> str | None:
         if len(plan.items) != 1:
             return "This execution path only accepts a plan with exactly one update."
 
         item = plan.items[0]
-        if item.update_type != "plugin" or item.update_identifier != self.MAINWP_CHILD_PLUGIN:
-            return "This execution path is restricted to the MainWP Child plugin."
+        if item.update_type != "plugin" or not self._is_plugin_file(item.update_identifier):
+            return "This execution path accepts one standard WordPress plugin update only."
         if item.is_active is not True:
-            return "MainWP Child must be active before it can be updated by the Hub."
+            return "The selected plugin must be active before it can be updated by the Hub."
         if not item.current_version or not item.target_version:
-            return "The MainWP Child update must include both current and target versions."
+            return "The selected plugin update must include both current and target versions."
         return None
 
-    def mainwp_child_recovery_scope_error(self, plan: UpdatePlan) -> str | None:
+    def plugin_recovery_scope_error(self, plan: UpdatePlan) -> str | None:
         if len(plan.items) != 1:
             return "This recovery path only accepts a plan with exactly one update."
 
         item = plan.items[0]
-        if item.update_type != "plugin" or item.update_identifier != self.MAINWP_CHILD_PLUGIN:
-            return "This recovery path is restricted to the MainWP Child plugin."
+        if item.update_type != "plugin" or not self._is_plugin_file(item.update_identifier):
+            return "This recovery path accepts one standard WordPress plugin only."
         if not item.target_version:
-            return "The MainWP Child recovery requires the approved installed version."
+            return "The plugin recovery requires the approved installed version."
         return None
 
-    def approve_mainwp_child(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+    def approve_plugin_update(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
         plan = self._require_plan(plan_id)
         if plan.status != "draft":
             return UpdatePlanExecutionResult("blocked", "Only a draft plan can be approved.")
 
-        scope_error = self.mainwp_child_scope_error(plan)
+        scope_error = self.plugin_update_scope_error(plan)
         if scope_error:
             return UpdatePlanExecutionResult("blocked", scope_error)
 
@@ -153,7 +153,7 @@ class UpdatePlanService:
             return self._block_plan(plan, actor, f"Approval blocked because the current preflight could not be refreshed: {exc.message}")
 
         plan = self._require_plan(plan_id)
-        readiness_error = self._mainwp_child_readiness_error(plan)
+        readiness_error = self._plugin_update_readiness_error(plan)
         if readiness_error:
             return self._block_plan(plan, actor, readiness_error)
 
@@ -161,22 +161,22 @@ class UpdatePlanService:
         self._write_plan_audit(
             plan,
             actor=actor,
-            action="approve-mainwp-child-update",
+            action="approve-plugin-update",
             result="approved",
             detail=(
-                f"Approved MainWP Child {plan.items[0].current_version} -> "
+                f"Approved {plan.items[0].update_name} {plan.items[0].current_version} -> "
                 f"{plan.items[0].target_version} after a fresh backup and update preflight."
             ),
         )
         self.db.commit()
-        return UpdatePlanExecutionResult("approved", "MainWP Child was approved. No update has been run yet.")
+        return UpdatePlanExecutionResult("approved", f"{plan.items[0].update_name} was approved. No update has been run yet.")
 
-    def execute_mainwp_child(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+    def execute_plugin_update(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
         plan = self._require_plan(plan_id)
         if plan.status != "approved":
-            return UpdatePlanExecutionResult("blocked", "Only an approved MainWP Child plan can be executed.")
+            return UpdatePlanExecutionResult("blocked", "Only an approved plugin update plan can be executed.")
 
-        scope_error = self.mainwp_child_scope_error(plan)
+        scope_error = self.plugin_update_scope_error(plan)
         if scope_error:
             return self._block_plan(plan, actor, scope_error)
 
@@ -186,7 +186,7 @@ class UpdatePlanService:
             return self._block_plan(plan, actor, f"Execution blocked because the current preflight could not be refreshed: {exc.message}")
 
         plan = self._require_plan(plan_id)
-        readiness_error = self._mainwp_child_readiness_error(plan)
+        readiness_error = self._plugin_update_readiness_error(plan)
         if readiness_error:
             return self._block_plan(plan, actor, readiness_error)
 
@@ -194,39 +194,40 @@ class UpdatePlanService:
         try:
             payload = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(
                 item.site_id,
-                self.MAINWP_CHILD_ABILITY,
+                self.PLUGIN_UPDATE_ABILITY,
                 {
+                    "plugin_file": item.update_identifier,
                     "expected_current_version": item.current_version,
                     "expected_target_version": item.target_version,
                 },
                 timeout_seconds=180,
             )
         except SiteMcpProxyError as exc:
-            return self._fail_plan(plan, actor, f"MainWP Child update request failed: {exc.message}")
+            return self._fail_plan(plan, actor, f"{item.update_name} update request failed: {exc.message}")
 
         result = payload.get("result")
         if not isinstance(result, dict):
-            return self._fail_plan(plan, actor, "MainWP Child returned no verifiable update result.")
+            return self._fail_plan(plan, actor, f"{item.update_name} returned no verifiable update result.")
 
         if (
             result.get("updated") is True
-            and result.get("plugin_file") == self.MAINWP_CHILD_PLUGIN
+            and result.get("plugin_file") == item.update_identifier
             and result.get("installed_version") == item.target_version
             and result.get("active") is not True
         ):
             return self._fail_plan(
                 plan,
                 actor,
-                "MainWP Child was updated to the approved version but is inactive. Use the explicit recovery action to reactivate that verified version.",
+                f"{item.update_name} was updated to the approved version but is inactive. Use the explicit recovery action to reactivate that verified version.",
             )
 
         if (
             result.get("updated") is not True
-            or result.get("plugin_file") != self.MAINWP_CHILD_PLUGIN
+            or result.get("plugin_file") != item.update_identifier
             or result.get("installed_version") != item.target_version
             or result.get("active") is not True
         ):
-            return self._fail_plan(plan, actor, "MainWP Child did not return the approved installed version and active state.")
+            return self._fail_plan(plan, actor, f"{item.update_name} did not return the approved installed version and active state.")
 
         refresh_note = ""
         try:
@@ -239,22 +240,22 @@ class UpdatePlanService:
         self._write_plan_audit(
             plan,
             actor=actor,
-            action="execute-mainwp-child-update",
+            action="execute-plugin-update",
             result="executed",
             detail=(
-                f"Updated MainWP Child {item.current_version} -> {item.target_version}. "
+                f"Updated {item.update_name} {item.current_version} -> {item.target_version}. "
                 f"Bridge verified installed version {result.get('installed_version')}.{refresh_note}"
             ),
         )
         self.db.commit()
-        return UpdatePlanExecutionResult("executed", f"MainWP Child was updated and verified.{refresh_note}")
+        return UpdatePlanExecutionResult("executed", f"{item.update_name} was updated and verified.{refresh_note}")
 
-    def recover_mainwp_child_activation(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+    def recover_plugin_activation(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
         plan = self._require_plan(plan_id)
         if plan.status != "failed":
-            return UpdatePlanExecutionResult("blocked", "Only a failed MainWP Child plan can use this recovery action.")
+            return UpdatePlanExecutionResult("blocked", "Only a failed plugin update plan can use this recovery action.")
 
-        scope_error = self.mainwp_child_recovery_scope_error(plan)
+        scope_error = self.plugin_recovery_scope_error(plan)
         if scope_error:
             return UpdatePlanExecutionResult("blocked", scope_error)
 
@@ -262,30 +263,33 @@ class UpdatePlanService:
         try:
             payload = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(
                 item.site_id,
-                self.MAINWP_CHILD_ACTIVATION_ABILITY,
-                {"expected_installed_version": item.target_version},
+                self.PLUGIN_ACTIVATION_ABILITY,
+                {
+                    "plugin_file": item.update_identifier,
+                    "expected_installed_version": item.target_version,
+                },
                 timeout_seconds=60,
             )
         except SiteMcpProxyError as exc:
             return self._fail_plan(
                 plan,
                 actor,
-                f"MainWP Child recovery request failed: {exc.message}",
-                action="recover-mainwp-child-activation",
+                f"{item.update_name} recovery request failed: {exc.message}",
+                action="recover-plugin-activation",
             )
 
         result = payload.get("result")
         if (
             not isinstance(result, dict)
-            or result.get("plugin_file") != self.MAINWP_CHILD_PLUGIN
+            or result.get("plugin_file") != item.update_identifier
             or result.get("installed_version") != item.target_version
             or result.get("active") is not True
         ):
             return self._fail_plan(
                 plan,
                 actor,
-                "MainWP Child activation could not be verified for the approved installed version.",
-                action="recover-mainwp-child-activation",
+                f"{item.update_name} activation could not be verified for the approved installed version.",
+                action="recover-plugin-activation",
             )
 
         refresh_note = ""
@@ -299,15 +303,15 @@ class UpdatePlanService:
         self._write_plan_audit(
             plan,
             actor=actor,
-            action="recover-mainwp-child-activation",
+            action="recover-plugin-activation",
             result="executed",
             detail=(
-                f"Reactivated MainWP Child at the verified installed version {item.target_version}."
+                f"Reactivated {item.update_name} at the verified installed version {item.target_version}."
                 f"{refresh_note}"
             ),
         )
         self.db.commit()
-        return UpdatePlanExecutionResult("executed", f"MainWP Child was reactivated and verified.{refresh_note}")
+        return UpdatePlanExecutionResult("executed", f"{item.update_name} was reactivated and verified.{refresh_note}")
 
     def _require_plan(self, plan_id: int) -> UpdatePlan:
         plan = self.repository.get(plan_id)
@@ -319,21 +323,21 @@ class UpdatePlanService:
         SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(site_id)
         SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(site_id)
 
-    def _mainwp_child_readiness_error(self, plan: UpdatePlan) -> str | None:
-        scope_error = self.mainwp_child_scope_error(plan)
+    def _plugin_update_readiness_error(self, plan: UpdatePlan) -> str | None:
+        scope_error = self.plugin_update_scope_error(plan)
         if scope_error:
             return scope_error
 
         preflight = self.build_preflight(plan)
         if len(preflight) != 1 or not preflight[0].execution_ready:
             if not preflight:
-                return "The MainWP Child preflight could not be created."
+                return "The plugin update preflight could not be created."
             return f"Execution remains blocked: {preflight[0].next_step}."
         return None
 
     def _block_plan(self, plan: UpdatePlan, actor: str, detail: str) -> UpdatePlanExecutionResult:
         plan.status = "blocked"
-        self._write_plan_audit(plan, actor=actor, action="block-mainwp-child-update", result="blocked", detail=detail)
+        self._write_plan_audit(plan, actor=actor, action="block-plugin-update", result="blocked", detail=detail)
         self.db.commit()
         return UpdatePlanExecutionResult("blocked", detail)
 
@@ -343,7 +347,7 @@ class UpdatePlanService:
         actor: str,
         detail: str,
         *,
-        action: str = "execute-mainwp-child-update",
+        action: str = "execute-plugin-update",
     ) -> UpdatePlanExecutionResult:
         plan.status = "failed"
         self._write_plan_audit(plan, actor=actor, action=action, result="failed", detail=detail)
@@ -419,6 +423,12 @@ class UpdatePlanService:
         if entry is None:
             return False
         return entry.current_version == (item.current_version or "") and entry.target_version == (item.target_version or "")
+
+    @staticmethod
+    def _is_plugin_file(identifier: str | None) -> bool:
+        if not isinstance(identifier, str):
+            return False
+        return re.fullmatch(r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php", identifier) is not None
 
     @staticmethod
     def _backup_preflight(snapshot: SiteBackupSnapshot | None) -> tuple[str, str | None, datetime | None]:

@@ -102,6 +102,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/update-plugin',
+			array(
+				'label'               => __( 'Update Plugin', 'kosmos-bridge' ),
+				'description'         => __( 'Updates one active plugin after a fresh full backup and exact version preflight.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::plugin_update_input_schema(),
+				'output_schema'       => self::plugin_update_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_plugin' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/update-mainwp-child',
 			array(
 				'label'               => __( 'Update MainWP Child', 'kosmos-bridge' ),
@@ -110,6 +124,20 @@ class Registry {
 				'input_schema'        => self::mainwp_child_update_input_schema(),
 				'output_schema'       => self::mainwp_child_update_output_schema(),
 				'execute_callback'    => array( self::class, 'execute_update_mainwp_child' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/activate-plugin',
+			array(
+				'label'               => __( 'Activate Plugin', 'kosmos-bridge' ),
+				'description'         => __( 'Reactivates one plugin only when its installed version matches the Hub recovery plan.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::plugin_activation_input_schema(),
+				'output_schema'       => self::plugin_activation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_activate_plugin' ),
 				'permission_callback' => array( self::class, 'allow_mutation_access' ),
 				'meta'                => self::mutation_meta(),
 			)
@@ -285,13 +313,29 @@ class Registry {
 	 * @return array|\WP_Error
 	 */
 	public static function execute_update_mainwp_child( $input = array() ) {
+		$input                = is_array( $input ) ? $input : array();
+		$input['plugin_file'] = self::MAINWP_CHILD_PLUGIN_FILE;
+
+		return self::execute_update_plugin( $input );
+	}
+
+	/**
+	 * Update exactly one approved active WordPress plugin. The Hub must provide
+	 * the plugin file and exact current and target versions from a single-item
+	 * plan. Package URLs and version ranges are never accepted from the Hub.
+	 *
+	 * @param mixed $input Plugin file and expected versions from the Hub plan.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_plugin( $input = array() ) {
+		$plugin_file     = self::get_input_string( $input, 'plugin_file' );
 		$expected_current = self::get_input_string( $input, 'expected_current_version' );
 		$expected_target  = self::get_input_string( $input, 'expected_target_version' );
 
-		if ( '' === $expected_current || '' === $expected_target ) {
+		if ( ! self::is_valid_plugin_file( $plugin_file ) || '' === $expected_current || '' === $expected_target ) {
 			return new \WP_Error(
 				'kosmos_bridge_invalid_update_input',
-				'Expected current and target versions are required.',
+				'Plugin file and expected current and target versions are required.',
 				array( 'status' => 400 )
 			);
 		}
@@ -301,27 +345,27 @@ class Registry {
 		}
 
 		$plugins = get_plugins();
-		if ( ! isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ) {
+		if ( ! isset( $plugins[ $plugin_file ] ) ) {
 			return new \WP_Error(
-				'kosmos_bridge_mainwp_child_not_installed',
-				'MainWP Child is not installed on this site.',
+				'kosmos_bridge_plugin_not_installed',
+				'The approved plugin is not installed on this site.',
 				array( 'status' => 409 )
 			);
 		}
 
-		$current_version = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		$current_version = isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
 		if ( $current_version !== $expected_current ) {
 			return new \WP_Error(
 				'kosmos_bridge_update_version_mismatch',
-				sprintf( 'MainWP Child is at version %s, not the approved version %s.', $current_version, $expected_current ),
+				sprintf( 'The approved plugin is at version %s, not the approved version %s.', $current_version, $expected_current ),
 				array( 'status' => 409 )
 			);
 		}
 
-		if ( ! is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+		if ( ! is_plugin_active( $plugin_file ) ) {
 			return new \WP_Error(
-				'kosmos_bridge_mainwp_child_inactive',
-				'MainWP Child must be active before the Hub can update it.',
+				'kosmos_bridge_plugin_inactive',
+				'The approved plugin must be active before the Hub can update it.',
 				array( 'status' => 409 )
 			);
 		}
@@ -346,14 +390,14 @@ class Registry {
 		self::refresh_update_transients( $plugins );
 		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
 		$responses        = isset( $plugin_transient['response'] ) ? self::to_array( $plugin_transient['response'] ) : array();
-		$offer            = isset( $responses[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ? self::to_array( $responses[ self::MAINWP_CHILD_PLUGIN_FILE ] ) : array();
+		$offer            = isset( $responses[ $plugin_file ] ) ? self::to_array( $responses[ $plugin_file ] ) : array();
 		$offered_version  = self::get_update_version( $offer );
 		$package          = isset( $offer['package'] ) ? trim( (string) $offer['package'] ) : '';
 
 		if ( $offered_version !== $expected_target || '' === $package ) {
 			return new \WP_Error(
 				'kosmos_bridge_update_offer_changed',
-				'The approved MainWP Child update offer is no longer available.',
+				'The approved plugin update offer is no longer available.',
 				array( 'status' => 409 )
 			);
 		}
@@ -368,14 +412,14 @@ class Registry {
 		}
 
 		$upgrader = new \Plugin_Upgrader( new \Automatic_Upgrader_Skin() );
-		$result   = $upgrader->upgrade( self::MAINWP_CHILD_PLUGIN_FILE, array( 'clear_update_cache' => true ) );
+		$result   = $upgrader->upgrade( $plugin_file, array( 'clear_update_cache' => true ) );
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
 		if ( true !== $result ) {
 			return new \WP_Error(
 				'kosmos_bridge_update_failed',
-				'WordPress did not confirm the MainWP Child update.',
+				'WordPress did not confirm the plugin update.',
 				array( 'status' => 500 )
 			);
 		}
@@ -384,23 +428,23 @@ class Registry {
 			wp_clean_plugins_cache( true );
 		}
 		$plugins         = get_plugins();
-		$installed_after = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		$installed_after = isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
 		if ( $installed_after !== $expected_target ) {
 			return new \WP_Error(
 				'kosmos_bridge_update_verification_failed',
-				'WordPress completed the update but the installed MainWP Child version could not be verified.',
+				'WordPress completed the update but the installed plugin version could not be verified.',
 				array( 'status' => 500 )
 			);
 		}
 
-		$activation = self::activate_mainwp_child();
+		$activation = self::activate_plugin_and_verify( $plugin_file );
 		if ( is_wp_error( $activation ) ) {
 			return $activation;
 		}
 
 		return array(
 			'updated'          => true,
-			'plugin_file'      => self::MAINWP_CHILD_PLUGIN_FILE,
+			'plugin_file'      => $plugin_file,
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
 			'active'           => true,
@@ -416,11 +460,26 @@ class Registry {
 	 * @return array|\WP_Error
 	 */
 	public static function execute_activate_mainwp_child( $input = array() ) {
+		$input                = is_array( $input ) ? $input : array();
+		$input['plugin_file'] = self::MAINWP_CHILD_PLUGIN_FILE;
+
+		return self::execute_activate_plugin( $input );
+	}
+
+	/**
+	 * Reactivate one plugin only when the installed version matches the target
+	 * version recorded in the failed Hub update plan.
+	 *
+	 * @param mixed $input Plugin file and expected installed version.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_activate_plugin( $input = array() ) {
+		$plugin_file      = self::get_input_string( $input, 'plugin_file' );
 		$expected_version = self::get_input_string( $input, 'expected_installed_version' );
-		if ( '' === $expected_version ) {
+		if ( ! self::is_valid_plugin_file( $plugin_file ) || '' === $expected_version ) {
 			return new \WP_Error(
 				'kosmos_bridge_invalid_activation_input',
-				'Expected installed version is required.',
+				'Plugin file and expected installed version are required.',
 				array( 'status' => 400 )
 			);
 		}
@@ -430,32 +489,32 @@ class Registry {
 		}
 
 		$plugins = get_plugins();
-		if ( ! isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ) {
+		if ( ! isset( $plugins[ $plugin_file ] ) ) {
 			return new \WP_Error(
-				'kosmos_bridge_mainwp_child_not_installed',
-				'MainWP Child is not installed on this site.',
+				'kosmos_bridge_plugin_not_installed',
+				'The approved plugin is not installed on this site.',
 				array( 'status' => 409 )
 			);
 		}
 
-		$installed_version = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		$installed_version = isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
 		if ( $installed_version !== $expected_version ) {
 			return new \WP_Error(
 				'kosmos_bridge_activation_version_mismatch',
-				sprintf( 'MainWP Child is at version %s, not the expected version %s.', $installed_version, $expected_version ),
+				sprintf( 'The approved plugin is at version %s, not the expected version %s.', $installed_version, $expected_version ),
 				array( 'status' => 409 )
 			);
 		}
 
-		$was_active = is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE );
-		$activation = self::activate_mainwp_child();
+		$was_active = is_plugin_active( $plugin_file );
+		$activation = self::activate_plugin_and_verify( $plugin_file );
 		if ( is_wp_error( $activation ) ) {
 			return $activation;
 		}
 
 		return array(
 			'activated'         => ! $was_active,
-			'plugin_file'       => self::MAINWP_CHILD_PLUGIN_FILE,
+			'plugin_file'       => $plugin_file,
 			'installed_version' => $installed_version,
 			'active'            => true,
 		);
@@ -756,12 +815,30 @@ class Registry {
 				'meta'          => self::readonly_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/update-plugin',
+				'label'         => __( 'Update Plugin', 'kosmos-bridge' ),
+				'description'   => __( 'Updates one active plugin after a fresh full backup and exact version preflight.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::plugin_update_input_schema(),
+				'output_schema' => self::plugin_update_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/update-mainwp-child',
 				'label'         => __( 'Update MainWP Child', 'kosmos-bridge' ),
 				'description'   => __( 'Updates the active MainWP Child plugin after a fresh full backup and version preflight.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => self::mainwp_child_update_input_schema(),
 				'output_schema' => self::mainwp_child_update_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/activate-plugin',
+				'label'         => __( 'Activate Plugin', 'kosmos-bridge' ),
+				'description'   => __( 'Reactivates one plugin only when its installed version matches the Hub recovery plan.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::plugin_activation_input_schema(),
+				'output_schema' => self::plugin_activation_output_schema(),
 				'meta'          => self::mutation_meta(),
 			),
 			array(
@@ -796,8 +873,14 @@ class Registry {
 	 * @return array|null
 	 */
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
+			return self::execute_update_plugin( $input );
+		}
 		if ( 'kosmos-bridge/update-mainwp-child' === $ability_name ) {
 			return self::execute_update_mainwp_child( $input );
+		}
+		if ( 'kosmos-bridge/activate-plugin' === $ability_name ) {
+			return self::execute_activate_plugin( $input );
 		}
 		if ( 'kosmos-bridge/activate-mainwp-child' === $ability_name ) {
 			return self::execute_activate_mainwp_child( $input );
@@ -906,6 +989,21 @@ class Registry {
 	/**
 	 * @return array
 	 */
+	private static function plugin_update_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'plugin_file'              => array( 'type' => 'string' ),
+				'expected_current_version' => array( 'type' => 'string' ),
+				'expected_target_version'  => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'plugin_file', 'expected_current_version', 'expected_target_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
 	private static function mainwp_child_update_output_schema() {
 		return array(
 			'type'       => 'object',
@@ -924,6 +1022,13 @@ class Registry {
 	/**
 	 * @return array
 	 */
+	private static function plugin_update_output_schema() {
+		return self::mainwp_child_update_output_schema();
+	}
+
+	/**
+	 * @return array
+	 */
 	private static function mainwp_child_activation_input_schema() {
 		return array(
 			'type'       => 'object',
@@ -931,6 +1036,20 @@ class Registry {
 				'expected_installed_version' => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'expected_installed_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function plugin_activation_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'plugin_file'                => array( 'type' => 'string' ),
+				'expected_installed_version' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'plugin_file', 'expected_installed_version' ),
 		);
 	}
 
@@ -948,6 +1067,13 @@ class Registry {
 			),
 			'required'   => array( 'activated', 'plugin_file', 'installed_version', 'active' ),
 		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function plugin_activation_output_schema() {
+		return self::mainwp_child_activation_output_schema();
 	}
 
 	/**
@@ -1472,30 +1598,39 @@ class Registry {
 
 	/**
 	 * Plugin_Upgrader may temporarily deactivate an active plugin during an
-	 * update. Restore that original state before reporting the mutation as
-	 * successful to the Hub.
+	 * update. Restore and verify the expected active state before reporting the
+	 * mutation as successful to the Hub.
 	 *
+	 * @param string $plugin_file Plugin file relative to WP_PLUGIN_DIR.
 	 * @return true|\WP_Error
 	 */
-	private static function activate_mainwp_child() {
-		if ( is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+	private static function activate_plugin_and_verify( $plugin_file ) {
+		if ( is_plugin_active( $plugin_file ) ) {
 			return true;
 		}
 
-		$activation = activate_plugin( self::MAINWP_CHILD_PLUGIN_FILE );
+		$activation = activate_plugin( $plugin_file );
 		if ( is_wp_error( $activation ) ) {
 			return $activation;
 		}
 
-		if ( ! is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+		if ( ! is_plugin_active( $plugin_file ) ) {
 			return new \WP_Error(
 				'kosmos_bridge_activation_verification_failed',
-				'WordPress did not confirm that MainWP Child is active.',
+				'WordPress did not confirm that the approved plugin is active.',
 				array( 'status' => 500 )
 			);
 		}
 
 		return true;
+	}
+
+	/**
+	 * @param string $plugin_file Plugin file relative to WP_PLUGIN_DIR.
+	 * @return bool
+	 */
+	private static function is_valid_plugin_file( $plugin_file ) {
+		return 1 === preg_match( '/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php$/', $plugin_file );
 	}
 
 	/**

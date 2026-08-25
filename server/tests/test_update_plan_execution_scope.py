@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from app.services.update_plans import UpdatePlanService
 
 
-def mainwp_child_plan(**overrides):
+def plugin_update_plan(**overrides):
     values = {
         "update_type": "plugin",
         "update_identifier": "mainwp-child/mainwp-child.php",
@@ -16,44 +16,50 @@ def mainwp_child_plan(**overrides):
     return SimpleNamespace(items=[SimpleNamespace(**values)])
 
 
-def test_execution_scope_accepts_one_active_mainwp_child_update():
-    plan = mainwp_child_plan()
+def test_execution_scope_accepts_one_active_plugin_update():
+    plan = plugin_update_plan()
 
-    assert UpdatePlanService.mainwp_child_scope_error(UpdatePlanService, plan) is None
+    assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) is None
 
 
-def test_execution_scope_rejects_other_plugins():
-    plan = mainwp_child_plan(update_identifier="woocommerce/woocommerce.php", update_name="WooCommerce")
+def test_execution_scope_accepts_other_active_plugins():
+    plan = plugin_update_plan(update_identifier="wp-smushit/wp-smush.php", update_name="Smush")
 
-    assert UpdatePlanService.mainwp_child_scope_error(UpdatePlanService, plan) == (
-        "This execution path is restricted to the MainWP Child plugin."
+    assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) is None
+
+
+def test_execution_scope_rejects_inactive_plugin():
+    plan = plugin_update_plan(is_active=False)
+
+    assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) == (
+        "The selected plugin must be active before it can be updated by the Hub."
     )
 
 
-def test_execution_scope_rejects_inactive_mainwp_child():
-    plan = mainwp_child_plan(is_active=False)
+def test_execution_scope_rejects_invalid_plugin_file():
+    plan = plugin_update_plan(update_identifier="../wp-config.php")
 
-    assert UpdatePlanService.mainwp_child_scope_error(UpdatePlanService, plan) == (
-        "MainWP Child must be active before it can be updated by the Hub."
+    assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) == (
+        "This execution path accepts one standard WordPress plugin update only."
     )
 
 
-def test_recovery_scope_accepts_inactive_mainwp_child_at_planned_version():
-    plan = mainwp_child_plan(is_active=False)
+def test_recovery_scope_accepts_inactive_plugin_at_planned_version():
+    plan = plugin_update_plan(is_active=False)
 
-    assert UpdatePlanService.mainwp_child_recovery_scope_error(UpdatePlanService, plan) is None
+    assert UpdatePlanService.plugin_recovery_scope_error(UpdatePlanService, plan) is None
 
 
-def test_recovery_scope_rejects_other_plugins():
-    plan = mainwp_child_plan(update_identifier="woocommerce/woocommerce.php", update_name="WooCommerce")
+def test_recovery_scope_rejects_non_plugin_entries():
+    plan = plugin_update_plan(update_type="theme", update_identifier="twentytwentyfive/style.css")
 
-    assert UpdatePlanService.mainwp_child_recovery_scope_error(UpdatePlanService, plan) == (
-        "This recovery path is restricted to the MainWP Child plugin."
+    assert UpdatePlanService.plugin_recovery_scope_error(UpdatePlanService, plan) == (
+        "This recovery path accepts one standard WordPress plugin only."
     )
 
 
 def test_execution_scope_rejects_multi_item_plans():
-    plan = mainwp_child_plan()
+    plan = plugin_update_plan()
     plan.items.append(
         SimpleNamespace(
             update_type="plugin",
@@ -65,6 +71,6 @@ def test_execution_scope_rejects_multi_item_plans():
         )
     )
 
-    assert UpdatePlanService.mainwp_child_scope_error(UpdatePlanService, plan) == (
+    assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) == (
         "This execution path only accepts a plan with exactly one update."
     )
