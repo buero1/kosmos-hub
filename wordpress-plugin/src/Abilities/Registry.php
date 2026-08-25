@@ -283,10 +283,9 @@ class Registry {
 			require_once ABSPATH . 'wp-admin/includes/update.php';
 		}
 
-		self::refresh_update_transients();
-
 		$current_wordpress_version = is_string( $wp_version ) ? $wp_version : get_bloginfo( 'version' );
 		$plugins                   = get_plugins();
+		self::refresh_update_transients( $plugins );
 		$wordpress_updates          = array();
 		$plugin_updates             = array();
 		$theme_updates              = array();
@@ -821,23 +820,136 @@ class Registry {
 	}
 
 	/**
-	 * Force WordPress to refresh its official update sources before returning a
-	 * fleet snapshot. Only transient cache values are updated here.
+	 * Refresh official update sources without discarding offers that trusted
+	 * third-party updaters already registered in the current WordPress cache.
 	 *
+	 * @param array $plugins Installed plugin metadata keyed by plugin file.
 	 * @return void
 	 */
-	private static function refresh_update_transients() {
+	private static function refresh_update_transients( $plugins ) {
 		if ( ! function_exists( 'wp_version_check' ) ) {
 			require_once ABSPATH . WPINC . '/update.php';
 		}
 
-		delete_site_transient( 'update_core' );
-		delete_site_transient( 'update_plugins' );
-		delete_site_transient( 'update_themes' );
+		$previous_plugin_updates = self::to_array( get_site_transient( 'update_plugins' ) );
+		$previous_theme_updates  = self::to_array( get_site_transient( 'update_themes' ) );
 
+		delete_site_transient( 'update_core' );
 		wp_version_check();
 		wp_update_plugins();
 		wp_update_themes();
+
+		self::restore_missing_plugin_update_responses( $previous_plugin_updates, $plugins );
+		self::restore_missing_theme_update_responses( $previous_theme_updates );
+	}
+
+	/**
+	 * Keep valid offers from premium and vendor updaters when a core refresh did
+	 * not put them back into the shared update transient.
+	 *
+	 * @param array $previous_transient Update transient before the refresh.
+	 * @param array $plugins Installed plugin metadata keyed by plugin file.
+	 * @return void
+	 */
+	private static function restore_missing_plugin_update_responses( $previous_transient, $plugins ) {
+		$previous_responses = isset( $previous_transient['response'] ) ? self::to_array( $previous_transient['response'] ) : array();
+		$current            = get_site_transient( 'update_plugins' );
+		$current_data       = self::to_array( $current );
+		$current_responses  = isset( $current_data['response'] ) ? self::to_array( $current_data['response'] ) : array();
+		$current_no_update  = isset( $current_data['no_update'] ) ? self::to_array( $current_data['no_update'] ) : array();
+		$changed            = false;
+
+		if ( empty( $previous_responses ) || empty( $current_data ) ) {
+			return;
+		}
+
+		foreach ( $previous_responses as $plugin_file => $update ) {
+			$update_data   = self::to_array( $update );
+			$resolved_file = isset( $update_data['plugin'] ) ? (string) $update_data['plugin'] : (string) $plugin_file;
+			$plugin_data   = isset( $plugins[ $resolved_file ] ) && is_array( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : array();
+			$new_version   = self::get_update_version( $update_data );
+			$installed     = isset( $plugin_data['Version'] ) ? (string) $plugin_data['Version'] : '';
+
+			if (
+				'' === $resolved_file ||
+				'' === $new_version ||
+				'' === $installed ||
+				! version_compare( $new_version, $installed, '>' ) ||
+				array_key_exists( $resolved_file, $current_responses ) ||
+				array_key_exists( $resolved_file, $current_no_update )
+			) {
+				continue;
+			}
+
+			$current_responses[ $resolved_file ] = $update;
+			$changed                              = true;
+		}
+
+		if ( $changed ) {
+			self::store_update_responses( 'update_plugins', $current, $current_data, $current_responses );
+		}
+	}
+
+	/**
+	 * Apply the same protection to premium themes that expose their offers
+	 * through WordPress' standard update transient.
+	 *
+	 * @param array $previous_transient Update transient before the refresh.
+	 * @return void
+	 */
+	private static function restore_missing_theme_update_responses( $previous_transient ) {
+		$previous_responses = isset( $previous_transient['response'] ) ? self::to_array( $previous_transient['response'] ) : array();
+		$current            = get_site_transient( 'update_themes' );
+		$current_data       = self::to_array( $current );
+		$current_responses  = isset( $current_data['response'] ) ? self::to_array( $current_data['response'] ) : array();
+		$current_no_update  = isset( $current_data['no_update'] ) ? self::to_array( $current_data['no_update'] ) : array();
+		$changed            = false;
+
+		if ( empty( $previous_responses ) || empty( $current_data ) || ! function_exists( 'wp_get_theme' ) ) {
+			return;
+		}
+
+		foreach ( $previous_responses as $stylesheet => $update ) {
+			$update_data = self::to_array( $update );
+			$new_version = isset( $update_data['new_version'] ) ? (string) $update_data['new_version'] : '';
+			$theme       = wp_get_theme( (string) $stylesheet );
+			$installed   = $theme->exists() ? (string) $theme->get( 'Version' ) : '';
+
+			if (
+				'' === $new_version ||
+				'' === $installed ||
+				! version_compare( $new_version, $installed, '>' ) ||
+				array_key_exists( $stylesheet, $current_responses ) ||
+				array_key_exists( $stylesheet, $current_no_update )
+			) {
+				continue;
+			}
+
+			$current_responses[ $stylesheet ] = $update;
+			$changed                           = true;
+		}
+
+		if ( $changed ) {
+			self::store_update_responses( 'update_themes', $current, $current_data, $current_responses );
+		}
+	}
+
+	/**
+	 * @param string $transient_name Update transient name.
+	 * @param mixed  $current Raw transient value.
+	 * @param array  $current_data Normalized transient value.
+	 * @param array  $responses Merged update responses.
+	 * @return void
+	 */
+	private static function store_update_responses( $transient_name, $current, $current_data, $responses ) {
+		if ( is_object( $current ) ) {
+			$current->response = $responses;
+		} else {
+			$current             = $current_data;
+			$current['response'] = $responses;
+		}
+
+		set_site_transient( $transient_name, $current );
 	}
 
 	/**
