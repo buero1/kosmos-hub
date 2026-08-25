@@ -114,6 +114,20 @@ class Registry {
 				'meta'                => self::mutation_meta(),
 			)
 		);
+
+		wp_register_ability(
+			'kosmos-bridge/activate-mainwp-child',
+			array(
+				'label'               => __( 'Activate MainWP Child', 'kosmos-bridge' ),
+				'description'         => __( 'Reactivates MainWP Child only when its installed version matches the Hub recovery plan.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::mainwp_child_activation_input_schema(),
+				'output_schema'       => self::mainwp_child_activation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_activate_mainwp_child' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
 	}
 
 	/**
@@ -379,13 +393,71 @@ class Registry {
 			);
 		}
 
+		$activation = self::activate_mainwp_child();
+		if ( is_wp_error( $activation ) ) {
+			return $activation;
+		}
+
 		return array(
 			'updated'          => true,
 			'plugin_file'      => self::MAINWP_CHILD_PLUGIN_FILE,
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
-			'active'           => is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ),
+			'active'           => true,
 			'backup_at'        => (string) $backup_status['latest_backup_at'],
+		);
+	}
+
+	/**
+	 * Recover the MainWP Child activation only after the Hub has verified the
+	 * version that was intended by a previously approved update plan.
+	 *
+	 * @param mixed $input Expected installed version from the Hub recovery plan.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_activate_mainwp_child( $input = array() ) {
+		$expected_version = self::get_input_string( $input, 'expected_installed_version' );
+		if ( '' === $expected_version ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_activation_input',
+				'Expected installed version is required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		if ( ! function_exists( 'get_plugins' ) || ! function_exists( 'is_plugin_active' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$plugins = get_plugins();
+		if ( ! isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ] ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_mainwp_child_not_installed',
+				'MainWP Child is not installed on this site.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$installed_version = isset( $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] ) ? (string) $plugins[ self::MAINWP_CHILD_PLUGIN_FILE ]['Version'] : '';
+		if ( $installed_version !== $expected_version ) {
+			return new \WP_Error(
+				'kosmos_bridge_activation_version_mismatch',
+				sprintf( 'MainWP Child is at version %s, not the expected version %s.', $installed_version, $expected_version ),
+				array( 'status' => 409 )
+			);
+		}
+
+		$was_active = is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE );
+		$activation = self::activate_mainwp_child();
+		if ( is_wp_error( $activation ) ) {
+			return $activation;
+		}
+
+		return array(
+			'activated'         => ! $was_active,
+			'plugin_file'       => self::MAINWP_CHILD_PLUGIN_FILE,
+			'installed_version' => $installed_version,
+			'active'            => true,
 		);
 	}
 
@@ -692,6 +764,15 @@ class Registry {
 				'output_schema' => self::mainwp_child_update_output_schema(),
 				'meta'          => self::mutation_meta(),
 			),
+			array(
+				'name'          => 'kosmos-bridge/activate-mainwp-child',
+				'label'         => __( 'Activate MainWP Child', 'kosmos-bridge' ),
+				'description'   => __( 'Reactivates MainWP Child only when its installed version matches the Hub recovery plan.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::mainwp_child_activation_input_schema(),
+				'output_schema' => self::mainwp_child_activation_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
 		);
 	}
 
@@ -717,6 +798,9 @@ class Registry {
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
 		if ( 'kosmos-bridge/update-mainwp-child' === $ability_name ) {
 			return self::execute_update_mainwp_child( $input );
+		}
+		if ( 'kosmos-bridge/activate-mainwp-child' === $ability_name ) {
+			return self::execute_activate_mainwp_child( $input );
 		}
 
 		if ( null !== $input && ! empty( $input ) ) {
@@ -834,6 +918,35 @@ class Registry {
 				'backup_at'         => array( 'type' => 'string', 'format' => 'date-time' ),
 			),
 			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active', 'backup_at' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function mainwp_child_activation_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'expected_installed_version' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'expected_installed_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function mainwp_child_activation_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'activated'         => array( 'type' => 'boolean' ),
+				'plugin_file'       => array( 'type' => 'string' ),
+				'installed_version' => array( 'type' => 'string' ),
+				'active'            => array( 'type' => 'boolean' ),
+			),
+			'required'   => array( 'activated', 'plugin_file', 'installed_version', 'active' ),
 		);
 	}
 
@@ -1355,6 +1468,34 @@ class Registry {
 		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader-skins.php';
 		require_once ABSPATH . 'wp-admin/includes/class-plugin-upgrader.php';
+	}
+
+	/**
+	 * Plugin_Upgrader may temporarily deactivate an active plugin during an
+	 * update. Restore that original state before reporting the mutation as
+	 * successful to the Hub.
+	 *
+	 * @return true|\WP_Error
+	 */
+	private static function activate_mainwp_child() {
+		if ( is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+			return true;
+		}
+
+		$activation = activate_plugin( self::MAINWP_CHILD_PLUGIN_FILE );
+		if ( is_wp_error( $activation ) ) {
+			return $activation;
+		}
+
+		if ( ! is_plugin_active( self::MAINWP_CHILD_PLUGIN_FILE ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_activation_verification_failed',
+				'WordPress did not confirm that MainWP Child is active.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return true;
 	}
 
 	/**

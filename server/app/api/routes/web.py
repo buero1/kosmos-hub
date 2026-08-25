@@ -184,6 +184,7 @@ def update_plan_detail_page(
         raise HTTPException(status_code=404, detail="Update plan not found.")
     preflight = service.build_preflight(plan)
     scope_error = service.mainwp_child_scope_error(plan)
+    recovery_scope_error = service.mainwp_child_recovery_scope_error(plan)
     preflight_ready = len(preflight) == 1 and preflight[0].execution_ready
     return templates.TemplateResponse(
         request,
@@ -193,8 +194,10 @@ def update_plan_detail_page(
             "preflight": preflight,
             "csrf_token": get_csrf_token(request),
             "scope_error": scope_error,
+            "recovery_scope_error": recovery_scope_error,
             "can_approve": plan.status == "draft" and scope_error is None and preflight_ready,
             "can_execute": plan.status == "approved" and scope_error is None and preflight_ready,
+            "can_recover": plan.status == "failed" and recovery_scope_error is None,
             "action_result": action,
             "action_message": message,
         },
@@ -239,6 +242,29 @@ def execute_mainwp_child_update_plan(
     service = UpdatePlanService(db=db, cipher=get_secret_cipher())
     try:
         outcome = service.execute_mainwp_child(plan_id=plan_id, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RedirectResponse(
+        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
+        status_code=303,
+    )
+
+
+@router.post("/update-plans/{plan_id}/recover-mainwp-child-activation")
+def recover_mainwp_child_activation(
+    plan_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
+    try:
+        outcome = service.recover_mainwp_child_activation(plan_id=plan_id, actor=user.username)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RedirectResponse(

@@ -43,6 +43,17 @@
         {% else %}
           <p class="notice-error">The current preflight must be ready before approval.</p>
         {% endif %}
+      {% elif plan.status == "failed" %}
+        <h3>Recovery required</h3>
+        <p class="subtle">The earlier update may have reached its approved version but requires verified reactivation. This action activates only MainWP Child at the exact version recorded in this plan. It does not run another update.</p>
+        {% if can_recover %}
+          <form method="post" action="/update-plans/{{ plan.id }}/recover-mainwp-child-activation" onsubmit="return confirm('Reactivate MainWP Child on {{ plan.items[0].site.domain }} now? This will not run another update.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button" type="submit">Reactivate verified MainWP Child</button>
+          </form>
+        {% else %}
+          <p class="notice-error">{{ recovery_scope_error or "This plan cannot use the restricted recovery action." }}</p>
+        {% endif %}
       {% else %}
         <h3>Execution closed</h3>
         <p class="subtle">This plan is {{ plan.status }}. Create a new plan after resolving the reported preflight or execution issue.</p>

@@ -62,6 +62,7 @@ class UpdatePlanExecutionResult:
 class UpdatePlanService:
     MAINWP_CHILD_PLUGIN = "mainwp-child/mainwp-child.php"
     MAINWP_CHILD_ABILITY = "kosmos-bridge/update-mainwp-child"
+    MAINWP_CHILD_ACTIVATION_ABILITY = "kosmos-bridge/activate-mainwp-child"
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -124,6 +125,17 @@ class UpdatePlanService:
             return "MainWP Child must be active before it can be updated by the Hub."
         if not item.current_version or not item.target_version:
             return "The MainWP Child update must include both current and target versions."
+        return None
+
+    def mainwp_child_recovery_scope_error(self, plan: UpdatePlan) -> str | None:
+        if len(plan.items) != 1:
+            return "This recovery path only accepts a plan with exactly one update."
+
+        item = plan.items[0]
+        if item.update_type != "plugin" or item.update_identifier != self.MAINWP_CHILD_PLUGIN:
+            return "This recovery path is restricted to the MainWP Child plugin."
+        if not item.target_version:
+            return "The MainWP Child recovery requires the approved installed version."
         return None
 
     def approve_mainwp_child(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
@@ -197,6 +209,18 @@ class UpdatePlanService:
             return self._fail_plan(plan, actor, "MainWP Child returned no verifiable update result.")
 
         if (
+            result.get("updated") is True
+            and result.get("plugin_file") == self.MAINWP_CHILD_PLUGIN
+            and result.get("installed_version") == item.target_version
+            and result.get("active") is not True
+        ):
+            return self._fail_plan(
+                plan,
+                actor,
+                "MainWP Child was updated to the approved version but is inactive. Use the explicit recovery action to reactivate that verified version.",
+            )
+
+        if (
             result.get("updated") is not True
             or result.get("plugin_file") != self.MAINWP_CHILD_PLUGIN
             or result.get("installed_version") != item.target_version
@@ -224,6 +248,66 @@ class UpdatePlanService:
         )
         self.db.commit()
         return UpdatePlanExecutionResult("executed", f"MainWP Child was updated and verified.{refresh_note}")
+
+    def recover_mainwp_child_activation(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
+        plan = self._require_plan(plan_id)
+        if plan.status != "failed":
+            return UpdatePlanExecutionResult("blocked", "Only a failed MainWP Child plan can use this recovery action.")
+
+        scope_error = self.mainwp_child_recovery_scope_error(plan)
+        if scope_error:
+            return UpdatePlanExecutionResult("blocked", scope_error)
+
+        item = plan.items[0]
+        try:
+            payload = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(
+                item.site_id,
+                self.MAINWP_CHILD_ACTIVATION_ABILITY,
+                {"expected_installed_version": item.target_version},
+                timeout_seconds=60,
+            )
+        except SiteMcpProxyError as exc:
+            return self._fail_plan(
+                plan,
+                actor,
+                f"MainWP Child recovery request failed: {exc.message}",
+                action="recover-mainwp-child-activation",
+            )
+
+        result = payload.get("result")
+        if (
+            not isinstance(result, dict)
+            or result.get("plugin_file") != self.MAINWP_CHILD_PLUGIN
+            or result.get("installed_version") != item.target_version
+            or result.get("active") is not True
+        ):
+            return self._fail_plan(
+                plan,
+                actor,
+                "MainWP Child activation could not be verified for the approved installed version.",
+                action="recover-mainwp-child-activation",
+            )
+
+        refresh_note = ""
+        try:
+            SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(item.site_id)
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(item.site_id)
+        except SiteMcpProxyError as exc:
+            refresh_note = f" The reactivation succeeded, but the follow-up scan failed: {exc.message}"
+
+        plan.status = "executed"
+        self._write_plan_audit(
+            plan,
+            actor=actor,
+            action="recover-mainwp-child-activation",
+            result="executed",
+            detail=(
+                f"Reactivated MainWP Child at the verified installed version {item.target_version}."
+                f"{refresh_note}"
+            ),
+        )
+        self.db.commit()
+        return UpdatePlanExecutionResult("executed", f"MainWP Child was reactivated and verified.{refresh_note}")
 
     def _require_plan(self, plan_id: int) -> UpdatePlan:
         plan = self.repository.get(plan_id)
@@ -253,9 +337,16 @@ class UpdatePlanService:
         self.db.commit()
         return UpdatePlanExecutionResult("blocked", detail)
 
-    def _fail_plan(self, plan: UpdatePlan, actor: str, detail: str) -> UpdatePlanExecutionResult:
+    def _fail_plan(
+        self,
+        plan: UpdatePlan,
+        actor: str,
+        detail: str,
+        *,
+        action: str = "execute-mainwp-child-update",
+    ) -> UpdatePlanExecutionResult:
         plan.status = "failed"
-        self._write_plan_audit(plan, actor=actor, action="execute-mainwp-child-update", result="failed", detail=detail)
+        self._write_plan_audit(plan, actor=actor, action=action, result="failed", detail=detail)
         self.db.commit()
         return UpdatePlanExecutionResult("failed", detail)
 
