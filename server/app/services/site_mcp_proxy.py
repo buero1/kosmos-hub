@@ -46,13 +46,21 @@ class SiteMcpProxyService:
         self._record_success(site, "get-ability-info", f"Fetched ability info for {ability_name}.", result.request_id)
         return result.payload
 
-    def execute_ability(self, site_id: int, ability_name: str, ability_input: dict[str, Any] | None) -> dict[str, Any]:
+    def execute_ability(
+        self,
+        site_id: int,
+        ability_name: str,
+        ability_input: dict[str, Any] | None,
+        *,
+        timeout_seconds: int = 20,
+    ) -> dict[str, Any]:
         site, connection = self._get_site_and_connection(site_id)
         result = self._send(
             site,
             connection,
             "execute-ability",
             {"ability_name": ability_name, "input": ability_input},
+            timeout_seconds=timeout_seconds,
         )
         self._record_success(site, "execute-ability", f"Executed {ability_name}.", result.request_id)
         return result.payload
@@ -72,7 +80,15 @@ class SiteMcpProxyService:
             status_code=424,
         )
 
-    def _send(self, site: Site, connection: SiteConnection, action: str, payload: dict[str, Any]) -> RemoteResult:
+    def _send(
+        self,
+        site: Site,
+        connection: SiteConnection,
+        action: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: int = 20,
+    ) -> RemoteResult:
         endpoint = connection.endpoint.rstrip("/")
         url = f"{endpoint}/{action}"
         body = json.dumps(payload).encode("utf-8")
@@ -100,7 +116,7 @@ class SiteMcpProxyService:
         )
 
         try:
-            with request.urlopen(req, timeout=20) as response:
+            with request.urlopen(req, timeout=timeout_seconds) as response:
                 parsed = json.loads(response.read().decode("utf-8"))
         except error.HTTPError as exc:
             parsed = self._read_error_body(exc)
@@ -155,4 +171,3 @@ class SiteMcpProxyService:
             return data
 
         return {"code": "REMOTE_HTTP_ERROR", "message": json.dumps(data)}
-

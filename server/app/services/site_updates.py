@@ -28,7 +28,7 @@ class SiteUpdateService:
         if site is None:
             raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
 
-        payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, None)
+        payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, None, timeout_seconds=60)
         result = payload.get("result", {})
         result = result if isinstance(result, dict) else {}
 

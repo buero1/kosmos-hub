@@ -72,7 +72,7 @@ class Registry {
 			'kosmos-bridge/get-available-updates',
 			array(
 				'label'               => __( 'Get Available Updates', 'kosmos-bridge' ),
-				'description'         => __( 'Returns WordPress, plugin, and theme updates already known to this site.', 'kosmos-bridge' ),
+				'description'         => __( 'Checks and returns currently available WordPress, plugin, and theme updates for this site.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'output_schema'       => self::available_updates_output_schema(),
 				'execute_callback'    => array( self::class, 'execute_get_available_updates' ),
@@ -149,8 +149,8 @@ class Registry {
 	}
 
 	/**
-	 * Read the cached WordPress update transients. This intentionally does not
-	 * trigger checks or install anything on the customer site.
+	 * Refresh and read WordPress update transients. This intentionally never
+	 * downloads or installs updates on the customer site.
 	 *
 	 * @return array
 	 */
@@ -160,6 +160,8 @@ class Registry {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
+
+		self::refresh_update_transients();
 
 		$current_wordpress_version = is_string( $wp_version ) ? $wp_version : get_bloginfo( 'version' );
 		$plugins                   = get_plugins();
@@ -223,6 +225,7 @@ class Registry {
 
 		return array(
 			'reported_at' => gmdate( 'c' ),
+			'check_mode'  => 'fresh',
 			'wordpress'   => array( 'updates' => $wordpress_updates ),
 			'plugins'     => array( 'updates' => $plugin_updates ),
 			'themes'      => array( 'updates' => $theme_updates ),
@@ -273,7 +276,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/get-available-updates',
 				'label'         => __( 'Get Available Updates', 'kosmos-bridge' ),
-				'description'   => __( 'Returns WordPress, plugin, and theme updates already known to this site.', 'kosmos-bridge' ),
+				'description'   => __( 'Checks and returns currently available WordPress, plugin, and theme updates for this site.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => array(),
 				'output_schema' => self::available_updates_output_schema(),
@@ -452,6 +455,7 @@ class Registry {
 			'type'       => 'object',
 			'properties' => array(
 				'reported_at' => array( 'type' => 'string', 'format' => 'date-time' ),
+				'check_mode'  => array( 'type' => 'string' ),
 				'wordpress'   => array( 'type' => 'object' ),
 				'plugins'     => array(
 					'type'       => 'object',
@@ -463,8 +467,28 @@ class Registry {
 				),
 				'summary'     => array( 'type' => 'object' ),
 			),
-			'required'   => array( 'reported_at', 'wordpress', 'plugins', 'themes', 'summary' ),
+			'required'   => array( 'reported_at', 'check_mode', 'wordpress', 'plugins', 'themes', 'summary' ),
 		);
+	}
+
+	/**
+	 * Force WordPress to refresh its official update sources before returning a
+	 * fleet snapshot. Only transient cache values are updated here.
+	 *
+	 * @return void
+	 */
+	private static function refresh_update_transients() {
+		if ( ! function_exists( 'wp_version_check' ) ) {
+			require_once ABSPATH . WPINC . '/update.php';
+		}
+
+		delete_site_transient( 'update_core' );
+		delete_site_transient( 'update_plugins' );
+		delete_site_transient( 'update_themes' );
+
+		wp_version_check();
+		wp_update_plugins();
+		wp_update_themes();
 	}
 
 	/**
