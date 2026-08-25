@@ -12,6 +12,13 @@ class PluginUpdater {
 	const PLUGIN_SLUG      = 'kosmos-bridge';
 	const DEFAULT_HOMEPAGE = 'https://kosmos-hub.31-70-92-95.sslip.io';
 	const METADATA_URL     = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
+	const METADATA_CACHE_KEY = 'kosmos_bridge_update_metadata_v1';
+	const METADATA_CACHE_TTL = 900;
+
+	/**
+	 * @var array<string, mixed>|null
+	 */
+	private $metadata = null;
 
 	/**
 	 * @return void
@@ -20,6 +27,7 @@ class PluginUpdater {
 		$instance = new self();
 
 		add_filter( 'pre_set_site_transient_update_plugins', array( $instance, 'inject_update' ) );
+		add_filter( 'site_transient_update_plugins', array( $instance, 'inject_stored_update' ) );
 		add_filter( 'plugins_api', array( $instance, 'get_plugin_information' ), 20, 3 );
 	}
 
@@ -28,6 +36,27 @@ class PluginUpdater {
 	 * @return mixed
 	 */
 	public function inject_update( $transient ) {
+		return $this->apply_update_metadata( $transient, true );
+	}
+
+	/**
+	 * WordPress reads this transient again immediately before an update runs.
+	 * Reinstate the trusted response there so the update screen and upgrader
+	 * cannot disagree about whether a package is available.
+	 *
+	 * @param mixed $transient Plugin update transient.
+	 * @return mixed
+	 */
+	public function inject_stored_update( $transient ) {
+		return $this->apply_update_metadata( $transient, false );
+	}
+
+	/**
+	 * @param mixed $transient Plugin update transient.
+	 * @param bool  $force_metadata_refresh Whether to bypass the short metadata cache.
+	 * @return mixed
+	 */
+	private function apply_update_metadata( $transient, $force_metadata_refresh ) {
 		if ( ! is_object( $transient ) || empty( $transient->checked ) || ! is_array( $transient->checked ) ) {
 			return $transient;
 		}
@@ -38,9 +67,10 @@ class PluginUpdater {
 			return $transient;
 		}
 
-		$metadata = $this->get_metadata();
+		$metadata = $this->get_metadata( $force_metadata_refresh );
 
 		if ( empty( $metadata ) || version_compare( (string) $metadata['version'], Options::get_bridge_version(), '<=' ) ) {
+			$this->remove_stale_update( $transient, $plugin_file );
 			return $transient;
 		}
 
@@ -61,6 +91,17 @@ class PluginUpdater {
 		);
 
 		return $transient;
+	}
+
+	/**
+	 * @param object $transient Plugin update transient.
+	 * @param string $plugin_file Plugin basename.
+	 * @return void
+	 */
+	private function remove_stale_update( $transient, $plugin_file ) {
+		if ( isset( $transient->response ) && is_array( $transient->response ) ) {
+			unset( $transient->response[ $plugin_file ] );
+		}
 	}
 
 	/**
@@ -100,7 +141,19 @@ class PluginUpdater {
 	/**
 	 * @return array<string, mixed>|null
 	 */
-	private function get_metadata() {
+	private function get_metadata( $force_refresh = false ) {
+		if ( ! $force_refresh && null !== $this->metadata ) {
+			return $this->metadata;
+		}
+
+		if ( ! $force_refresh ) {
+			$cached_metadata = get_site_transient( self::METADATA_CACHE_KEY );
+			if ( is_array( $cached_metadata ) ) {
+				$this->metadata = $cached_metadata;
+				return $this->metadata;
+			}
+		}
+
 		$response = wp_remote_get(
 			self::METADATA_URL,
 			array(
@@ -119,7 +172,12 @@ class PluginUpdater {
 		$metadata = json_decode( wp_remote_retrieve_body( $response ), true );
 		$metadata = is_array( $metadata ) ? $metadata : array();
 
-		return $this->sanitize_metadata( $metadata );
+		$this->metadata = $this->sanitize_metadata( $metadata );
+		if ( null !== $this->metadata ) {
+			set_site_transient( self::METADATA_CACHE_KEY, $this->metadata, self::METADATA_CACHE_TTL );
+		}
+
+		return $this->metadata;
 	}
 
 	/**
