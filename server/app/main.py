@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import accounts, health, registrations, site_abilities, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(accounts.bootstrap_router)
     app.include_router(sites.router)
     app.include_router(site_abilities.router)
+    app.include_router(site_backups.router)
     app.include_router(site_inventory.router)
     app.include_router(site_updates.router)
     app.include_router(web.router)

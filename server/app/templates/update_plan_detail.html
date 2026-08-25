@@ -45,7 +45,11 @@
               <td><strong>{{ check.item.update_name }}</strong><p class="subtle table-note">{{ check.item.update_type }}</p></td>
               <td>{{ check.item.current_version or "-" }} → {{ check.item.target_version or "Not reported" }}</td>
               <td>{{ "Yes" if check.update_still_available else "No" }}</td>
-              <td>{{ check.backup_status }}</td>
+              <td>
+                <strong>{{ check.backup_status }}</strong>
+                {% if check.backup_provider %}<p class="subtle table-note">{{ check.backup_provider }}</p>{% endif %}
+                {% if check.backup_at %}<p class="subtle table-note">{{ check.backup_at }}</p>{% endif %}
+              </td>
               <td><span class="pill pill-{{ "active" if check.execution_ready else "missing" }}">{{ check.status_label }}</span></td>
               <td>{{ check.next_step }}</td>
             </tr>

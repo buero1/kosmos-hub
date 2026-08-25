@@ -84,6 +84,8 @@ Stand im aktuellen Build:
   Audit-Eintraegen
 - Preflight fuer verifizierte Site, weiterhin verfuegbares Update und
   Backupanbindung; ohne Backup bleibt Ausfuehrung blockiert
+- rein lesender UpdraftPlus-Status mit Zeitstempel, Vollstaendigkeit und
+  Komponenten des letzten Backups; keine Backup-Erstellung oder -Ausfuehrung
 - geschuetzte Hub-Weboberflaeche mit erstem Administrator, Sitzungen und
   Passwortwechsel
 - manueller, HMAC-gesicherter Sofort-Refresh pro Site fuer Bridge-,

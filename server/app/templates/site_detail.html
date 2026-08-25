@@ -41,6 +41,20 @@
       {% endif %}
     </article>
     <article class="card">
+      <h3>Backup Status</h3>
+      {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
+      {% if latest_backup %}
+        <p><strong>Checked:</strong> {{ latest_backup.captured_at }}</p>
+        <p><strong>Provider:</strong> {{ latest_backup.provider }}</p>
+        <p><strong>Latest complete backup:</strong> {{ latest_backup.backup_at or "Not available" }}</p>
+        <p><strong>Status:</strong> {{ "Ready" if latest_backup.backup_available and latest_backup.backup_complete else "Not ready" }}</p>
+        <p><strong>Components:</strong> {{ latest_backup.components_json | join(", ") or "-" }}</p>
+        {% if latest_backup.summary_json.message %}<p class="subtle">{{ latest_backup.summary_json.message }}</p>{% endif %}
+      {% else %}
+        <p>No backup status checked yet.</p>
+      {% endif %}
+    </article>
+    <article class="card">
       <h3>Connections</h3>
       {% for connection in site.connections %}
         <p><strong>{{ connection.provider }}</strong></p>
@@ -76,6 +90,22 @@
     <p class="notice-success">Current status and update data were refreshed successfully.</p>
   {% elif request.query_params.get("refresh") == "error" %}
     <p class="notice-error">Refresh failed: {{ request.query_params.get("message") }}</p>
+  {% endif %}
+  <section class="site-refresh-panel">
+    <div>
+      <p class="eyebrow">Read-only backup check</p>
+      <h3>Refresh UpdraftPlus backup status</h3>
+      <p class="subtle">Reads only the metadata of the latest complete backup. It does not create, download, restore or modify backups.</p>
+    </div>
+    <form method="post" action="/sites/{{ site.id }}/backup-refresh">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button button-secondary" type="submit">Check backup status</button>
+    </form>
+  </section>
+  {% if request.query_params.get("backup_refresh") == "ok" %}
+    <p class="notice-success">The read-only backup status was refreshed successfully.</p>
+  {% elif request.query_params.get("backup_refresh") == "error" %}
+    <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
   {% if removable_test_registration %}
     <section class="site-removal-panel">

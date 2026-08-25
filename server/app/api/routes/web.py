@@ -15,6 +15,7 @@ from app.schemas.dashboard import DashboardSummary
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.audit import write_audit_log
 from app.services.site_inventory import SiteInventoryService
+from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.update_plans import UpdatePlanService
@@ -263,6 +264,58 @@ def refresh_site_from_detail(
     return RedirectResponse(url=f"/sites/{site_id}?refresh=ok", status_code=303)
 
 
+@router.post("/sites/{site_id}/backup-refresh")
+def refresh_site_backup_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    repository = SiteRepository(db)
+    site = repository.get_site(site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found.")
+
+    try:
+        payload = SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)
+    except SiteMcpProxyError as exc:
+        write_audit_log(
+            db,
+            site=site,
+            actor=user.username,
+            source="hub-web",
+            action="request-site-backup-refresh",
+            result="error",
+            detail=exc.message,
+        )
+        db.commit()
+        return RedirectResponse(
+            url=f"/sites/{site_id}?{urlencode({'backup_refresh': 'error', 'message': exc.message})}",
+            status_code=303,
+        )
+
+    snapshot = payload["snapshot"]
+    write_audit_log(
+        db,
+        site=site,
+        actor=user.username,
+        source="hub-web",
+        action="request-site-backup-refresh",
+        result="ok",
+        detail=(
+            f"Stored read-only backup status: available={snapshot.backup_available}, "
+            f"complete={snapshot.backup_complete}."
+        ),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/sites/{site_id}?backup_refresh=ok", status_code=303)
+
+
 @router.post("/sites/{site_id}/remove-empty-test-registration")
 def remove_empty_test_registration(
     site_id: int,
@@ -302,6 +355,7 @@ def _is_removable_empty_test_registration(site) -> bool:
         and site.domain.endswith(".kosmos-medien.de")
         and not site.snapshots
         and not site.update_snapshots
+        and not site.backup_snapshots
         and not site.capabilities
         and not site.update_plan_items
     )

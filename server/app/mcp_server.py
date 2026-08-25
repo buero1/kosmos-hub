@@ -13,10 +13,12 @@ from app.schemas.inventory import (
     SiteStateSnapshotResponse,
     StoredSiteCapabilityResponse,
 )
+from app.schemas.backups import SiteBackupRefreshResponse, SiteBackupSnapshotResponse
 from app.schemas.updates import SiteUpdateRefreshResponse, SiteUpdateSnapshotResponse
 from app.schemas.site import SiteDetailResponse
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.site_inventory import SiteInventoryService
+from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 from app.services.site_updates import SiteUpdateService
 
@@ -219,6 +221,38 @@ def refresh_site_update_snapshot(site_id: int) -> dict[str, Any]:
             site_id=payload["site_id"],
             refreshed_at=payload["refreshed_at"],
             snapshot=SiteUpdateSnapshotResponse.model_validate(payload["snapshot"]),
+        ).model_dump(mode="json")
+        return {"ok": True, "payload": response}
+
+
+@hub_mcp.tool()
+def get_site_backup_snapshot(site_id: int) -> dict[str, Any]:
+    """Read the last stored, metadata-only backup status for one site."""
+    with SessionLocal() as db:
+        service = SiteBackupService(db=db, cipher=get_secret_cipher())
+        try:
+            snapshot = service.get_latest_site_backup_snapshot(site_id)
+        except SiteMcpProxyError as exc:
+            return _proxy_error_payload(exc)
+        return {
+            "ok": True,
+            "payload": SiteBackupSnapshotResponse.model_validate(snapshot).model_dump(mode="json") if snapshot else None,
+        }
+
+
+@hub_mcp.tool()
+def refresh_site_backup_snapshot(site_id: int) -> dict[str, Any]:
+    """Read and store UpdraftPlus backup metadata without creating or changing backups."""
+    with SessionLocal() as db:
+        service = SiteBackupService(db=db, cipher=get_secret_cipher())
+        try:
+            payload = service.refresh_site_backup_status(site_id)
+        except SiteMcpProxyError as exc:
+            return _proxy_error_payload(exc)
+        response = SiteBackupRefreshResponse(
+            site_id=payload["site_id"],
+            refreshed_at=payload["refreshed_at"],
+            snapshot=SiteBackupSnapshotResponse.model_validate(payload["snapshot"]),
         ).model_dump(mode="json")
         return {"ok": True, "payload": response}
 

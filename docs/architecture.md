@@ -63,6 +63,10 @@ Kein Bridge-Release sollte noetig sein fuer:
 - neue Nutzung bereits vorhandener WordPress-Abilities
 - neue Kombinationen aus Hub, WordPress und spaeter weiteren Providern
 
+Ein Backup-Status ist ein Beispiel fuer eine gezielt kleine lokale Erweiterung:
+Die Bridge liest nur UpdraftPlus-Metadaten, waehrend Speicherung, Auswertung
+und spaetere Wartungsfreigaben im Hub verbleiben.
+
 ## Monorepo-Entscheidung
 
 Server, Plugin und Dokumentation liegen zunaechst bewusst in einem Monorepo.

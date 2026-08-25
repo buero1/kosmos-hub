@@ -83,6 +83,19 @@ class Registry {
 				'meta'                => self::readonly_meta(),
 			)
 		);
+
+		wp_register_ability(
+			'kosmos-bridge/get-updraftplus-backup-status',
+			array(
+				'label'               => __( 'Get UpdraftPlus Backup Status', 'kosmos-bridge' ),
+				'description'         => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'output_schema'       => self::updraftplus_backup_status_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_get_updraftplus_backup_status' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
 	}
 
 	/**
@@ -149,6 +162,75 @@ class Registry {
 			'count'   => count( $items ),
 			'plugins' => $items,
 		);
+	}
+
+	/**
+	 * Read UpdraftPlus backup metadata without starting, downloading, restoring,
+	 * or exposing backup files. The provider resolves a full backup against the
+	 * backup entities configured on the individual site.
+	 *
+	 * @return array
+	 */
+	public static function execute_get_updraftplus_backup_status() {
+		$plugin_file = 'updraftplus/updraftplus.php';
+		$installed   = file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
+		$active      = in_array( $plugin_file, (array) get_option( 'active_plugins', array() ), true );
+
+		if ( is_multisite() ) {
+			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
+			$active         = $active || isset( $network_active[ $plugin_file ] );
+		}
+
+		$result = array(
+			'reported_at'      => gmdate( 'c' ),
+			'provider'         => 'updraftplus',
+			'installed'        => $installed,
+			'active'           => $active,
+			'available'        => false,
+			'complete'         => false,
+			'latest_backup_at' => '',
+			'backup_count'     => 0,
+			'components'       => array(),
+			'message'          => '',
+		);
+
+		if ( ! $installed ) {
+			$result['message'] = 'UpdraftPlus is not installed on this site.';
+			return $result;
+		}
+
+		if ( ! $active || ! class_exists( 'UpdraftPlus_Backup_History', false ) ) {
+			$result['message'] = 'UpdraftPlus is installed but not active or not initialized.';
+			return $result;
+		}
+
+		try {
+			$history = \UpdraftPlus_Backup_History::get_history();
+			$history = is_array( $history ) ? $history : array();
+			$nonce   = (string) \UpdraftPlus_Backup_History::get_latest_full_backup();
+			$backup  = self::find_updraftplus_backup_by_nonce( $history, $nonce );
+		} catch ( \Throwable $exception ) {
+			$result['message'] = 'UpdraftPlus backup history could not be read.';
+			return $result;
+		}
+
+		$result['backup_count'] = count( $history );
+		if ( empty( $backup ) ) {
+			$result['message'] = 'No complete UpdraftPlus backup is currently recorded.';
+			return $result;
+		}
+
+		$timestamp = self::get_updraftplus_backup_timestamp( $backup );
+		if ( $timestamp > 0 ) {
+			$result['latest_backup_at'] = gmdate( 'c', $timestamp );
+		}
+
+		$result['available']  = $timestamp > 0;
+		$result['complete']   = true;
+		$result['components'] = self::get_updraftplus_backup_components( $backup );
+		$result['message']    = $result['available'] ? 'Complete UpdraftPlus backup found.' : 'A complete backup was found without a usable timestamp.';
+
+		return $result;
 	}
 
 	/**
@@ -330,6 +412,15 @@ class Registry {
 				'output_schema' => self::available_updates_output_schema(),
 				'meta'          => self::readonly_meta(),
 			),
+			array(
+				'name'          => 'kosmos-bridge/get-updraftplus-backup-status',
+				'label'         => __( 'Get UpdraftPlus Backup Status', 'kosmos-bridge' ),
+				'description'   => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::updraftplus_backup_status_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
 		);
 	}
 
@@ -366,6 +457,8 @@ class Registry {
 				return self::execute_list_active_plugins();
 			case 'kosmos-bridge/get-available-updates':
 				return self::execute_get_available_updates();
+			case 'kosmos-bridge/get-updraftplus-backup-status':
+				return self::execute_get_updraftplus_backup_status();
 		}
 
 		return null;
@@ -517,6 +610,101 @@ class Registry {
 			),
 			'required'   => array( 'reported_at', 'check_mode', 'wordpress', 'plugins', 'themes', 'summary' ),
 		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_status_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'reported_at'      => array( 'type' => 'string', 'format' => 'date-time' ),
+				'provider'         => array( 'type' => 'string' ),
+				'installed'        => array( 'type' => 'boolean' ),
+				'active'           => array( 'type' => 'boolean' ),
+				'available'        => array( 'type' => 'boolean' ),
+				'complete'         => array( 'type' => 'boolean' ),
+				'latest_backup_at' => array( 'type' => 'string', 'format' => 'date-time' ),
+				'backup_count'     => array( 'type' => 'integer' ),
+				'components'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'message'          => array( 'type' => 'string' ),
+			),
+			'required'   => array(
+				'reported_at',
+				'provider',
+				'installed',
+				'active',
+				'available',
+				'complete',
+				'latest_backup_at',
+				'backup_count',
+				'components',
+				'message',
+			),
+		);
+	}
+
+	/**
+	 * @param array  $history UpdraftPlus backup history.
+	 * @param string $nonce Backup nonce selected by UpdraftPlus.
+	 * @return array
+	 */
+	private static function find_updraftplus_backup_by_nonce( $history, $nonce ) {
+		if ( '' === $nonce ) {
+			return array();
+		}
+
+		foreach ( $history as $backup_time => $backup ) {
+			if ( ! is_array( $backup ) || ! isset( $backup['nonce'] ) || $nonce !== (string) $backup['nonce'] ) {
+				continue;
+			}
+
+			$backup['_kosmos_backup_time'] = $backup_time;
+			return $backup;
+		}
+
+		return array();
+	}
+
+	/**
+	 * @param array $backup UpdraftPlus backup history entry.
+	 * @return int
+	 */
+	private static function get_updraftplus_backup_timestamp( $backup ) {
+		foreach ( array( '_kosmos_backup_time', 'backup_time', 'nonincremental_backup_time' ) as $key ) {
+			if ( isset( $backup[ $key ] ) && is_numeric( $backup[ $key ] ) && (int) $backup[ $key ] > 0 ) {
+				return (int) $backup[ $key ];
+			}
+		}
+
+		return 0;
+	}
+
+	/**
+	 * @param array $backup UpdraftPlus backup history entry.
+	 * @return array
+	 */
+	private static function get_updraftplus_backup_components( $backup ) {
+		$components = array();
+		$entities   = array(
+			'db'      => 'database',
+			'plugins' => 'plugins',
+			'themes'  => 'themes',
+			'uploads' => 'uploads',
+			'others'  => 'others',
+		);
+
+		foreach ( $entities as $prefix => $label ) {
+			foreach ( array_keys( $backup ) as $backup_key ) {
+				if ( 0 === strpos( (string) $backup_key, $prefix ) ) {
+					$components[] = $label;
+					break;
+				}
+			}
+		}
+
+		return $components;
 	}
 
 	/**

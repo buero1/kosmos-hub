@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.site import Site
+from app.models.site_backup_snapshot import SiteBackupSnapshot
 from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
@@ -23,6 +24,7 @@ class SiteRepository:
                 selectinload(Site.capabilities),
                 selectinload(Site.snapshots),
                 selectinload(Site.update_snapshots),
+                selectinload(Site.backup_snapshots),
             )
             .where(Site.uuid == site_uuid)
         )
@@ -37,6 +39,7 @@ class SiteRepository:
                 selectinload(Site.capabilities),
                 selectinload(Site.snapshots),
                 selectinload(Site.update_snapshots),
+                selectinload(Site.backup_snapshots),
             )
             .where(Site.id == site_id)
         )
@@ -98,6 +101,15 @@ class SiteRepository:
         )
         return self.db.scalar(statement)
 
+    def get_latest_site_backup_snapshot(self, site_id: int) -> SiteBackupSnapshot | None:
+        statement = (
+            select(SiteBackupSnapshot)
+            .where(SiteBackupSnapshot.site_id == site_id)
+            .order_by(SiteBackupSnapshot.captured_at.desc())
+            .limit(1)
+        )
+        return self.db.scalar(statement)
+
     def get_latest_update_snapshots_by_site_ids(self, site_ids: list[int]) -> dict[int, SiteUpdateSnapshot]:
         if not site_ids:
             return {}
@@ -115,6 +127,27 @@ class SiteRepository:
             latest_captured_at,
             (SiteUpdateSnapshot.site_id == latest_captured_at.c.site_id)
             & (SiteUpdateSnapshot.captured_at == latest_captured_at.c.captured_at),
+        )
+        snapshots = self.db.scalars(statement).all()
+        return {snapshot.site_id: snapshot for snapshot in snapshots}
+
+    def get_latest_backup_snapshots_by_site_ids(self, site_ids: list[int]) -> dict[int, SiteBackupSnapshot]:
+        if not site_ids:
+            return {}
+
+        latest_captured_at = (
+            select(
+                SiteBackupSnapshot.site_id,
+                func.max(SiteBackupSnapshot.captured_at).label("captured_at"),
+            )
+            .where(SiteBackupSnapshot.site_id.in_(site_ids))
+            .group_by(SiteBackupSnapshot.site_id)
+            .subquery()
+        )
+        statement = select(SiteBackupSnapshot).join(
+            latest_captured_at,
+            (SiteBackupSnapshot.site_id == latest_captured_at.c.site_id)
+            & (SiteBackupSnapshot.captured_at == latest_captured_at.c.captured_at),
         )
         snapshots = self.db.scalars(statement).all()
         return {snapshot.site_id: snapshot for snapshot in snapshots}
@@ -159,6 +192,38 @@ class SiteRepository:
             core_updates_json=core_updates_json,
             plugin_updates_json=plugin_updates_json,
             theme_updates_json=theme_updates_json,
+            summary_json=summary_json,
+        )
+        self.db.add(snapshot)
+        self.db.flush()
+        return snapshot
+
+    def create_site_backup_snapshot(
+        self,
+        *,
+        site: Site,
+        captured_at: datetime,
+        provider: str,
+        provider_installed: bool,
+        provider_active: bool,
+        backup_available: bool,
+        backup_complete: bool,
+        backup_at: datetime | None,
+        backup_count: int,
+        components_json: list,
+        summary_json: dict,
+    ) -> SiteBackupSnapshot:
+        snapshot = SiteBackupSnapshot(
+            site=site,
+            captured_at=captured_at,
+            provider=provider,
+            provider_installed=provider_installed,
+            provider_active=provider_active,
+            backup_available=backup_available,
+            backup_complete=backup_complete,
+            backup_at=backup_at,
+            backup_count=backup_count,
+            components_json=components_json,
             summary_json=summary_json,
         )
         self.db.add(snapshot)

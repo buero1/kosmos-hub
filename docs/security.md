@@ -119,7 +119,15 @@ Nicht geloggt werden:
 - vollstaendige Authorization-Header
 - Passwoerter
 
-### 7. Hub-Benutzerkonten und Sitzungen
+### 7. Read-only UpdraftPlus-Status
+
+Die Bridge kann Metadaten zum letzten vollstaendigen UpdraftPlus-Backup
+auslesen. Dabei werden nur Anbieterstatus, Zeitpunkt, Anzahl und enthaltene
+Komponenten gespeichert. Die Ability erstellt, laedt nicht herunter,
+restauriert und veraendert keine Backups; Dateinamen, Pfade, Inhalte und
+Remote-Speicherziele werden nicht an den Hub uebertragen.
+
+### 8. Hub-Benutzerkonten und Sitzungen
 
 Die Weboberflaeche und internen APIs sind durch ein eigenes Hub-Konto geschuetzt.
 Ausgenommen bleiben ausschliesslich der Health-Endpoint und die HMAC-gesicherte

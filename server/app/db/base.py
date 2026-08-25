@@ -4,6 +4,7 @@ from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.request_nonce import RequestNonce
 from app.models.site import Site
+from app.models.site_backup_snapshot import SiteBackupSnapshot
 from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
@@ -19,6 +20,7 @@ __all__ = [
     "HubUser",
     "RequestNonce",
     "Site",
+    "SiteBackupSnapshot",
     "SiteCapability",
     "SiteConnection",
     "SiteSnapshot",
