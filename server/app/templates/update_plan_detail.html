@@ -54,10 +54,28 @@
         {% else %}
           <p class="notice-error">{{ recovery_scope_error or "This plan cannot use the restricted recovery action." }}</p>
         {% endif %}
+      {% elif plan.status == "postflight_failed" %}
+        <h3>Update completed, health review needed</h3>
+        <p class="subtle">The plugin update was verified, but the public homepage or WordPress REST API check needs review. No automatic rollback has been run.</p>
       {% else %}
         <h3>Execution closed</h3>
         <p class="subtle">This plan is {{ plan.status }}. Create a new plan after resolving the reported preflight or execution issue.</p>
       {% endif %}
+    </article>
+  </section>
+
+  <section class="detail-list">
+    <article class="card postflight-card">
+      <p class="eyebrow">Post-update protection</p>
+      <h3>Site health check</h3>
+      {% if postflight %}
+        <p><strong>Status:</strong> <span class="pill pill-{{ "active" if postflight.result == "passed" else "postflight_failed" }}">{{ "Passed" if postflight.result == "passed" else "Needs review" }}</span></p>
+        <p><strong>Checked:</strong> {{ postflight.timestamp }}</p>
+        <p class="{{ "notice-success" if postflight.result == "passed" else "notice-error" }}">{{ postflight.detail }}</p>
+      {% else %}
+        <p class="subtle">No post-update health check is recorded for this earlier plan.</p>
+      {% endif %}
+      <p class="subtle">No automatic rollback is performed. The complete backup evidence remains documented in the preflight below.</p>
     </article>
   </section>
 

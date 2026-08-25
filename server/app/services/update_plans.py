@@ -2,9 +2,11 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.models.audit_log import AuditLog
 from app.models.site import SiteStatus
 from app.models.site_backup_snapshot import SiteBackupSnapshot
 from app.models.update_plan import UpdatePlan, UpdatePlanItem
@@ -63,6 +65,7 @@ class UpdatePlanExecutionResult:
 class UpdatePlanService:
     PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
     PLUGIN_ACTIVATION_ABILITY = "kosmos-bridge/activate-plugin"
+    SITE_HEALTH_ABILITY = "kosmos-bridge/check-site-health"
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -113,6 +116,22 @@ class UpdatePlanService:
 
     def get_plan(self, plan_id: int) -> UpdatePlan | None:
         return self.repository.get(plan_id)
+
+    def get_latest_postflight(self, plan: UpdatePlan) -> AuditLog | None:
+        if not plan.items:
+            return None
+
+        statement = (
+            select(AuditLog)
+            .where(
+                AuditLog.site_id == plan.items[0].site_id,
+                AuditLog.action == "postflight-plugin-update",
+                AuditLog.detail.like(f"Plan {plan.id}:%"),
+            )
+            .order_by(AuditLog.timestamp.desc())
+            .limit(1)
+        )
+        return self.db.scalar(statement)
 
     def plugin_update_scope_error(self, plan: UpdatePlan) -> str | None:
         if len(plan.items) != 1:
@@ -236,7 +255,6 @@ class UpdatePlanService:
         except SiteMcpProxyError as exc:
             refresh_note = f" The update succeeded, but the follow-up scan failed: {exc.message}"
 
-        plan.status = "executed"
         self._write_plan_audit(
             plan,
             actor=actor,
@@ -245,6 +263,37 @@ class UpdatePlanService:
             detail=(
                 f"Updated {item.update_name} {item.current_version} -> {item.target_version}. "
                 f"Bridge verified installed version {result.get('installed_version')}.{refresh_note}"
+            ),
+        )
+
+        postflight_error, postflight_detail = self._run_postflight_health_check(item)
+        if postflight_error:
+            plan.status = "postflight_failed"
+            self._write_plan_audit(
+                plan,
+                actor=actor,
+                action="postflight-plugin-update",
+                result="failed",
+                detail=(
+                    f"{postflight_detail} The plugin update itself completed with {item.update_name} "
+                    f"{item.target_version} active. No automatic rollback was performed."
+                ),
+            )
+            self.db.commit()
+            return UpdatePlanExecutionResult(
+                "postflight_failed",
+                f"{item.update_name} was updated and verified, but the post-update health check needs review: {postflight_error}",
+            )
+
+        plan.status = "executed"
+        self._write_plan_audit(
+            plan,
+            actor=actor,
+            action="postflight-plugin-update",
+            result="passed",
+            detail=(
+                f"{postflight_detail} Plugin verification passed for {item.update_name} "
+                f"{item.target_version} active."
             ),
         )
         self.db.commit()
@@ -299,7 +348,6 @@ class UpdatePlanService:
         except SiteMcpProxyError as exc:
             refresh_note = f" The reactivation succeeded, but the follow-up scan failed: {exc.message}"
 
-        plan.status = "executed"
         self._write_plan_audit(
             plan,
             actor=actor,
@@ -308,6 +356,37 @@ class UpdatePlanService:
             detail=(
                 f"Reactivated {item.update_name} at the verified installed version {item.target_version}."
                 f"{refresh_note}"
+            ),
+        )
+
+        postflight_error, postflight_detail = self._run_postflight_health_check(item)
+        if postflight_error:
+            plan.status = "postflight_failed"
+            self._write_plan_audit(
+                plan,
+                actor=actor,
+                action="postflight-plugin-update",
+                result="failed",
+                detail=(
+                    f"{postflight_detail} Plugin activation itself completed with {item.update_name} "
+                    f"{item.target_version} active. No automatic rollback was performed."
+                ),
+            )
+            self.db.commit()
+            return UpdatePlanExecutionResult(
+                "postflight_failed",
+                f"{item.update_name} was reactivated and verified, but the post-update health check needs review: {postflight_error}",
+            )
+
+        plan.status = "executed"
+        self._write_plan_audit(
+            plan,
+            actor=actor,
+            action="postflight-plugin-update",
+            result="passed",
+            detail=(
+                f"{postflight_detail} Plugin activation verification passed for {item.update_name} "
+                f"{item.target_version} active."
             ),
         )
         self.db.commit()
@@ -322,6 +401,26 @@ class UpdatePlanService:
     def _refresh_preflight_evidence(self, site_id: int) -> None:
         SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(site_id)
         SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(site_id)
+
+    def _run_postflight_health_check(self, item: UpdatePlanItem) -> tuple[str | None, str]:
+        try:
+            payload = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(
+                item.site_id,
+                self.SITE_HEALTH_ABILITY,
+                None,
+                timeout_seconds=45,
+            )
+        except SiteMcpProxyError as exc:
+            return (
+                f"the Bridge health check could not run ({exc.message})",
+                "Post-update health check could not be completed.",
+            )
+
+        result = payload.get("result")
+        health_error = self._postflight_health_error(result)
+        if health_error:
+            return health_error, self._postflight_health_detail(result)
+        return None, self._postflight_health_detail(result)
 
     def _plugin_update_readiness_error(self, plan: UpdatePlan) -> str | None:
         scope_error = self.plugin_update_scope_error(plan)
@@ -372,6 +471,30 @@ class UpdatePlanService:
             result=result,
             detail=f"Plan {plan.id}: {detail}",
         )
+
+    @staticmethod
+    def _postflight_health_error(result: object) -> str | None:
+        if not isinstance(result, dict):
+            return "the Bridge did not return a verifiable health result"
+        if result.get("home_healthy") is not True:
+            return f"the public homepage health check did not pass (HTTP {UpdatePlanService._health_status(result.get('home_status'))})"
+        if result.get("rest_healthy") is not True:
+            return f"the WordPress REST API health check did not pass (HTTP {UpdatePlanService._health_status(result.get('rest_status'))})"
+        return None
+
+    @staticmethod
+    def _postflight_health_detail(result: object) -> str:
+        if not isinstance(result, dict):
+            return "Post-update health check returned no verifiable result."
+        return (
+            "Post-update health check: "
+            f"homepage HTTP {UpdatePlanService._health_status(result.get('home_status'))}; "
+            f"WordPress REST API HTTP {UpdatePlanService._health_status(result.get('rest_status'))}."
+        )
+
+    @staticmethod
+    def _health_status(value: object) -> str:
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else "not reported"
 
     def build_preflight(self, plan: UpdatePlan) -> list[UpdatePlanPreflightItem]:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)

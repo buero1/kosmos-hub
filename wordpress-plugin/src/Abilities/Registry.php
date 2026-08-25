@@ -102,6 +102,19 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/check-site-health',
+			array(
+				'label'               => __( 'Check Site Health', 'kosmos-bridge' ),
+				'description'         => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'output_schema'       => self::site_health_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_check_site_health' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/update-plugin',
 			array(
 				'label'               => __( 'Update Plugin', 'kosmos-bridge' ),
@@ -301,6 +314,29 @@ class Registry {
 		$result['message']    = $result['available'] ? 'Complete UpdraftPlus backup found.' : 'A complete backup was found without a usable timestamp.';
 
 		return $result;
+	}
+
+	/**
+	 * Verify that the public homepage and the WordPress REST API still return a
+	 * successful HTTP response. This does not change site content or settings.
+	 *
+	 * @return array
+	 */
+	public static function execute_check_site_health() {
+		$home_url = home_url( '/' );
+		$rest_url = rest_url( '/' );
+		$home     = self::request_health_url( $home_url );
+		$rest     = self::request_health_url( $rest_url );
+
+		return array(
+			'home_url'      => $home_url,
+			'rest_url'      => $rest_url,
+			'home_status'   => $home['status'],
+			'rest_status'   => $rest['status'],
+			'home_healthy'  => $home['healthy'],
+			'rest_healthy'  => $rest['healthy'],
+			'message'       => self::site_health_message( $home, $rest ),
+		);
 	}
 
 	/**
@@ -815,6 +851,15 @@ class Registry {
 				'meta'          => self::readonly_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/check-site-health',
+				'label'         => __( 'Check Site Health', 'kosmos-bridge' ),
+				'description'   => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::site_health_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/update-plugin',
 				'label'         => __( 'Update Plugin', 'kosmos-bridge' ),
 				'description'   => __( 'Updates one active plugin after a fresh full backup and exact version preflight.', 'kosmos-bridge' ),
@@ -901,6 +946,8 @@ class Registry {
 				return self::execute_get_available_updates();
 			case 'kosmos-bridge/get-updraftplus-backup-status':
 				return self::execute_get_updraftplus_backup_status();
+			case 'kosmos-bridge/check-site-health':
+				return self::execute_check_site_health();
 		}
 
 		return null;
@@ -1074,6 +1121,25 @@ class Registry {
 	 */
 	private static function plugin_activation_output_schema() {
 		return self::mainwp_child_activation_output_schema();
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function site_health_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'home_url'     => array( 'type' => 'string', 'format' => 'uri' ),
+				'rest_url'     => array( 'type' => 'string', 'format' => 'uri' ),
+				'home_status'  => array( 'type' => 'integer' ),
+				'rest_status'  => array( 'type' => 'integer' ),
+				'home_healthy' => array( 'type' => 'boolean' ),
+				'rest_healthy' => array( 'type' => 'boolean' ),
+				'message'      => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'home_url', 'rest_url', 'home_status', 'rest_status', 'home_healthy', 'rest_healthy', 'message' ),
+		);
 	}
 
 	/**
@@ -1309,6 +1375,57 @@ class Registry {
 		}
 
 		return '';
+	}
+
+	/**
+	 * @param string $url Public site URL owned by this WordPress installation.
+	 * @return array{status:int,healthy:bool}
+	 */
+	private static function request_health_url( $url ) {
+		$response = wp_remote_get(
+			$url,
+			array(
+				'timeout'             => 15,
+				'redirection'         => 3,
+				'sslverify'           => true,
+				'limit_response_size' => 1024,
+				'user-agent'          => 'Kosmos Bridge/' . \KosmosBridge\Options::get_bridge_version(),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'status'  => 0,
+				'healthy' => false,
+			);
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		return array(
+			'status'  => $status,
+			'healthy' => $status >= 200 && $status < 400,
+		);
+	}
+
+	/**
+	 * @param array{status:int,healthy:bool} $home Homepage response result.
+	 * @param array{status:int,healthy:bool} $rest REST API response result.
+	 * @return string
+	 */
+	private static function site_health_message( $home, $rest ) {
+		if ( $home['healthy'] && $rest['healthy'] ) {
+			return 'Public homepage and WordPress REST API health checks passed.';
+		}
+
+		$failed = array();
+		if ( ! $home['healthy'] ) {
+			$failed[] = 'public homepage';
+		}
+		if ( ! $rest['healthy'] ) {
+			$failed[] = 'WordPress REST API';
+		}
+
+		return implode( ' and ', $failed ) . ' health check did not return a successful HTTP response.';
 	}
 
 	/**

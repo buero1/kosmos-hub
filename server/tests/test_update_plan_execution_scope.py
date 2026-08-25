@@ -74,3 +74,23 @@ def test_execution_scope_rejects_multi_item_plans():
     assert UpdatePlanService.plugin_update_scope_error(UpdatePlanService, plan) == (
         "This execution path only accepts a plan with exactly one update."
     )
+
+
+def test_postflight_accepts_healthy_homepage_and_rest_api():
+    result = {"home_healthy": True, "home_status": 200, "rest_healthy": True, "rest_status": 200}
+
+    assert UpdatePlanService._postflight_health_error(result) is None
+
+
+def test_postflight_flags_homepage_health_failure():
+    result = {"home_healthy": False, "home_status": 503, "rest_healthy": True, "rest_status": 200}
+
+    assert UpdatePlanService._postflight_health_error(result) == (
+        "the public homepage health check did not pass (HTTP 503)"
+    )
+
+
+def test_postflight_flags_missing_result():
+    assert UpdatePlanService._postflight_health_error(None) == (
+        "the Bridge did not return a verifiable health result"
+    )

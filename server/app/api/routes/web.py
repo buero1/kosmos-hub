@@ -183,6 +183,7 @@ def update_plan_detail_page(
     if plan is None:
         raise HTTPException(status_code=404, detail="Update plan not found.")
     preflight = service.build_preflight(plan)
+    postflight = service.get_latest_postflight(plan)
     scope_error = service.plugin_update_scope_error(plan)
     recovery_scope_error = service.plugin_recovery_scope_error(plan)
     preflight_ready = len(preflight) == 1 and preflight[0].execution_ready
@@ -192,6 +193,7 @@ def update_plan_detail_page(
         {
             "plan": plan,
             "preflight": preflight,
+            "postflight": postflight,
             "csrf_token": get_csrf_token(request),
             "scope_error": scope_error,
             "recovery_scope_error": recovery_scope_error,

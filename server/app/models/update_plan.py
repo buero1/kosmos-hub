@@ -13,6 +13,7 @@ class UpdatePlanStatus(StrEnum):
     blocked = "blocked"
     executed = "executed"
     failed = "failed"
+    postflight_failed = "postflight_failed"
 
 
 class UpdatePlan(TimestampMixin, Base):
