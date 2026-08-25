@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 from base64 import b64decode
-from ftplib import FTP, error_perm
+from ftplib import FTP, all_errors, error_perm
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -93,12 +93,12 @@ def remote_file_exists(ftp: FTP, remote_path: str) -> bool:
     try:
         ftp.size(remote_path)
         return True
-    except error_perm:
+    except all_errors:
         # Some hosting FTP servers disable SIZE for PHP files even though the
         # file is present. NLST is broadly supported and sufficient here.
         try:
             return bool(ftp.nlst(remote_path))
-        except error_perm:
+        except all_errors:
             return False
 
 

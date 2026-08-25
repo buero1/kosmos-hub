@@ -91,7 +91,9 @@ class PluginUpdater {
 			'requires_php'  => (string) $metadata['requires_php'],
 			'last_updated'  => (string) $metadata['last_updated'],
 			'download_link' => (string) $metadata['download_url'],
-			'sections'      => (object) $metadata['sections'],
+			// WordPress 6.2 writes sanitized sections back by array key.
+			// Keeping this as an array avoids a fatal error in its details dialog.
+			'sections'      => $metadata['sections'],
 		);
 	}
 
