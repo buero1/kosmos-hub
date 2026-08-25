@@ -369,6 +369,8 @@ class Registry {
 			);
 		}
 
+		$plugin_updates = self::append_crocoblock_plugin_updates( $plugin_updates, $plugins );
+
 		$theme_transient = self::to_array( get_site_transient( 'update_themes' ) );
 		$theme_responses = isset( $theme_transient['response'] ) ? self::to_array( $theme_transient['response'] ) : array();
 		foreach ( $theme_responses as $stylesheet => $update ) {
@@ -401,6 +403,77 @@ class Registry {
 				'total'     => count( $wordpress_updates ) + count( $plugin_updates ) + count( $theme_updates ),
 			),
 		);
+	}
+
+	/**
+	 * Crocoblock's Jet Dashboard can provide valid update data without adding
+	 * every installed Jet plugin to WordPress' shared update transient. Read the
+	 * vendor manager's own list and normalize it into the common inventory.
+	 *
+	 * @param array $plugin_updates Existing normalized update entries.
+	 * @param array $plugins Installed plugin metadata keyed by plugin file.
+	 * @return array
+	 */
+	private static function append_crocoblock_plugin_updates( $plugin_updates, $plugins ) {
+		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) ) {
+			return $plugin_updates;
+		}
+
+		try {
+			$dashboard = \Jet_Dashboard\Dashboard::get_instance();
+			$manager   = isset( $dashboard->plugin_manager ) ? $dashboard->plugin_manager : null;
+			$offers    = is_object( $manager ) && method_exists( $manager, 'get_remote_jet_plugin_list' ) ? $manager->get_remote_jet_plugin_list() : false;
+		} catch ( \Throwable $exception ) {
+			return $plugin_updates;
+		}
+
+		if ( ! is_array( $offers ) ) {
+			return $plugin_updates;
+		}
+
+		$known_files = array();
+		foreach ( $plugin_updates as $update ) {
+			if ( is_array( $update ) && isset( $update['plugin_file'] ) ) {
+				$known_files[ (string) $update['plugin_file'] ] = true;
+			}
+		}
+
+		foreach ( $offers as $offer ) {
+			$offer_data  = self::to_array( $offer );
+			$plugin_file = isset( $offer_data['slug'] ) ? (string) $offer_data['slug'] : '';
+			$new_version = isset( $offer_data['version'] ) ? trim( (string) $offer_data['version'] ) : '';
+			$plugin_data = isset( $plugins[ $plugin_file ] ) && is_array( $plugins[ $plugin_file ] ) ? $plugins[ $plugin_file ] : array();
+			$installed   = isset( $plugin_data['Version'] ) ? (string) $plugin_data['Version'] : '';
+
+			if (
+				'' === $plugin_file ||
+				'' === $new_version ||
+				'' === $installed ||
+				isset( $known_files[ $plugin_file ] ) ||
+				! self::is_crocoblock_plugin_file( $plugin_file ) ||
+				! version_compare( $new_version, $installed, '>' )
+			) {
+				continue;
+			}
+
+			$plugin_updates[] = array(
+				'plugin_file'     => $plugin_file,
+				'name'            => isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : $plugin_file,
+				'current_version' => $installed,
+				'new_version'     => $new_version,
+			);
+			$known_files[ $plugin_file ] = true;
+		}
+
+		return $plugin_updates;
+	}
+
+	/**
+	 * @param string $plugin_file WordPress plugin file returned by Jet Dashboard.
+	 * @return bool
+	 */
+	private static function is_crocoblock_plugin_file( $plugin_file ) {
+		return 0 === strpos( $plugin_file, 'jet-' );
 	}
 
 	/**
