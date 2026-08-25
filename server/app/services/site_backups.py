@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,14 @@ class SiteBackupService:
         payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, None, timeout_seconds=30)
         result = payload.get("result", {})
         result = result if isinstance(result, dict) else {}
+        return self.store_backup_status_result(site_id, result)
+
+    def store_backup_status_result(self, site_id: int, result: dict[str, Any]):
+        """Persist a provider result that was already fetched by a scoped workflow."""
+        site = self.repository.get_site(site_id)
+        if site is None:
+            raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
+
         captured_at = datetime.now(UTC)
 
         installed = self._as_bool(result.get("installed"))

@@ -18,6 +18,7 @@ from app.services.site_inventory import SiteInventoryService
 from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
+from app.services.maintenance_runs import MaintenanceRunService
 from app.services.update_plans import UpdatePlanService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -282,6 +283,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found.")
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+    maintenance_runs = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_site_runs(site_id)
     site_entries = [
         entry
         for entry in inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
@@ -294,6 +296,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
             "site": site,
             "update_entries": site_entries,
             "csrf_token": get_csrf_token(request),
+            "maintenance_runs": maintenance_runs,
             "removable_test_registration": _is_removable_empty_test_registration(site),
         },
     )
@@ -403,6 +406,32 @@ def refresh_site_backup_from_detail(
     )
     db.commit()
     return RedirectResponse(url=f"/sites/{site_id}?backup_refresh=ok", status_code=303)
+
+
+@router.post("/sites/{site_id}/maintenance/updraftplus-backup")
+def start_updraftplus_backup_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    try:
+        outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_updraftplus_backup(
+            site_id=site_id,
+            actor=user.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RedirectResponse(
+        url=f"/sites/{site_id}?{urlencode({'maintenance': outcome.result, 'message': outcome.message})}",
+        status_code=303,
+    )
 
 
 @router.post("/sites/{site_id}/remove-empty-test-registration")

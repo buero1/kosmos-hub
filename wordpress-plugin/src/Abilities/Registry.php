@@ -10,6 +10,9 @@ class Registry {
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
 	const MAINWP_CHILD_PLUGIN_FILE  = 'mainwp-child/mainwp-child.php';
 	const UPDATE_BACKUP_MAX_AGE     = 604800;
+	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
+	const UPDRAFT_BACKUP_REQUEST_TRANSIENT = 'kosmos_bridge_updraft_backup_request';
+	const UPDRAFT_BACKUP_REQUEST_TTL       = 5400;
 
 	/**
 	 * @return void
@@ -92,12 +95,27 @@ class Registry {
 			'kosmos-bridge/get-updraftplus-backup-status',
 			array(
 				'label'               => __( 'Get UpdraftPlus Backup Status', 'kosmos-bridge' ),
-				'description'         => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup.', 'kosmos-bridge' ),
+				'description'         => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup or one requested backup.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::updraftplus_backup_status_input_schema(),
 				'output_schema'       => self::updraftplus_backup_status_output_schema(),
 				'execute_callback'    => array( self::class, 'execute_get_updraftplus_backup_status' ),
 				'permission_callback' => array( self::class, 'allow_readonly_access' ),
 				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/start-updraftplus-backup',
+			array(
+				'label'               => __( 'Start UpdraftPlus Backup', 'kosmos-bridge' ),
+				'description'         => __( 'Schedules one full UpdraftPlus backup using the site configuration. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => array(),
+				'output_schema'       => self::updraftplus_backup_start_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_start_updraftplus_backup' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
 			)
 		);
 
@@ -252,12 +270,14 @@ class Registry {
 	 * or exposing backup files. The provider resolves a full backup against the
 	 * backup entities configured on the individual site.
 	 *
+	 * @param array|null $input Optional exact UpdraftPlus backup nonce.
 	 * @return array
 	 */
-	public static function execute_get_updraftplus_backup_status() {
+	public static function execute_get_updraftplus_backup_status( $input = null ) {
 		$plugin_file = 'updraftplus/updraftplus.php';
 		$installed   = file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
 		$active      = in_array( $plugin_file, (array) get_option( 'active_plugins', array() ), true );
+		$requested_nonce = self::get_requested_updraftplus_backup_nonce( $input );
 
 		if ( is_multisite() ) {
 			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
@@ -272,6 +292,7 @@ class Registry {
 			'available'        => false,
 			'complete'         => false,
 			'latest_backup_at' => '',
+			'backup_nonce'     => '',
 			'backup_count'     => 0,
 			'components'       => array(),
 			'message'          => '',
@@ -290,7 +311,7 @@ class Registry {
 		try {
 			$history = \UpdraftPlus_Backup_History::get_history();
 			$history = is_array( $history ) ? $history : array();
-			$nonce   = (string) \UpdraftPlus_Backup_History::get_latest_full_backup();
+			$nonce   = '' !== $requested_nonce ? $requested_nonce : (string) \UpdraftPlus_Backup_History::get_latest_full_backup();
 			$backup  = self::find_updraftplus_backup_by_nonce( $history, $nonce );
 		} catch ( \Throwable $exception ) {
 			$result['message'] = 'UpdraftPlus backup history could not be read.';
@@ -310,10 +331,100 @@ class Registry {
 
 		$result['available']  = $timestamp > 0;
 		$result['complete']   = true;
+		$result['backup_nonce'] = $nonce;
 		$result['components'] = self::get_updraftplus_backup_components( $backup );
 		$result['message']    = $result['available'] ? 'Complete UpdraftPlus backup found.' : 'A complete backup was found without a usable timestamp.';
 
+		if ( '' !== $requested_nonce && $requested_nonce === $nonce ) {
+			self::clear_updraftplus_backup_request( $nonce );
+		}
+
 		return $result;
+	}
+
+	/**
+	 * Schedule exactly one full UpdraftPlus backup and return its generated
+	 * nonce. The backup runs through WordPress cron so this authenticated Hub
+	 * request does not need to remain open for the duration of the backup.
+	 *
+	 * @return array|\WP_Error
+	 */
+	public static function execute_start_updraftplus_backup() {
+		$plugin_file = 'updraftplus/updraftplus.php';
+		$installed   = file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
+		$active      = in_array( $plugin_file, (array) get_option( 'active_plugins', array() ), true );
+
+		if ( is_multisite() ) {
+			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
+			$active         = $active || isset( $network_active[ $plugin_file ] );
+		}
+
+		if ( ! $installed || ! $active || ! isset( $GLOBALS['updraftplus'] ) || ! is_object( $GLOBALS['updraftplus'] ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_unavailable',
+				'UpdraftPlus must be installed, active, and initialized before a backup can start.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		if ( is_array( $pending ) && ! empty( $pending['nonce'] ) && self::is_valid_updraftplus_backup_nonce( $pending['nonce'] ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_backup_pending',
+				'An UpdraftPlus backup requested by Kosmos Hub is already pending.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$updraftplus = $GLOBALS['updraftplus'];
+		if ( ! method_exists( $updraftplus, 'backup_time_nonce' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_unavailable',
+				'UpdraftPlus could not prepare a backup identifier.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$nonce = (string) $updraftplus->backup_time_nonce();
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_nonce_failed',
+				'UpdraftPlus did not return a usable backup identifier.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$scheduled = wp_schedule_single_event(
+			time(),
+			self::UPDRAFT_BACKUP_REQUEST_ACTION,
+			array( array( 'use_nonce' => $nonce ) ),
+			true
+		);
+		if ( is_wp_error( $scheduled ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_schedule_failed',
+				'UpdraftPlus backup could not be scheduled.',
+				array( 'status' => 500 )
+			);
+		}
+
+		set_transient(
+			self::UPDRAFT_BACKUP_REQUEST_TRANSIENT,
+			array(
+				'nonce'        => $nonce,
+				'requested_at' => time(),
+			),
+			self::UPDRAFT_BACKUP_REQUEST_TTL
+		);
+		self::dispatch_due_updraftplus_backup();
+
+		return array(
+			'accepted'     => true,
+			'provider'     => 'updraftplus',
+			'backup_nonce' => $nonce,
+			'scheduled_at' => gmdate( 'c' ),
+			'message'      => 'A full UpdraftPlus backup was scheduled using the existing site configuration.',
+		);
 	}
 
 	/**
@@ -844,11 +955,20 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/get-updraftplus-backup-status',
 				'label'         => __( 'Get UpdraftPlus Backup Status', 'kosmos-bridge' ),
-				'description'   => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup.', 'kosmos-bridge' ),
+				'description'   => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup or one requested backup.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
-				'input_schema'  => array(),
+				'input_schema'  => self::updraftplus_backup_status_input_schema(),
 				'output_schema' => self::updraftplus_backup_status_output_schema(),
 				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/start-updraftplus-backup',
+				'label'         => __( 'Start UpdraftPlus Backup', 'kosmos-bridge' ),
+				'description'   => __( 'Schedules one full UpdraftPlus backup using the site configuration. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::updraftplus_backup_start_output_schema(),
+				'meta'          => self::mutation_meta(),
 			),
 			array(
 				'name'          => 'kosmos-bridge/check-site-health',
@@ -918,6 +1038,9 @@ class Registry {
 	 * @return array|null
 	 */
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( 'kosmos-bridge/start-updraftplus-backup' === $ability_name ) {
+			return self::execute_start_updraftplus_backup();
+		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
 		}
@@ -931,7 +1054,7 @@ class Registry {
 			return self::execute_activate_mainwp_child( $input );
 		}
 
-		if ( null !== $input && ! empty( $input ) ) {
+		if ( null !== $input && ! empty( $input ) && 'kosmos-bridge/get-updraftplus-backup-status' !== $ability_name ) {
 			return null;
 		}
 
@@ -945,7 +1068,7 @@ class Registry {
 			case 'kosmos-bridge/get-available-updates':
 				return self::execute_get_available_updates();
 			case 'kosmos-bridge/get-updraftplus-backup-status':
-				return self::execute_get_updraftplus_backup_status();
+				return self::execute_get_updraftplus_backup_status( $input );
 			case 'kosmos-bridge/check-site-health':
 				return self::execute_check_site_health();
 		}
@@ -1254,6 +1377,7 @@ class Registry {
 				'complete'         => array( 'type' => 'boolean' ),
 				// Empty when UpdraftPlus has no complete backup yet; the Hub parses a timestamp only when present.
 				'latest_backup_at' => array( 'type' => 'string' ),
+				'backup_nonce'     => array( 'type' => 'string' ),
 				'backup_count'     => array( 'type' => 'integer' ),
 				'components'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 				'message'          => array( 'type' => 'string' ),
@@ -1266,10 +1390,40 @@ class Registry {
 				'available',
 				'complete',
 				'latest_backup_at',
+				'backup_nonce',
 				'backup_count',
 				'components',
 				'message',
 			),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_status_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce' => array( 'type' => 'string' ),
+			),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_start_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'accepted'     => array( 'type' => 'boolean' ),
+				'provider'     => array( 'type' => 'string' ),
+				'backup_nonce' => array( 'type' => 'string' ),
+				'scheduled_at' => array( 'type' => 'string', 'format' => 'date-time' ),
+				'message'      => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'accepted', 'provider', 'backup_nonce', 'scheduled_at', 'message' ),
 		);
 	}
 
@@ -1293,6 +1447,57 @@ class Registry {
 		}
 
 		return array();
+	}
+
+	/**
+	 * @param mixed $input Ability input.
+	 * @return string
+	 */
+	private static function get_requested_updraftplus_backup_nonce( $input ) {
+		if ( ! is_array( $input ) || ! isset( $input['backup_nonce'] ) ) {
+			return '';
+		}
+
+		$nonce = (string) $input['backup_nonce'];
+		return self::is_valid_updraftplus_backup_nonce( $nonce ) ? $nonce : '';
+	}
+
+	/**
+	 * @param mixed $nonce UpdraftPlus backup nonce.
+	 * @return bool
+	 */
+	private static function is_valid_updraftplus_backup_nonce( $nonce ) {
+		return is_string( $nonce ) && 1 === preg_match( '/^[a-f0-9]{12}$/', $nonce );
+	}
+
+	/**
+	 * @param string $nonce UpdraftPlus backup nonce.
+	 * @return void
+	 */
+	private static function clear_updraftplus_backup_request( $nonce ) {
+		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		if ( is_array( $pending ) && isset( $pending['nonce'] ) && $nonce === $pending['nonce'] ) {
+			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		}
+	}
+
+	/**
+	 * WordPress normally starts due cron events on its next request. Trigger a
+	 * non-blocking local cron request as well, so a Hub backup does not depend
+	 * on a visitor reaching the site first.
+	 *
+	 * @return void
+	 */
+	private static function dispatch_due_updraftplus_backup() {
+		$cron_url = add_query_arg( 'doing_wp_cron', sprintf( '%.22F', microtime( true ) ), site_url( '/wp-cron.php' ) );
+		wp_remote_post(
+			$cron_url,
+			array(
+				'timeout'   => 0.01,
+				'blocking'  => false,
+				'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
+			)
+		);
 	}
 
 	/**

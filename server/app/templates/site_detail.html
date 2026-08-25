@@ -107,6 +107,49 @@
   {% elif request.query_params.get("backup_refresh") == "error" %}
     <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
+  <section class="site-refresh-panel">
+    <div>
+      <p class="eyebrow">Maintenance pilot</p>
+      <h3>Create and verify a fresh UpdraftPlus backup</h3>
+      <p class="subtle">Starts one full backup using the site&apos;s existing UpdraftPlus destination. The Hub checks the exact backup automatically and records the result. No plugin update is performed.</p>
+    </div>
+    <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button" type="submit">Start verified backup</button>
+    </form>
+  </section>
+  {% if request.query_params.get("maintenance") == "started" %}
+    <p class="notice-success">{{ request.query_params.get("message") }}</p>
+  {% elif request.query_params.get("maintenance") in ["blocked", "failed"] %}
+    <p class="notice-error">{{ request.query_params.get("message") }}</p>
+  {% endif %}
+  {% if maintenance_runs %}
+    <section>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Maintenance record</p>
+          <h2>Recent backup runs</h2>
+          <p class="subtle">Every run remains documented here. A running check continues in the background until it succeeds, fails, or times out.</p>
+        </div>
+      </div>
+      <div class="detail-list maintenance-run-list">
+        {% for run in maintenance_runs %}
+          <article class="card maintenance-run-card">
+            <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
+            <p><strong>Run:</strong> #{{ run.id }}</p>
+            <p><strong>Started:</strong> {{ run.started_at }}</p>
+            <p><strong>Completed:</strong> {{ run.completed_at or "Still running" }}</p>
+            {% if run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
+            {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
+            {% for step in run.steps %}
+              <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}</p>
+              {% if step.detail %}<p class="subtle">{{ step.detail }}</p>{% endif %}
+            {% endfor %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
   {% if removable_test_registration %}
     <section class="site-removal-panel">
       <div>

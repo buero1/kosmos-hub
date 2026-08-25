@@ -15,6 +15,7 @@ from app.db.session import SessionLocal, engine
 from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_inventory import FleetInventoryService
+from app.services.maintenance_runs import MaintenanceRunService
 from app.core.security import get_secret_cipher
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,24 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours:
         await asyncio.sleep(interval_hours * 60 * 60)
 
 
+def _poll_maintenance_runs() -> dict[str, int]:
+    with SessionLocal() as db:
+        service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+        return service.poll_active_updraftplus_backups(limit=25)
+
+
+async def _maintenance_run_poll_loop(initial_delay_seconds: int, interval_seconds: int) -> None:
+    await asyncio.sleep(initial_delay_seconds)
+    while True:
+        try:
+            result = await asyncio.to_thread(_poll_maintenance_runs)
+            if result["checked"]:
+                logger.info("Maintenance backup polling: %s", result)
+        except Exception:
+            logger.exception("Maintenance backup polling failed unexpectedly.")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
@@ -57,6 +76,14 @@ async def lifespan(_: FastAPI):
                     settings.fleet_updates_refresh_interval_hours,
                 )
             )
+        maintenance_task = None
+        if settings.maintenance_runs_auto_poll:
+            maintenance_task = asyncio.create_task(
+                _maintenance_run_poll_loop(
+                    settings.maintenance_runs_initial_delay_seconds,
+                    settings.maintenance_runs_poll_interval_seconds,
+                )
+            )
         try:
             yield
         finally:
@@ -64,6 +91,10 @@ async def lifespan(_: FastAPI):
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await refresh_task
+            if maintenance_task is not None:
+                maintenance_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await maintenance_task
 
 
 def create_app() -> FastAPI:

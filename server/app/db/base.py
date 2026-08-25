@@ -4,6 +4,7 @@ from app.models.customer import Customer
 from app.models.hub_access_token import HubAccessToken
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
+from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
 from app.models.request_nonce import RequestNonce
 from app.models.site import Site
 from app.models.site_backup_snapshot import SiteBackupSnapshot
@@ -22,6 +23,8 @@ __all__ = [
     "HubAccessToken",
     "HubSetupToken",
     "HubUser",
+    "MaintenanceRun",
+    "MaintenanceRunStep",
     "RequestNonce",
     "Site",
     "SiteBackupSnapshot",
