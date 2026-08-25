@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -12,6 +13,10 @@ from app.db.session import get_db
 from app.repositories.site_repository import SiteRepository
 from app.schemas.dashboard import DashboardSummary
 from app.services.fleet_inventory import FleetInventoryService
+from app.services.audit import write_audit_log
+from app.services.site_inventory import SiteInventoryService
+from app.services.site_mcp_proxy import SiteMcpProxyError
+from app.services.site_updates import SiteUpdateService
 from app.services.update_plans import UpdatePlanService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -198,5 +203,105 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
         {
             "site": site,
             "update_entries": site_entries,
+            "csrf_token": get_csrf_token(request),
+            "removable_test_registration": _is_removable_empty_test_registration(site),
         },
+    )
+
+
+@router.post("/sites/{site_id}/refresh")
+def refresh_site_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    repository = SiteRepository(db)
+    site = repository.get_site(site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found.")
+
+    try:
+        state_payload = SiteInventoryService(db=db, cipher=get_secret_cipher()).refresh_site_state(site_id)
+        updates_payload = SiteUpdateService(db=db, cipher=get_secret_cipher()).refresh_site_updates(site_id)
+    except SiteMcpProxyError as exc:
+        write_audit_log(
+            db,
+            site=site,
+            actor=user.username,
+            source="hub-web",
+            action="request-site-refresh",
+            result="error",
+            detail=exc.message,
+        )
+        db.commit()
+        return RedirectResponse(
+            url=f"/sites/{site_id}?{urlencode({'refresh': 'error', 'message': exc.message})}",
+            status_code=303,
+        )
+
+    summary = updates_payload["snapshot"].summary_json
+    update_count = int(summary.get("total", 0)) if isinstance(summary, dict) else 0
+    write_audit_log(
+        db,
+        site=site,
+        actor=user.username,
+        source="hub-web",
+        action="request-site-refresh",
+        result="ok",
+        detail=(
+            f"Stored current state from {state_payload['refreshed_at']} and "
+            f"{update_count} available updates."
+        ),
+    )
+    db.commit()
+    return RedirectResponse(url=f"/sites/{site_id}?refresh=ok", status_code=303)
+
+
+@router.post("/sites/{site_id}/remove-empty-test-registration")
+def remove_empty_test_registration(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    site = SiteRepository(db).get_site(site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail="Site not found.")
+    if not _is_removable_empty_test_registration(site):
+        raise HTTPException(status_code=409, detail="Only empty test registrations can be removed from this screen.")
+
+    domain = site.domain
+    db.delete(site)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="remove-empty-test-registration",
+        result="ok",
+        detail=f"Removed the empty test registration for {domain}.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/sites?{urlencode({'removed': domain})}", status_code=303)
+
+
+def _is_removable_empty_test_registration(site) -> bool:
+    return (
+        site.domain.startswith("test-")
+        and site.domain.endswith(".kosmos-medien.de")
+        and not site.snapshots
+        and not site.update_snapshots
+        and not site.capabilities
+        and not site.update_plan_items
     )

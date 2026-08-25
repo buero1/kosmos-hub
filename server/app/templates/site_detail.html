@@ -61,6 +61,35 @@
       {% endfor %}
     </article>
   </section>
+  <section class="site-refresh-panel">
+    <div>
+      <p class="eyebrow">Live data</p>
+      <h3>Refresh current status</h3>
+      <p class="subtle">Fetches the Bridge version, WordPress environment and available updates directly from this site. It does not install or change anything.</p>
+    </div>
+    <form method="post" action="/sites/{{ site.id }}/refresh">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button" type="submit">Refresh status and updates</button>
+    </form>
+  </section>
+  {% if request.query_params.get("refresh") == "ok" %}
+    <p class="notice-success">Current status and update data were refreshed successfully.</p>
+  {% elif request.query_params.get("refresh") == "error" %}
+    <p class="notice-error">Refresh failed: {{ request.query_params.get("message") }}</p>
+  {% endif %}
+  {% if removable_test_registration %}
+    <section class="site-removal-panel">
+      <div>
+        <p class="eyebrow">Test data cleanup</p>
+        <h3>Remove empty test registration</h3>
+        <p class="subtle">This removes only this unused test record and its connection data. Sites with stored inventory, updates, capabilities or plan items cannot be removed here.</p>
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/remove-empty-test-registration">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-danger" type="submit">Remove test registration</button>
+      </form>
+    </section>
+  {% endif %}
   <section>
     <div class="section-heading">
       <div>

@@ -2,6 +2,9 @@
 {% block title %}Inventory · kosmos-hub{% endblock %}
 {% block content %}
   <section>
+    {% if request.query_params.get("removed") %}
+      <p class="notice-success">The empty test registration for {{ request.query_params.get("removed") }} was removed.</p>
+    {% endif %}
     <div class="section-heading">
       <div>
         <p class="eyebrow">Fleet inventory</p>

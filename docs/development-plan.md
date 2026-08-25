@@ -86,6 +86,8 @@ Stand im aktuellen Build:
   Backupanbindung; ohne Backup bleibt Ausfuehrung blockiert
 - geschuetzte Hub-Weboberflaeche mit erstem Administrator, Sitzungen und
   Passwortwechsel
+- manueller, HMAC-gesicherter Sofort-Refresh pro Site fuer Bridge-,
+  Umgebungs- und Update-Daten
 - noch keine ausfuehrbaren Update-Aktionen, keine automatische Installation
   und keine persistierten Freigaben
 
