@@ -16,4 +16,4 @@
 - `GET /`
 - `GET /sites`
 - `GET /sites/{site_id}`
-
+- `POST /mcp/` (Streamable HTTP; Hub-Sitzung oder persoenlicher Bearer-Token)

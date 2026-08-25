@@ -63,6 +63,12 @@ Kein Bridge-Release sollte noetig sein fuer:
 - neue Nutzung bereits vorhandener WordPress-Abilities
 - neue Kombinationen aus Hub, WordPress und spaeter weiteren Providern
 
+MCP bleibt dabei die zentrale Schnittstelle fuer KI-Clients. Der Hub stellt
+lesende Inventar- und Analyse-Tools direkt bereit. Schreibende WordPress-
+Operationen werden nicht als freie Remote-Ability durchgereicht: Sie duerfen
+nur ueber einen zuvor gespeicherten, exakt abgegrenzten Hub-Plan mit
+Backup-Preflight, expliziter Freigabe und Postflight-Pruefung laufen.
+
 Ein Backup-Status ist ein Beispiel fuer eine gezielt kleine lokale Erweiterung:
 Die Bridge liest nur UpdraftPlus-Metadaten, waehrend Speicherung, Auswertung
 und spaetere Wartungsfreigaben im Hub verbleiben.
@@ -145,6 +151,12 @@ statischen Server-Basic-Auth. Der erste Administrator wird ueber einen nur auf
 dem Host erzeugbaren Einmal-Link eingerichtet. Danach schuetzen signierte
 HTTPS-Sitzungen die Hub-Seiten und internen APIs; die HMAC-Registrierung der
 WordPress-Sites bleibt davon bewusst getrennt.
+
+Der Streamable-HTTP-Endpunkt unter `/mcp/` akzeptiert entweder eine bestehende
+Hub-Sitzung oder einen persoenlichen Bearer-Token des Hub-Benutzers. Tokens
+sind einzeln benannt, widerrufbar und werden nur als HMAC-Digest gespeichert.
+Jeder MCP-Tool-Aufruf erhaelt zentral einen Audit-Eintrag mit dem zugeordneten
+MCP-Akteur.
 
 ## Datenmodell in Phase 1
 

@@ -95,9 +95,10 @@ def setup_first_admin(
 
 
 @router.get("", response_class=HTMLResponse)
-def account_page(request: Request):
+def account_page(request: Request, db: Annotated[Session, Depends(get_db)]):
     user = _require_current_user(request)
-    return templates.TemplateResponse(request, "account.html", {"user": user, "csrf_token": get_csrf_token(request)})
+    service = _account_service(db)
+    return templates.TemplateResponse(request, "account.html", _account_context(request, user, service))
 
 
 @router.post("/password")
@@ -127,7 +128,7 @@ def change_password(
         return templates.TemplateResponse(
             request,
             "account.html",
-            {"user": user, "csrf_token": get_csrf_token(request), "error": str(exc)},
+            _account_context(request, user, service, error=str(exc)),
             status_code=400,
         )
     write_audit_log(db, site=None, actor=user.username, source="hub-account", action="change-password", result="success")
@@ -135,6 +136,86 @@ def change_password(
     request.session.clear()
     request.session.update({"user_id": user.id, "session_version": user.session_version})
     return RedirectResponse(url="/account?password=changed", status_code=303)
+
+
+@router.post("/mcp-tokens")
+def create_mcp_token(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+
+    try:
+        access_token, raw_token = service.create_mcp_access_token(user=user, name=name)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="create-mcp-token",
+        result="success",
+        detail=f"Created MCP token {access_token.id} ({access_token.name}).",
+    )
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(request, user, service, new_mcp_token=raw_token, new_mcp_token_name=access_token.name),
+    )
+
+
+@router.post("/mcp-tokens/{token_id}/revoke")
+def revoke_mcp_token(
+    token_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+
+    try:
+        access_token = service.revoke_mcp_access_token(user=user, token_id=token_id)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=404,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="revoke-mcp-token",
+        result="success",
+        detail=f"Revoked MCP token {access_token.id} ({access_token.name}).",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?mcp_token=revoked", status_code=303)
 
 
 @bootstrap_router.post("/internal/bootstrap-token")
@@ -152,6 +233,25 @@ def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_
 
 def _account_service(db: Session) -> HubAccountService:
     return HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+
+
+def _account_context(
+    request: Request,
+    user,
+    service: HubAccountService,
+    *,
+    error: str | None = None,
+    new_mcp_token: str | None = None,
+    new_mcp_token_name: str | None = None,
+) -> dict:
+    return {
+        "user": user,
+        "csrf_token": get_csrf_token(request),
+        "mcp_tokens": service.list_mcp_access_tokens(user=user),
+        "error": error,
+        "new_mcp_token": new_mcp_token,
+        "new_mcp_token_name": new_mcp_token_name,
+    }
 
 
 def _current_user(request: Request):

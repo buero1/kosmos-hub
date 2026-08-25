@@ -54,8 +54,7 @@ def execute_site_ability(
 ) -> ExecuteAbilityResponse:
     service = SiteMcpProxyService(db=db, cipher=cipher)
     try:
-        payload = service.execute_ability(site_id, body.ability_name, body.input)
+        payload = service.execute_readonly_ability(site_id, body.ability_name, body.input)
     except SiteMcpProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
     return ExecuteAbilityResponse.model_validate(payload)
-

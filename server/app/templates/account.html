@@ -12,6 +12,9 @@
     {% if request.query_params.get("password") == "changed" %}
       <p class="notice-success">Your password was changed. Other active sessions are no longer valid.</p>
     {% endif %}
+    {% if request.query_params.get("mcp_token") == "revoked" %}
+      <p class="notice-success">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
+    {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -30,6 +33,54 @@
       </label>
       <button class="button" type="submit">Change password</button>
     </form>
+    <section class="account-panel">
+      <div>
+        <p class="eyebrow">MCP access</p>
+        <h3>Personal MCP tokens</h3>
+        <p class="subtle">Use one token per MCP client. Tokens can read the Hub and use only plan-based write workflows.</p>
+      </div>
+      {% if new_mcp_token %}
+        <p class="notice-success">Token for <strong>{{ new_mcp_token_name }}</strong> created. Copy it now: it is never shown again.</p>
+        <code class="token-value">{{ new_mcp_token }}</code>
+      {% endif %}
+      <form method="post" action="/account/mcp-tokens">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>Token name</span>
+          <input type="text" name="name" placeholder="Codex desktop" minlength="3" maxlength="80" required>
+        </label>
+        <button class="button button-secondary" type="submit">Create MCP token</button>
+      </form>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for token in mcp_tokens %}
+              <tr>
+                <td>{{ token.name }}</td>
+                <td><code>{{ token.token_prefix }}...</code></td>
+                <td>{{ token.created_at }}</td>
+                <td>{{ token.last_used_at or "Never" }}</td>
+                <td>
+                  {% if token.revoked_at %}
+                    <span class="pill pill-missing">Revoked</span>
+                  {% else %}
+                    <form method="post" action="/account/mcp-tokens/{{ token.id }}/revoke">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-secondary" type="submit">Revoke</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No MCP tokens have been created yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
     <form method="post" action="/account/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button class="button button-secondary" type="submit">Sign out</button>

@@ -157,6 +157,24 @@ class UpdatePlanService:
             return "The plugin recovery requires the approved installed version."
         return None
 
+    def plugin_update_confirmation_error(
+        self,
+        plan: UpdatePlan,
+        *,
+        confirmed_site: str,
+        confirmed_plugin_file: str,
+    ) -> str | None:
+        scope_error = UpdatePlanService.plugin_update_scope_error(self, plan)
+        if scope_error:
+            return scope_error
+
+        item = plan.items[0]
+        if confirmed_site.strip().casefold() != item.site.domain.casefold():
+            return "The confirmed site does not match the site recorded in this update plan."
+        if confirmed_plugin_file != item.update_identifier:
+            return "The confirmed plugin file does not match the plugin recorded in this update plan."
+        return None
+
     def approve_plugin_update(self, *, plan_id: int, actor: str) -> UpdatePlanExecutionResult:
         plan = self._require_plan(plan_id)
         if plan.status != "draft":

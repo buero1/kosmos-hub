@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.routes import accounts, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
+from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.mcp_server import hub_mcp, mcp_asgi_app
@@ -71,7 +72,22 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def protect_hub_and_prevent_stale_web_pages(request: Request, call_next):
-        if not _is_public_hub_path(request.url.path):
+        mcp_context_token = None
+        if _is_mcp_path(request.url.path):
+            mcp_actor = _authenticated_mcp_actor(request)
+            if mcp_actor is None:
+                user = _authenticated_hub_user(request)
+                if user is None:
+                    return PlainTextResponse(
+                        "MCP bearer token or authenticated Hub session required.",
+                        status_code=401,
+                        headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+                    )
+                mcp_actor = f"mcp-session:{user.username[:48]}"
+                request.state.hub_user = user
+            request.state.mcp_actor = mcp_actor
+            mcp_context_token = set_mcp_actor(mcp_actor)
+        elif not _is_public_hub_path(request.url.path):
             user = _authenticated_hub_user(request)
             if user is None:
                 if request.method == "GET" and _prefers_html(request):
@@ -82,7 +98,11 @@ def create_app() -> FastAPI:
                 return PlainTextResponse("Authentication required.", status_code=401, headers={"Cache-Control": "no-store"})
             request.state.hub_user = user
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        finally:
+            if mcp_context_token is not None:
+                reset_mcp_actor(mcp_context_token)
         if (
             request.url.path == "/"
             or request.url.path.startswith("/account")
@@ -121,6 +141,25 @@ app = create_app()
 
 def _is_public_hub_path(path: str) -> bool:
     return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"}
+
+
+def _is_mcp_path(path: str) -> bool:
+    return path == "/mcp" or path.startswith("/mcp/")
+
+
+def _authenticated_mcp_actor(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+
+    with SessionLocal() as db:
+        service = HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+        authenticated = service.authenticate_mcp_access_token(token)
+        if authenticated is None:
+            return None
+        user, access_token = authenticated
+        return f"mcp:{user.username[:48]}:{access_token.id}"
 
 
 def _authenticated_hub_user(request: Request):

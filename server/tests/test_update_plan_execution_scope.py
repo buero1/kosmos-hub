@@ -11,6 +11,7 @@ def plugin_update_plan(**overrides):
         "current_version": "5.4.1",
         "target_version": "5.4.2",
         "is_active": True,
+        "site": SimpleNamespace(domain="test-gasthofloewen.kosmos-medien.de"),
     }
     values.update(overrides)
     return SimpleNamespace(items=[SimpleNamespace(**values)])
@@ -94,3 +95,20 @@ def test_postflight_flags_missing_result():
     assert UpdatePlanService._postflight_health_error(None) == (
         "the Bridge did not return a verifiable health result"
     )
+
+
+def test_mcp_confirmation_requires_the_planned_site_and_plugin_file():
+    plan = plugin_update_plan(update_identifier="wp-smushit/wp-smush.php")
+
+    assert UpdatePlanService.plugin_update_confirmation_error(
+        UpdatePlanService,
+        plan,
+        confirmed_site="test-gasthofloewen.kosmos-medien.de",
+        confirmed_plugin_file="wp-smushit/wp-smush.php",
+    ) is None
+    assert UpdatePlanService.plugin_update_confirmation_error(
+        UpdatePlanService,
+        plan,
+        confirmed_site="another-site.example",
+        confirmed_plugin_file="wp-smushit/wp-smush.php",
+    ) == "The confirmed site does not match the site recorded in this update plan."

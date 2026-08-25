@@ -88,10 +88,14 @@ Stand im aktuellen Build:
   Komponenten des letzten Backups; keine Backup-Erstellung oder -Ausfuehrung
 - geschuetzte Hub-Weboberflaeche mit erstem Administrator, Sitzungen und
   Passwortwechsel
+- persoenliche, widerrufbare MCP-Tokens fuer KI- und Automationsclients;
+  jeder MCP-Tool-Aufruf wird zentral auditiert
 - manueller, HMAC-gesicherter Sofort-Refresh pro Site fuer Bridge-,
   Umgebungs- und Update-Daten
-- noch keine ausfuehrbaren Update-Aktionen, keine automatische Installation
-  und keine persistierten Freigaben
+- ein explizit freigegebener Ein-Plugin-Updatepfad mit frischem Backup,
+  Versions-/Aktivstatuspruefung und Postflight fuer Startseite und REST-API
+- MCP kann keine freien schreibenden Site-Abilities ausfuehren; der gleiche
+  planbasierte Sicherheitsablauf gilt auch fuer MCP-gestuetzte Updates
 
 ## Phase 5
 

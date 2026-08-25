@@ -1,5 +1,6 @@
 from app.models.audit_log import AuditLog
 from app.models.customer import Customer
+from app.models.hub_access_token import HubAccessToken
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.request_nonce import RequestNonce
@@ -16,6 +17,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "Customer",
+    "HubAccessToken",
     "HubSetupToken",
     "HubUser",
     "RequestNonce",

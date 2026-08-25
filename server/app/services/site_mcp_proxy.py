@@ -65,6 +65,36 @@ class SiteMcpProxyService:
         self._record_success(site, "execute-ability", f"Executed {ability_name}.", result.request_id)
         return result.payload
 
+    def execute_readonly_ability(
+        self,
+        site_id: int,
+        ability_name: str,
+        ability_input: dict[str, Any] | None,
+        *,
+        timeout_seconds: int = 20,
+    ) -> dict[str, Any]:
+        ability_info = self.get_ability_info(site_id, ability_name)
+        if not self._ability_is_readonly(ability_info):
+            raise SiteMcpProxyError(
+                "ABILITY_WRITE_BLOCKED",
+                "This ability can change the customer site and is only available through a scoped Hub workflow.",
+                status_code=403,
+            )
+        return self.execute_ability(site_id, ability_name, ability_input, timeout_seconds=timeout_seconds)
+
+    @staticmethod
+    def _ability_is_readonly(ability_info: dict[str, Any]) -> bool:
+        ability = ability_info.get("ability")
+        if not isinstance(ability, dict):
+            return False
+        meta = ability.get("meta")
+        if not isinstance(meta, dict):
+            return False
+        annotations = meta.get("annotations")
+        if not isinstance(annotations, dict):
+            return False
+        return annotations.get("readonly") is True and annotations.get("destructive") is False
+
     def _get_site_and_connection(self, site_id: int) -> tuple[Site, SiteConnection]:
         site = self.repository.get_site(site_id)
         if site is None:

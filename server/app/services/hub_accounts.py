@@ -6,14 +6,18 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.hub_access_token import HubAccessToken
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 
 _PASSWORD_ITERATIONS = 600_000
 _SETUP_TOKEN_LIFETIME = timedelta(minutes=20)
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
+_MCP_TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{2,79}$")
+_MCP_TOKEN_PREFIX = "khmcp_"
 
 
 class HubAccountService:
@@ -91,6 +95,66 @@ class HubAccountService:
         user.session_version += 1
         self.db.commit()
 
+    def list_mcp_access_tokens(self, *, user: HubUser) -> list[HubAccessToken]:
+        statement = (
+            select(HubAccessToken)
+            .where(HubAccessToken.user_id == user.id)
+            .order_by(HubAccessToken.created_at.desc())
+        )
+        return list(self.db.scalars(statement))
+
+    def create_mcp_access_token(self, *, user: HubUser, name: str) -> tuple[HubAccessToken, str]:
+        normalized_name = self.normalize_mcp_token_name(name)
+        token = _MCP_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        access_token = HubAccessToken(
+            user_id=user.id,
+            name=normalized_name,
+            token_prefix=token[:18],
+            token_digest=self._digest_token(token),
+        )
+        self.db.add(access_token)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise ValueError("An MCP token with this name already exists.") from None
+        self.db.refresh(access_token)
+        return access_token, token
+
+    def authenticate_mcp_access_token(self, token: str) -> tuple[HubUser, HubAccessToken] | None:
+        if not token.startswith(_MCP_TOKEN_PREFIX) or len(token) > 256:
+            return None
+
+        access_token = self.db.scalar(
+            select(HubAccessToken)
+            .where(HubAccessToken.token_digest == self._digest_token(token))
+            .where(HubAccessToken.revoked_at.is_(None))
+        )
+        if access_token is None:
+            return None
+
+        user = self.get_user(access_token.user_id)
+        if user is None or not user.is_active:
+            return None
+
+        access_token.last_used_at = datetime.now(UTC)
+        self.db.commit()
+        return user, access_token
+
+    def revoke_mcp_access_token(self, *, user: HubUser, token_id: int) -> HubAccessToken:
+        access_token = self.db.scalar(
+            select(HubAccessToken)
+            .where(HubAccessToken.id == token_id)
+            .where(HubAccessToken.user_id == user.id)
+            .where(HubAccessToken.revoked_at.is_(None))
+        )
+        if access_token is None:
+            raise ValueError("This active MCP token was not found.")
+
+        access_token.revoked_at = datetime.now(UTC)
+        self.db.commit()
+        return access_token
+
     @staticmethod
     def normalize_username(username: str) -> str:
         normalized = username.strip().lower()
@@ -102,6 +166,13 @@ class HubAccountService:
     def validate_password(password: str) -> None:
         if len(password) < 12:
             raise ValueError("Use a password with at least 12 characters.")
+
+    @staticmethod
+    def normalize_mcp_token_name(name: str) -> str:
+        normalized = " ".join(name.strip().split())
+        if not _MCP_TOKEN_NAME_RE.fullmatch(normalized):
+            raise ValueError("Use 3-80 letters, numbers, spaces, dots, hyphens or underscores for the MCP token name.")
+        return normalized
 
     def _digest_token(self, token: str) -> str:
         return hmac.new(self._token_key, token.encode("utf-8"), hashlib.sha256).hexdigest()

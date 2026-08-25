@@ -147,6 +147,27 @@ Versionsnummer. Ein Passwortwechsel erhoeht diese Nummer und macht damit andere
 bestehende Sitzungen ungueltig. Formulare mit schreibender Wirkung sind zusaetzlich
 mit serverseitig gespeicherten CSRF-Tokens geschuetzt.
 
+### 9. MCP-Zugang und Write-Gates
+
+Der zentrale Streamable-HTTP-Endpunkt `/mcp/` ist weder anonym noch durch ein
+globales Token geschuetzt. Ein Hub-Benutzer erstellt im Account-Bereich eigene
+MCP-Tokens fuer einzelne Clients. Der Klartext ist nur einmal sichtbar; in der
+Datenbank liegen nur ein HMAC-Digest, ein kurzer Wiedererkennungs-Praefix und
+Nutzungs-/Widerrufszeitpunkte. Widerruf sperrt den Token sofort.
+
+Das allgemeine MCP-Tool fuer Site-Abilities akzeptiert ausschliesslich
+Abilities, die von der Bridge explizit als `readonly=true` und
+`destructive=false` beschrieben sind. Schreibende Abilities werden nicht frei
+durchgereicht. Fuer den ersten Plugin-Updatepfad gibt es nur spezifische
+Plan-Tools: Plan lesen, Site und Plugin-Datei exakt bestaetigen, freigeben und
+einen bereits freigegebenen Plan ausfuehren. Die bestehende Pruefung von
+Backup, Version, Aktivstatus und Postflight bleibt dabei serverseitig
+verbindlich.
+
+Jeder MCP-Tool-Aufruf wird mit MCP-Akteur, Tool-Name und Ergebnis im zentralen
+Audit erfasst. Klartext-Tokens und Tool-Parameter werden nicht in den
+Audit-Details gespeichert.
+
 ## Sicherheitsregeln fuer spaetere MCP-Endpunkte
 
 Fuer Phase 2+ sind bereits jetzt verbindlich:
