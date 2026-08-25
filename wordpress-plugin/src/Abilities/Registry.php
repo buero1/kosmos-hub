@@ -944,6 +944,8 @@ class Registry {
 		$previous_theme_updates  = self::to_array( get_site_transient( 'update_themes' ) );
 
 		delete_site_transient( 'update_core' );
+		self::mark_update_transient_stale( 'update_plugins' );
+		self::mark_update_transient_stale( 'update_themes' );
 		wp_version_check();
 		wp_update_plugins();
 		wp_update_themes();
@@ -955,6 +957,28 @@ class Registry {
 			true
 		);
 		self::restore_missing_theme_update_responses( $previous_theme_updates );
+	}
+
+	/**
+	 * Ask WordPress to perform a fresh standard update check without deleting
+	 * third-party update offers that are already present in its shared cache.
+	 *
+	 * @param string $transient_name Update transient name.
+	 * @return void
+	 */
+	private static function mark_update_transient_stale( $transient_name ) {
+		$transient = get_site_transient( $transient_name );
+
+		if ( is_object( $transient ) ) {
+			$transient->last_checked = 0;
+			set_site_transient( $transient_name, $transient );
+			return;
+		}
+
+		if ( is_array( $transient ) ) {
+			$transient['last_checked'] = 0;
+			set_site_transient( $transient_name, $transient );
+		}
 	}
 
 	/**
