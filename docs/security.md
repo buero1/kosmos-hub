@@ -123,8 +123,8 @@ Nicht geloggt werden:
 
 Die Weboberflaeche und internen APIs sind durch ein eigenes Hub-Konto geschuetzt.
 Ausgenommen bleiben ausschliesslich der Health-Endpoint und die HMAC-gesicherte
-Site-Registrierung. Passwoerter werden mit `PBKDF2-HMAC-SHA256`, einem eigenen
-zufaelligen Salt und 600.000 Iterationen gespeichert; Klartextpasswoerter werden
+Site-Registrierung. Passwoerter muessen mindestens 12 Zeichen haben und werden
+mit `PBKDF2-HMAC-SHA256`, einem eigenen zufaelligen Salt und 600.000 Iterationen gespeichert; Klartextpasswoerter werden
 nicht persistiert oder geloggt.
 
 Der erste Administrator wird nicht ueber eine oeffentliche Registrierung

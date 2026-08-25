@@ -100,8 +100,8 @@ class HubAccountService:
 
     @staticmethod
     def validate_password(password: str) -> None:
-        if len(password) < 14:
-            raise ValueError("Use a password with at least 14 characters.")
+        if len(password) < 12:
+            raise ValueError("Use a password with at least 12 characters.")
 
     def _digest_token(self, token: str) -> str:
         return hmac.new(self._token_key, token.encode("utf-8"), hashlib.sha256).hexdigest()

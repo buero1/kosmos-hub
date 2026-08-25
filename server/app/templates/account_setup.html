@@ -6,7 +6,7 @@
       <div>
         <p class="eyebrow">One-time secure setup</p>
         <h2>Create the first administrator account</h2>
-        <p class="subtle">This link is valid for 20 minutes. Use a unique password with at least 14 characters.</p>
+        <p class="subtle">This link is valid for 20 minutes. Use a unique password with at least 12 characters.</p>
       </div>
     </div>
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
@@ -19,11 +19,11 @@
       </label>
       <label>
         <span>Password</span>
-        <input type="password" name="password" autocomplete="new-password" minlength="14" required>
+        <input type="password" name="password" autocomplete="new-password" minlength="12" required>
       </label>
       <label>
         <span>Confirm password</span>
-        <input type="password" name="password_confirmation" autocomplete="new-password" minlength="14" required>
+        <input type="password" name="password_confirmation" autocomplete="new-password" minlength="12" required>
       </label>
       <button class="button" type="submit">Create administrator account</button>
     </form>
