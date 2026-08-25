@@ -64,6 +64,15 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def prevent_stale_web_pages(request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/sites"):
+            # Inventory and update data must not be served from a browser cache.
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     app.include_router(health.router)
     app.include_router(registrations.router)
     app.include_router(sites.router)
