@@ -625,7 +625,8 @@ class Registry {
 				'active'           => array( 'type' => 'boolean' ),
 				'available'        => array( 'type' => 'boolean' ),
 				'complete'         => array( 'type' => 'boolean' ),
-				'latest_backup_at' => array( 'type' => 'string', 'format' => 'date-time' ),
+				// Empty when UpdraftPlus has no complete backup yet; the Hub parses a timestamp only when present.
+				'latest_backup_at' => array( 'type' => 'string' ),
 				'backup_count'     => array( 'type' => 'integer' ),
 				'components'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 				'message'          => array( 'type' => 'string' ),
