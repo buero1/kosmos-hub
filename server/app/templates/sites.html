@@ -11,6 +11,7 @@
       <div class="inventory-totals">
         <span><strong>{{ inventory_summary.active_plugins }}</strong> active plugins</span>
         <span><strong>{{ inventory_summary.missing_inventory_sites }}</strong> without inventory</span>
+        <span><strong>{{ inventory_summary.sites_needing_updates }}</strong> need updates</span>
       </div>
     </div>
 
@@ -30,6 +31,22 @@
           <option value="present" {% if filters.inventory == "present" %}selected{% endif %}>Available</option>
           <option value="missing" {% if filters.inventory == "missing" %}selected{% endif %}>Not collected</option>
         </select>
+      </label>
+      <label>
+        <span>Updates</span>
+        <select name="updates">
+          <option value="all" {% if filters.updates == "all" %}selected{% endif %}>All sites</option>
+          <option value="available" {% if filters.updates == "available" %}selected{% endif %}>Updates available</option>
+          <option value="wordpress" {% if filters.updates == "wordpress" %}selected{% endif %}>WordPress updates</option>
+          <option value="plugins" {% if filters.updates == "plugins" %}selected{% endif %}>Plugin updates</option>
+          <option value="themes" {% if filters.updates == "themes" %}selected{% endif %}>Theme updates</option>
+          <option value="none" {% if filters.updates == "none" %}selected{% endif %}>No updates</option>
+          <option value="missing" {% if filters.updates == "missing" %}selected{% endif %}>Not collected</option>
+        </select>
+      </label>
+      <label>
+        <span>Update for</span>
+        <input type="search" name="update_plugin" value="{{ filters.update_plugin }}" placeholder="e.g. Elementor">
       </label>
       <label>
         <span>WordPress</span>
@@ -75,6 +92,7 @@
             <th>WordPress / PHP</th>
             <th>Bridge</th>
             <th>Active plugins</th>
+            <th>Updates</th>
           </tr>
         </thead>
         <tbody>
@@ -106,10 +124,27 @@
                   -
                 {% endif %}
               </td>
+              <td>
+                {% if item.update_snapshot %}
+                  {% if item.update_count %}
+                    <strong>{{ item.update_count }} available</strong>
+                    <p class="subtle table-note">{{ item.core_updates | length }} WP · {{ item.plugin_updates | length }} plugins · {{ item.theme_updates | length }} themes</p>
+                    {% set update_matches = item.matching_update_names(filters.update_plugin) %}
+                    {% if update_matches %}
+                      <p class="subtle table-note">{{ update_matches | join(", ") }}</p>
+                    {% endif %}
+                  {% else %}
+                    <span class="pill">Up to date</span>
+                  {% endif %}
+                  <p class="subtle table-note">{{ item.update_snapshot.captured_at }}</p>
+                {% else %}
+                  <span class="pill pill-missing">Not collected</span>
+                {% endif %}
+              </td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="6">No sites match the selected filters.</td>
+              <td colspan="7">No sites match the selected filters.</td>
             </tr>
           {% endfor %}
         </tbody>

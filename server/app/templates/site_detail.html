@@ -29,6 +29,18 @@
       {% endif %}
     </article>
     <article class="card">
+      <h3>Available Updates</h3>
+      {% set latest_updates = site.update_snapshots[0] if site.update_snapshots else None %}
+      {% if latest_updates %}
+        <p><strong>Captured:</strong> {{ latest_updates.captured_at }}</p>
+        <p><strong>WordPress:</strong> {{ latest_updates.core_updates_json | length }}</p>
+        <p><strong>Plugins:</strong> {{ latest_updates.plugin_updates_json | length }}</p>
+        <p><strong>Themes:</strong> {{ latest_updates.theme_updates_json | length }}</p>
+      {% else %}
+        <p>No stored update check yet.</p>
+      {% endif %}
+    </article>
+    <article class="card">
       <h3>Connections</h3>
       {% for connection in site.connections %}
         <p><strong>{{ connection.provider }}</strong></p>

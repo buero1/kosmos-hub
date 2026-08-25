@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True
     auto_verify_domains: str = ""
     wordpress_bridge_min_version: str = "0.1.0"
+    fleet_updates_auto_refresh: bool = True
+    fleet_updates_refresh_interval_hours: int = Field(default=24, ge=1, le=168)
+    fleet_updates_initial_delay_seconds: int = Field(default=300, ge=0, le=3600)
 
     @property
     def auto_verify_domain_list(self) -> list[str]:
@@ -25,4 +28,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

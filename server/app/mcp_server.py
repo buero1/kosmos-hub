@@ -13,10 +13,12 @@ from app.schemas.inventory import (
     SiteStateSnapshotResponse,
     StoredSiteCapabilityResponse,
 )
+from app.schemas.updates import SiteUpdateRefreshResponse, SiteUpdateSnapshotResponse
 from app.schemas.site import SiteDetailResponse
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.site_inventory import SiteInventoryService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
+from app.services.site_updates import SiteUpdateService
 
 hub_mcp = MCPServer(
     "kosmos-hub",
@@ -190,12 +192,46 @@ def refresh_site_state_snapshot(site_id: int) -> dict[str, Any]:
 
 
 @hub_mcp.tool()
+def get_site_update_snapshot(site_id: int) -> dict[str, Any]:
+    """Read the last stored WordPress, plugin, and theme update state for one site."""
+    with SessionLocal() as db:
+        service = SiteUpdateService(db=db, cipher=get_secret_cipher())
+        try:
+            snapshot = service.get_latest_site_update_snapshot(site_id)
+        except SiteMcpProxyError as exc:
+            return _proxy_error_payload(exc)
+        return {
+            "ok": True,
+            "payload": SiteUpdateSnapshotResponse.model_validate(snapshot).model_dump(mode="json") if snapshot else None,
+        }
+
+
+@hub_mcp.tool()
+def refresh_site_update_snapshot(site_id: int) -> dict[str, Any]:
+    """Read and store available updates for one WordPress site without installing anything."""
+    with SessionLocal() as db:
+        service = SiteUpdateService(db=db, cipher=get_secret_cipher())
+        try:
+            payload = service.refresh_site_updates(site_id)
+        except SiteMcpProxyError as exc:
+            return _proxy_error_payload(exc)
+        response = SiteUpdateRefreshResponse(
+            site_id=payload["site_id"],
+            refreshed_at=payload["refreshed_at"],
+            snapshot=SiteUpdateSnapshotResponse.model_validate(payload["snapshot"]),
+        ).model_dump(mode="json")
+        return {"ok": True, "payload": response}
+
+
+@hub_mcp.tool()
 def search_site_inventory(
     query: str = "",
     plugin: str = "",
     wordpress_version: str = "",
     bridge_version: str = "",
     inventory_state: str = "all",
+    updates_state: str = "all",
+    update_plugin: str = "",
 ) -> dict[str, Any]:
     """Find sites by stored WordPress, Bridge, and active-plugin inventory data."""
     if inventory_state not in {"all", "present", "missing"}:
@@ -203,6 +239,14 @@ def search_site_inventory(
             SiteMcpProxyError(
                 "INVALID_INVENTORY_STATE",
                 "inventory_state must be all, present, or missing.",
+                status_code=422,
+            )
+        )
+    if updates_state not in {"all", "available", "wordpress", "plugins", "themes", "none", "missing"}:
+        return _proxy_error_payload(
+            SiteMcpProxyError(
+                "INVALID_UPDATES_STATE",
+                "updates_state must be all, available, wordpress, plugins, themes, none, or missing.",
                 status_code=422,
             )
         )
@@ -214,6 +258,8 @@ def search_site_inventory(
             query=query,
             plugin=plugin,
             inventory_state=inventory_state,
+            updates_state=updates_state,
+            update_plugin=update_plugin,
             wordpress_version=wordpress_version,
             bridge_version=bridge_version,
         )
@@ -230,6 +276,11 @@ def search_site_inventory(
                         "bridge_version": item.site.bridge_version,
                         "inventory_captured_at": item.snapshot.captured_at if item.snapshot else None,
                         "active_plugin_count": item.plugin_count,
+                        "updates_captured_at": item.update_snapshot.captured_at if item.update_snapshot else None,
+                        "available_update_count": item.update_count,
+                        "core_updates": list(item.core_updates),
+                        "plugin_updates": list(item.plugin_updates),
+                        "theme_updates": list(item.theme_updates),
                         "plugins": [
                             {
                                 "name": plugin.get("name"),
@@ -257,3 +308,16 @@ def refresh_verified_site_inventories(limit: int = 25) -> dict[str, Any]:
     with SessionLocal() as db:
         service = FleetInventoryService(db=db, cipher=get_secret_cipher())
         return {"ok": True, "payload": service.refresh_verified_site_states(limit=limit)}
+
+
+@hub_mcp.tool()
+def refresh_verified_site_updates(limit: int = 25) -> dict[str, Any]:
+    """Read and store available updates for every compatible verified WordPress site."""
+    if limit < 1 or limit > 100:
+        return _proxy_error_payload(
+            SiteMcpProxyError("INVALID_LIMIT", "limit must be between 1 and 100.", status_code=422)
+        )
+
+    with SessionLocal() as db:
+        service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+        return {"ok": True, "payload": service.refresh_verified_site_updates(limit=limit)}

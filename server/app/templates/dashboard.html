@@ -26,13 +26,21 @@
       <p class="subtle">Active plugins</p>
       <p class="metric">{{ inventory_summary.active_plugins }}</p>
     </article>
+    <article class="card">
+      <p class="subtle">Sites needing updates</p>
+      <p class="metric">{{ inventory_summary.sites_needing_updates }}</p>
+    </article>
+    <article class="card">
+      <p class="subtle">Available updates</p>
+      <p class="metric">{{ inventory_summary.available_updates }}</p>
+    </article>
   </section>
 
   <section class="section-heading">
     <div>
       <p class="eyebrow">Fleet inventory</p>
       <h2>Software and plugin visibility</h2>
-      <p class="subtle">{{ inventory_summary.missing_inventory_sites }} sites have not yet delivered a stored inventory snapshot.</p>
+      <p class="subtle">{{ inventory_summary.missing_inventory_sites }} sites have no inventory and {{ inventory_summary.missing_update_checks }} no stored update check yet.</p>
     </div>
     <a class="button button-secondary" href="/sites">Open inventory</a>
   </section>

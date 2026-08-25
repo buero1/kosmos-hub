@@ -5,6 +5,17 @@ from app.models.site import Site
 from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
+from app.models.site_update_snapshot import SiteUpdateSnapshot
 from app.models.base import Base
 
-__all__ = ["AuditLog", "Base", "Customer", "RequestNonce", "Site", "SiteCapability", "SiteConnection", "SiteSnapshot"]
+__all__ = [
+    "AuditLog",
+    "Base",
+    "Customer",
+    "RequestNonce",
+    "Site",
+    "SiteCapability",
+    "SiteConnection",
+    "SiteSnapshot",
+    "SiteUpdateSnapshot",
+]

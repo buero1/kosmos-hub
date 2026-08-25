@@ -7,6 +7,7 @@ from app.models.site import Site
 from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
+from app.models.site_update_snapshot import SiteUpdateSnapshot
 
 
 class SiteRepository:
@@ -21,6 +22,7 @@ class SiteRepository:
                 selectinload(Site.audit_entries),
                 selectinload(Site.capabilities),
                 selectinload(Site.snapshots),
+                selectinload(Site.update_snapshots),
             )
             .where(Site.uuid == site_uuid)
         )
@@ -34,6 +36,7 @@ class SiteRepository:
                 selectinload(Site.audit_entries),
                 selectinload(Site.capabilities),
                 selectinload(Site.snapshots),
+                selectinload(Site.update_snapshots),
             )
             .where(Site.id == site_id)
         )
@@ -86,6 +89,36 @@ class SiteRepository:
         snapshots = self.db.scalars(statement).all()
         return {snapshot.site_id: snapshot for snapshot in snapshots}
 
+    def get_latest_site_update_snapshot(self, site_id: int) -> SiteUpdateSnapshot | None:
+        statement = (
+            select(SiteUpdateSnapshot)
+            .where(SiteUpdateSnapshot.site_id == site_id)
+            .order_by(SiteUpdateSnapshot.captured_at.desc())
+            .limit(1)
+        )
+        return self.db.scalar(statement)
+
+    def get_latest_update_snapshots_by_site_ids(self, site_ids: list[int]) -> dict[int, SiteUpdateSnapshot]:
+        if not site_ids:
+            return {}
+
+        latest_captured_at = (
+            select(
+                SiteUpdateSnapshot.site_id,
+                func.max(SiteUpdateSnapshot.captured_at).label("captured_at"),
+            )
+            .where(SiteUpdateSnapshot.site_id.in_(site_ids))
+            .group_by(SiteUpdateSnapshot.site_id)
+            .subquery()
+        )
+        statement = select(SiteUpdateSnapshot).join(
+            latest_captured_at,
+            (SiteUpdateSnapshot.site_id == latest_captured_at.c.site_id)
+            & (SiteUpdateSnapshot.captured_at == latest_captured_at.c.captured_at),
+        )
+        snapshots = self.db.scalars(statement).all()
+        return {snapshot.site_id: snapshot for snapshot in snapshots}
+
     def create_site_snapshot(
         self,
         *,
@@ -105,6 +138,28 @@ class SiteRepository:
             plugins_json=plugins_json,
             themes_json=themes_json,
             environment_json=environment_json,
+        )
+        self.db.add(snapshot)
+        self.db.flush()
+        return snapshot
+
+    def create_site_update_snapshot(
+        self,
+        *,
+        site: Site,
+        captured_at: datetime,
+        core_updates_json: list,
+        plugin_updates_json: list,
+        theme_updates_json: list,
+        summary_json: dict,
+    ) -> SiteUpdateSnapshot:
+        snapshot = SiteUpdateSnapshot(
+            site=site,
+            captured_at=captured_at,
+            core_updates_json=core_updates_json,
+            plugin_updates_json=plugin_updates_json,
+            theme_updates_json=theme_updates_json,
+            summary_json=summary_json,
         )
         self.db.add(snapshot)
         self.db.flush()

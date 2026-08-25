@@ -42,6 +42,8 @@ def sites_page(
     plugin: str = "",
     status: str = "",
     inventory: Literal["all", "present", "missing"] = "all",
+    updates: Literal["all", "available", "wordpress", "plugins", "themes", "none", "missing"] = "all",
+    update_plugin: str = "",
     wordpress: str = "",
     bridge: str = "",
 ):
@@ -53,6 +55,8 @@ def sites_page(
         plugin=plugin,
         status=status,
         inventory_state=inventory,
+        updates_state=updates,
+        update_plugin=update_plugin,
         wordpress_version=wordpress,
         bridge_version=bridge,
     )
@@ -67,6 +71,8 @@ def sites_page(
                 "plugin": plugin,
                 "status": status,
                 "inventory": inventory,
+                "updates": updates,
+                "update_plugin": update_plugin,
                 "wordpress": wordpress,
                 "bridge": bridge,
             },

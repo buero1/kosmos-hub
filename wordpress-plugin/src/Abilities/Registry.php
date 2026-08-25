@@ -67,6 +67,19 @@ class Registry {
 				'meta'                => self::readonly_meta(),
 			)
 		);
+
+		wp_register_ability(
+			'kosmos-bridge/get-available-updates',
+			array(
+				'label'               => __( 'Get Available Updates', 'kosmos-bridge' ),
+				'description'         => __( 'Returns WordPress, plugin, and theme updates already known to this site.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'output_schema'       => self::available_updates_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_get_available_updates' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
 	}
 
 	/**
@@ -136,6 +149,93 @@ class Registry {
 	}
 
 	/**
+	 * Read the cached WordPress update transients. This intentionally does not
+	 * trigger checks or install anything on the customer site.
+	 *
+	 * @return array
+	 */
+	public static function execute_get_available_updates() {
+		global $wp_version;
+
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$current_wordpress_version = is_string( $wp_version ) ? $wp_version : get_bloginfo( 'version' );
+		$plugins                   = get_plugins();
+		$wordpress_updates          = array();
+		$plugin_updates             = array();
+		$theme_updates              = array();
+
+		foreach ( (array) get_site_transient( 'update_core' ) as $update ) {
+			$data    = self::to_array( $update );
+			$version = isset( $data['version'] ) ? (string) $data['version'] : '';
+
+			if ( '' === $version || version_compare( $version, $current_wordpress_version, '<=' ) ) {
+				continue;
+			}
+
+			$wordpress_updates[] = array(
+				'current_version' => $current_wordpress_version,
+				'new_version'     => $version,
+				'locale'          => isset( $data['locale'] ) ? (string) $data['locale'] : '',
+			);
+		}
+
+		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
+		$plugin_responses = isset( $plugin_transient['response'] ) ? self::to_array( $plugin_transient['response'] ) : array();
+		foreach ( $plugin_responses as $plugin_file => $update ) {
+			$data        = self::to_array( $update );
+			$resolved_file = isset( $data['plugin'] ) ? (string) $data['plugin'] : (string) $plugin_file;
+			$plugin_data = isset( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : array();
+			$new_version = isset( $data['new_version'] ) ? (string) $data['new_version'] : '';
+
+			if ( '' === $new_version ) {
+				continue;
+			}
+
+			$plugin_updates[] = array(
+				'plugin_file'     => $resolved_file,
+				'name'            => isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : $resolved_file,
+				'current_version' => isset( $plugin_data['Version'] ) ? (string) $plugin_data['Version'] : '',
+				'new_version'     => $new_version,
+			);
+		}
+
+		$theme_transient = self::to_array( get_site_transient( 'update_themes' ) );
+		$theme_responses = isset( $theme_transient['response'] ) ? self::to_array( $theme_transient['response'] ) : array();
+		foreach ( $theme_responses as $stylesheet => $update ) {
+			$data        = self::to_array( $update );
+			$new_version = isset( $data['new_version'] ) ? (string) $data['new_version'] : '';
+
+			if ( '' === $new_version ) {
+				continue;
+			}
+
+			$theme = wp_get_theme( (string) $stylesheet );
+			$theme_updates[] = array(
+				'stylesheet'      => (string) $stylesheet,
+				'name'            => $theme->exists() ? (string) $theme->get( 'Name' ) : (string) $stylesheet,
+				'current_version' => $theme->exists() ? (string) $theme->get( 'Version' ) : '',
+				'new_version'     => $new_version,
+			);
+		}
+
+		return array(
+			'reported_at' => gmdate( 'c' ),
+			'wordpress'   => array( 'updates' => $wordpress_updates ),
+			'plugins'     => array( 'updates' => $plugin_updates ),
+			'themes'      => array( 'updates' => $theme_updates ),
+			'summary'     => array(
+				'wordpress' => count( $wordpress_updates ),
+				'plugins'   => count( $plugin_updates ),
+				'themes'    => count( $theme_updates ),
+				'total'     => count( $wordpress_updates ) + count( $plugin_updates ) + count( $theme_updates ),
+			),
+		);
+	}
+
+	/**
 	 * Provide the read-only core abilities on WordPress versions without the
 	 * native Abilities API so older managed sites use the same MCP contract.
 	 *
@@ -168,6 +268,15 @@ class Registry {
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => array(),
 				'output_schema' => self::active_plugins_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/get-available-updates',
+				'label'         => __( 'Get Available Updates', 'kosmos-bridge' ),
+				'description'   => __( 'Returns WordPress, plugin, and theme updates already known to this site.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::available_updates_output_schema(),
 				'meta'          => self::readonly_meta(),
 			),
 		);
@@ -204,6 +313,8 @@ class Registry {
 				return self::execute_get_environment_info();
 			case 'kosmos-bridge/list-active-plugins':
 				return self::execute_list_active_plugins();
+			case 'kosmos-bridge/get-available-updates':
+				return self::execute_get_available_updates();
 		}
 
 		return null;
@@ -321,5 +432,52 @@ class Registry {
 			),
 			'required'   => array( 'count', 'plugins' ),
 		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function available_updates_output_schema() {
+		$update_item = array(
+			'type'       => 'object',
+			'properties' => array(
+				'name'            => array( 'type' => 'string' ),
+				'current_version' => array( 'type' => 'string' ),
+				'new_version'     => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'current_version', 'new_version' ),
+		);
+
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'reported_at' => array( 'type' => 'string', 'format' => 'date-time' ),
+				'wordpress'   => array( 'type' => 'object' ),
+				'plugins'     => array(
+					'type'       => 'object',
+					'properties' => array( 'updates' => array( 'type' => 'array', 'items' => $update_item ) ),
+				),
+				'themes'      => array(
+					'type'       => 'object',
+					'properties' => array( 'updates' => array( 'type' => 'array', 'items' => $update_item ) ),
+				),
+				'summary'     => array( 'type' => 'object' ),
+			),
+			'required'   => array( 'reported_at', 'wordpress', 'plugins', 'themes', 'summary' ),
+		);
+	}
+
+	/**
+	 * Normalize WordPress transients, which can be arrays or stdClass values.
+	 *
+	 * @param mixed $value Value to normalize.
+	 * @return array
+	 */
+	private static function to_array( $value ) {
+		if ( is_array( $value ) ) {
+			return $value;
+		}
+
+		return is_object( $value ) ? get_object_vars( $value ) : array();
 	}
 }

@@ -36,3 +36,9 @@ class Site(TimestampMixin, Base):
     audit_entries = relationship("AuditLog", back_populates="site", cascade="all, delete-orphan")
     capabilities = relationship("SiteCapability", back_populates="site", cascade="all, delete-orphan")
     snapshots = relationship("SiteSnapshot", back_populates="site", cascade="all, delete-orphan", order_by="desc(SiteSnapshot.captured_at)")
+    update_snapshots = relationship(
+        "SiteUpdateSnapshot",
+        back_populates="site",
+        cascade="all, delete-orphan",
+        order_by="desc(SiteUpdateSnapshot.captured_at)",
+    )
