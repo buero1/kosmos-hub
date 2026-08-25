@@ -80,6 +80,10 @@ Stand im aktuellen Build:
 - admin-context Update-Check fuer Anbieter, die ihre Update-Angebote nur in
   `wp-admin` registrieren
 - Update-Workbench mit Versionsvergleich, Plugin-Aktivstatus und Filtern
+- persistierbare Update-Entwuerfe mit unveraenderlichem Versionsbezug und
+  Audit-Eintraegen
+- Preflight fuer verifizierte Site, weiterhin verfuegbares Update und
+  Backupanbindung; ohne Backup bleibt Ausfuehrung blockiert
 - noch keine ausfuehrbaren Update-Aktionen, keine automatische Installation
   und keine persistierten Freigaben
 

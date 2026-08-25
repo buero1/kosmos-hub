@@ -118,7 +118,9 @@
         font-size: 0.84rem;
       }
       .filter-panel input,
-      .filter-panel select {
+      .filter-panel select,
+      .plan-panel input,
+      .plan-panel textarea {
         width: 100%;
         border: 1px solid var(--border);
         border-radius: 9px;
@@ -127,6 +129,26 @@
         font: inherit;
         padding: 0.58rem 0.65rem;
       }
+      .plan-panel {
+        display: grid;
+        grid-template-columns: 1.2fr minmax(170px, 0.8fr) minmax(220px, 1fr) auto;
+        gap: 0.85rem;
+        align-items: end;
+        margin: 1.25rem 0;
+        padding: 1.15rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .plan-panel p { margin: 0.25rem 0; }
+      .plan-panel label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .plan-panel textarea { resize: vertical; }
+      .plan-panel-locked { grid-template-columns: 1fr; }
       .filter-actions {
         display: flex;
         align-items: center;
@@ -136,6 +158,12 @@
         border: 0;
         cursor: pointer;
         font: inherit;
+      }
+      button.button {
+        background: var(--accent);
+        color: white;
+        padding: 0.75rem 1rem;
+        border-radius: 999px;
       }
       .button-secondary {
         border: 1px solid var(--accent);
@@ -235,6 +263,9 @@
         .filter-panel {
           grid-template-columns: 1fr;
         }
+        .plan-panel {
+          grid-template-columns: 1fr;
+        }
         th, td {
           padding: 0.75rem;
         }
@@ -250,6 +281,7 @@
           <a href="/">Dashboard</a>
           <a href="/sites">Sites</a>
           <a href="/updates">Update workbench</a>
+          <a href="/update-plans">Plans</a>
           <a href="/healthz">Health</a>
         </nav>
       </div>

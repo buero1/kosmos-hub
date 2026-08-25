@@ -6,6 +6,7 @@ from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
 from app.models.site_update_snapshot import SiteUpdateSnapshot
+from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.models.base import Base
 
 __all__ = [
@@ -18,4 +19,6 @@ __all__ = [
     "SiteConnection",
     "SiteSnapshot",
     "SiteUpdateSnapshot",
+    "UpdatePlan",
+    "UpdatePlanItem",
 ]

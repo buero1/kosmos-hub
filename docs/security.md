@@ -122,9 +122,16 @@ Nicht geloggt werden:
 ### 7. Einfache Weboberflaeche
 
 Fuer das interne MVP ist zunaechst kein vollwertiges Login-System vorgesehen.
-Wenn die Oberflaeche extern erreichbar gemacht wird, sollte mindestens ein
-einfacher vorgeschalteter Schutz wie Basic Auth oder Reverse-Proxy-Absicherung
-aktiv sein, bevor echte Produktionsdaten darueber erreichbar werden.
+Der Hub unterstuetzt dafuer eine einfache Basic-Auth-Sperre mit
+`HUB_ACCESS_USERNAME` und `HUB_ACCESS_PASSWORD`. Beide Werte muessen gemeinsam
+in der geschuetzten Server-Environment gesetzt werden; unvollstaendige Werte
+verhindern den Start.
+
+Solange diese Sperre nicht aktiv ist, bleibt die Workbench rein lesend und das
+Speichern von Update-Entwuerfen wird serverseitig mit `403` blockiert. Bevor
+echte Produktionsdaten oder schreibende Aktionen darueber erreichbar werden,
+muss mindestens diese Sperre oder ein gleichwertiger Reverse-Proxy-Schutz aktiv
+sein.
 
 ## Sicherheitsregeln fuer spaetere MCP-Endpunkte
 

@@ -105,6 +105,10 @@ class UpdateWorkbenchEntry:
             return "Inactive plugin: review first"
         return "Theme update: review first"
 
+    @property
+    def plan_key(self) -> str:
+        return "|".join((str(self.site.id), self.kind, self.identifier or self.name))
+
 
 class FleetInventoryService:
     def __init__(self, *, db: Session, cipher: SecretCipher):

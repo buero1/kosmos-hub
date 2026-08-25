@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Update Plans · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Review records</p>
+        <h2>Update plans</h2>
+        <p class="subtle">Plans preserve a reviewed selection. They do not install, download or activate anything.</p>
+      </div>
+      <a class="button button-secondary" href="/updates">Open workbench</a>
+    </div>
+
+    {% if not plan_creation_enabled %}
+      <div class="plan-panel plan-panel-locked">
+        <p><strong>Plan creation is locked.</strong></p>
+        <p class="subtle">Configure Hub Basic Auth first. This prevents unauthenticated visitors from creating review records.</p>
+      </div>
+    {% endif %}
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Plan</th>
+            <th>Status</th>
+            <th>Items</th>
+            <th>Created by</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for plan in plans %}
+            <tr>
+              <td>
+                <a href="/update-plans/{{ plan.id }}"><strong>{{ plan.name }}</strong></a>
+                {% if plan.notes %}<p class="subtle table-note">{{ plan.notes }}</p>{% endif %}
+              </td>
+              <td><span class="pill pill-{{ plan.status }}">{{ plan.status }}</span></td>
+              <td>{{ plan.items | length }}</td>
+              <td>{{ plan.created_by }}</td>
+              <td>{{ plan.created_at }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5">No update plans have been created yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

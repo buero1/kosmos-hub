@@ -42,3 +42,4 @@ class Site(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="desc(SiteUpdateSnapshot.captured_at)",
     )
+    update_plan_items = relationship("UpdatePlanItem", back_populates="site", cascade="all, delete-orphan")

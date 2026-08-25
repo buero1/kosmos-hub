@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.name }} · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="detail-list">
+    <article class="card">
+      <p class="eyebrow">Update plan</p>
+      <h2>{{ plan.name }}</h2>
+      <p><strong>Status:</strong> <span class="pill pill-{{ plan.status }}">{{ plan.status }}</span></p>
+      <p><strong>Created by:</strong> {{ plan.created_by }}</p>
+      <p><strong>Created:</strong> {{ plan.created_at }}</p>
+      {% if plan.notes %}<p><strong>Notes:</strong> {{ plan.notes }}</p>{% endif %}
+    </article>
+    <article class="card">
+      <p class="eyebrow">Execution gate</p>
+      <h3>Not enabled</h3>
+      <p class="subtle">This plan is a review record. Execution remains blocked until access control, backup checks and an explicit approval workflow are in place.</p>
+    </article>
+  </section>
+
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Current preflight</p>
+        <h2>Safety checks</h2>
+        <p class="subtle">The plan is compared with the current update inventory. Backup availability is intentionally a hard blocker for future execution.</p>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Update</th>
+            <th>Versions</th>
+            <th>Still available</th>
+            <th>Backup</th>
+            <th>Preflight</th>
+            <th>Next step</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for check in preflight %}
+            <tr>
+              <td><a href="/sites/{{ check.item.site.id }}">{{ check.item.site.domain }}</a></td>
+              <td><strong>{{ check.item.update_name }}</strong><p class="subtle table-note">{{ check.item.update_type }}</p></td>
+              <td>{{ check.item.current_version or "-" }} → {{ check.item.target_version or "Not reported" }}</td>
+              <td>{{ "Yes" if check.update_still_available else "No" }}</td>
+              <td>{{ check.backup_status }}</td>
+              <td><span class="pill pill-{{ "active" if check.execution_ready else "missing" }}">{{ check.status_label }}</span></td>
+              <td>{{ check.next_step }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="7">This plan has no items.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <a class="button" href="/update-plans">Back to plans</a>
+{% endblock %}

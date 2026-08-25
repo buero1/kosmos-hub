@@ -45,11 +45,36 @@
       </div>
     </form>
 
+    {% if plan_creation_enabled %}
+      <form class="plan-panel" method="post" action="/update-plans">
+        <div>
+          <p class="eyebrow">Create draft</p>
+          <p class="subtle">Select current entries below. Drafts are review records only and cannot install updates.</p>
+        </div>
+        <label>
+          <span>Plan name</span>
+          <input name="name" placeholder="e.g. September plugin review">
+        </label>
+        <label>
+          <span>Review notes</span>
+          <textarea name="notes" rows="2" placeholder="Scope, customer approval or maintenance window"></textarea>
+        </label>
+        <button class="button" type="submit">Create draft plan</button>
+    {% else %}
+      <div class="plan-panel plan-panel-locked">
+        <div>
+          <p class="eyebrow">Drafts locked</p>
+          <p class="subtle">Enable the Hub access configuration before creating persisted update plans. The current workbench remains read-only.</p>
+        </div>
+      </div>
+    {% endif %}
+
     <p class="result-count">{{ entries | length }} update items in the current review plan. Nothing can be installed from this page.</p>
     <div class="table-scroll">
       <table>
         <thead>
           <tr>
+            {% if plan_creation_enabled %}<th>Select</th>{% endif %}
             <th>Site</th>
             <th>Type</th>
             <th>Update</th>
@@ -62,6 +87,9 @@
         <tbody>
           {% for entry in entries %}
             <tr>
+              {% if plan_creation_enabled %}
+                <td><input type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}"></td>
+              {% endif %}
               <td><a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a></td>
               <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
               <td>
@@ -77,11 +105,12 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="7">No updates match the selected filters.</td>
+              <td colspan="{{ 8 if plan_creation_enabled else 7 }}">No updates match the selected filters.</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+    {% if plan_creation_enabled %}</form>{% endif %}
   </section>
 {% endblock %}

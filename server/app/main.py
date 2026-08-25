@@ -1,8 +1,12 @@
 import asyncio
 import logging
+from base64 import b64decode
+from binascii import Error as BinasciiError
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from secrets import compare_digest
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 
 from app.api.routes import health, registrations, site_abilities, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
@@ -66,9 +70,24 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
     @app.middleware("http")
-    async def prevent_stale_web_pages(request, call_next):
+    async def protect_hub_and_prevent_stale_web_pages(request: Request, call_next):
+        if settings.hub_access_enabled and not _is_public_hub_path(request.url.path):
+            username = _authenticated_hub_username(request, settings)
+            if username is None:
+                return PlainTextResponse(
+                    "Authentication required.",
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="kosmos-hub"', "Cache-Control": "no-store"},
+                )
+            request.state.hub_access_username = username
+
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith("/sites") or request.url.path == "/updates":
+        if (
+            request.url.path == "/"
+            or request.url.path.startswith("/sites")
+            or request.url.path == "/updates"
+            or request.url.path.startswith("/update-plans")
+        ):
             # Inventory and update data must not be served from a browser cache.
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -85,3 +104,28 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def _is_public_hub_path(path: str) -> bool:
+    return path in {"/healthz", "/api/v1/registrations"}
+
+
+def _authenticated_hub_username(request: Request, settings) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, encoded_credentials = authorization.partition(" ")
+    if scheme.lower() != "basic" or not encoded_credentials:
+        return None
+
+    try:
+        decoded_credentials = b64decode(encoded_credentials, validate=True).decode("utf-8")
+    except (BinasciiError, UnicodeDecodeError):
+        return None
+
+    username, separator, password = decoded_credentials.partition(":")
+    if not separator or settings.hub_access_password is None:
+        return None
+
+    expected_password = settings.hub_access_password.get_secret_value()
+    if not compare_digest(username, settings.hub_access_username) or not compare_digest(password, expected_password):
+        return None
+    return username
