@@ -160,6 +160,9 @@ class Registry {
 		if ( ! function_exists( 'get_plugins' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
+		if ( ! function_exists( 'get_plugin_updates' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/update.php';
+		}
 
 		self::refresh_update_transients();
 
@@ -196,7 +199,7 @@ class Registry {
 			$wordpress_updates[] = $preferred_core_update;
 		}
 
-		$native_plugin_updates = function_exists( 'get_plugin_updates' ) ? get_plugin_updates() : array();
+		$native_plugin_updates = get_plugin_updates();
 		foreach ( $native_plugin_updates as $plugin_file => $plugin ) {
 			$plugin_record = self::to_array( $plugin );
 			$data          = isset( $plugin_record['update'] ) ? self::to_array( $plugin_record['update'] ) : array();
