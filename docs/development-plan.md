@@ -74,6 +74,15 @@ Stand im aktuellen Build:
 - Audit und Sicherheits-Gates fuer schreibende Aktionen
 - vorbereitende Healthchecks / Smoke-Checks
 
+Stand im aktuellen Build:
+
+- zentrale, rein lesende Update-Inventur fuer WordPress, Plugins und Themes
+- admin-context Update-Check fuer Anbieter, die ihre Update-Angebote nur in
+  `wp-admin` registrieren
+- Update-Workbench mit Versionsvergleich, Plugin-Aktivstatus und Filtern
+- noch keine ausfuehrbaren Update-Aktionen, keine automatische Installation
+  und keine persistierten Freigaben
+
 ## Phase 5
 
 - Elementor- und andere vorhandene WordPress-Abilities untersuchen

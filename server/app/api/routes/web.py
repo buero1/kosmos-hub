@@ -91,16 +91,50 @@ def sites_page(
     )
 
 
+@router.get("/updates", response_class=HTMLResponse)
+def update_workbench_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    q: str = "",
+    kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
+    activity: Literal["all", "active", "inactive"] = "all",
+):
+    inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+    entries = inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
+    filtered_entries = inventory_service.filter_update_workbench(
+        entries,
+        query=q,
+        kind=kind,
+        activity=activity,
+    )
+    return templates.TemplateResponse(
+        request,
+        "updates.html",
+        {
+            "entries": filtered_entries,
+            "summary": inventory_service.summarize_update_workbench(entries),
+            "filters": {"q": q, "kind": kind, "activity": activity},
+        },
+    )
+
+
 @router.get("/sites/{site_id}", response_class=HTMLResponse)
 def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     repository = SiteRepository(db)
     site = repository.get_site(site_id)
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found.")
+    inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+    site_entries = [
+        entry
+        for entry in inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
+        if entry.site.id == site.id
+    ]
     return templates.TemplateResponse(
         request,
         "site_detail.html",
         {
             "site": site,
+            "update_entries": site_entries,
         },
     )

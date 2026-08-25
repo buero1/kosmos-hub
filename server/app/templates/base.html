@@ -186,6 +186,24 @@
         background: #e7e8e6;
         color: #566057;
       }
+      .pill-wordpress {
+        background: #f2dfd2;
+        color: #8a3f25;
+      }
+      .pill-plugin,
+      .pill-active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .pill-theme,
+      .pill-system {
+        background: #e7e8e6;
+        color: #566057;
+      }
+      .pill-inactive {
+        background: #f3e3c3;
+        color: #8b5a12;
+      }
       .detail-list {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -201,6 +219,10 @@
         color: white;
         padding: 0.75rem 1rem;
         border-radius: 999px;
+      }
+      a.button.button-secondary {
+        background: transparent;
+        color: var(--accent);
       }
       @media (max-width: 720px) {
         .section-heading {
@@ -227,6 +249,7 @@
         <nav>
           <a href="/">Dashboard</a>
           <a href="/sites">Sites</a>
+          <a href="/updates">Update workbench</a>
           <a href="/healthz">Health</a>
         </nav>
       </div>

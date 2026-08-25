@@ -61,5 +61,48 @@
       {% endfor %}
     </article>
   </section>
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Read-only review plan</p>
+        <h2>Update details</h2>
+        <p class="subtle">These entries are informational only. No update can be executed from kosmos-hub yet.</p>
+      </div>
+      <a class="button button-secondary" href="/updates?q={{ site.domain | urlencode }}">Open workbench</a>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Update</th>
+            <th>Versions</th>
+            <th>State</th>
+            <th>Review</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in update_entries %}
+            <tr>
+              <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
+              <td>
+                <strong>{{ entry.name }}</strong>
+                {% if entry.identifier %}
+                  <p class="subtle table-note">{{ entry.identifier }}</p>
+                {% endif %}
+              </td>
+              <td>{{ entry.current_version or "-" }} → {{ entry.target_version or "Not reported" }}</td>
+              <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
+              <td>{{ entry.review_note }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5">No stored update details yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
   <a class="button" href="/sites">Back to sites</a>
 {% endblock %}

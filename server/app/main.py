@@ -68,7 +68,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def prevent_stale_web_pages(request, call_next):
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith("/sites"):
+        if request.url.path == "/" or request.url.path.startswith("/sites") or request.url.path == "/updates":
             # Inventory and update data must not be served from a browser cache.
             response.headers["Cache-Control"] = "no-store"
         return response

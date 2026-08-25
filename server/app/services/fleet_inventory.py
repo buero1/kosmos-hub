@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -71,6 +72,38 @@ class FleetInventoryItem:
             return ()
         updates = getattr(self.update_snapshot, field_name, [])
         return tuple(update for update in updates if isinstance(update, dict))
+
+
+@dataclass(frozen=True)
+class UpdateWorkbenchEntry:
+    site: Site
+    kind: str
+    name: str
+    identifier: str
+    current_version: str
+    target_version: str
+    is_active: bool | None
+    captured_at: datetime
+
+    @property
+    def kind_label(self) -> str:
+        return {"wordpress": "WordPress", "plugin": "Plugin", "theme": "Theme"}[self.kind]
+
+    @property
+    def activity_label(self) -> str:
+        if self.kind != "plugin":
+            return "System"
+        return "Active" if self.is_active else "Inactive"
+
+    @property
+    def review_note(self) -> str:
+        if self.kind == "wordpress":
+            return "Core update: review first"
+        if self.kind == "plugin" and self.is_active:
+            return "Active plugin: review first"
+        if self.kind == "plugin":
+            return "Inactive plugin: review first"
+        return "Theme update: review first"
 
 
 class FleetInventoryService:
@@ -147,6 +180,101 @@ class FleetInventoryService:
             "missing_update_checks": len(items) - len(update_checked),
             "sites_needing_updates": sum(1 for item in update_checked if item.update_count > 0),
             "available_updates": sum(item.update_count for item in update_checked),
+        }
+
+    def build_update_workbench(self, items: list[FleetInventoryItem]) -> list[UpdateWorkbenchEntry]:
+        entries: list[UpdateWorkbenchEntry] = []
+        for item in items:
+            if item.update_snapshot is None:
+                continue
+
+            active_plugin_files = {
+                str(plugin.get("plugin_file", "")).strip()
+                for plugin in item.plugins
+                if str(plugin.get("plugin_file", "")).strip()
+            }
+            captured_at = item.update_snapshot.captured_at
+
+            for update in item.core_updates:
+                entries.append(
+                    UpdateWorkbenchEntry(
+                        site=item.site,
+                        kind="wordpress",
+                        name="WordPress core",
+                        identifier=str(update.get("locale", "")).strip(),
+                        current_version=str(update.get("current_version", "")).strip(),
+                        target_version=str(update.get("new_version", "")).strip(),
+                        is_active=None,
+                        captured_at=captured_at,
+                    )
+                )
+
+            for update in item.plugin_updates:
+                plugin_file = str(update.get("plugin_file", "")).strip()
+                entries.append(
+                    UpdateWorkbenchEntry(
+                        site=item.site,
+                        kind="plugin",
+                        name=str(update.get("name", "")).strip() or plugin_file,
+                        identifier=plugin_file,
+                        current_version=str(update.get("current_version", "")).strip(),
+                        target_version=str(update.get("new_version", "")).strip(),
+                        is_active=plugin_file in active_plugin_files,
+                        captured_at=captured_at,
+                    )
+                )
+
+            for update in item.theme_updates:
+                stylesheet = str(update.get("stylesheet", "")).strip()
+                entries.append(
+                    UpdateWorkbenchEntry(
+                        site=item.site,
+                        kind="theme",
+                        name=str(update.get("name", "")).strip() or stylesheet,
+                        identifier=stylesheet,
+                        current_version=str(update.get("current_version", "")).strip(),
+                        target_version=str(update.get("new_version", "")).strip(),
+                        is_active=None,
+                        captured_at=captured_at,
+                    )
+                )
+
+        kind_order = {"wordpress": 0, "plugin": 1, "theme": 2}
+        return sorted(entries, key=lambda entry: (entry.site.domain.casefold(), kind_order[entry.kind], entry.name.casefold()))
+
+    def filter_update_workbench(
+        self,
+        entries: list[UpdateWorkbenchEntry],
+        *,
+        query: str = "",
+        kind: str = "all",
+        activity: str = "all",
+    ) -> list[UpdateWorkbenchEntry]:
+        normalized_query = query.strip().casefold()
+
+        def matches(entry: UpdateWorkbenchEntry) -> bool:
+            if kind != "all" and entry.kind != kind:
+                return False
+            if activity == "active" and entry.is_active is not True:
+                return False
+            if activity == "inactive" and entry.is_active is not False:
+                return False
+            if not normalized_query:
+                return True
+
+            haystack = " ".join((entry.site.domain, entry.name, entry.identifier)).casefold()
+            return normalized_query in haystack
+
+        return [entry for entry in entries if matches(entry)]
+
+    def summarize_update_workbench(self, entries: list[UpdateWorkbenchEntry]) -> dict[str, int]:
+        return {
+            "total": len(entries),
+            "wordpress": sum(1 for entry in entries if entry.kind == "wordpress"),
+            "plugins": sum(1 for entry in entries if entry.kind == "plugin"),
+            "themes": sum(1 for entry in entries if entry.kind == "theme"),
+            "active_plugins": sum(1 for entry in entries if entry.kind == "plugin" and entry.is_active),
+            "inactive_plugins": sum(1 for entry in entries if entry.kind == "plugin" and not entry.is_active),
         }
 
     def refresh_verified_site_states(self, *, limit: int = 25) -> dict[str, list[dict[str, Any]]]:

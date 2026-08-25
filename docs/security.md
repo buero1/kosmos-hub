@@ -100,13 +100,26 @@ Jede relevante Aktion erzeugt einen Audit-Eintrag mit:
 - `result`
 - `timestamp`
 
+### 6. Admin-Loopback fuer Update-Inventur
+
+Einige WordPress-Plugins stellen ihre Update-Angebote nur bereit, wenn der
+Admin-Kontext geladen wurde. Die Bridge kann deshalb nach einem bereits
+HMAC-autorisierten Hub-Aufruf eine Anfrage an die eigene `admin-ajax.php`
+ausfuehren. Diese Anfrage ist zusaetzlich mit einem einmaligen, zufaelligen
+Token abgesichert, der nur 60 Sekunden gueltig ist, als Hash im WordPress-
+Transient gespeichert und vor der Auswertung verbraucht wird.
+
+Der Loopback liest ausschliesslich Update-Metadaten. Wenn eine Site lokale
+Loopback-Anfragen blockiert, faellt die Bridge kontrolliert auf die bisherige
+rein lesende Update-Pruefung zurueck.
+
 Nicht geloggt werden:
 
 - Secrets
 - vollstaendige Authorization-Header
 - Passwoerter
 
-### 6. Einfache Weboberflaeche
+### 7. Einfache Weboberflaeche
 
 Fuer das interne MVP ist zunaechst kein vollwertiges Login-System vorgesehen.
 Wenn die Oberflaeche extern erreichbar gemacht wird, sollte mindestens ein

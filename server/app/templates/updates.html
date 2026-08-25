@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Update Workbench · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Read-only review plan</p>
+        <h2>Update workbench</h2>
+        <p class="subtle">Review current WordPress, plugin and theme updates before any future approval or execution step.</p>
+      </div>
+      <div class="inventory-totals">
+        <span><strong>{{ summary.total }}</strong> updates</span>
+        <span><strong>{{ summary.wordpress }}</strong> WordPress</span>
+        <span><strong>{{ summary.plugins }}</strong> plugins</span>
+        <span><strong>{{ summary.themes }}</strong> themes</span>
+        <span><strong>{{ summary.active_plugins }}</strong> active plugins</span>
+      </div>
+    </div>
+
+    <form class="filter-panel" method="get" action="/updates">
+      <label>
+        <span>Site or update</span>
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
+      </label>
+      <label>
+        <span>Type</span>
+        <select name="kind">
+          <option value="all" {% if filters.kind == "all" %}selected{% endif %}>All updates</option>
+          <option value="wordpress" {% if filters.kind == "wordpress" %}selected{% endif %}>WordPress</option>
+          <option value="plugin" {% if filters.kind == "plugin" %}selected{% endif %}>Plugins</option>
+          <option value="theme" {% if filters.kind == "theme" %}selected{% endif %}>Themes</option>
+        </select>
+      </label>
+      <label>
+        <span>Plugin state</span>
+        <select name="activity">
+          <option value="all" {% if filters.activity == "all" %}selected{% endif %}>All states</option>
+          <option value="active" {% if filters.activity == "active" %}selected{% endif %}>Active plugins</option>
+          <option value="inactive" {% if filters.activity == "inactive" %}selected{% endif %}>Inactive plugins</option>
+        </select>
+      </label>
+      <div class="filter-actions">
+        <button class="button" type="submit">Apply filters</button>
+        <a href="/updates">Reset</a>
+      </div>
+    </form>
+
+    <p class="result-count">{{ entries | length }} update items in the current review plan. Nothing can be installed from this page.</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Site</th>
+            <th>Type</th>
+            <th>Update</th>
+            <th>Versions</th>
+            <th>State</th>
+            <th>Captured</th>
+            <th>Review</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td><a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a></td>
+              <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
+              <td>
+                <strong>{{ entry.name }}</strong>
+                {% if entry.identifier %}
+                  <p class="subtle table-note">{{ entry.identifier }}</p>
+                {% endif %}
+              </td>
+              <td>{{ entry.current_version or "-" }} → {{ entry.target_version or "Not reported" }}</td>
+              <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
+              <td>{{ entry.captured_at }}</td>
+              <td>{{ entry.review_note }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="7">No updates match the selected filters.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
