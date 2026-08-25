@@ -4,6 +4,9 @@ namespace KosmosBridge\Abilities;
 defined( 'ABSPATH' ) || exit;
 
 class Registry {
+	const UPDATE_LOOPBACK_ACTION = 'kosmos_bridge_collect_update_inventory';
+	const UPDATE_LOOPBACK_TTL    = 60;
+
 	/**
 	 * @return void
 	 */
@@ -155,6 +158,40 @@ class Registry {
 	 * @return array
 	 */
 	public static function execute_get_available_updates() {
+		if ( is_admin() ) {
+			return self::collect_available_updates( 'admin' );
+		}
+
+		$admin_payload = self::request_admin_update_inventory();
+		if ( is_array( $admin_payload ) ) {
+			return $admin_payload;
+		}
+
+		return self::collect_available_updates( 'standard_fallback' );
+	}
+
+	/**
+	 * Handle the one-time, same-site admin loopback used for update providers
+	 * that only register their offers during WordPress admin bootstrap.
+	 *
+	 * @return void
+	 */
+	public static function handle_admin_update_loopback() {
+		$token = isset( $_POST['token'] ) ? (string) wp_unslash( $_POST['token'] ) : '';
+		if ( ! self::consume_loopback_token( $token ) ) {
+			wp_send_json_error( array( 'code' => 'kosmos_bridge_loopback_forbidden' ), 403 );
+		}
+
+		wp_send_json_success( self::collect_available_updates( 'admin_loopback' ) );
+	}
+
+	/**
+	 * Read the WordPress update state without installing or downloading updates.
+	 *
+	 * @param string $check_mode Source context for this update inventory.
+	 * @return array
+	 */
+	private static function collect_available_updates( $check_mode ) {
 		global $wp_version;
 
 		if ( ! function_exists( 'get_plugins' ) ) {
@@ -236,7 +273,7 @@ class Registry {
 
 		return array(
 			'reported_at' => gmdate( 'c' ),
-			'check_mode'  => 'fresh',
+			'check_mode'  => $check_mode,
 			'wordpress'   => array( 'updates' => $wordpress_updates ),
 			'plugins'     => array( 'updates' => $plugin_updates ),
 			'themes'      => array( 'updates' => $theme_updates ),
@@ -522,6 +559,76 @@ class Registry {
 		}
 
 		return '';
+	}
+
+	/**
+	 * Run the same inventory inside admin-ajax so admin-only update providers
+	 * can attach their standard WordPress update offers.
+	 *
+	 * @return array|null
+	 */
+	private static function request_admin_update_inventory() {
+		$token = self::generate_loopback_token();
+		set_transient( self::loopback_token_key( $token ), hash( 'sha256', $token ), self::UPDATE_LOOPBACK_TTL );
+
+		$response = wp_remote_post(
+			admin_url( 'admin-ajax.php' ),
+			array(
+				'timeout'     => 30,
+				'redirection' => 0,
+				'body'        => array(
+					'action' => self::UPDATE_LOOPBACK_ACTION,
+					'token'  => $token,
+				),
+			)
+		);
+		delete_transient( self::loopback_token_key( $token ) );
+
+		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+			return null;
+		}
+
+		$payload = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $payload ) || empty( $payload['success'] ) || ! isset( $payload['data'] ) || ! is_array( $payload['data'] ) ) {
+			return null;
+		}
+
+		return $payload['data'];
+	}
+
+	/**
+	 * @param string $token One-time loopback token.
+	 * @return bool
+	 */
+	private static function consume_loopback_token( $token ) {
+		if ( '' === $token ) {
+			return false;
+		}
+
+		$key      = self::loopback_token_key( $token );
+		$expected = get_transient( $key );
+		delete_transient( $key );
+
+		return is_string( $expected ) && hash_equals( $expected, hash( 'sha256', $token ) );
+	}
+
+	/**
+	 * @return string
+	 */
+	private static function generate_loopback_token() {
+		try {
+			return bin2hex( random_bytes( 32 ) );
+		} catch ( \Exception $exception ) {
+			return wp_generate_password( 64, false, false );
+		}
+	}
+
+	/**
+	 * @param string $token One-time loopback token.
+	 * @return string
+	 */
+	private static function loopback_token_key( $token ) {
+		return 'kosmos_bridge_update_loopback_' . hash( 'sha256', $token );
 	}
 
 	/**
