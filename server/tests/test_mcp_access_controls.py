@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
+from app.mcp_server import MCP_ALLOWED_HOSTS
 from app.models.hub_user import HubUser
 from app.services.hub_accounts import HubAccountService, hash_password
 from app.services.site_mcp_proxy import SiteMcpProxyService
@@ -41,3 +42,7 @@ def test_only_explicit_readonly_abilities_can_use_the_generic_execution_path():
     assert SiteMcpProxyService._ability_is_readonly(readonly) is True
     assert SiteMcpProxyService._ability_is_readonly(mutation) is False
     assert SiteMcpProxyService._ability_is_readonly({}) is False
+
+
+def test_mcp_allows_the_public_hub_host_without_a_port():
+    assert "kosmos-hub.31-70-92-95.sslip.io" in MCP_ALLOWED_HOSTS

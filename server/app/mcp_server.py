@@ -26,6 +26,21 @@ from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 from app.services.site_updates import SiteUpdateService
 from app.services.update_plans import UpdatePlanService
 
+MCP_ALLOWED_HOSTS = (
+    "localhost",
+    "localhost:*",
+    "127.0.0.1",
+    "127.0.0.1:*",
+    "kosmos-hub.31-70-92-95.sslip.io",
+    "kosmos-hub.31-70-92-95.sslip.io:*",
+)
+
+MCP_ALLOWED_ORIGINS = (
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+    "https://kosmos-hub.31-70-92-95.sslip.io",
+)
+
 hub_mcp = MCPServer(
     "kosmos-hub",
 )
@@ -34,16 +49,8 @@ mcp_asgi_app = hub_mcp.streamable_http_app(
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[
-            "localhost:*",
-            "127.0.0.1:*",
-            "kosmos-hub.31-70-92-95.sslip.io:*",
-        ],
-        allowed_origins=[
-            "http://localhost:*",
-            "http://127.0.0.1:*",
-            "https://kosmos-hub.31-70-92-95.sslip.io",
-        ],
+        allowed_hosts=list(MCP_ALLOWED_HOSTS),
+        allowed_origins=list(MCP_ALLOWED_ORIGINS),
     ),
 )
 
