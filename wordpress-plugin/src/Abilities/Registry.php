@@ -169,7 +169,9 @@ class Registry {
 		$plugin_updates             = array();
 		$theme_updates              = array();
 
-		foreach ( (array) get_site_transient( 'update_core' ) as $update ) {
+		$core_transient = self::to_array( get_site_transient( 'update_core' ) );
+		$core_offers    = isset( $core_transient['updates'] ) ? (array) $core_transient['updates'] : array();
+		foreach ( $core_offers as $update ) {
 			$data    = self::to_array( $update );
 			$version = isset( $data['version'] ) ? (string) $data['version'] : '';
 
