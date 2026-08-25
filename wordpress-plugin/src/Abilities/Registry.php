@@ -202,7 +202,7 @@ class Registry {
 			$data        = self::to_array( $update );
 			$resolved_file = isset( $data['plugin'] ) ? (string) $data['plugin'] : (string) $plugin_file;
 			$plugin_data = isset( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : array();
-			$new_version = isset( $data['new_version'] ) ? (string) $data['new_version'] : '';
+			$new_version = self::get_update_version( $data );
 
 			if ( '' === $new_version ) {
 				continue;
@@ -505,6 +505,24 @@ class Registry {
 		}
 
 		return version_compare( $candidate['new_version'], $current['new_version'], '>' );
+	}
+
+	/**
+	 * WordPress.org uses new_version, while some trusted third-party updaters
+	 * use version for the same update offer.
+	 *
+	 * @param array $data Update response data.
+	 * @return string
+	 */
+	private static function get_update_version( $data ) {
+		foreach ( array( 'new_version', 'version' ) as $key ) {
+			$version = isset( $data[ $key ] ) ? trim( (string) $data[ $key ] ) : '';
+			if ( '' !== $version ) {
+				return $version;
+			}
+		}
+
+		return '';
 	}
 
 	/**
