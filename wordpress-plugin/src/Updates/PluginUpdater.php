@@ -9,9 +9,10 @@ defined( 'ABSPATH' ) || exit;
  * Supplies WordPress with trusted update metadata from the Kosmos endpoint.
  */
 class PluginUpdater {
-	const PLUGIN_SLUG      = 'kosmos-bridge';
-	const DEFAULT_HOMEPAGE = 'https://kosmos-hub.31-70-92-95.sslip.io';
-	const METADATA_URL     = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
+	const PLUGIN_SLUG        = 'kosmos-bridge';
+	const UPDATE_HOST        = 'plugins.kosmos-medien.de';
+	const DEFAULT_HOMEPAGE   = 'https://kosmos-hub.31-70-92-95.sslip.io';
+	const METADATA_URL       = 'https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json';
 	const METADATA_CACHE_KEY = 'kosmos_bridge_update_metadata_v1';
 	const METADATA_CACHE_TTL = 900;
 
@@ -26,6 +27,8 @@ class PluginUpdater {
 	public static function boot() {
 		$instance = new self();
 
+		// Native WordPress provider hook for the plugin header's Update URI.
+		add_filter( 'update_plugins_' . self::UPDATE_HOST, array( $instance, 'provide_wordpress_update' ), 10, 4 );
 		add_filter( 'pre_set_site_transient_update_plugins', array( $instance, 'inject_update' ) );
 		add_filter( 'site_transient_update_plugins', array( $instance, 'inject_stored_update' ) );
 		add_filter( 'plugins_api', array( $instance, 'get_plugin_information' ), 20, 3 );
@@ -48,22 +51,72 @@ class PluginUpdater {
 	 * @return mixed
 	 */
 	public function inject_stored_update( $transient ) {
-		return $this->apply_update_metadata( $transient, false );
+		return $this->apply_update_metadata( $transient, false, true );
+	}
+
+	/**
+	 * Provide the update data through WordPress' dedicated Update URI hook.
+	 * This is used whenever WordPress rebuilds the plugin update transient.
+	 *
+	 * @param mixed  $update Existing provider response.
+	 * @param array  $plugin_data Plugin header data.
+	 * @param string $plugin_file Plugin basename.
+	 * @param array  $locales Installed locales.
+	 * @return mixed
+	 */
+	public function provide_wordpress_update( $update, $plugin_data, $plugin_file, $locales ) {
+		$expected_plugin_file = plugin_basename( KOSMOS_BRIDGE_PLUGIN_FILE );
+		if ( $expected_plugin_file !== (string) $plugin_file ) {
+			return $update;
+		}
+
+		$metadata        = $this->get_metadata( true );
+		$current_version = isset( $plugin_data['Version'] ) ? (string) $plugin_data['Version'] : Options::get_bridge_version();
+
+		if ( empty( $metadata ) || version_compare( (string) $metadata['version'], $current_version, '<=' ) ) {
+			return false;
+		}
+
+		return $this->build_update_offer( $metadata, $expected_plugin_file );
 	}
 
 	/**
 	 * @param mixed $transient Plugin update transient.
 	 * @param bool  $force_metadata_refresh Whether to bypass the short metadata cache.
+	 * @param bool  $bootstrap_missing_state Whether to rebuild the minimum state
+	 *                                       needed by WordPress' updater.
 	 * @return mixed
 	 */
-	private function apply_update_metadata( $transient, $force_metadata_refresh ) {
-		if ( ! is_object( $transient ) || empty( $transient->checked ) || ! is_array( $transient->checked ) ) {
-			return $transient;
+	private function apply_update_metadata( $transient, $force_metadata_refresh, $bootstrap_missing_state = false ) {
+		if ( ! is_object( $transient ) ) {
+			if ( ! $bootstrap_missing_state ) {
+				return $transient;
+			}
+
+			$transient = new \stdClass();
 		}
 
 		$plugin_file = plugin_basename( KOSMOS_BRIDGE_PLUGIN_FILE );
 
+		if ( ! isset( $transient->checked ) || ! is_array( $transient->checked ) ) {
+			if ( ! $bootstrap_missing_state ) {
+				return $transient;
+			}
+
+			$transient->checked = array();
+		}
+
 		if ( ! array_key_exists( $plugin_file, $transient->checked ) ) {
+			if ( ! $bootstrap_missing_state ) {
+				return $transient;
+			}
+
+			// The update screen can clear this transient just before the upgrader
+			// reads it. The loaded Bridge version is sufficient for this one offer.
+			$transient->checked[ $plugin_file ] = Options::get_bridge_version();
+		}
+
+		if ( empty( $transient->checked ) ) {
 			return $transient;
 		}
 
@@ -78,10 +131,22 @@ class PluginUpdater {
 			$transient->response = array();
 		}
 
-		$transient->response[ $plugin_file ] = (object) array(
+		$transient->response[ $plugin_file ] = $this->build_update_offer( $metadata, $plugin_file );
+
+		return $transient;
+	}
+
+	/**
+	 * @param array<string, mixed> $metadata Validated update metadata.
+	 * @param string               $plugin_file Plugin basename.
+	 * @return object
+	 */
+	private function build_update_offer( array $metadata, $plugin_file ) {
+		return (object) array(
 			'id'           => self::METADATA_URL,
 			'slug'         => self::PLUGIN_SLUG,
 			'plugin'       => $plugin_file,
+			'version'      => (string) $metadata['version'],
 			'new_version'  => (string) $metadata['version'],
 			'url'          => (string) $metadata['homepage'],
 			'package'      => (string) $metadata['download_url'],
@@ -89,8 +154,6 @@ class PluginUpdater {
 			'requires'     => (string) $metadata['requires'],
 			'requires_php' => (string) $metadata['requires_php'],
 		);
-
-		return $transient;
 	}
 
 	/**
