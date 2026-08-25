@@ -196,17 +196,13 @@ class Registry {
 			$wordpress_updates[] = $preferred_core_update;
 		}
 
-		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
-		$plugin_responses = isset( $plugin_transient['response'] ) ? self::to_array( $plugin_transient['response'] ) : array();
-		foreach ( $plugin_responses as $plugin_file => $update ) {
-			$data        = self::to_array( $update );
+		$native_plugin_updates = function_exists( 'get_plugin_updates' ) ? get_plugin_updates() : array();
+		foreach ( $native_plugin_updates as $plugin_file => $plugin ) {
+			$plugin_record = self::to_array( $plugin );
+			$data          = isset( $plugin_record['update'] ) ? self::to_array( $plugin_record['update'] ) : array();
 			$resolved_file = isset( $data['plugin'] ) ? (string) $data['plugin'] : (string) $plugin_file;
-			$plugin_data = isset( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : array();
-			$new_version = self::get_update_version( $data );
-
-			if ( '' === $new_version ) {
-				continue;
-			}
+			$plugin_data   = isset( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : $plugin_record;
+			$new_version   = self::get_update_version( $data );
 
 			$plugin_updates[] = array(
 				'plugin_file'     => $resolved_file,
