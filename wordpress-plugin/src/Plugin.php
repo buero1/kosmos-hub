@@ -32,6 +32,7 @@ class Plugin {
 
 		add_action( 'plugins_loaded', array( self::class, 'ensure_identity' ) );
 		add_action( 'plugins_loaded', array( PluginUpdater::class, 'boot' ) );
+		add_filter( 'pre_set_site_transient_update_plugins', array( AbilityRegistry::class, 'capture_plugin_update_offers' ), PHP_INT_MAX );
 		add_action( 'init', array( self::class, 'maybe_retry_registration' ) );
 		add_action( 'wp_abilities_api_categories_init', array( AbilityRegistry::class, 'register_categories' ) );
 		add_action( 'wp_abilities_api_init', array( AbilityRegistry::class, 'register_abilities' ) );

@@ -6,6 +6,8 @@ defined( 'ABSPATH' ) || exit;
 class Registry {
 	const UPDATE_LOOPBACK_ACTION = 'kosmos_bridge_collect_update_inventory';
 	const UPDATE_LOOPBACK_TTL    = 60;
+	const UPDATE_OFFER_CACHE_OPTION = 'kosmos_bridge_plugin_update_offers_v1';
+	const UPDATE_OFFER_CACHE_TTL    = 172800;
 
 	/**
 	 * @return void
@@ -250,6 +252,40 @@ class Registry {
 		}
 
 		return self::collect_available_updates( 'standard_fallback' );
+	}
+
+	/**
+	 * Remember offers contributed through WordPress' shared plugin updater
+	 * transient. Vendor updaters often contribute only during normal admin
+	 * requests, while a later Hub refresh may only receive WordPress.org data.
+	 *
+	 * @param mixed $transient Plugin update transient before WordPress stores it.
+	 * @return mixed
+	 */
+	public static function capture_plugin_update_offers( $transient ) {
+		$transient_data = self::to_array( $transient );
+		$responses      = isset( $transient_data['response'] ) ? self::to_array( $transient_data['response'] ) : array();
+		$cached_entries = self::get_cached_plugin_update_entries();
+		$now            = time();
+		$changed        = false;
+
+		foreach ( $responses as $plugin_file => $offer ) {
+			if ( '' === self::get_update_version( self::to_array( $offer ) ) ) {
+				continue;
+			}
+
+			$cached_entries[ (string) $plugin_file ] = array(
+				'captured_at' => $now,
+				'offer'       => $offer,
+			);
+			$changed = true;
+		}
+
+		if ( $changed ) {
+			update_option( self::UPDATE_OFFER_CACHE_OPTION, $cached_entries, false );
+		}
+
+		return $transient;
 	}
 
 	/**
@@ -840,7 +876,52 @@ class Registry {
 		wp_update_themes();
 
 		self::restore_missing_plugin_update_responses( $previous_plugin_updates, $plugins );
+		self::restore_missing_plugin_update_responses(
+			array( 'response' => self::get_cached_plugin_update_offers() ),
+			$plugins,
+			true
+		);
 		self::restore_missing_theme_update_responses( $previous_theme_updates );
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function get_cached_plugin_update_offers() {
+		$offers = array();
+
+		foreach ( self::get_cached_plugin_update_entries() as $plugin_file => $entry ) {
+			if ( isset( $entry['offer'] ) ) {
+				$offers[ $plugin_file ] = $entry['offer'];
+			}
+		}
+
+		return $offers;
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function get_cached_plugin_update_entries() {
+		$stored = get_option( self::UPDATE_OFFER_CACHE_OPTION, array() );
+		$stored = is_array( $stored ) ? $stored : array();
+		$now    = time();
+		$valid  = array();
+
+		foreach ( $stored as $plugin_file => $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+
+			$captured_at = isset( $entry['captured_at'] ) ? (int) $entry['captured_at'] : 0;
+			if ( $captured_at < ( $now - self::UPDATE_OFFER_CACHE_TTL ) || ! isset( $entry['offer'] ) ) {
+				continue;
+			}
+
+			$valid[ (string) $plugin_file ] = $entry;
+		}
+
+		return $valid;
 	}
 
 	/**
@@ -849,9 +930,11 @@ class Registry {
 	 *
 	 * @param array $previous_transient Update transient before the refresh.
 	 * @param array $plugins Installed plugin metadata keyed by plugin file.
+	 * @param bool  $prefer_cached_offer Whether a valid vendor cache may take
+	 *                                   precedence over WordPress.org no-update data.
 	 * @return void
 	 */
-	private static function restore_missing_plugin_update_responses( $previous_transient, $plugins ) {
+	private static function restore_missing_plugin_update_responses( $previous_transient, $plugins, $prefer_cached_offer = false ) {
 		$previous_responses = isset( $previous_transient['response'] ) ? self::to_array( $previous_transient['response'] ) : array();
 		$current            = get_site_transient( 'update_plugins' );
 		$current_data       = self::to_array( $current );
@@ -876,7 +959,7 @@ class Registry {
 				'' === $installed ||
 				! version_compare( $new_version, $installed, '>' ) ||
 				array_key_exists( $resolved_file, $current_responses ) ||
-				array_key_exists( $resolved_file, $current_no_update )
+				( ! $prefer_cached_offer && array_key_exists( $resolved_file, $current_no_update ) )
 			) {
 				continue;
 			}
