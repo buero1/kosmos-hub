@@ -235,7 +235,7 @@ class MaintenanceRunService:
                     "current_version": entry.current_version,
                     "target_version": entry.target_version,
                     "stage": "queued",
-                    "stage_message": "Queued for direct update after a fresh backup and update preflight.",
+                    "stage_message": "Queued for direct update after a fresh selected-update preflight.",
                 },
             )
             run.steps.extend(
@@ -244,7 +244,7 @@ class MaintenanceRunService:
                         step_key="preflight",
                         status=MaintenanceRunStepStatus.waiting.value,
                         started_at=now,
-                        detail="Waiting for a fresh protected-backup and update check.",
+                        detail="Waiting for a fresh selected-update check.",
                         result_json={},
                     ),
                     MaintenanceRunStep(
@@ -288,7 +288,7 @@ class MaintenanceRunService:
             run_count=len(runs),
             message=(
                 f"Queued {len(runs)} direct plugin update{'s' if len(runs) != 1 else ''}. "
-                "Each update will verify the current protected backup and run a health check afterwards."
+                "Each update will verify the selected version and run a health check afterwards."
             ),
         )
 
@@ -350,9 +350,8 @@ class MaintenanceRunService:
             return "failed"
 
         preflight_step = self._find_step(run, "preflight")
-        self._start_plugin_update_step(run, preflight_step, "Refreshing protected-backup and available-update evidence.")
+        self._start_plugin_update_step(run, preflight_step, "Refreshing available-update evidence.")
         try:
-            SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(run.site_id)
             SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
         except SiteMcpProxyError as exc:
             self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
@@ -365,7 +364,7 @@ class MaintenanceRunService:
         self._complete_plugin_update_step(
             run,
             preflight_step,
-            "Fresh protected-backup and selected plugin update checks passed.",
+            "Fresh selected plugin update checks passed.",
         )
 
         update_step = self._find_step(run, "update-plugin")
@@ -491,8 +490,7 @@ class MaintenanceRunService:
         if scope_error:
             return scope_error
 
-        snapshot = self.repository.get_latest_backup_snapshots_by_site_ids([run.site_id]).get(run.site_id)
-        return self._direct_backup_preflight_error(snapshot)
+        return None
 
     @staticmethod
     def _direct_plugin_update_scope_error(entry: UpdateWorkbenchEntry) -> str | None:
@@ -504,25 +502,6 @@ class MaintenanceRunService:
             return f"{entry.name} does not have a valid WordPress plugin file."
         if not entry.current_version or not entry.target_version:
             return f"{entry.name} does not report both the installed and target version."
-        return None
-
-    @staticmethod
-    def _direct_backup_preflight_error(snapshot: object) -> str | None:
-        if snapshot is None:
-            return "Direct update blocked: no current backup check is available."
-        if not getattr(snapshot, "provider_installed", False):
-            return "Direct update blocked: no backup provider is installed."
-        if not getattr(snapshot, "provider_active", False):
-            return "Direct update blocked: the backup provider is inactive."
-        backup_at = getattr(snapshot, "backup_at", None)
-        if not getattr(snapshot, "backup_available", False) or not getattr(snapshot, "backup_complete", False) or backup_at is None:
-            return "Direct update blocked: no complete backup is available."
-        summary = getattr(snapshot, "summary_json", {}) or {}
-        if not isinstance(summary, dict) or summary.get("retention_protected") is not True:
-            return "Direct update blocked: the latest complete backup is not protected from automatic deletion."
-        normalized_backup_at = MaintenanceRunService._as_utc(backup_at)
-        if normalized_backup_at < datetime.now(UTC) - timedelta(days=7):
-            return "Direct update blocked: the latest protected backup is older than seven days."
         return None
 
     @staticmethod

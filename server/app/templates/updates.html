@@ -6,7 +6,7 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update workbench</h2>
-        <p class="subtle">Select active plugin updates and start one protected, fully logged maintenance run. WordPress core, themes and inactive plugins remain review-only for now.</p>
+        <p class="subtle">Select active plugin updates and start one fully logged maintenance run. WordPress core, themes and inactive plugins remain review-only for now.</p>
       </div>
       <div class="inventory-totals">
         <span><strong>{{ summary.total }}</strong> updates</span>
@@ -49,7 +49,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div>
         <p class="eyebrow">Run selected updates</p>
-        <p class="subtle">Before every update, the Hub refreshes the protected-backup and update evidence. It verifies the exact installed version and active state, checks homepage and REST API, and stops the remaining selection if anything fails.</p>
+        <p class="subtle">Before every update, the Hub refreshes the update evidence and verifies the exact installed version and active state. Afterwards it checks homepage and REST API, and stops the remaining selection if anything fails.</p>
       </div>
       <button class="button" type="submit">Run selected plugin updates</button>
     </form>
