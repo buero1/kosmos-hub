@@ -1,9 +1,11 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.db.base import Base
-from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStatus
+from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStatus, MaintenanceRunStep, MaintenanceRunStepStatus
 from app.models.site import Site, SiteStatus
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.site_mcp_proxy import SiteMcpProxyService
@@ -199,6 +201,21 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
                 }
             }
 
+        if ability_name == "kosmos-bridge/verify-updraftplus-backup-deletion":
+            assert ability_input == {
+                "backup_nonce": old_complete_nonce,
+                "backup_timestamp": 1700000000,
+            }
+            return {
+                "result": {
+                    "backup_nonce": old_complete_nonce,
+                    "backup_timestamp": 1700000000,
+                    "verified": True,
+                    "remaining_components": [],
+                    "message": "UpdraftPlus remote rescan confirmed that the requested backup set is no longer present.",
+                }
+            }
+
         assert ability_name == "kosmos-bridge/list-updraftplus-backups"
         assert ability_input == {}
         return {
@@ -268,10 +285,12 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
 
         service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
         started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
-        summary = service.poll_active_updraftplus_backups()
+        first_poll = service.poll_active_updraftplus_backups()
+        second_poll = service.poll_active_updraftplus_backups()
         verified = db.get(MaintenanceRun, started.run.id)
 
-        assert summary == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
+        assert first_poll == {"checked": 1, "succeeded": 0, "failed": 0, "waiting": 1}
+        assert second_poll == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
         assert deleted_inputs == [
             {
                 "backup_nonce": old_complete_nonce,
@@ -294,8 +313,75 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
             "backup_sets_removed": 1,
             "local_files_deleted": 5,
             "remote_files_deleted": 5,
-            "message": "UpdraftPlus deleted the requested backup locally and from the configured remote storage.",
+            "message": "UpdraftPlus remote rescan confirmed that the requested backup set is no longer present.",
+            "remote_deletion_verified": True,
         }
+
+
+def test_remote_deletion_verification_fails_when_components_remain(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "b1b2c3d4e5f6"
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert site_id == 1
+        assert ability_name == "kosmos-bridge/verify-updraftplus-backup-deletion"
+        assert ability_input == {"backup_nonce": backup_nonce, "backup_timestamp": 1700000000}
+        return {
+            "result": {
+                "backup_nonce": backup_nonce,
+                "backup_timestamp": 1700000000,
+                "verified": False,
+                "remaining_components": ["database", "themes", "uploads", "others"],
+                "message": "UpdraftPlus remote rescan still found files from the requested backup set.",
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="29ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        run = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.UPDRAFT_BACKUP_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by="operator",
+            bridge_backup_nonce="a1b2c3d4e5f6",
+            started_at=datetime.now(UTC),
+            result_json={},
+        )
+        cleanup = {
+            "status": "verifying",
+            "backup_nonce": backup_nonce,
+            "backup_timestamp": 1700000000,
+            "backup_at": "2023-11-14T22:13:20+00:00",
+            "message": "UpdraftPlus reported deletion.",
+        }
+        cleanup_step = MaintenanceRunStep(
+            run=run,
+            step_key="prune-oldest-backup",
+            status=MaintenanceRunStepStatus.running.value,
+            started_at=datetime.now(UTC),
+            detail=cleanup["message"],
+            result_json=cleanup,
+        )
+        run.result_json = {"cleanup": cleanup}
+        db.add_all((site, run, cleanup_step))
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        result = service._verify_updraftplus_backup_cleanup(run, cleanup_step, cleanup)
+
+        assert result == "failed"
+        assert run.status == MaintenanceRunStatus.failed.value
+        assert cleanup_step.status == MaintenanceRunStepStatus.failed.value
+        assert "database, themes, uploads, others" in (run.error_message or "")
 
 
 def test_unprotected_completed_backup_run_fails(monkeypatch):

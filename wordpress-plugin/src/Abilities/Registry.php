@@ -150,6 +150,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/verify-updraftplus-backup-deletion',
+			array(
+				'label'               => __( 'Verify UpdraftPlus Backup Deletion', 'kosmos-bridge' ),
+				'description'         => __( 'Rescans configured remote storage and confirms whether one exact UpdraftPlus backup set is gone. It does not delete backup files.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::updraftplus_backup_deletion_verification_input_schema(),
+				'output_schema'       => self::updraftplus_backup_deletion_verification_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_verify_updraftplus_backup_deletion' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/check-site-health',
 			array(
 				'label'               => __( 'Check Site Health', 'kosmos-bridge' ),
@@ -595,6 +609,77 @@ class Registry {
 		}
 
 		return self::updraftplus_backup_delete_result( $nonce, $timestamp, $deletion );
+	}
+
+	/**
+	 * Confirm a deletion by rebuilding UpdraftPlus' backup history from the
+	 * configured remote storage. A provider acknowledgement alone is not proof
+	 * that every remote archive from a set was removed.
+	 *
+	 * @param mixed $input Exact backup identity.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_verify_updraftplus_backup_deletion( $input = array() ) {
+		$nonce     = self::get_input_string( $input, 'backup_nonce' );
+		$timestamp = self::get_updraftplus_backup_timestamp_input( $input );
+
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) || $timestamp <= 0 ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_updraftplus_backup_deletion_verification_input',
+				'Backup nonce and backup timestamp are required for deletion verification.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$availability = self::get_updraftplus_availability();
+		if ( ! $availability['installed'] || ! $availability['active'] || ! class_exists( 'UpdraftPlus_Backup_History', false ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_unavailable',
+				'UpdraftPlus must be installed, active, and initialized before backup deletion can be verified.',
+				array( 'status' => 409 )
+			);
+		}
+
+		try {
+			$diagnostics = \UpdraftPlus_Backup_History::rebuild( true );
+			$history     = \UpdraftPlus_Backup_History::get_history();
+			$history     = is_array( $history ) ? $history : array();
+			$remaining   = self::find_updraftplus_backup_by_nonce( $history, $nonce );
+		} catch ( \Throwable $exception ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_remote_rescan_failed',
+				'UpdraftPlus could not rescan remote storage after the backup deletion: ' . $exception->getMessage(),
+				array( 'status' => 502 )
+			);
+		}
+
+		if ( ! empty( $diagnostics ) ) {
+			return array(
+				'backup_nonce'         => $nonce,
+				'backup_timestamp'     => $timestamp,
+				'verified'             => false,
+				'remaining_components' => empty( $remaining ) ? array() : self::get_updraftplus_backup_components( $remaining ),
+				'message'              => 'UpdraftPlus remote rescan returned diagnostics, so complete backup deletion cannot be verified.',
+			);
+		}
+
+		if ( empty( $remaining ) ) {
+			return array(
+				'backup_nonce'         => $nonce,
+				'backup_timestamp'     => $timestamp,
+				'verified'             => true,
+				'remaining_components' => array(),
+				'message'              => 'UpdraftPlus remote rescan confirmed that the requested backup set is no longer present.',
+			);
+		}
+
+		return array(
+			'backup_nonce'         => $nonce,
+			'backup_timestamp'     => $timestamp,
+			'verified'             => false,
+			'remaining_components' => self::get_updraftplus_backup_components( $remaining ),
+			'message'              => 'UpdraftPlus remote rescan still found files from the requested backup set.',
+		);
 	}
 
 	/**
@@ -1236,6 +1321,15 @@ class Registry {
 				'meta'          => self::destructive_mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/verify-updraftplus-backup-deletion',
+				'label'         => __( 'Verify UpdraftPlus Backup Deletion', 'kosmos-bridge' ),
+				'description'   => __( 'Rescans configured remote storage and confirms whether one exact UpdraftPlus backup set is gone. It does not delete backup files.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::updraftplus_backup_deletion_verification_input_schema(),
+				'output_schema' => self::updraftplus_backup_deletion_verification_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/check-site-health',
 				'label'         => __( 'Check Site Health', 'kosmos-bridge' ),
 				'description'   => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
@@ -1290,6 +1384,9 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/delete-updraftplus-backup' === $ability_name ) {
 			return self::execute_delete_updraftplus_backup( $input );
+		}
+		if ( 'kosmos-bridge/verify-updraftplus-backup-deletion' === $ability_name ) {
+			return self::execute_verify_updraftplus_backup_deletion( $input );
 		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
@@ -1735,6 +1832,37 @@ class Registry {
 				'message'                => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'status', 'completed', 'backup_sets_removed', 'local_files_deleted', 'remote_files_deleted', 'processed_instance_ids', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_deletion_verification_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce'     => array( 'type' => 'string' ),
+				'backup_timestamp' => array( 'type' => 'integer' ),
+			),
+			'required'   => array( 'backup_nonce', 'backup_timestamp' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_deletion_verification_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce'         => array( 'type' => 'string' ),
+				'backup_timestamp'     => array( 'type' => 'integer' ),
+				'verified'             => array( 'type' => 'boolean' ),
+				'remaining_components' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'message'              => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'verified', 'remaining_components', 'message' ),
 		);
 	}
 

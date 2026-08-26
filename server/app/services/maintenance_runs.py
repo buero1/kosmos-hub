@@ -34,6 +34,7 @@ class MaintenanceRunService:
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
+    VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
     START_BACKUP_TIMEOUT_SECONDS = 20
     BACKUP_TIMEOUT = timedelta(minutes=3)
 
@@ -283,6 +284,8 @@ class MaintenanceRunService:
             self.db.flush()
 
         cleanup = self._cleanup_result(run)
+        if cleanup.get("status") == "verifying":
+            return self._verify_updraftplus_backup_cleanup(run, cleanup_step, cleanup)
         if cleanup.get("status") in {"completed", "skipped"}:
             return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
 
@@ -362,9 +365,51 @@ class MaintenanceRunService:
             self._mark_waiting(run, cleanup_step, cleanup["message"])
             return "waiting"
         if cleanup["status"] == "completed" and result.get("completed") is True:
-            return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
+            cleanup["status"] = "verifying"
+            cleanup["message"] = "UpdraftPlus reported deletion. The Hub is rescanning configured remote storage before confirming completion."
+            self._store_cleanup_result(run, cleanup_step, cleanup)
+            self._mark_waiting(run, cleanup_step, cleanup["message"])
+            return "waiting"
 
         self._fail_run(run, actor="kosmos-hub", message=cleanup["message"])
+        return "failed"
+
+    def _verify_updraftplus_backup_cleanup(
+        self,
+        run: MaintenanceRun,
+        cleanup_step: MaintenanceRunStep,
+        cleanup: dict[str, Any],
+    ) -> str:
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                run.site_id,
+                self.VERIFY_BACKUP_DELETION_ABILITY,
+                {
+                    "backup_nonce": cleanup["backup_nonce"],
+                    "backup_timestamp": cleanup["backup_timestamp"],
+                },
+                timeout_seconds=30,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not be verified against remote storage: {exc.message}")
+            return "failed"
+
+        result = self._result_from_payload(payload)
+        message = self._safe_message(result.get("message"), "UpdraftPlus did not return a remote deletion verification result.")
+        if result.get("verified") is True:
+            cleanup = {
+                **cleanup,
+                "status": "completed",
+                "message": message,
+                "remote_deletion_verified": True,
+            }
+            self._store_cleanup_result(run, cleanup_step, cleanup)
+            return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
+
+        remaining_components = result.get("remaining_components")
+        components = ", ".join(component for component in remaining_components if isinstance(component, str)) if isinstance(remaining_components, list) else ""
+        detail = f" Remaining components: {components}." if components else ""
+        self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup was not confirmed by the UpdraftPlus remote rescan: {message}{detail}")
         return "failed"
 
     def _complete_run_after_cleanup(
