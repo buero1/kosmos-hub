@@ -1,4 +1,4 @@
-from threading import Lock
+from threading import Lock, Thread
 
 from app.core.security import get_secret_cipher
 from app.db.session import SessionLocal
@@ -20,3 +20,12 @@ def process_pending_direct_updates() -> dict[str, int]:
             return service.poll_active_plugin_updates(limit=25)
     finally:
         _direct_update_poll_lock.release()
+
+
+def schedule_pending_direct_updates() -> None:
+    """Start processing without holding the originating web request open."""
+    Thread(
+        target=process_pending_direct_updates,
+        name="kosmos-direct-update-worker",
+        daemon=True,
+    ).start()
