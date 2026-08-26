@@ -27,9 +27,6 @@
     {% if request.query_params.get("crocoblock") == "removed" %}
       <p class="notice-success">The centrally stored Crocoblock license was removed.</p>
     {% endif %}
-    {% if request.query_params.get("crocoblock") == "activated" %}
-      <p class="notice-success">Crocoblock activation finished: {{ request.query_params.get("activated", "0") }} activated, {{ request.query_params.get("failed", "0") }} failed, {{ request.query_params.get("skipped", "0") }} skipped. Successful sites refreshed their update offers.</p>
-    {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -128,10 +125,10 @@
         <p class="eyebrow">Update provider</p>
         <h3>Crocoblock licenses</h3>
         {% if crocoblock_config and crocoblock_config.enabled %}
-          <p class="subtle">A shared Crocoblock license is stored encrypted. The Hub activates it on every verified, inventoried website with an active Jet plugin. Last activation: {{ crocoblock_config.last_used_at or "Never" }}.</p>
-          {% if crocoblock_config.last_error %}<p class="notice-error">Last activation error: {{ crocoblock_config.last_error }}</p>{% endif %}
+          <p class="subtle">A shared Crocoblock license is stored encrypted. The Hub uses it automatically only when a Jet update needs an authorized package. Last use: {{ crocoblock_config.last_used_at or "Never" }}.</p>
+          {% if crocoblock_config.last_error %}<p class="notice-error">Last automatic-use error: {{ crocoblock_config.last_error }}</p>{% endif %}
         {% else %}
-          <p class="subtle">Save the shared Crocoblock license once, then activate it centrally on every matching managed website.</p>
+          <p class="subtle">Save the shared Crocoblock license once. The Hub uses it automatically when a Jet update needs it.</p>
         {% endif %}
       </div>
       <form method="post" action="/account/crocoblock">
@@ -144,11 +141,6 @@
         <button class="button" type="submit">Save Crocoblock license</button>
       </form>
       {% if crocoblock_config %}
-        <form method="post" action="/account/crocoblock/activate">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <p class="subtle">This activates the saved license on all matching managed websites. It does not update plugins; the Hub refreshes only the available update offers afterwards.</p>
-          <button class="button" type="submit">Activate Crocoblock on all matching sites</button>
-        </form>
         <form method="post" action="/account/crocoblock/remove">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="button button-secondary" type="submit">Remove Crocoblock license</button>

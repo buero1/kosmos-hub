@@ -351,36 +351,6 @@ def remove_crocoblock(
     return RedirectResponse(url="/account?crocoblock=removed", status_code=303)
 
 
-@router.post("/crocoblock/activate")
-def activate_crocoblock(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_current_user(request)
-    service = CrocoblockLicenseService(db=db, cipher=get_secret_cipher())
-    try:
-        outcome = service.activate_for_matching_sites(actor=user)
-    except CrocoblockLicenseError as exc:
-        return templates.TemplateResponse(
-            request,
-            "account.html",
-            _account_context(request, user, _account_service(db), error=str(exc)),
-            status_code=400,
-        )
-
-    return RedirectResponse(
-        url=(
-            "/account?crocoblock=activated"
-            f"&activated={len(outcome['activated'])}"
-            f"&failed={len(outcome['failed'])}"
-            f"&skipped={len(outcome['skipped'])}"
-        ),
-        status_code=303,
-    )
-
-
 @bootstrap_router.post("/internal/bootstrap-token")
 def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_db)]):
     # This endpoint is only reachable from an SSH shell on the Hub host, never through the public proxy.

@@ -17,6 +17,7 @@ from app.models.maintenance_run import (
 from app.models.site import Site, SiteStatus
 from app.repositories.site_repository import SiteRepository
 from app.services.audit import write_audit_log
+from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.fleet_inventory import FleetInventoryService, UpdateWorkbenchEntry
 from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
@@ -200,8 +201,13 @@ class MaintenanceRunService:
             raise ValueError("One or more selected updates are no longer available. Refresh the workbench and try again.")
 
         selected_entries = [entries_by_key[key] for key in requested_keys]
+        has_stored_crocoblock_license = self._has_stored_crocoblock_license()
         for entry in selected_entries:
-            scope_error = self._direct_plugin_update_scope_error(entry)
+            scope_error = self._direct_plugin_update_scope_error(
+                entry,
+                allow_stored_crocoblock_license=True,
+                has_stored_crocoblock_license=has_stored_crocoblock_license,
+            )
             if scope_error:
                 raise ValueError(scope_error)
 
@@ -357,6 +363,11 @@ class MaintenanceRunService:
             self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
             return "failed"
 
+        crocoblock_error = self._activate_crocoblock_license_if_required(run, details, preflight_step)
+        if crocoblock_error:
+            self._fail_plugin_update_run(run, crocoblock_error)
+            return "failed"
+
         preflight_error = self._direct_plugin_update_preflight_error(run, details)
         if preflight_error:
             self._fail_plugin_update_run(run, preflight_error)
@@ -492,19 +503,90 @@ class MaintenanceRunService:
 
         return None
 
+    def _activate_crocoblock_license_if_required(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, str],
+        preflight_step: MaintenanceRunStep | None,
+    ) -> str | None:
+        entry = self._current_plugin_update_entry(run, details)
+        if entry is None or not self._is_crocoblock_entry(entry) or entry.execution_ready:
+            return None
+
+        self._start_plugin_update_step(
+            run,
+            preflight_step,
+            "Crocoblock needs the stored Hub license before its update package can be requested.",
+        )
+        try:
+            activation = CrocoblockLicenseService(db=self.db, cipher=self.cipher).activate_for_plugin_update(
+                actor=run.requested_by or "kosmos-hub",
+                site_id=run.site_id,
+            )
+        except CrocoblockLicenseError as exc:
+            return f"{details['plugin_name']} needs Crocoblock license activation: {exc}"
+
+        self._start_plugin_update_step(
+            run,
+            preflight_step,
+            "Crocoblock license activation was verified. Refreshing its authorized update package.",
+        )
+        try:
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+        except SiteMcpProxyError as exc:
+            return f"Crocoblock license activation succeeded, but its update package could not be refreshed: {exc.message}"
+
+        run.result_json = {
+            **(run.result_json or {}),
+            "crocoblock_license_activated": True,
+            "crocoblock_update_package_ready": activation["update_package_ready"],
+        }
+        return None
+
+    def _current_plugin_update_entry(self, run: MaintenanceRun, details: dict[str, str]) -> UpdateWorkbenchEntry | None:
+        inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
+        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        return next(
+            (
+                entry
+                for entry in entries
+                if entry.site.id == run.site_id
+                and entry.kind == "plugin"
+                and entry.identifier == details["plugin_file"]
+            ),
+            None,
+        )
+
     @staticmethod
-    def _direct_plugin_update_scope_error(entry: UpdateWorkbenchEntry) -> str | None:
+    def _direct_plugin_update_scope_error(
+        entry: UpdateWorkbenchEntry,
+        *,
+        allow_stored_crocoblock_license: bool = False,
+        has_stored_crocoblock_license: bool = False,
+    ) -> str | None:
         if entry.kind != "plugin":
             return "Direct updates currently support active WordPress plugins only."
         if entry.is_active is not True:
             return f"{entry.name} is inactive. Direct updates currently require an active plugin."
-        if entry.execution_ready is not True:
-            return entry.execution_note or f"{entry.name} does not have an authorized update package yet."
-        if not MaintenanceRunService._is_plugin_file(entry.identifier):
+        if not self._is_plugin_file(entry.identifier):
             return f"{entry.name} does not have a valid WordPress plugin file."
         if not entry.current_version or not entry.target_version:
             return f"{entry.name} does not report both the installed and target version."
+        if entry.execution_ready is not True:
+            if allow_stored_crocoblock_license and MaintenanceRunService._is_crocoblock_entry(entry):
+                if has_stored_crocoblock_license:
+                    return None
+                return f"{entry.name} needs the centrally stored Crocoblock license before its update package is available."
+            return entry.execution_note or f"{entry.name} does not have an authorized update package yet."
         return None
+
+    @staticmethod
+    def _is_crocoblock_entry(entry: UpdateWorkbenchEntry) -> bool:
+        return entry.identifier.startswith("jet-")
+
+    def _has_stored_crocoblock_license(self) -> bool:
+        config = CrocoblockLicenseService(db=self.db, cipher=self.cipher).get_config()
+        return config is not None and config.enabled
 
     @staticmethod
     def _plugin_update_health_error(result: object) -> str | None:

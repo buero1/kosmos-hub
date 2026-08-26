@@ -34,6 +34,29 @@ def test_direct_updates_reject_plugins_without_an_authorized_package():
     ) == "License activation is required."
 
 
+def test_direct_updates_accept_jet_plugin_with_stored_crocoblock_license():
+    assert MaintenanceRunService._direct_plugin_update_scope_error(
+        plugin_entry(
+            name="JetElements",
+            identifier="jet-elements/jet-elements.php",
+            execution_ready=False,
+        ),
+        allow_stored_crocoblock_license=True,
+        has_stored_crocoblock_license=True,
+    ) is None
+
+
+def test_direct_updates_reject_jet_plugin_without_stored_crocoblock_license():
+    assert MaintenanceRunService._direct_plugin_update_scope_error(
+        plugin_entry(
+            name="JetElements",
+            identifier="jet-elements/jet-elements.php",
+            execution_ready=False,
+        ),
+        allow_stored_crocoblock_license=True,
+    ) == "JetElements needs the centrally stored Crocoblock license before its update package is available."
+
+
 def test_direct_updates_reject_non_plugin_entries():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(kind="theme")) == (
         "Direct updates currently support active WordPress plugins only."

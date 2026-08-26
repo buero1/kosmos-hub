@@ -101,6 +101,8 @@ class UpdateWorkbenchEntry:
     def review_note(self) -> str:
         if self.kind == "wordpress":
             return "Core update: not enabled"
+        if self.requires_stored_crocoblock_license:
+            return "Crocoblock update: the saved Hub license is activated automatically before this update."
         if self.kind == "plugin" and not self.execution_ready:
             return self.execution_note or "The update provider has not supplied an authorized package."
         if self.kind == "plugin" and self.is_active:
@@ -108,6 +110,14 @@ class UpdateWorkbenchEntry:
         if self.kind == "plugin":
             return "Inactive plugin: not enabled"
         return "Theme update: not enabled"
+
+    @property
+    def requires_stored_crocoblock_license(self) -> bool:
+        return self.kind == "plugin" and self.is_active is True and not self.execution_ready and self.identifier.startswith("jet-")
+
+    @property
+    def direct_update_selectable(self) -> bool:
+        return self.kind == "plugin" and self.is_active is True and (self.execution_ready or self.requires_stored_crocoblock_license)
 
     @property
     def plan_key(self) -> str:
