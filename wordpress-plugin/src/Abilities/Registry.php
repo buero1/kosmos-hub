@@ -14,6 +14,7 @@ class Registry {
 	const UPDRAFT_BACKUP_REQUEST_OPTION    = 'kosmos_bridge_updraft_backup_request';
 	const UPDRAFT_BACKUP_REQUEST_TTL       = 300;
 	const UPDRAFT_BACKUP_PENDING_MAX_AGE   = 180;
+	const UPDRAFT_REMOTE_DELETE_SLICE_SECONDS = 8;
 
 	/**
 	 * @return void
@@ -117,6 +118,34 @@ class Registry {
 				'execute_callback'    => array( self::class, 'execute_start_updraftplus_backup' ),
 				'permission_callback' => array( self::class, 'allow_mutation_access' ),
 				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/list-updraftplus-backups',
+			array(
+				'label'               => __( 'List UpdraftPlus Backups', 'kosmos-bridge' ),
+				'description'         => __( 'Returns read-only metadata for the UpdraftPlus backup sets known to this site. It does not expose backup files or credentials.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::updraftplus_backup_start_input_schema(),
+				'output_schema'       => self::updraftplus_backup_list_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_list_updraftplus_backups' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/delete-updraftplus-backup',
+			array(
+				'label'               => __( 'Delete UpdraftPlus Backup', 'kosmos-bridge' ),
+				'description'         => __( 'Deletes one exact UpdraftPlus backup set locally and from its configured remote storage. The Hub must provide the exact nonce and timestamp.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::updraftplus_backup_delete_input_schema(),
+				'output_schema'       => self::updraftplus_backup_delete_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_delete_updraftplus_backup' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::destructive_mutation_meta(),
 			)
 		);
 
@@ -413,6 +442,167 @@ class Registry {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * List known UpdraftPlus backup sets without exposing archive locations or
+	 * storage credentials. The Hub uses the exact nonce and timestamp to scope
+	 * a later deletion to one previously observed backup set.
+	 *
+	 * @return array
+	 */
+	public static function execute_list_updraftplus_backups( $input = null ) {
+		$availability = self::get_updraftplus_availability();
+		$result       = array(
+			'provider'  => 'updraftplus',
+			'installed' => $availability['installed'],
+			'active'    => $availability['active'],
+			'backups'   => array(),
+			'message'   => '',
+		);
+
+		if ( ! $availability['installed'] || ! $availability['active'] || ! class_exists( 'UpdraftPlus_Backup_History', false ) ) {
+			$result['message'] = 'UpdraftPlus is not installed, active, or initialized on this site.';
+			return $result;
+		}
+
+		try {
+			$history = \UpdraftPlus_Backup_History::get_history();
+			$history = is_array( $history ) ? $history : array();
+		} catch ( \Throwable $exception ) {
+			$result['message'] = 'UpdraftPlus backup history could not be read.';
+			return $result;
+		}
+
+		foreach ( $history as $backup_time => $backup ) {
+			if ( ! is_array( $backup ) || ! isset( $backup['nonce'] ) ) {
+				continue;
+			}
+
+			$nonce     = (string) $backup['nonce'];
+			$timestamp = self::get_updraftplus_history_timestamp( $backup_time, $backup );
+			if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) || $timestamp <= 0 ) {
+				continue;
+			}
+
+			$result['backups'][] = array(
+				'backup_nonce'        => $nonce,
+				'backup_timestamp'    => $timestamp,
+				'backup_at'           => gmdate( 'c', $timestamp ),
+				'complete'            => self::is_complete_updraftplus_backup( $backup ),
+				'retention_protected' => ! empty( $backup['always_keep'] ),
+				'components'          => self::get_updraftplus_backup_components( $backup ),
+			);
+		}
+
+		usort(
+			$result['backups'],
+			static function ( $left, $right ) {
+				return $left['backup_timestamp'] <=> $right['backup_timestamp'];
+			}
+		);
+		$result['message'] = empty( $result['backups'] )
+			? 'No UpdraftPlus backup sets are currently recorded.'
+			: 'UpdraftPlus backup metadata was read successfully.';
+
+		return $result;
+	}
+
+	/**
+	 * Delete exactly one known UpdraftPlus backup set through the provider's own
+	 * deletion API. Remote deletion is mandatory so local and remote retention
+	 * cannot drift apart. Long remote deletions return a continuation payload.
+	 *
+	 * @param mixed $input Exact backup identity and continuation state.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_delete_updraftplus_backup( $input = array() ) {
+		$nonce                   = self::get_input_string( $input, 'backup_nonce' );
+		$timestamp               = self::get_updraftplus_backup_timestamp_input( $input );
+		$allow_protected_delete  = true === self::get_input_bool( $input, 'allow_protected_delete' );
+		$processed_instance_ids  = self::get_updraftplus_processed_instance_ids( $input );
+
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) || $timestamp <= 0 || ! self::get_input_bool( $input, 'delete_remote' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_updraftplus_backup_delete_input',
+				'Backup nonce, backup timestamp, and delete_remote=true are required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$availability = self::get_updraftplus_availability();
+		if ( ! $availability['installed'] || ! $availability['active'] || ! class_exists( 'UpdraftPlus_Backup_History', false ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_unavailable',
+				'UpdraftPlus must be installed, active, and initialized before a backup can be deleted.',
+				array( 'status' => 409 )
+			);
+		}
+
+		try {
+			$history = \UpdraftPlus_Backup_History::get_history();
+			$history = is_array( $history ) ? $history : array();
+			$backup  = self::find_updraftplus_backup_by_nonce( $history, $nonce );
+		} catch ( \Throwable $exception ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_history_unavailable',
+				'UpdraftPlus backup history could not be read before deletion.',
+				array( 'status' => 502 )
+			);
+		}
+
+		if ( empty( $backup ) || self::get_updraftplus_backup_timestamp( $backup ) !== $timestamp ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_backup_not_found',
+				'The requested UpdraftPlus backup no longer matches the observed backup set.',
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( ! self::is_complete_updraftplus_backup( $backup ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_backup_incomplete',
+				'The requested UpdraftPlus backup is not a complete backup set and cannot be deleted by Kosmos Hub.',
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( ! $allow_protected_delete && ! empty( $backup['always_keep'] ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_backup_protected',
+				'The requested backup is protected for manual deletion only and cannot be removed by automatic cleanup.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$updraftplus_admin = self::get_updraftplus_admin();
+		if ( ! is_object( $updraftplus_admin ) || ! method_exists( $updraftplus_admin, 'delete_set' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_delete_unavailable',
+				'UpdraftPlus could not initialize its backup deletion service.',
+				array( 'status' => 502 )
+			);
+		}
+
+		try {
+			$deletion = $updraftplus_admin->delete_set(
+				array(
+					'backup_timestamp'       => (string) $timestamp,
+					'delete_remote'          => true,
+					'remote_delete_limit'    => self::UPDRAFT_REMOTE_DELETE_SLICE_SECONDS,
+					'is_continuation'        => self::get_input_bool( $input, 'continue_delete' ),
+					'processed_instance_ids' => $processed_instance_ids,
+				)
+			);
+		} catch ( \Throwable $exception ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_delete_failed',
+				'UpdraftPlus could not delete the requested backup: ' . $exception->getMessage(),
+				array( 'status' => 502 )
+			);
+		}
+
+		return self::updraftplus_backup_delete_result( $nonce, $timestamp, $deletion );
 	}
 
 	/**
@@ -1036,6 +1226,24 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/list-updraftplus-backups',
+				'label'         => __( 'List UpdraftPlus Backups', 'kosmos-bridge' ),
+				'description'   => __( 'Returns read-only metadata for the UpdraftPlus backup sets known to this site.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::updraftplus_backup_start_input_schema(),
+				'output_schema' => self::updraftplus_backup_list_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/delete-updraftplus-backup',
+				'label'         => __( 'Delete UpdraftPlus Backup', 'kosmos-bridge' ),
+				'description'   => __( 'Deletes one exact UpdraftPlus backup set locally and from its configured remote storage.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::updraftplus_backup_delete_input_schema(),
+				'output_schema' => self::updraftplus_backup_delete_output_schema(),
+				'meta'          => self::destructive_mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/check-site-health',
 				'label'         => __( 'Check Site Health', 'kosmos-bridge' ),
 				'description'   => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
@@ -1088,6 +1296,9 @@ class Registry {
 		if ( 'kosmos-bridge/start-updraftplus-backup' === $ability_name ) {
 			return self::execute_start_updraftplus_backup();
 		}
+		if ( 'kosmos-bridge/delete-updraftplus-backup' === $ability_name ) {
+			return self::execute_delete_updraftplus_backup( $input );
+		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
 		}
@@ -1110,6 +1321,8 @@ class Registry {
 				return self::execute_get_available_updates();
 			case 'kosmos-bridge/get-updraftplus-backup-status':
 				return self::execute_get_updraftplus_backup_status( $input );
+			case 'kosmos-bridge/list-updraftplus-backups':
+				return self::execute_list_updraftplus_backups();
 			case 'kosmos-bridge/check-site-health':
 				return self::execute_check_site_health();
 		}
@@ -1178,6 +1391,21 @@ class Registry {
 			'annotations'  => array(
 				'readonly'    => false,
 				'destructive' => false,
+				'idempotent'  => false,
+			),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function destructive_mutation_meta() {
+		return array(
+			'public'       => true,
+			'show_in_rest' => true,
+			'annotations'  => array(
+				'readonly'    => false,
+				'destructive' => true,
 				'idempotent'  => false,
 			),
 		);
@@ -1449,6 +1677,76 @@ class Registry {
 	}
 
 	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_list_output_schema() {
+		$backup_item = array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce'        => array( 'type' => 'string' ),
+				'backup_timestamp'    => array( 'type' => 'integer' ),
+				'backup_at'           => array( 'type' => 'string', 'format' => 'date-time' ),
+				'complete'            => array( 'type' => 'boolean' ),
+				'retention_protected' => array( 'type' => 'boolean' ),
+				'components'          => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'backup_at', 'complete', 'retention_protected', 'components' ),
+		);
+
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'provider'  => array( 'type' => 'string' ),
+				'installed' => array( 'type' => 'boolean' ),
+				'active'    => array( 'type' => 'boolean' ),
+				'backups'   => array( 'type' => 'array', 'items' => $backup_item ),
+				'message'   => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'provider', 'installed', 'active', 'backups', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_delete_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce'           => array( 'type' => 'string' ),
+				'backup_timestamp'       => array( 'type' => 'integer' ),
+				'delete_remote'          => array( 'type' => 'boolean' ),
+				'allow_protected_delete' => array( 'type' => 'boolean' ),
+				'continue_delete'        => array( 'type' => 'boolean' ),
+				'processed_instance_ids' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+			),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'allow_protected_delete', 'continue_delete', 'processed_instance_ids' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function updraftplus_backup_delete_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'backup_nonce'           => array( 'type' => 'string' ),
+				'backup_timestamp'       => array( 'type' => 'integer' ),
+				'delete_remote'          => array( 'type' => 'boolean' ),
+				'status'                 => array( 'type' => 'string' ),
+				'completed'              => array( 'type' => 'boolean' ),
+				'backup_sets_removed'    => array( 'type' => 'integer' ),
+				'local_files_deleted'    => array( 'type' => 'integer' ),
+				'remote_files_deleted'   => array( 'type' => 'integer' ),
+				'processed_instance_ids' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'message'                => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'status', 'completed', 'backup_sets_removed', 'local_files_deleted', 'remote_files_deleted', 'processed_instance_ids', 'message' ),
+		);
+	}
+
+	/**
 	 * @param array  $history UpdraftPlus backup history.
 	 * @param string $nonce Backup nonce selected by UpdraftPlus.
 	 * @return array
@@ -1618,6 +1916,197 @@ class Registry {
 		}
 
 		return $components;
+	}
+
+	/**
+	 * @return array{installed: bool, active: bool}
+	 */
+	private static function get_updraftplus_availability() {
+		$plugin_file = 'updraftplus/updraftplus.php';
+		$installed   = file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
+		$active      = in_array( $plugin_file, (array) get_option( 'active_plugins', array() ), true );
+
+		if ( is_multisite() ) {
+			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
+			$active         = $active || isset( $network_active[ $plugin_file ] );
+		}
+
+		return array(
+			'installed' => $installed,
+			'active'    => $active,
+		);
+	}
+
+	/**
+	 * Match UpdraftPlus' own definition of a complete backup while keeping
+	 * migrated or remote-send-only records out of Kosmos cleanup decisions.
+	 *
+	 * @param array $backup UpdraftPlus backup history entry.
+	 * @return bool
+	 */
+	private static function is_complete_updraftplus_backup( $backup ) {
+		global $updraftplus;
+
+		if ( ! is_array( $backup ) || ! is_object( $updraftplus ) || ! method_exists( $updraftplus, 'get_backupable_file_entities' ) ) {
+			return false;
+		}
+
+		$remote_sent = ! empty( $backup['service'] ) && (
+			( is_array( $backup['service'] ) && in_array( 'remotesend', $backup['service'], true ) ) || 'remotesend' === $backup['service']
+		);
+		if ( $remote_sent ) {
+			return false;
+		}
+
+		try {
+			$entities = $updraftplus->get_backupable_file_entities( true, true );
+		} catch ( \Throwable $exception ) {
+			return false;
+		}
+
+		if ( ! is_array( $entities ) ) {
+			return false;
+		}
+
+		foreach ( $entities as $key => $entity ) {
+			if ( ! \UpdraftPlus_Options::get_updraft_option( 'updraft_include_' . $key, false ) ) {
+				continue;
+			}
+			if ( ! isset( $backup[ $key ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * @param mixed $history_time History array key.
+	 * @param array $backup UpdraftPlus backup history entry.
+	 * @return int
+	 */
+	private static function get_updraftplus_history_timestamp( $history_time, $backup ) {
+		if ( is_numeric( $history_time ) && (int) $history_time > 0 ) {
+			return (int) $history_time;
+		}
+
+		return self::get_updraftplus_backup_timestamp( $backup );
+	}
+
+	/**
+	 * @return object|null
+	 */
+	private static function get_updraftplus_admin() {
+		if ( ! class_exists( 'UpdraftPlus_Admin', false ) ) {
+			$admin_file = WP_PLUGIN_DIR . '/updraftplus/admin.php';
+			if ( ! is_readable( $admin_file ) ) {
+				return null;
+			}
+
+			require_once $admin_file;
+		}
+
+		global $updraftplus_admin;
+		return isset( $updraftplus_admin ) && is_object( $updraftplus_admin ) ? $updraftplus_admin : null;
+	}
+
+	/**
+	 * Convert an UpdraftPlus delete result into a stable Hub contract. A
+	 * continuation deliberately remains pending so the Hub can resume it with
+	 * the provider-issued instance identifiers on its next worker cycle.
+	 *
+	 * @param string $nonce Backup nonce.
+	 * @param int    $timestamp UpdraftPlus backup history timestamp.
+	 * @param mixed  $deletion Provider response.
+	 * @return array
+	 */
+	private static function updraftplus_backup_delete_result( $nonce, $timestamp, $deletion ) {
+		$deletion = is_array( $deletion ) ? $deletion : array();
+		$outcome  = isset( $deletion['result'] ) ? (string) $deletion['result'] : 'error';
+		$deleted_timestamps = isset( $deletion['deleted_timestamps'] ) ? explode( ',', (string) $deletion['deleted_timestamps'] ) : array();
+		$completed = 'success' === $outcome && in_array( (string) $timestamp, $deleted_timestamps, true );
+		$status    = $completed ? 'completed' : ( 'continue' === $outcome ? 'running' : 'failed' );
+		$message   = '';
+
+		if ( 'completed' === $status ) {
+			$message = 'UpdraftPlus deleted the requested backup locally and from the configured remote storage.';
+		} elseif ( 'running' === $status ) {
+			$message = 'UpdraftPlus is continuing remote deletion for the requested backup.';
+		} else {
+			$message = 'UpdraftPlus did not confirm complete deletion of the requested backup set.';
+		}
+
+		return array(
+			'backup_nonce'           => $nonce,
+			'backup_timestamp'       => $timestamp,
+			'delete_remote'          => true,
+			'status'                 => $status,
+			'completed'              => $completed,
+			'backup_sets_removed'    => isset( $deletion['backup_sets'] ) ? max( 0, (int) $deletion['backup_sets'] ) : 0,
+			'local_files_deleted'    => isset( $deletion['backup_local'] ) ? max( 0, (int) $deletion['backup_local'] ) : 0,
+			'remote_files_deleted'   => isset( $deletion['backup_remote'] ) ? max( 0, (int) $deletion['backup_remote'] ) : 0,
+			'processed_instance_ids' => self::sanitize_updraftplus_processed_instance_ids( $deletion['processed_instance_ids'] ?? array() ),
+			'message'                => $message,
+		);
+	}
+
+	/**
+	 * @param mixed $input Ability input.
+	 * @return int
+	 */
+	private static function get_updraftplus_backup_timestamp_input( $input ) {
+		if ( ! is_array( $input ) || ! isset( $input['backup_timestamp'] ) ) {
+			return 0;
+		}
+
+		$value = $input['backup_timestamp'];
+		if ( is_int( $value ) && $value > 0 ) {
+			return $value;
+		}
+
+		return is_string( $value ) && ctype_digit( $value ) && (int) $value > 0 ? (int) $value : 0;
+	}
+
+	/**
+	 * @param mixed  $input Ability input.
+	 * @param string $key Input key.
+	 * @return bool
+	 */
+	private static function get_input_bool( $input, $key ) {
+		return is_array( $input ) && isset( $input[ $key ] ) && true === $input[ $key ];
+	}
+
+	/**
+	 * @param mixed $input Ability input.
+	 * @return array
+	 */
+	private static function get_updraftplus_processed_instance_ids( $input ) {
+		return is_array( $input ) && isset( $input['processed_instance_ids'] )
+			? self::sanitize_updraftplus_processed_instance_ids( $input['processed_instance_ids'] )
+			: array();
+	}
+
+	/**
+	 * @param mixed $value Provider continuation values.
+	 * @return array
+	 */
+	private static function sanitize_updraftplus_processed_instance_ids( $value ) {
+		if ( ! is_array( $value ) ) {
+			return array();
+		}
+
+		$ids = array();
+		foreach ( $value as $id ) {
+			if ( ! is_string( $id ) || '' === $id || strlen( $id ) > 255 ) {
+				continue;
+			}
+			$ids[] = $id;
+			if ( count( $ids ) >= 100 ) {
+				break;
+			}
+		}
+
+		return array_values( array_unique( $ids ) );
 	}
 
 	/**

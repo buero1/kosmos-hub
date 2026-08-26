@@ -32,22 +32,39 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
 
     def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
         assert site_id == 1
-        assert ability_name == "kosmos-bridge/get-updraftplus-backup-status"
-        assert ability_input == {"backup_nonce": backup_nonce}
+        if ability_name == "kosmos-bridge/get-updraftplus-backup-status":
+            assert ability_input == {"backup_nonce": backup_nonce}
+            return {
+                "result": {
+                    "reported_at": "2026-08-25T12:02:00+00:00",
+                    "installed": True,
+                    "active": True,
+                    "available": True,
+                    "complete": True,
+                    "retention_protected": True,
+                    "request_status": "completed",
+                    "backup_nonce": backup_nonce,
+                    "latest_backup_at": "2026-08-25T12:01:30+00:00",
+                    "backup_count": 1,
+                    "components": ["database", "plugins", "themes", "uploads", "others"],
+                    "message": "Complete UpdraftPlus backup found.",
+                }
+            }
+        assert ability_name == "kosmos-bridge/list-updraftplus-backups"
+        assert ability_input == {}
         return {
             "result": {
-                "reported_at": "2026-08-25T12:02:00+00:00",
                 "installed": True,
                 "active": True,
-                "available": True,
-                "complete": True,
-                "retention_protected": True,
-                "request_status": "completed",
-                "backup_nonce": backup_nonce,
-                "latest_backup_at": "2026-08-25T12:01:30+00:00",
-                "backup_count": 4,
-                "components": ["database", "plugins", "themes", "uploads", "others"],
-                "message": "Complete UpdraftPlus backup found.",
+                "backups": [
+                    {
+                        "backup_nonce": backup_nonce,
+                        "backup_timestamp": 1756123290,
+                        "backup_at": "2026-08-25T12:01:30+00:00",
+                        "complete": True,
+                        "retention_protected": True,
+                    }
+                ],
             }
         }
 
@@ -84,6 +101,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         assert verified.result_json["components"] == ["database", "plugins", "themes", "uploads", "others"]
         assert verified.result_json["retention_protected"] is True
         assert verified.result_json["bridge_status"] == "completed"
+        assert verified.result_json["cleanup"]["status"] == "skipped"
 
 
 def test_second_running_backup_run_is_blocked(monkeypatch):
@@ -122,6 +140,136 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
         assert first.result == "started"
         assert second.result == "blocked"
         assert second.run.id == first.run.id
+
+
+def test_verified_backup_prunes_only_the_oldest_unprotected_backup(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "a1b2c3d4e5f6"
+    old_backup_nonce = "b1b2c3d4e5f6"
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert site_id == 1
+        if ability_name == "kosmos-bridge/start-updraftplus-backup":
+            assert ability_input == {}
+            return {
+                "result": {
+                    "accepted": True,
+                    "backup_nonce": backup_nonce,
+                    "retention_protection_requested": True,
+                    "request_status": "queued",
+                    "background_dispatch_requested": True,
+                    "scheduled_at": "2026-08-25T12:00:00+00:00",
+                }
+            }
+
+        assert ability_name == "kosmos-bridge/delete-updraftplus-backup"
+        assert ability_input == {
+            "backup_nonce": old_backup_nonce,
+            "backup_timestamp": 1700000000,
+            "delete_remote": True,
+            "allow_protected_delete": False,
+            "continue_delete": False,
+            "processed_instance_ids": [],
+        }
+        return {
+            "result": {
+                "status": "completed",
+                "completed": True,
+                "backup_sets_removed": 1,
+                "local_files_deleted": 5,
+                "remote_files_deleted": 5,
+                "processed_instance_ids": [],
+                "message": "UpdraftPlus deleted the requested backup locally and from the configured remote storage.",
+            }
+        }
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert site_id == 1
+        if ability_name == "kosmos-bridge/get-updraftplus-backup-status":
+            assert ability_input == {"backup_nonce": backup_nonce}
+            return {
+                "result": {
+                    "reported_at": "2026-08-25T12:02:00+00:00",
+                    "installed": True,
+                    "active": True,
+                    "available": True,
+                    "complete": True,
+                    "retention_protected": True,
+                    "request_status": "completed",
+                    "backup_nonce": backup_nonce,
+                    "latest_backup_at": "2026-08-25T12:01:30+00:00",
+                    "backup_count": 3,
+                    "components": ["database", "plugins", "themes", "uploads", "others"],
+                }
+            }
+
+        assert ability_name == "kosmos-bridge/list-updraftplus-backups"
+        assert ability_input == {}
+        return {
+            "result": {
+                "installed": True,
+                "active": True,
+                "backups": [
+                    {
+                        "backup_nonce": "c1b2c3d4e5f6",
+                        "backup_timestamp": 1720000000,
+                        "backup_at": "2024-07-03T09:46:40+00:00",
+                        "complete": True,
+                        "retention_protected": False,
+                    },
+                    {
+                        "backup_nonce": old_backup_nonce,
+                        "backup_timestamp": 1700000000,
+                        "backup_at": "2023-11-14T22:13:20+00:00",
+                        "complete": True,
+                        "retention_protected": False,
+                    },
+                    {
+                        "backup_nonce": backup_nonce,
+                        "backup_timestamp": 1756123290,
+                        "backup_at": "2025-08-25T12:01:30+00:00",
+                        "complete": True,
+                        "retention_protected": True,
+                    },
+                ],
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="98ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
+        summary = service.poll_active_updraftplus_backups()
+        verified = db.get(MaintenanceRun, started.run.id)
+
+        assert summary == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
+        assert verified is not None
+        assert verified.status == MaintenanceRunStatus.succeeded.value
+        assert verified.result_json["cleanup"] == {
+            "status": "completed",
+            "backup_nonce": old_backup_nonce,
+            "backup_timestamp": 1700000000,
+            "backup_at": "2023-11-14T22:13:20+00:00",
+            "continue_delete": True,
+            "processed_instance_ids": [],
+            "backup_sets_removed": 1,
+            "local_files_deleted": 5,
+            "remote_files_deleted": 5,
+            "message": "UpdraftPlus deleted the requested backup locally and from the configured remote storage.",
+        }
 
 
 def test_unprotected_completed_backup_run_fails(monkeypatch):

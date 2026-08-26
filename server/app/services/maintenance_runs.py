@@ -32,6 +32,8 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
+    LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
+    DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     START_BACKUP_TIMEOUT_SECONDS = 20
     BACKUP_TIMEOUT = timedelta(minutes=3)
 
@@ -187,6 +189,9 @@ class MaintenanceRunService:
             self._fail_run(run, actor="kosmos-hub", message="The backup run has no valid UpdraftPlus backup identifier.")
             return "failed"
 
+        if self._backup_was_verified(run):
+            return self._poll_updraftplus_backup_cleanup(run)
+
         if now - self._as_utc(run.started_at) > self.BACKUP_TIMEOUT:
             self._fail_run(
                 run,
@@ -237,34 +242,24 @@ class MaintenanceRunService:
 
         if self._is_verified_backup_result(result, run.bridge_backup_nonce):
             snapshot = SiteBackupService(db=self.db, cipher=self.cipher).store_backup_status_result(run.site_id, result)["snapshot"]
-            run.status = MaintenanceRunStatus.succeeded.value
-            run.completed_at = datetime.now(UTC)
-            run.last_checked_at = run.completed_at
             run.result_json = {
+                **(run.result_json or {}),
                 "provider": "updraftplus",
                 "backup_nonce": run.bridge_backup_nonce,
                 "backup_at": snapshot.backup_at.isoformat() if snapshot.backup_at else None,
                 "components": snapshot.components_json,
                 "retention_protected": True,
-                "bridge_status": "completed",
-                "bridge_status_message": "UpdraftPlus recorded the requested protected backup.",
+                "backup_verified": True,
+                "bridge_status": "cleanup",
+                "bridge_status_message": "The protected backup was verified. The Hub is now checking the oldest eligible backup for cleanup.",
             }
             if verification_step is not None:
                 verification_step.status = MaintenanceRunStepStatus.succeeded.value
-                verification_step.completed_at = run.completed_at
+                verification_step.completed_at = datetime.now(UTC)
                 verification_step.detail = "UpdraftPlus recorded the requested complete backup and its protection from automatic deletion."
                 verification_step.result_json = dict(run.result_json)
-            write_audit_log(
-                self.db,
-                site=run.site,
-                actor="kosmos-hub",
-                source="hub-worker",
-                action="verify-updraftplus-backup-run",
-                result="succeeded",
-                detail=f"Maintenance run {run.id} verified a fresh complete UpdraftPlus backup protected from automatic deletion.",
-            )
             self.db.commit()
-            return "succeeded"
+            return self._poll_updraftplus_backup_cleanup(run)
 
         self._mark_waiting(
             run,
@@ -272,6 +267,199 @@ class MaintenanceRunService:
             self._backup_waiting_detail(bridge_status, bridge_message),
         )
         return "waiting"
+
+    def _poll_updraftplus_backup_cleanup(self, run: MaintenanceRun) -> str:
+        cleanup_step = self._find_step(run, "prune-oldest-backup")
+        if cleanup_step is None:
+            cleanup_step = MaintenanceRunStep(
+                run=run,
+                step_key="prune-oldest-backup",
+                status=MaintenanceRunStepStatus.running.value,
+                started_at=datetime.now(UTC),
+                detail="Finding the oldest complete backup that is eligible for automatic cleanup.",
+                result_json={},
+            )
+            self.db.add(cleanup_step)
+            self.db.flush()
+
+        cleanup = self._cleanup_result(run)
+        if cleanup.get("status") in {"completed", "skipped"}:
+            return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
+
+        if not cleanup:
+            try:
+                payload = self.proxy.execute_readonly_ability(
+                    run.site_id,
+                    self.LIST_BACKUPS_ABILITY,
+                    {},
+                    timeout_seconds=30,
+                )
+            except SiteMcpProxyError as exc:
+                self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not list backup sets: {exc.message}")
+                return "failed"
+
+            candidate = self._oldest_automatic_cleanup_candidate(
+                self._result_from_payload(payload).get("backups"),
+                run.bridge_backup_nonce,
+            )
+            if candidate is None:
+                cleanup = {
+                    "status": "skipped",
+                    "message": "No older complete backup is eligible for automatic cleanup. Backups protected for manual deletion remain untouched.",
+                    "backup_sets_removed": 0,
+                    "local_files_deleted": 0,
+                    "remote_files_deleted": 0,
+                }
+                self._store_cleanup_result(run, cleanup_step, cleanup)
+                return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
+
+            cleanup = {
+                "status": "running",
+                "backup_nonce": candidate["backup_nonce"],
+                "backup_timestamp": candidate["backup_timestamp"],
+                "backup_at": candidate["backup_at"],
+                "continue_delete": False,
+                "processed_instance_ids": [],
+                "backup_sets_removed": 0,
+                "local_files_deleted": 0,
+                "remote_files_deleted": 0,
+                "message": "Deleting the oldest eligible complete backup locally and from the configured remote storage.",
+            }
+            self._store_cleanup_result(run, cleanup_step, cleanup)
+
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.DELETE_BACKUP_ABILITY,
+                {
+                    "backup_nonce": cleanup["backup_nonce"],
+                    "backup_timestamp": cleanup["backup_timestamp"],
+                    "delete_remote": True,
+                    "allow_protected_delete": False,
+                    "continue_delete": cleanup.get("continue_delete") is True,
+                    "processed_instance_ids": cleanup.get("processed_instance_ids", []),
+                },
+                timeout_seconds=30,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not start or continue: {exc.message}")
+            return "failed"
+
+        result = self._result_from_payload(payload)
+        cleanup = {
+            **cleanup,
+            "status": self._safe_string(result.get("status")) or "failed",
+            "continue_delete": True,
+            "processed_instance_ids": result.get("processed_instance_ids") if isinstance(result.get("processed_instance_ids"), list) else [],
+            "backup_sets_removed": int(cleanup.get("backup_sets_removed", 0)) + self._non_negative_int(result.get("backup_sets_removed")),
+            "local_files_deleted": int(cleanup.get("local_files_deleted", 0)) + self._non_negative_int(result.get("local_files_deleted")),
+            "remote_files_deleted": int(cleanup.get("remote_files_deleted", 0)) + self._non_negative_int(result.get("remote_files_deleted")),
+            "message": self._safe_message(result.get("message"), "UpdraftPlus did not return a cleanup result."),
+        }
+        self._store_cleanup_result(run, cleanup_step, cleanup)
+
+        if cleanup["status"] == "running":
+            self._mark_waiting(run, cleanup_step, cleanup["message"])
+            return "waiting"
+        if cleanup["status"] == "completed" and result.get("completed") is True:
+            return self._complete_run_after_cleanup(run, cleanup_step, cleanup)
+
+        self._fail_run(run, actor="kosmos-hub", message=cleanup["message"])
+        return "failed"
+
+    def _complete_run_after_cleanup(
+        self,
+        run: MaintenanceRun,
+        cleanup_step: MaintenanceRunStep,
+        cleanup: dict[str, Any],
+    ) -> str:
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = datetime.now(UTC)
+        run.last_checked_at = run.completed_at
+        run.result_json = {
+            **(run.result_json or {}),
+            "bridge_status": "completed",
+            "bridge_status_message": cleanup["message"],
+            "cleanup": cleanup,
+        }
+        cleanup_step.status = MaintenanceRunStepStatus.succeeded.value
+        cleanup_step.completed_at = run.completed_at
+        cleanup_step.detail = cleanup["message"]
+        cleanup_step.result_json = dict(cleanup)
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-updraftplus-backup-run",
+            result="succeeded",
+            detail=(
+                f"Maintenance run {run.id} verified a fresh protected backup and "
+                f"finished backup cleanup: {cleanup['message']}"
+            ),
+        )
+        self.db.commit()
+        return "succeeded"
+
+    def _store_cleanup_result(
+        self,
+        run: MaintenanceRun,
+        cleanup_step: MaintenanceRunStep,
+        cleanup: dict[str, Any],
+    ) -> None:
+        run.result_json = {
+            **(run.result_json or {}),
+            "cleanup": cleanup,
+            "bridge_status": "cleanup",
+            "bridge_status_message": cleanup["message"],
+        }
+        cleanup_step.status = MaintenanceRunStepStatus.running.value
+        cleanup_step.detail = cleanup["message"]
+        cleanup_step.result_json = dict(cleanup)
+        self.db.commit()
+
+    @classmethod
+    def _oldest_automatic_cleanup_candidate(
+        cls,
+        backups: object,
+        protected_backup_nonce: str | None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(backups, list):
+            return None
+
+        candidates: list[dict[str, Any]] = []
+        for backup in backups:
+            if not isinstance(backup, dict):
+                continue
+            nonce = backup.get("backup_nonce")
+            timestamp = backup.get("backup_timestamp")
+            backup_at = backup.get("backup_at")
+            if (
+                not cls._is_backup_nonce(nonce)
+                or nonce == protected_backup_nonce
+                or backup.get("complete") is not True
+                or backup.get("retention_protected") is True
+                or isinstance(timestamp, bool)
+                or not isinstance(timestamp, int)
+                or timestamp <= 0
+                or not isinstance(backup_at, str)
+                or not backup_at.strip()
+            ):
+                continue
+            candidates.append(
+                {
+                    "backup_nonce": nonce,
+                    "backup_timestamp": timestamp,
+                    "backup_at": backup_at,
+                }
+            )
+
+        return min(candidates, key=lambda candidate: candidate["backup_timestamp"]) if candidates else None
+
+    @staticmethod
+    def _cleanup_result(run: MaintenanceRun) -> dict[str, Any]:
+        cleanup = (run.result_json or {}).get("cleanup")
+        return dict(cleanup) if isinstance(cleanup, dict) else {}
 
     def _mark_waiting(self, run: MaintenanceRun, step: MaintenanceRunStep | None, detail: str) -> None:
         run.last_checked_at = datetime.now(UTC)
@@ -285,8 +473,9 @@ class MaintenanceRunService:
         run.completed_at = datetime.now(UTC)
         run.last_checked_at = run.completed_at
         run.error_message = message
+        cleanup_step = self._find_step(run, "prune-oldest-backup")
         verification_step = self._find_step(run, "verify-backup")
-        target_step = verification_step or self._find_step(run, "request-backup")
+        target_step = cleanup_step or verification_step or self._find_step(run, "request-backup")
         if target_step is not None:
             target_step.status = MaintenanceRunStepStatus.failed.value
             target_step.completed_at = run.completed_at
@@ -314,6 +503,13 @@ class MaintenanceRunService:
     @staticmethod
     def _safe_string(value: object) -> str | None:
         return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _non_negative_int(value: object) -> int:
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
 
     @classmethod
     def _bridge_backup_status(cls, result: dict[str, Any]) -> str:
@@ -364,6 +560,10 @@ class MaintenanceRunService:
             and isinstance(result.get("latest_backup_at"), str)
             and bool(result["latest_backup_at"].strip())
         )
+
+    @staticmethod
+    def _backup_was_verified(run: MaintenanceRun) -> bool:
+        return (run.result_json or {}).get("backup_verified") is True
 
     @staticmethod
     def _find_step(run: MaintenanceRun, step_key: str) -> MaintenanceRunStep | None:

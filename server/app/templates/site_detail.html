@@ -117,12 +117,12 @@
   <section class="site-refresh-panel">
     <div>
       <p class="eyebrow">Maintenance pilot</p>
-      <h3>Create and verify a fresh UpdraftPlus backup</h3>
-      <p class="subtle">Starts one full backup using the site&apos;s existing UpdraftPlus destination. The Hub checks the exact backup automatically and records the result. No plugin update is performed.</p>
+      <h3>Create, verify, and clean up a fresh UpdraftPlus backup</h3>
+      <p class="subtle">Starts one protected full backup using the site&apos;s existing destination, verifies it, then removes the oldest older complete backup that is not protected for manual deletion. Cleanup includes the configured remote storage. No plugin update is performed.</p>
     </div>
     <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button" type="submit" {% if running_maintenance_runs %}disabled{% endif %}>{{ "Backup verification is running" if running_maintenance_runs else "Start verified backup" }}</button>
+      <button class="button" type="submit" {% if running_maintenance_runs %}disabled{% endif %}>{{ "Backup maintenance is running" if running_maintenance_runs else "Start verified backup" }}</button>
     </form>
   </section>
   {% if request.query_params.get("maintenance") == "started" %}
