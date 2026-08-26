@@ -1,4 +1,5 @@
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -55,6 +56,8 @@ class MaintenanceRunService:
     DELETE_BACKUP_TIMEOUT_SECONDS = 180
     REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS = 60
     BACKUP_TIMEOUT = timedelta(minutes=3)
+    POST_UPDATE_HEALTH_MAX_ATTEMPTS = 3
+    POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS = 10
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -420,20 +423,10 @@ class MaintenanceRunService:
 
         health_step = self._find_step(run, "postflight-health")
         self._start_plugin_update_step(run, health_step, "Checking the public homepage and WordPress REST API.")
-        try:
-            health_payload = self.proxy.execute_ability(
-                run.site_id,
-                self.SITE_HEALTH_ABILITY,
-                None,
-                timeout_seconds=45,
-            )
-        except SiteMcpProxyError as exc:
-            self._fail_plugin_update_run(run, f"{details['plugin_name']} was updated, but the health check could not run: {exc.message}")
-            return "failed"
-
-        health_result = self._result_from_payload(health_payload)
-        health_error = self._plugin_update_health_error(health_result)
-        health_detail = self._plugin_update_health_detail(health_result)
+        health_error, health_detail, health_result = self._run_direct_update_postflight_health(
+            run,
+            health_step,
+        )
         if health_error:
             self._fail_plugin_update_run(
                 run,
@@ -475,6 +468,56 @@ class MaintenanceRunService:
         )
         self.db.commit()
         return "succeeded"
+
+    def _run_direct_update_postflight_health(
+        self,
+        run: MaintenanceRun,
+        health_step: MaintenanceRunStep | None,
+    ) -> tuple[str | None, str, dict[str, Any]]:
+        """Allow WordPress a short stabilization window after an in-place update."""
+        last_error = "the Bridge did not return a verifiable health result"
+        last_result: dict[str, Any] = {}
+
+        for attempt in range(1, self.POST_UPDATE_HEALTH_MAX_ATTEMPTS + 1):
+            try:
+                health_payload = self.proxy.execute_ability(
+                    run.site_id,
+                    self.SITE_HEALTH_ABILITY,
+                    None,
+                    timeout_seconds=45,
+                )
+            except SiteMcpProxyError as exc:
+                last_error = f"the Bridge health check could not run ({exc.message})"
+            else:
+                health_result = self._result_from_payload(health_payload)
+                if isinstance(health_result, dict):
+                    last_result = health_result
+                health_error = self._plugin_update_health_error(health_result)
+                if health_error is None:
+                    return None, self._plugin_update_health_detail(health_result), last_result
+                last_error = health_error
+
+            if attempt == self.POST_UPDATE_HEALTH_MAX_ATTEMPTS:
+                break
+
+            self._start_plugin_update_step(
+                run,
+                health_step,
+                (
+                    f"Post-update health check attempt {attempt} did not pass ({last_error}). "
+                    f"Retrying in {self.POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS} seconds while WordPress finishes initialization."
+                ),
+            )
+            time.sleep(self.POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS)
+
+        return (
+            last_error,
+            (
+                f"Post-update health check did not pass after {self.POST_UPDATE_HEALTH_MAX_ATTEMPTS} attempts: "
+                f"{last_error}."
+            ),
+            last_result,
+        )
 
     def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, str]) -> str | None:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
