@@ -1171,8 +1171,11 @@ class Registry {
 			);
 		}
 
-		if ( ! function_exists( 'wp_version_check' ) || ! function_exists( 'get_core_updates' ) ) {
+		if ( ! function_exists( 'wp_version_check' ) ) {
 			require_once ABSPATH . WPINC . '/update.php';
+		}
+		if ( ! function_exists( 'get_core_updates' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/update-core.php';
 		}
 		delete_site_transient( 'update_core' );
 		wp_version_check();
