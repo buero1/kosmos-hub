@@ -202,6 +202,34 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/update-theme',
+			array(
+				'label'               => __( 'Update Theme', 'kosmos-bridge' ),
+				'description'         => __( 'Updates one installed WordPress theme after an exact version preflight.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::theme_update_input_schema(),
+				'output_schema'       => self::theme_update_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_theme' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/update-wordpress-core',
+			array(
+				'label'               => __( 'Update WordPress Core', 'kosmos-bridge' ),
+				'description'         => __( 'Updates WordPress core after an exact version preflight and verifies the files on disk.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::wordpress_core_update_input_schema(),
+				'output_schema'       => self::wordpress_core_update_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_wordpress_core' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/activate-crocoblock-license',
 			array(
 				'label'               => __( 'Activate Crocoblock License', 'kosmos-bridge' ),
@@ -1006,6 +1034,207 @@ class Registry {
 	}
 
 	/**
+	 * Update exactly one approved theme. The Hub supplies only the stylesheet
+	 * and exact versions; WordPress resolves the package from its own offer.
+	 *
+	 * @param mixed $input Theme stylesheet and expected versions from the Hub run.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_theme( $input = array() ) {
+		$stylesheet       = self::get_input_string( $input, 'stylesheet' );
+		$expected_current = self::get_input_string( $input, 'expected_current_version' );
+		$expected_target  = self::get_input_string( $input, 'expected_target_version' );
+
+		if ( ! self::is_valid_theme_stylesheet( $stylesheet ) || '' === $expected_current || '' === $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_theme_update_input',
+				'Theme stylesheet and expected current and target versions are required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$theme = wp_get_theme( $stylesheet );
+		if ( ! $theme->exists() ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_not_installed',
+				'The approved theme is not installed on this site.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$current_version = (string) $theme->get( 'Version' );
+		if ( $current_version !== $expected_current ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_update_version_mismatch',
+				sprintf( 'The approved theme is at version %s, not the approved version %s.', $current_version, $expected_current ),
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$plugins = get_plugins();
+		self::refresh_update_transients( $plugins );
+		$theme_transient = self::to_array( get_site_transient( 'update_themes' ) );
+		$responses       = isset( $theme_transient['response'] ) ? self::to_array( $theme_transient['response'] ) : array();
+		$offer           = isset( $responses[ $stylesheet ] ) ? self::to_array( $responses[ $stylesheet ] ) : array();
+		$offered_version = isset( $offer['new_version'] ) ? trim( (string) $offer['new_version'] ) : '';
+		$package         = isset( $offer['package'] ) ? trim( (string) $offer['package'] ) : '';
+
+		if ( $offered_version !== $expected_target || '' === $package ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_update_offer_changed',
+				'The approved theme update offer is no longer available.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$was_active = self::is_active_theme( $stylesheet );
+		self::load_theme_upgrader();
+		if ( ! class_exists( '\\Theme_Upgrader' ) || ! class_exists( '\\Automatic_Upgrader_Skin' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_upgrader_unavailable',
+				'WordPress could not load its theme updater.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$upgrader = new \Theme_Upgrader( new \Automatic_Upgrader_Skin() );
+		$result   = $upgrader->upgrade( $stylesheet, array( 'clear_update_cache' => true ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( true !== $result ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_update_failed',
+				'WordPress did not confirm the theme update.',
+				array( 'status' => 500 )
+			);
+		}
+
+		if ( function_exists( 'wp_clean_themes_cache' ) ) {
+			wp_clean_themes_cache( true );
+		}
+		$theme_after     = wp_get_theme( $stylesheet );
+		$installed_after = $theme_after->exists() ? (string) $theme_after->get( 'Version' ) : '';
+		if ( $installed_after !== $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_update_verification_failed',
+				'WordPress completed the theme update but the installed version could not be verified.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$active_after = self::is_active_theme( $stylesheet );
+		if ( $active_after !== $was_active ) {
+			return new \WP_Error(
+				'kosmos_bridge_theme_activation_state_changed',
+				'The theme update completed but changed whether this theme is active.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return array(
+			'updated'           => true,
+			'stylesheet'        => $stylesheet,
+			'previous_version'  => $current_version,
+			'installed_version' => $installed_after,
+			'active'            => $active_after,
+		);
+	}
+
+	/**
+	 * Update WordPress core from the current core offer and verify the version
+	 * written to disk. The Hub performs a second fresh request before health checks.
+	 *
+	 * @param mixed $input Expected current and target WordPress versions.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_wordpress_core( $input = array() ) {
+		$expected_current = self::get_input_string( $input, 'expected_current_version' );
+		$expected_target  = self::get_input_string( $input, 'expected_target_version' );
+		if ( '' === $expected_current || '' === $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_core_update_input',
+				'Expected current and target WordPress versions are required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$current_version = self::wordpress_version_from_disk();
+		if ( $current_version !== $expected_current ) {
+			return new \WP_Error(
+				'kosmos_bridge_core_update_version_mismatch',
+				sprintf( 'WordPress is at version %s, not the approved version %s.', $current_version, $expected_current ),
+				array( 'status' => 409 )
+			);
+		}
+
+		if ( ! function_exists( 'wp_version_check' ) || ! function_exists( 'get_core_updates' ) ) {
+			require_once ABSPATH . WPINC . '/update.php';
+		}
+		delete_site_transient( 'update_core' );
+		wp_version_check();
+		$offer = null;
+		foreach ( (array) get_core_updates() as $candidate ) {
+			$candidate_data = self::to_array( $candidate );
+			$version        = isset( $candidate_data['version'] ) ? (string) $candidate_data['version'] : ( isset( $candidate_data['current'] ) ? (string) $candidate_data['current'] : '' );
+			$package        = isset( $candidate_data['download'] ) ? trim( (string) $candidate_data['download'] ) : '';
+			if ( $version === $expected_target && '' !== $package ) {
+				$offer = $candidate;
+				break;
+			}
+		}
+
+		if ( null === $offer ) {
+			return new \WP_Error(
+				'kosmos_bridge_core_update_offer_changed',
+				'The approved WordPress core update offer is no longer available.',
+				array( 'status' => 409 )
+			);
+		}
+
+		self::load_core_upgrader();
+		if ( ! class_exists( '\\Core_Upgrader' ) || ! class_exists( '\\Automatic_Upgrader_Skin' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_core_upgrader_unavailable',
+				'WordPress could not load its core updater.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$upgrader = new \Core_Upgrader( new \Automatic_Upgrader_Skin() );
+		$result   = $upgrader->upgrade( $offer );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( true !== $result ) {
+			return new \WP_Error(
+				'kosmos_bridge_core_update_failed',
+				'WordPress did not confirm the core update.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$installed_after = self::wordpress_version_from_disk();
+		if ( $installed_after !== $expected_target ) {
+			return new \WP_Error(
+				'kosmos_bridge_core_update_verification_failed',
+				'WordPress completed the core update but the version written to disk could not be verified.',
+				array( 'status' => 500 )
+			);
+		}
+
+		return array(
+			'updated'           => true,
+			'component'         => 'wordpress-core',
+			'previous_version'  => $current_version,
+			'installed_version' => $installed_after,
+		);
+	}
+
+	/**
 	 * Activate one centrally supplied Crocoblock license through the version of
 	 * Jet Dashboard already installed on this site. The key stays inside the
 	 * signed Hub-to-site request and is never included in the result.
@@ -1691,6 +1920,24 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/update-theme',
+				'label'         => __( 'Update Theme', 'kosmos-bridge' ),
+				'description'   => __( 'Updates one installed WordPress theme after an exact version preflight.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::theme_update_input_schema(),
+				'output_schema' => self::theme_update_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/update-wordpress-core',
+				'label'         => __( 'Update WordPress Core', 'kosmos-bridge' ),
+				'description'   => __( 'Updates WordPress core after an exact version preflight and verifies the files on disk.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::wordpress_core_update_input_schema(),
+				'output_schema' => self::wordpress_core_update_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/activate-crocoblock-license',
 				'label'         => __( 'Activate Crocoblock License', 'kosmos-bridge' ),
 				'description'   => __( 'Activates a Crocoblock license through the installed Jet Dashboard and refreshes update availability without returning the license key.', 'kosmos-bridge' ),
@@ -1742,6 +1989,12 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
+		}
+		if ( 'kosmos-bridge/update-theme' === $ability_name ) {
+			return self::execute_update_theme( $input );
+		}
+		if ( 'kosmos-bridge/update-wordpress-core' === $ability_name ) {
+			return self::execute_update_wordpress_core( $input );
 		}
 		if ( 'kosmos-bridge/activate-crocoblock-license' === $ability_name ) {
 			return self::execute_activate_crocoblock_license( $input );
@@ -1887,6 +2140,68 @@ class Registry {
 				'active'            => array( 'type' => 'boolean' ),
 			),
 			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function theme_update_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'stylesheet'               => array( 'type' => 'string' ),
+				'expected_current_version' => array( 'type' => 'string' ),
+				'expected_target_version'  => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'stylesheet', 'expected_current_version', 'expected_target_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function theme_update_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'updated'           => array( 'type' => 'boolean' ),
+				'stylesheet'        => array( 'type' => 'string' ),
+				'previous_version'  => array( 'type' => 'string' ),
+				'installed_version' => array( 'type' => 'string' ),
+				'active'            => array( 'type' => 'boolean' ),
+			),
+			'required'   => array( 'updated', 'stylesheet', 'previous_version', 'installed_version', 'active' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wordpress_core_update_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'expected_current_version' => array( 'type' => 'string' ),
+				'expected_target_version'  => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'expected_current_version', 'expected_target_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wordpress_core_update_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'updated'           => array( 'type' => 'boolean' ),
+				'component'         => array( 'type' => 'string' ),
+				'previous_version'  => array( 'type' => 'string' ),
+				'installed_version' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'updated', 'component', 'previous_version', 'installed_version' ),
 		);
 	}
 
@@ -3000,6 +3315,28 @@ class Registry {
 	}
 
 	/**
+	 * @return void
+	 */
+	private static function load_theme_upgrader() {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/misc.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader-skins.php';
+		require_once ABSPATH . 'wp-admin/includes/class-theme-upgrader.php';
+	}
+
+	/**
+	 * @return void
+	 */
+	private static function load_core_upgrader() {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+		require_once ABSPATH . 'wp-admin/includes/misc.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+		require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader-skins.php';
+		require_once ABSPATH . 'wp-admin/includes/class-core-upgrader.php';
+	}
+
+	/**
 	 * Plugin_Upgrader may temporarily deactivate an active plugin during an
 	 * update. Restore and verify the expected active state before reporting the
 	 * mutation as successful to the Hub.
@@ -3053,6 +3390,40 @@ class Registry {
 	 */
 	private static function is_valid_plugin_file( $plugin_file ) {
 		return 1 === preg_match( '/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php$/', $plugin_file );
+	}
+
+	/**
+	 * @param string $stylesheet Theme stylesheet directory name.
+	 * @return bool
+	 */
+	private static function is_valid_theme_stylesheet( $stylesheet ) {
+		return 1 === preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/', $stylesheet );
+	}
+
+	/**
+	 * A parent theme of an active child theme is also active for update safety.
+	 *
+	 * @param string $stylesheet Theme stylesheet directory name.
+	 * @return bool
+	 */
+	private static function is_active_theme( $stylesheet ) {
+		return $stylesheet === get_stylesheet() || $stylesheet === get_template();
+	}
+
+	/**
+	 * Read version.php again after a core update instead of trusting the version
+	 * loaded when this request began.
+	 *
+	 * @return string
+	 */
+	private static function wordpress_version_from_disk() {
+		$version_file = ABSPATH . WPINC . '/version.php';
+		$wp_version   = '';
+		if ( file_exists( $version_file ) ) {
+			require $version_file;
+		}
+
+		return is_string( $wp_version ) ? $wp_version : '';
 	}
 
 	/**

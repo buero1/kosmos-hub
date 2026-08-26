@@ -112,8 +112,10 @@ class UpdateWorkbenchEntry:
 
     @property
     def review_note(self) -> str:
+        if self.kind == "wordpress" and self.direct_update_selectable:
+            return "WordPress core: direct update ready"
         if self.kind == "wordpress":
-            return "Core update: not enabled"
+            return "WordPress core update is not ready."
         if self.kind == "plugin" and not self.update_available:
             return "No update is currently available." if self.update_checked else "Plugin inventory is available, but no update check has been recorded yet."
         if self.requires_stored_crocoblock_license:
@@ -126,7 +128,9 @@ class UpdateWorkbenchEntry:
             return "Inactive plugin: direct update ready; it will remain inactive."
         if self.kind == "plugin":
             return self.execution_note or "The update provider has not supplied an authorized package."
-        return "Theme update: not enabled"
+        if self.kind == "theme" and self.direct_update_selectable:
+            return "Theme: direct update ready"
+        return "Theme update is not ready."
 
     @property
     def requires_stored_crocoblock_license(self) -> bool:
@@ -134,7 +138,11 @@ class UpdateWorkbenchEntry:
 
     @property
     def direct_update_selectable(self) -> bool:
-        return self.kind == "plugin" and self.update_available and self.is_active is not None and (self.execution_ready or self.requires_stored_crocoblock_license)
+        if not self.update_available or not self.current_version or not self.target_version:
+            return False
+        if self.kind == "plugin":
+            return self.is_active is not None and (self.execution_ready or self.requires_stored_crocoblock_license)
+        return self.kind in {"wordpress", "theme"} and self.execution_ready
 
     @property
     def plan_key(self) -> str:
@@ -268,13 +276,13 @@ class FleetInventoryService:
                         site=item.site,
                         kind="wordpress",
                         name="WordPress core",
-                        identifier=str(update.get("locale", "")).strip(),
+                        identifier="wordpress-core",
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=None,
                         update_available=True,
                         update_checked=True,
-                        execution_ready=False,
+                        execution_ready=True,
                         execution_note="",
                         captured_at=captured_at,
                     )
@@ -311,7 +319,7 @@ class FleetInventoryService:
                         is_active=None,
                         update_available=True,
                         update_checked=True,
-                        execution_ready=False,
+                        execution_ready=True,
                         execution_note="",
                         captured_at=captured_at,
                     )

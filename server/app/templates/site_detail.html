@@ -138,7 +138,7 @@
         <div>
           <p class="eyebrow">Maintenance record</p>
           <h2>Recent maintenance runs</h2>
-          <p class="subtle">Every backup and direct plugin update remains documented here. While a run is active, this page refreshes automatically and shows its current stage.</p>
+          <p class="subtle">Every backup and direct WordPress, theme, or plugin update remains documented here. While a run is active, this page refreshes automatically and shows its current stage.</p>
         </div>
       </div>
       <div class="detail-list maintenance-run-list">
@@ -155,7 +155,7 @@
             {% endif %}
             {% if run.kind == "updraftplus-backup" and run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
             {% if run.kind == "direct-plugin-update" %}
-              <p><strong>Plugin:</strong> {{ run.result_json.plugin_name }}</p>
+              <p><strong>{{ run.result_json.update_kind | default("plugin", true) | title }}:</strong> {{ run.result_json.update_name or run.result_json.plugin_name }}</p>
               <p><strong>Versions:</strong> {{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
               <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
               {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
@@ -196,7 +196,7 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update details</h2>
-        <p class="subtle">Active and inactive plugin updates can be started directly from the workbench. WordPress core and themes remain review-only for now.</p>
+        <p class="subtle">WordPress core, themes, and active or inactive plugin updates can be started directly from the workbench.</p>
       </div>
       <a class="button button-secondary" href="/updates?q={{ site.domain | urlencode }}">Open workbench</a>
     </div>

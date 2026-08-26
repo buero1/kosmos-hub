@@ -194,6 +194,7 @@ def refresh_official_plugin_versions(
 
 
 @router.post("/updates/execute-selected-plugins")
+@router.post("/updates/execute-selected-updates")
 def execute_selected_plugin_updates(
     request: Request,
     db: Annotated[Session, Depends(get_db)],

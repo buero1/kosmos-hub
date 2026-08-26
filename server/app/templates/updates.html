@@ -6,7 +6,7 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update workbench</h2>
-        <p class="subtle">Select plugin updates and start one fully logged maintenance run. Active plugins remain active; inactive plugins remain inactive. WordPress core and themes remain review-only for now.</p>
+        <p class="subtle">Select WordPress, theme, or plugin updates and start one fully logged maintenance run. Active plugins remain active; inactive plugins remain inactive.</p>
       </div>
       <div class="inventory-totals">
         <span><strong>{{ summary.available_updates }}</strong> updates</span>
@@ -63,13 +63,13 @@
       </div>
     </form>
 
-    <form id="direct-update-form" class="plan-panel" method="post" action="/updates/execute-selected-plugins">
+    <form id="direct-update-form" class="plan-panel" method="post" action="/updates/execute-selected-updates">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div>
         <p class="eyebrow">Run selected updates</p>
-        <p class="subtle">Before every update, the Hub refreshes the update evidence and verifies the exact installed version and selected activation state. Afterwards it checks homepage and REST API, and stops the remaining selection if anything fails.</p>
+        <p class="subtle">Before every update, the Hub refreshes the update evidence and verifies the exact installed version. Active plugins remain active; inactive plugins remain inactive. Afterwards it verifies WordPress again, checks homepage and REST API, and stops the remaining selection if anything fails.</p>
       </div>
-      <button class="button" type="submit">Run selected plugin updates</button>
+      <button class="button" type="submit">Run selected updates</button>
     </form>
 
     <form class="plan-panel plan-panel-locked" method="post" action="/updates/refresh-official-plugin-versions">
@@ -131,7 +131,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Direct update run</p>
-            <h3>{{ batch_runs | length }} selected plugin update{{ "s" if batch_runs | length != 1 else "" }}</h3>
+            <h3>{{ batch_runs | length }} selected update{{ "s" if batch_runs | length != 1 else "" }}</h3>
             <p class="subtle">Batch {{ update_batch[:12] }}. The batch stops at the first error; no automatic rollback is performed.</p>
           </div>
         </div>
@@ -140,7 +140,7 @@
             <article class="card maintenance-run-card">
               <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
               <p><strong>Site:</strong> <a href="/sites/{{ run.site.id }}">{{ run.site.domain }}</a></p>
-              <p><strong>Plugin:</strong> {{ run.result_json.plugin_name }}</p>
+              <p><strong>{{ run.result_json.update_kind | default("plugin", true) | title }}:</strong> {{ run.result_json.update_name or run.result_json.plugin_name }}</p>
               <p><strong>Versions:</strong> {{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
               <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
               {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
@@ -155,7 +155,7 @@
       </section>
     {% endif %}
 
-    <p class="result-count">{{ entries | length }} plugin inventory and update items. Only available active or inactive plugin updates can be selected and started from this page.</p>
+    <p class="result-count">{{ entries | length }} WordPress, theme, and plugin inventory items. Available WordPress, theme, and active or inactive plugin updates can be selected and started from this page.</p>
     <div class="table-scroll">
       <table class="update-workbench-table">
         <thead>

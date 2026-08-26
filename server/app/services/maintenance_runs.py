@@ -51,6 +51,8 @@ class MaintenanceRunService:
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
     PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
+    THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
+    WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
     SITE_HEALTH_ABILITY = "kosmos-bridge/check-site-health"
     START_BACKUP_TIMEOUT_SECONDS = 20
     DELETE_BACKUP_TIMEOUT_SECONDS = 180
@@ -192,14 +194,14 @@ class MaintenanceRunService:
         selected_keys: list[str],
         actor: str,
     ) -> PluginUpdateBatchOutcome:
-        """Queue selected plugin updates without creating review plans."""
+        """Queue selected WordPress, theme, or plugin updates without review plans."""
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
         entries = inventory.build_update_workbench(inventory.list_items(limit=200))
         entries_by_key = {entry.plan_key: entry for entry in entries}
         requested_keys = list(dict.fromkeys(key for key in selected_keys if key))
 
         if not requested_keys:
-            raise ValueError("Select at least one plugin update before starting the run.")
+            raise ValueError("Select at least one update before starting the run.")
         if any(key not in entries_by_key for key in requested_keys):
             raise ValueError("One or more selected updates are no longer available. Refresh the workbench and try again.")
 
@@ -223,12 +225,13 @@ class MaintenanceRunService:
             )
         )
         if any(active_runs):
-            raise ValueError("A direct plugin update is already queued or running for one of the selected sites.")
+            raise ValueError("A direct update is already queued or running for one of the selected sites.")
 
         batch_id = uuid4().hex
         now = datetime.now(UTC)
         runs: list[MaintenanceRun] = []
         for position, entry in enumerate(selected_entries, start=1):
+            update_step_key = self._update_step_key(entry.kind)
             run = MaintenanceRun(
                 site=entry.site,
                 kind=self.PLUGIN_UPDATE_KIND,
@@ -239,8 +242,9 @@ class MaintenanceRunService:
                     "batch_id": batch_id,
                     "batch_position": position,
                     "batch_size": len(selected_entries),
-                    "plugin_file": entry.identifier,
-                    "plugin_name": entry.name,
+                    "update_kind": entry.kind,
+                    "update_identifier": entry.identifier,
+                    "update_name": entry.name,
                     "current_version": entry.current_version,
                     "target_version": entry.target_version,
                     "expected_active": entry.is_active,
@@ -258,7 +262,7 @@ class MaintenanceRunService:
                         result_json={},
                     ),
                     MaintenanceRunStep(
-                        step_key="update-plugin",
+                        step_key=update_step_key,
                         status=MaintenanceRunStepStatus.waiting.value,
                         started_at=now,
                         detail="Waiting for the preflight to pass.",
@@ -268,7 +272,7 @@ class MaintenanceRunService:
                         step_key="postflight-health",
                         status=MaintenanceRunStepStatus.waiting.value,
                         started_at=now,
-                        detail="Waiting for the plugin update to complete.",
+                        detail="Waiting for the selected update to complete.",
                         result_json={},
                     ),
                 )
@@ -283,11 +287,11 @@ class MaintenanceRunService:
                 site=run.site,
                 actor=actor,
                 source="hub-web",
-                action="start-direct-plugin-update-run",
+                action="start-direct-update-run",
                 result="queued",
                 detail=(
-                    f"Queued direct plugin update run {run.id} in batch {batch_id[:12]} for "
-                    f"{run.result_json['plugin_name']} {run.result_json['current_version']} -> "
+                    f"Queued direct {run.result_json['update_kind']} update run {run.id} in batch {batch_id[:12]} for "
+                    f"{run.result_json['update_name']} {run.result_json['current_version']} -> "
                     f"{run.result_json['target_version']}."
                 ),
                 request_id=batch_id,
@@ -297,7 +301,7 @@ class MaintenanceRunService:
             batch_id=batch_id,
             run_count=len(runs),
             message=(
-                f"Queued {len(runs)} direct plugin update{'s' if len(runs) != 1 else ''}. "
+                f"Queued {len(runs)} direct update{'s' if len(runs) != 1 else ''}. "
                 "Each update will verify the selected version and run a health check afterwards."
             ),
         )
@@ -350,13 +354,13 @@ class MaintenanceRunService:
         return summary
 
     def _poll_plugin_update(self, run: MaintenanceRun) -> str:
-        details = self._plugin_update_details(run)
+        details = self._direct_update_details(run)
         site = self.repository.get_site(run.site_id)
         if site is None or site.status != SiteStatus.verified.value:
             self._fail_plugin_update_run(run, "The site is no longer verified for direct updates.")
             return "failed"
         if details is None:
-            self._fail_plugin_update_run(run, "The direct update run has an invalid plugin scope.")
+            self._fail_plugin_update_run(run, "The direct update run has an invalid update scope.")
             return "failed"
 
         preflight_step = self._find_step(run, "preflight")
@@ -379,50 +383,52 @@ class MaintenanceRunService:
         self._complete_plugin_update_step(
             run,
             preflight_step,
-            "Fresh selected plugin update checks passed.",
+            "Fresh selected update checks passed.",
         )
 
-        update_step = self._find_step(run, "update-plugin")
+        update_step = self._find_step(run, self._update_step_key(details["update_kind"]))
         self._start_plugin_update_step(
             run,
             update_step,
-            f"Updating {details['plugin_name']} from {details['current_version']} to {details['target_version']}.",
+            f"Updating {details['update_name']} from {details['current_version']} to {details['target_version']}.",
         )
         try:
-            payload = self.proxy.execute_ability(
-                run.site_id,
-                self.PLUGIN_UPDATE_ABILITY,
-                {
-                    "plugin_file": details["plugin_file"],
-                    "expected_current_version": details["current_version"],
-                    "expected_target_version": details["target_version"],
-                    "expected_active": details["expected_active"],
-                },
-                timeout_seconds=180,
-            )
+            payload = self._execute_direct_update(run.site_id, details)
         except SiteMcpProxyError as exc:
-            self._fail_plugin_update_run(run, f"{details['plugin_name']} update request failed: {exc.message}")
+            self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
             return "failed"
 
         result = self._result_from_payload(payload)
-        if (
-            result.get("updated") is not True
-            or result.get("plugin_file") != details["plugin_file"]
-            or result.get("installed_version") != details["target_version"]
-            or result.get("active") is not details["expected_active"]
-        ):
-            self._fail_plugin_update_run(
-                run,
-                f"{details['plugin_name']} did not preserve the selected activation state after its update.",
-            )
+        result_error = self._direct_update_result_error(details, result)
+        if result_error:
+            self._fail_plugin_update_run(run, result_error)
             return "failed"
+
+        if details["update_kind"] == "wordpress":
+            self._start_plugin_update_step(
+                run,
+                update_step,
+                "WordPress core files were updated. Verifying the version through a fresh Bridge request.",
+            )
+            try:
+                SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
+            except SiteMcpProxyError as exc:
+                self._fail_plugin_update_run(run, f"WordPress core was updated, but fresh version verification failed: {exc.message}")
+                return "failed"
+            verified_site = self.repository.get_site(run.site_id)
+            if verified_site is None or verified_site.wordpress_version != details["target_version"]:
+                observed_version = verified_site.wordpress_version if verified_site is not None else "not reported"
+                self._fail_plugin_update_run(
+                    run,
+                    f"WordPress core was updated, but the fresh Bridge check reported {observed_version} instead of {details['target_version']}.",
+                )
+                return "failed"
+            result = {**result, "fresh_wordpress_version": verified_site.wordpress_version}
+
         self._complete_plugin_update_step(
             run,
             update_step,
-            (
-                f"Bridge verified {details['plugin_name']} {details['target_version']} "
-                f"{'active' if details['expected_active'] else 'inactive'}."
-            ),
+            self._direct_update_verification_detail(details),
             result,
         )
 
@@ -435,7 +441,7 @@ class MaintenanceRunService:
         if health_error:
             self._fail_plugin_update_run(
                 run,
-                f"{details['plugin_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
+                f"{details['update_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
                 health_step=health_step,
             )
             return "failed"
@@ -455,7 +461,7 @@ class MaintenanceRunService:
         run.result_json = {
             **(run.result_json or {}),
             "stage": "completed",
-            "stage_message": f"{details['plugin_name']} was updated and verified.{refresh_note}",
+            "stage_message": f"{details['update_name']} was updated and verified.{refresh_note}",
             "installed_version": details["target_version"],
         }
         write_audit_log(
@@ -463,10 +469,10 @@ class MaintenanceRunService:
             site=site,
             actor="kosmos-hub",
             source="hub-worker",
-            action="complete-direct-plugin-update-run",
+            action="complete-direct-update-run",
             result="succeeded",
             detail=(
-                f"Direct update run {run.id} updated {details['plugin_name']} "
+                f"Direct update run {run.id} updated {details['update_name']} "
                 f"{details['current_version']} -> {details['target_version']}. {health_detail}{refresh_note}"
             ),
             request_id=self._plugin_update_batch_id(run),
@@ -525,27 +531,16 @@ class MaintenanceRunService:
         )
 
     def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, Any]) -> str | None:
-        inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
-        current_entry = next(
-            (
-                entry
-                for entry in entries
-                if entry.site.id == run.site_id
-                and entry.kind == "plugin"
-                and entry.identifier == details["plugin_file"]
-            ),
-            None,
-        )
+        current_entry = self._current_plugin_update_entry(run, details)
         if current_entry is None:
-            return f"{details['plugin_name']} is no longer listed as an available plugin update."
+            return f"{details['update_name']} is no longer listed as an available {details['update_kind']} update."
         if (
             current_entry.current_version != details["current_version"]
             or current_entry.target_version != details["target_version"]
         ):
-            return f"{details['plugin_name']} changed since it was selected. Refresh the workbench and start a new run."
-        if current_entry.is_active is not details["expected_active"]:
-            return f"{details['plugin_name']} changed activation state since it was selected. Refresh the workbench and start a new run."
+            return f"{details['update_name']} changed since it was selected. Refresh the workbench and start a new run."
+        if details["update_kind"] == "plugin" and current_entry.is_active is not details["expected_active"]:
+            return f"{details['update_name']} changed activation state since it was selected. Refresh the workbench and start a new run."
 
         scope_error = self._direct_plugin_update_scope_error(current_entry)
         if scope_error:
@@ -559,6 +554,8 @@ class MaintenanceRunService:
         details: dict[str, Any],
         preflight_step: MaintenanceRunStep | None,
     ) -> str | None:
+        if details["update_kind"] != "plugin":
+            return None
         entry = self._current_plugin_update_entry(run, details)
         if entry is None or not self._is_crocoblock_entry(entry) or entry.execution_ready:
             return None
@@ -574,7 +571,7 @@ class MaintenanceRunService:
                 site_id=run.site_id,
             )
         except CrocoblockLicenseError as exc:
-            return f"{details['plugin_name']} needs Crocoblock license activation: {exc}"
+            return f"{details['update_name']} needs Crocoblock license activation: {exc}"
 
         self._start_plugin_update_step(
             run,
@@ -601,8 +598,8 @@ class MaintenanceRunService:
                 entry
                 for entry in entries
                 if entry.site.id == run.site_id
-                and entry.kind == "plugin"
-                and entry.identifier == details["plugin_file"]
+                and entry.kind == details["update_kind"]
+                and entry.identifier == details["update_identifier"]
             ),
             None,
         )
@@ -614,8 +611,20 @@ class MaintenanceRunService:
         allow_stored_crocoblock_license: bool = False,
         has_stored_crocoblock_license: bool = False,
     ) -> str | None:
+        if entry.kind == "wordpress":
+            if entry.identifier != "wordpress-core":
+                return "WordPress core does not have a valid update identifier."
+            if not entry.current_version or not entry.target_version:
+                return "WordPress core does not report both the installed and target version."
+            return None
+        if entry.kind == "theme":
+            if not MaintenanceRunService._is_theme_stylesheet(entry.identifier):
+                return f"{entry.name} does not have a valid WordPress theme stylesheet."
+            if not entry.current_version or not entry.target_version:
+                return f"{entry.name} does not report both the installed and target version."
+            return None
         if entry.kind != "plugin":
-            return "Direct updates currently support WordPress plugins only."
+            return "Direct updates support WordPress core, themes, and plugins only."
         if entry.is_active is None:
             return f"{entry.name} does not report whether it is active or inactive."
         if not MaintenanceRunService._is_plugin_file(entry.identifier):
@@ -629,6 +638,74 @@ class MaintenanceRunService:
                 return f"{entry.name} needs the centrally stored Crocoblock license before its update package is available."
             return entry.execution_note or f"{entry.name} does not have an authorized update package yet."
         return None
+
+    def _execute_direct_update(self, site_id: int, details: dict[str, Any]) -> dict[str, Any]:
+        update_kind = details["update_kind"]
+        if update_kind == "plugin":
+            return self.proxy.execute_ability(
+                site_id,
+                self.PLUGIN_UPDATE_ABILITY,
+                {
+                    "plugin_file": details["update_identifier"],
+                    "expected_current_version": details["current_version"],
+                    "expected_target_version": details["target_version"],
+                    "expected_active": details["expected_active"],
+                },
+                timeout_seconds=180,
+            )
+        if update_kind == "theme":
+            return self.proxy.execute_ability(
+                site_id,
+                self.THEME_UPDATE_ABILITY,
+                {
+                    "stylesheet": details["update_identifier"],
+                    "expected_current_version": details["current_version"],
+                    "expected_target_version": details["target_version"],
+                },
+                timeout_seconds=240,
+            )
+        return self.proxy.execute_ability(
+            site_id,
+            self.WORDPRESS_CORE_UPDATE_ABILITY,
+            {
+                "expected_current_version": details["current_version"],
+                "expected_target_version": details["target_version"],
+            },
+            timeout_seconds=300,
+        )
+
+    @staticmethod
+    def _direct_update_result_error(details: dict[str, Any], result: dict[str, Any]) -> str | None:
+        if result.get("updated") is not True or result.get("installed_version") != details["target_version"]:
+            return f"{details['update_name']} did not return the selected installed version."
+        if details["update_kind"] == "plugin":
+            if result.get("plugin_file") != details["update_identifier"] or result.get("active") is not details["expected_active"]:
+                return f"{details['update_name']} did not preserve the selected activation state after its update."
+        elif details["update_kind"] == "theme":
+            if result.get("stylesheet") != details["update_identifier"]:
+                return f"{details['update_name']} did not return the selected theme after its update."
+        elif result.get("component") != "wordpress-core":
+            return "WordPress core did not return the expected update component."
+        return None
+
+    @staticmethod
+    def _direct_update_verification_detail(details: dict[str, Any]) -> str:
+        if details["update_kind"] == "plugin":
+            return (
+                f"Bridge verified {details['update_name']} {details['target_version']} "
+                f"{'active' if details['expected_active'] else 'inactive'}."
+            )
+        if details["update_kind"] == "theme":
+            return f"Bridge verified theme {details['update_name']} {details['target_version']}."
+        return f"Bridge and a fresh follow-up request verified WordPress {details['target_version']}."
+
+    @staticmethod
+    def _update_step_key(update_kind: str) -> str:
+        return {
+            "plugin": "update-plugin",
+            "theme": "update-theme",
+            "wordpress": "update-wordpress-core",
+        }[update_kind]
 
     @staticmethod
     def _is_crocoblock_entry(entry: UpdateWorkbenchEntry) -> bool:
@@ -785,25 +862,34 @@ class MaintenanceRunService:
         return batch_id if isinstance(batch_id, str) and re.fullmatch(r"[a-f0-9]{32}", batch_id) else None
 
     @staticmethod
-    def _plugin_update_details(run: MaintenanceRun) -> dict[str, Any] | None:
+    def _direct_update_details(run: MaintenanceRun) -> dict[str, Any] | None:
         values = run.result_json or {}
         if not isinstance(values, dict):
             return None
+        update_kind = values.get("update_kind", "plugin")
         details = {
-            "plugin_file": values.get("plugin_file"),
-            "plugin_name": values.get("plugin_name"),
+            "update_identifier": values.get("update_identifier", values.get("plugin_file")),
+            "update_name": values.get("update_name", values.get("plugin_name")),
             "current_version": values.get("current_version"),
             "target_version": values.get("target_version"),
         }
+        if update_kind not in {"plugin", "theme", "wordpress"}:
+            return None
         if not all(isinstance(value, str) and value.strip() for value in details.values()):
             return None
-        if not MaintenanceRunService._is_plugin_file(details["plugin_file"]):
+        identifier = details["update_identifier"].strip()
+        if update_kind == "plugin" and not MaintenanceRunService._is_plugin_file(identifier):
             return None
-        expected_active = values.get("expected_active", True)
-        if not isinstance(expected_active, bool):
+        if update_kind == "theme" and not MaintenanceRunService._is_theme_stylesheet(identifier):
+            return None
+        if update_kind == "wordpress" and identifier != "wordpress-core":
+            return None
+        expected_active = values.get("expected_active")
+        if update_kind == "plugin" and not isinstance(expected_active, bool):
             return None
         return {
             **{key: value.strip() for key, value in details.items()},
+            "update_kind": update_kind,
             "expected_active": expected_active,
         }
 
@@ -813,6 +899,10 @@ class MaintenanceRunService:
             r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php",
             identifier,
         ) is not None
+
+    @staticmethod
+    def _is_theme_stylesheet(identifier: str | None) -> bool:
+        return isinstance(identifier, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", identifier) is not None
 
     @staticmethod
     def _health_status(value: object) -> str:

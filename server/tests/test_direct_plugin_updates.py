@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService, UpdateWorkbenchEntry
@@ -35,7 +36,7 @@ def test_direct_updates_accept_inactive_plugins():
 
 
 def test_direct_update_details_preserve_an_inactive_selection():
-    details = MaintenanceRunService._plugin_update_details(
+    details = MaintenanceRunService._direct_update_details(
         SimpleNamespace(
             result_json={
                 "plugin_file": "wp-smushit/wp-smush.php",
@@ -49,6 +50,54 @@ def test_direct_update_details_preserve_an_inactive_selection():
 
     assert details is not None
     assert details["expected_active"] is False
+
+
+def test_direct_update_details_accept_theme_and_wordpress_core_scopes():
+    theme = MaintenanceRunService._direct_update_details(
+        SimpleNamespace(
+            result_json={
+                "update_kind": "theme",
+                "update_identifier": "hello-elementor",
+                "update_name": "Hello Elementor",
+                "current_version": "3.4.1",
+                "target_version": "3.4.2",
+            }
+        )
+    )
+    core = MaintenanceRunService._direct_update_details(
+        SimpleNamespace(
+            result_json={
+                "update_kind": "wordpress",
+                "update_identifier": "wordpress-core",
+                "update_name": "WordPress core",
+                "current_version": "6.8.1",
+                "target_version": "6.8.2",
+            }
+        )
+    )
+
+    assert theme is not None
+    assert theme["update_identifier"] == "hello-elementor"
+    assert core is not None
+    assert core["update_identifier"] == "wordpress-core"
+
+
+def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():
+    theme = plugin_entry(
+        kind="theme",
+        name="Hello Elementor",
+        identifier="hello-elementor",
+        is_active=None,
+    )
+    core = plugin_entry(
+        kind="wordpress",
+        name="WordPress core",
+        identifier="wordpress-core",
+        is_active=None,
+    )
+
+    assert MaintenanceRunService._direct_plugin_update_scope_error(theme) is None
+    assert MaintenanceRunService._direct_plugin_update_scope_error(core) is None
 
 
 def test_update_workbench_includes_plugins_without_available_updates():
@@ -202,9 +251,9 @@ def test_direct_updates_reject_jet_plugin_without_stored_crocoblock_license():
     ) == "JetElements needs the centrally stored Crocoblock license before its update package is available."
 
 
-def test_direct_updates_reject_non_plugin_entries():
-    assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(kind="theme")) == (
-        "Direct updates currently support WordPress plugins only."
+def test_direct_updates_reject_unknown_update_entries():
+    assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(kind="translation")) == (
+        "Direct updates support WordPress core, themes, and plugins only."
     )
 
 
