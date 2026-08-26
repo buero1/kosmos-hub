@@ -65,6 +65,7 @@ class SiteInventoryService:
         if site is None:
             raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
 
+        previous_bridge_version = site.bridge_version
         environment_payload = self.proxy.execute_ability(site_id, "kosmos-bridge/get-environment-info", None)
         try:
             plugins_payload = self.proxy.execute_ability(site_id, self.INSTALLED_PLUGINS_ABILITY, None)
@@ -105,10 +106,20 @@ class SiteInventoryService:
             detail=f"Stored site snapshot for {site.domain} with {len(snapshot.plugins_json)} installed plugins.",
         )
         self.db.commit()
+
+        capability_refresh_error = ""
+        if site.bridge_version != previous_bridge_version:
+            try:
+                self.refresh_site_inventory(site_id)
+            except SiteMcpProxyError as exc:
+                capability_refresh_error = exc.message
+
         return {
             "site_id": site.id,
             "refreshed_at": refreshed_at,
             "snapshot": snapshot,
+            "capabilities_refreshed": not capability_refresh_error and site.bridge_version != previous_bridge_version,
+            "capability_refresh_error": capability_refresh_error,
         }
 
     def _string_or_none(self, value: object) -> str | None:

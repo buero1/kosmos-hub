@@ -21,6 +21,7 @@ class FleetInventoryItem:
     snapshot: SiteSnapshot | None
     update_snapshot: SiteUpdateSnapshot | None
     plugins: tuple[dict[str, Any], ...]
+    ability_names: frozenset[str] = frozenset()
 
     @property
     def plugin_count(self) -> int:
@@ -54,6 +55,9 @@ class FleetInventoryItem:
     @property
     def update_count(self) -> int:
         return len(self.core_updates) + len(self.plugin_updates) + len(self.theme_updates)
+
+    def supports_ability(self, ability_name: str) -> bool:
+        return ability_name in self.ability_names
 
     def matching_update_names(self, query: str) -> list[str]:
         normalized_query = query.strip().casefold()
@@ -115,7 +119,7 @@ class UpdateWorkbenchEntry:
         if self.kind == "wordpress" and self.direct_update_selectable:
             return "WordPress core: direct update ready"
         if self.kind == "wordpress":
-            return "WordPress core update is not ready."
+            return self.execution_note or "WordPress core update is not ready."
         if self.kind == "plugin" and not self.update_available:
             return "No update is currently available." if self.update_checked else "Plugin inventory is available, but no update check has been recorded yet."
         if self.requires_stored_crocoblock_license:
@@ -130,7 +134,7 @@ class UpdateWorkbenchEntry:
             return self.execution_note or "The update provider has not supplied an authorized package."
         if self.kind == "theme" and self.direct_update_selectable:
             return "Theme: direct update ready"
-        return "Theme update is not ready."
+        return self.execution_note or "Theme update is not ready."
 
     @property
     def requires_stored_crocoblock_license(self) -> bool:
@@ -150,6 +154,9 @@ class UpdateWorkbenchEntry:
 
 
 class FleetInventoryService:
+    THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
+    WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
+
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
         self.cipher = cipher
@@ -271,6 +278,7 @@ class FleetInventoryService:
                 )
 
             for update in item.core_updates:
+                execution_ready = item.supports_ability(self.WORDPRESS_CORE_UPDATE_ABILITY)
                 entries.append(
                     UpdateWorkbenchEntry(
                         site=item.site,
@@ -282,8 +290,12 @@ class FleetInventoryService:
                         is_active=None,
                         update_available=True,
                         update_checked=True,
-                        execution_ready=True,
-                        execution_note="",
+                        execution_ready=execution_ready,
+                        execution_note=(
+                            "Update this site to Kosmos Bridge 0.3.48 or newer, then refresh its status."
+                            if not execution_ready
+                            else ""
+                        ),
                         captured_at=captured_at,
                     )
                 )
@@ -308,6 +320,7 @@ class FleetInventoryService:
 
             for update in item.theme_updates:
                 stylesheet = str(update.get("stylesheet", "")).strip()
+                execution_ready = item.supports_ability(self.THEME_UPDATE_ABILITY)
                 entries.append(
                     UpdateWorkbenchEntry(
                         site=item.site,
@@ -319,8 +332,12 @@ class FleetInventoryService:
                         is_active=None,
                         update_available=True,
                         update_checked=True,
-                        execution_ready=True,
-                        execution_note="",
+                        execution_ready=execution_ready,
+                        execution_note=(
+                            "Update this site to Kosmos Bridge 0.3.48 or newer, then refresh its status."
+                            if not execution_ready
+                            else ""
+                        ),
                         captured_at=captured_at,
                     )
                 )
@@ -562,7 +579,18 @@ class FleetInventoryService:
     ) -> FleetInventoryItem:
         plugins_json = snapshot.plugins_json if snapshot is not None else []
         plugins = tuple(plugin for plugin in plugins_json if isinstance(plugin, dict))
-        return FleetInventoryItem(site=site, snapshot=snapshot, update_snapshot=update_snapshot, plugins=plugins)
+        ability_names = frozenset(
+            capability.ability_name
+            for capability in site.capabilities
+            if capability.provider == "kosmos-wordpress" and capability.ability_name
+        )
+        return FleetInventoryItem(
+            site=site,
+            snapshot=snapshot,
+            update_snapshot=update_snapshot,
+            plugins=plugins,
+            ability_names=ability_names,
+        )
 
     def _matches_site_query(self, site: Site, query: str) -> bool:
         return query in site.domain.casefold() or query in site.home_url.casefold() or query in site.site_url.casefold()

@@ -48,7 +48,7 @@ class SiteRepository:
     def list_sites(self, limit: int = 100) -> list[Site]:
         statement = (
             select(Site)
-            .options(selectinload(Site.connections))
+            .options(selectinload(Site.connections), selectinload(Site.capabilities))
             .order_by(Site.updated_at.desc())
             .limit(limit)
         )

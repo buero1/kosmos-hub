@@ -100,6 +100,38 @@ def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():
     assert MaintenanceRunService._direct_plugin_update_scope_error(core) is None
 
 
+def test_update_workbench_requires_the_matching_bridge_ability_for_core_and_themes():
+    captured_at = datetime.now(UTC)
+    item = FleetInventoryItem(
+        site=SimpleNamespace(id=17, domain="example.test"),
+        snapshot=SimpleNamespace(captured_at=captured_at),
+        update_snapshot=SimpleNamespace(
+            captured_at=captured_at,
+            core_updates_json=[{"current_version": "6.8.1", "new_version": "6.8.2"}],
+            plugin_updates_json=[],
+            theme_updates_json=[
+                {
+                    "stylesheet": "hello-elementor",
+                    "name": "Hello Elementor",
+                    "current_version": "3.4.1",
+                    "new_version": "3.4.2",
+                }
+            ],
+        ),
+        plugins=(),
+        ability_names=frozenset({"kosmos-bridge/update-wordpress-core"}),
+    )
+
+    service = object.__new__(FleetInventoryService)
+    service._attach_official_plugin_versions = lambda entries: entries
+    entries = service.build_update_workbench([item])
+    by_kind = {entry.kind: entry for entry in entries}
+
+    assert by_kind["wordpress"].direct_update_selectable is True
+    assert by_kind["theme"].direct_update_selectable is False
+    assert "0.3.48" in by_kind["theme"].review_note
+
+
 def test_update_workbench_includes_plugins_without_available_updates():
     captured_at = datetime.now(UTC)
     item = FleetInventoryItem(
