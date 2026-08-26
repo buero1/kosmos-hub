@@ -6,5 +6,6 @@ from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
 from app.models.provider_credential import ProviderCredential
+from app.models.plugin_official_version import PluginOfficialVersion
 
-__all__ = ["AiProviderConfig", "HubAccessToken", "HubSetupToken", "HubUser", "MaintenanceRun", "MaintenanceRunStep", "ProviderCredential"]
+__all__ = ["AiProviderConfig", "HubAccessToken", "HubSetupToken", "HubUser", "MaintenanceRun", "MaintenanceRunStep", "PluginOfficialVersion", "ProviderCredential"]

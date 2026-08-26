@@ -21,11 +21,11 @@
     {% if request.query_params.get("openai") == "removed" %}
       <p class="notice-success">The stored OpenAI API key was removed.</p>
     {% endif %}
-    {% if request.query_params.get("crocoblock") == "configured" %}
-      <p class="notice-success">The Crocoblock license is encrypted and ready for an explicit site activation.</p>
+    {% if request.query_params.get("provider_license") == "configured" %}
+      <p class="notice-success">The provider license was encrypted and saved. It is never displayed again.</p>
     {% endif %}
-    {% if request.query_params.get("crocoblock") == "removed" %}
-      <p class="notice-success">The centrally stored Crocoblock license was removed.</p>
+    {% if request.query_params.get("provider_license") == "removed" %}
+      <p class="notice-success">The provider license was removed.</p>
     {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/password">
@@ -120,32 +120,60 @@
         </form>
       {% endif %}
     </section>
-    <section class="account-panel">
+    <section class="account-panel account-panel-wide">
       <div>
         <p class="eyebrow">Update provider</p>
-        <h3>Crocoblock licenses</h3>
-        {% if crocoblock_config and crocoblock_config.enabled %}
-          <p class="subtle">A shared Crocoblock license is stored encrypted. The Hub uses it automatically only when a Jet update needs an authorized package. Last use: {{ crocoblock_config.last_used_at or "Never" }}.</p>
-          {% if crocoblock_config.last_error %}<p class="notice-error">Last automatic-use error: {{ crocoblock_config.last_error }}</p>{% endif %}
-        {% else %}
-          <p class="subtle">Save the shared Crocoblock license once. The Hub uses it automatically when a Jet update needs it.</p>
-        {% endif %}
+        <h3>Provider licenses</h3>
+        <p class="subtle">Save one shared license per provider. Keys stay encrypted on the Hub and are never shown or written to activity logs. Crocoblock is already used automatically for Jet updates; other providers are stored for the next provider-specific integration.</p>
       </div>
-      <form method="post" action="/account/crocoblock">
+      <form method="post" action="/account/provider-licenses">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>
-          <span>{% if crocoblock_config %}Replace Crocoblock license key{% else %}Crocoblock license key{% endif %}</span>
+          <span>Provider</span>
+          <input type="text" name="provider" list="provider-license-suggestions" placeholder="e.g. Elementor Pro" minlength="2" maxlength="64" required>
+          <datalist id="provider-license-suggestions">
+            <option value="Elementor Pro"></option>
+            <option value="Crocoblock"></option>
+            <option value="Borlabs Cookie"></option>
+            <option value="WP Rocket"></option>
+            <option value="Rank Math"></option>
+          </datalist>
+        </label>
+        <label>
+          <span>License key</span>
           <input type="password" name="license_key" autocomplete="new-password" minlength="8" maxlength="512" required>
         </label>
-        <p class="subtle">Stored encrypted on the Hub, never displayed again, and never written to activity logs.</p>
-        <button class="button" type="submit">Save Crocoblock license</button>
+        <button class="button" type="submit">Save provider license</button>
       </form>
-      {% if crocoblock_config %}
-        <form method="post" action="/account/crocoblock/remove">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button button-secondary" type="submit">Remove Crocoblock license</button>
-        </form>
-      {% endif %}
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Provider</th><th>Use</th><th>Configured</th><th>Last use</th><th>Status</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            {% for license in provider_licenses %}
+              <tr>
+                <td><strong>{{ license.label }}</strong><p class="subtle table-note">{{ license.provider }}</p></td>
+                <td>{% if license.automatic_use %}Automatic for supported updates{% else %}Stored, not transmitted automatically{% endif %}</td>
+                <td>{{ license.configured_at }}</td>
+                <td>{{ license.last_used_at or "Never" }}</td>
+                <td>
+                  {% if license.last_error %}<span class="pill pill-missing">Last use failed</span><p class="subtle table-note">{{ license.last_error }}</p>
+                  {% else %}<span class="pill">Encrypted</span>{% endif %}
+                </td>
+                <td>
+                  <form method="post" action="/account/provider-licenses/{{ license.provider }}/remove">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="button button-secondary" type="submit">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6">No provider licenses have been stored yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
     <form method="post" action="/account/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -16,15 +16,19 @@ from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.core.security import get_secret_cipher
 
 logger = logging.getLogger(__name__)
 
 
-def _refresh_fleet_updates() -> dict[str, list[dict[str, object]]]:
+def _refresh_fleet_updates() -> dict[str, object]:
     with SessionLocal() as db:
         service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-        return service.refresh_verified_site_updates(limit=100)
+        result = service.refresh_verified_site_updates(limit=100)
+        result["official_versions"] = OfficialPluginVersionService(db=db).refresh_for_inventory(service.list_items(limit=200))
+        db.commit()
+        return result
 
 
 async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours: int) -> None:
@@ -33,10 +37,11 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours:
         try:
             result = await asyncio.to_thread(_refresh_fleet_updates)
             logger.info(
-                "Fleet update refresh completed: %s refreshed, %s failed, %s skipped.",
+                "Fleet update refresh completed: %s refreshed, %s failed, %s skipped, %s official versions checked.",
                 len(result["refreshed"]),
                 len(result["failed"]),
                 len(result["skipped"]),
+                result["official_versions"]["checked"],
             )
         except Exception:
             logger.exception("Fleet update refresh failed unexpectedly.")

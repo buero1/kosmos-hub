@@ -19,6 +19,7 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.update_plans import UpdatePlanService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -109,6 +110,7 @@ def update_workbench_page(
     activity: Literal["all", "active", "inactive"] = "all",
     update_batch: str = "",
     direct_update: str = "",
+    official_versions: str = "",
     message: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
@@ -136,8 +138,47 @@ def update_workbench_page(
             "batch_runs": batch_runs,
             "batch_running": any(run.status == "running" for run in batch_runs),
             "direct_update": direct_update,
+            "official_versions": official_versions,
             "message": message,
         },
+    )
+
+
+@router.post("/updates/refresh-official-plugin-versions")
+def refresh_official_plugin_versions(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+    summary = OfficialPluginVersionService(db=db).refresh_for_inventory(inventory_service.list_items(limit=200))
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="refresh-official-plugin-versions",
+        result="success",
+        detail=(
+            f"Checked {summary['checked']} plugins for official version evidence: "
+            f"{summary['wordpress_org']} WordPress.org, {summary['provider_offer']} provider offers, "
+            f"{summary['unavailable']} unavailable."
+        ),
+    )
+    db.commit()
+    message = (
+        f"Official version evidence refreshed for {summary['checked']} plugins: "
+        f"{summary['wordpress_org']} from WordPress.org, {summary['provider_offer']} from site update providers, "
+        f"{summary['unavailable']} not available yet."
+    )
+    return RedirectResponse(
+        url=f"/updates?{urlencode({'official_versions': 'refreshed', 'message': message})}",
+        status_code=303,
     )
 
 

@@ -14,6 +14,7 @@
         <span><strong>{{ summary.plugins }}</strong> plugins</span>
         <span><strong>{{ summary.themes }}</strong> themes</span>
         <span><strong>{{ summary.active_plugins }}</strong> active plugins</span>
+        <span><strong>{{ summary.official_version_mismatches }}</strong> version mismatches</span>
       </div>
     </div>
 
@@ -54,10 +55,22 @@
       <button class="button" type="submit">Run selected plugin updates</button>
     </form>
 
+    <form class="plan-panel plan-panel-locked" method="post" action="/updates/refresh-official-plugin-versions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div>
+        <p class="eyebrow">Version evidence</p>
+        <p class="subtle">Check the official latest version for every installed plugin. Public WordPress.org plugins are checked directly. For premium plugins the Hub uses a version already offered by the installed provider, if available. This does not install, activate, or license anything.</p>
+      </div>
+      <button class="button button-secondary" type="submit">Check official plugin versions</button>
+    </form>
+
     {% if direct_update == "started" %}
       <p class="notice-success">{{ message }}</p>
     {% elif direct_update == "error" %}
       <p class="notice-error">Direct update could not start: {{ message }}</p>
+    {% endif %}
+    {% if official_versions == "refreshed" %}
+      <p class="notice-success">{{ message }}</p>
     {% endif %}
 
     {% if batch_runs %}
@@ -99,6 +112,7 @@
             <th>Type</th>
             <th>Update</th>
             <th>Versions</th>
+            <th>Official version</th>
             <th>State</th>
             <th>Captured</th>
             <th>Review</th>
@@ -131,13 +145,29 @@
                   {{ entry.current_version or "-" }} · Update not checked
                 {% endif %}
               </td>
+              <td>
+                {% if entry.official_checked_at %}
+                  <strong>{{ entry.official_version or "Not available" }}</strong>
+                  <p class="subtle table-note">{{ entry.official_source }}</p>
+                  {% if entry.official_mismatch %}
+                    <span class="pill pill-missing">Mismatch</span>
+                    <p class="table-note">{{ entry.official_note }}</p>
+                  {% else %}
+                    <p class="subtle table-note">{{ entry.official_note }}</p>
+                  {% endif %}
+                {% elif entry.kind == "plugin" %}
+                  <span class="pill pill-unknown">Not checked</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
               <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
               <td>{{ entry.captured_at }}</td>
               <td>{{ entry.review_note }}</td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="8">
+              <td colspan="9">
                 <strong>No plugin inventory or update entries match the selected filters.</strong>
                 {% if matching_sites %}
                   <p class="subtle table-note">The matching site is registered, but has no matching plugin inventory or available update entry.</p>

@@ -14,6 +14,7 @@ from app.services.audit import write_audit_log
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.hub_accounts import HubAccountService
+from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/account", include_in_schema=False)
@@ -351,6 +352,73 @@ def remove_crocoblock(
     return RedirectResponse(url="/account?crocoblock=removed", status_code=303)
 
 
+@router.post("/provider-licenses")
+def configure_provider_license(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    provider: Annotated[str, Form()] = "",
+    license_key: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    service = ProviderCredentialService(db=db, cipher=get_secret_cipher())
+    try:
+        credential = service.configure(actor=user, provider=provider, license_key=license_key)
+    except ProviderCredentialError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-provider-license",
+        result="success",
+        detail=f"Configured encrypted license credentials for provider {credential.provider}. The secret was not logged.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?provider_license=configured", status_code=303)
+
+
+@router.post("/provider-licenses/{provider}/remove")
+def remove_provider_license(
+    provider: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    service = ProviderCredentialService(db=db, cipher=get_secret_cipher())
+    try:
+        credential = service.remove(actor=user, provider=provider)
+    except ProviderCredentialError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="remove-provider-license",
+        result="success",
+        detail=f"Removed encrypted license credentials for provider {credential.provider}.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?provider_license=removed", status_code=303)
+
+
 @bootstrap_router.post("/internal/bootstrap-token")
 def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_db)]):
     # This endpoint is only reachable from an SSH shell on the Hub host, never through the public proxy.
@@ -385,7 +453,7 @@ def _account_context(
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
-        "crocoblock_config": CrocoblockLicenseService(db=service.db, cipher=get_secret_cipher()).get_config(),
+        "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
     }
 
 

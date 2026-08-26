@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +10,7 @@ from app.models.site_snapshot import SiteSnapshot
 from app.models.site_update_snapshot import SiteUpdateSnapshot
 from app.repositories.site_repository import SiteRepository
 from app.services.site_inventory import SiteInventoryService
+from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 
@@ -88,6 +89,11 @@ class UpdateWorkbenchEntry:
     execution_ready: bool
     execution_note: str
     captured_at: datetime
+    official_version: str = ""
+    official_source: str = ""
+    official_checked_at: datetime | None = None
+    official_mismatch: bool = False
+    official_note: str = "Official version not checked yet."
 
     @property
     def kind_label(self) -> str:
@@ -306,6 +312,7 @@ class FleetInventoryService:
                     )
                 )
 
+        entries = self._attach_official_plugin_versions(entries)
         kind_order = {"wordpress": 0, "plugin": 1, "theme": 2}
         return sorted(entries, key=lambda entry: (entry.site.domain.casefold(), kind_order[entry.kind], entry.name.casefold()))
 
@@ -344,7 +351,42 @@ class FleetInventoryService:
             "themes": sum(1 for entry in entries if entry.kind == "theme" and entry.update_available),
             "active_plugins": sum(1 for entry in entries if entry.kind == "plugin" and entry.is_active),
             "inactive_plugins": sum(1 for entry in entries if entry.kind == "plugin" and not entry.is_active),
+            "official_versions_checked": sum(1 for entry in entries if entry.kind == "plugin" and entry.official_checked_at is not None),
+            "official_version_mismatches": sum(1 for entry in entries if entry.kind == "plugin" and entry.official_mismatch),
         }
+
+    def _attach_official_plugin_versions(self, entries: list[UpdateWorkbenchEntry]) -> list[UpdateWorkbenchEntry]:
+        plugin_files = [entry.identifier for entry in entries if entry.kind == "plugin" and entry.identifier]
+        cached_versions = OfficialPluginVersionService(db=self.db).get_cached(plugin_files)
+        enriched: list[UpdateWorkbenchEntry] = []
+
+        for entry in entries:
+            if entry.kind != "plugin":
+                enriched.append(entry)
+                continue
+
+            reference = cached_versions.get(entry.identifier)
+            if reference is None:
+                enriched.append(entry)
+                continue
+
+            mismatch, note = OfficialPluginVersionService.comparison(
+                current_version=entry.current_version,
+                reported_version=entry.target_version,
+                official_version=reference.official_version,
+            )
+            enriched.append(
+                replace(
+                    entry,
+                    official_version=reference.official_version or "",
+                    official_source=reference.source,
+                    official_checked_at=reference.checked_at,
+                    official_mismatch=mismatch,
+                    official_note=note,
+                )
+            )
+
+        return enriched
 
     def refresh_verified_site_states(self, *, limit: int = 25) -> dict[str, list[dict[str, Any]]]:
         sites = self.repository.list_sites(limit=limit)

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.official_plugin_versions import OfficialPluginVersionService
+from app.services.provider_credentials import ProviderCredentialService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 
 
@@ -81,7 +83,9 @@ def test_update_workbench_includes_plugins_without_available_updates():
         ),
     )
 
-    entries = FleetInventoryService.build_update_workbench(SimpleNamespace(), [item])
+    service = object.__new__(FleetInventoryService)
+    service._attach_official_plugin_versions = lambda entries: entries
+    entries = service.build_update_workbench([item])
     by_plugin = {entry.identifier: entry for entry in entries}
 
     assert by_plugin["akismet/akismet.php"].direct_update_selectable is True
@@ -121,8 +125,35 @@ def test_direct_updates_reject_jet_plugin_without_stored_crocoblock_license():
 
 def test_direct_updates_reject_non_plugin_entries():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(kind="theme")) == (
-        "Direct updates currently support active WordPress plugins only."
+        "Direct updates currently support WordPress plugins only."
     )
+
+
+def test_official_version_comparison_marks_missing_site_update_offer():
+    mismatch, note = OfficialPluginVersionService.comparison(
+        current_version="3.22.1",
+        reported_version="",
+        official_version="3.22.2",
+    )
+
+    assert mismatch is True
+    assert note == "Mismatch: installed 3.22.1; official version 3.22.2 has no site update offer."
+
+
+def test_official_version_comparison_accepts_matching_reported_target():
+    mismatch, note = OfficialPluginVersionService.comparison(
+        current_version="3.22.1",
+        reported_version="3.22.2",
+        official_version="3.22.2",
+    )
+
+    assert mismatch is False
+    assert note == "The reported update matches the official version."
+
+
+def test_provider_license_normalization_keeps_elementor_in_one_row():
+    assert ProviderCredentialService.normalize_provider("Elementor Pro") == "elementor"
+    assert ProviderCredentialService.normalize_provider(" Elementor ") == "elementor"
 
 
 def test_direct_updates_require_healthy_homepage_and_rest_api():
