@@ -184,6 +184,22 @@ def test_version_diagnosis_blocks_conflicting_provider_information():
     assert "will not update" in note
 
 
+def test_version_diagnosis_explains_the_crocoblock_license_step():
+    status, label, note = OfficialPluginVersionService.diagnosis(
+        current_version="2.7.4.1",
+        reported_version="2.9.2",
+        official_version="2.9.2",
+        official_source="Crocoblock Jet Dashboard",
+        execution_ready=False,
+        execution_note="Crocoblock must activate a valid license for this site before its update package is available.",
+        is_jet_plugin=True,
+    )
+
+    assert status == "crocoblock-license-step"
+    assert label == "Crocoblock license step"
+    assert "activates the stored Crocoblock license" in note
+
+
 def test_official_version_lookup_uses_the_documented_wordpress_org_query_shape():
     url = OfficialPluginVersionService.WORDPRESS_ORG_API.format(slug="wordpress-seo")
 

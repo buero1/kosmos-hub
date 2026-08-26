@@ -203,9 +203,9 @@ class OfficialPluginVersionService:
                 )
             if is_jet_plugin:
                 return (
-                    "crocoblock-package-pending",
-                    "Crocoblock package pending",
-                    f"Jet Dashboard confirms {official_version}, but has not supplied a WordPress update package yet. The Hub will not update it until a package is available.",
+                    "crocoblock-license-step",
+                    "Crocoblock license step",
+                    f"The site offer matches Jet Dashboard at {official_version}. Before updating, the Hub activates the stored Crocoblock license and rechecks the package. It installs only if the provider confirms that package.",
                 )
             return (
                 "provider-package-unavailable",
