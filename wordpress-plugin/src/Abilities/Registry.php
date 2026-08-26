@@ -14,7 +14,6 @@ class Registry {
 	const UPDRAFT_BACKUP_REQUEST_OPTION    = 'kosmos_bridge_updraft_backup_request';
 	const UPDRAFT_BACKUP_REQUEST_TTL       = 300;
 	const UPDRAFT_BACKUP_PENDING_MAX_AGE   = 180;
-	const UPDRAFT_REMOTE_DELETE_SLICE_SECONDS = 8;
 
 	/**
 	 * @return void
@@ -525,16 +524,16 @@ class Registry {
 	/**
 	 * Delete exactly one known UpdraftPlus backup set through the provider's own
 	 * deletion API. Remote deletion is mandatory so local and remote retention
-	 * cannot drift apart. Long remote deletions return a continuation payload.
+	 * cannot drift apart. The provider receives one uninterrupted deletion call
+	 * so its own backup-set state is never resumed mid-component.
 	 *
-	 * @param mixed $input Exact backup identity and continuation state.
+	 * @param mixed $input Exact backup identity and deletion policy.
 	 * @return array|\WP_Error
 	 */
 	public static function execute_delete_updraftplus_backup( $input = array() ) {
-		$nonce                   = self::get_input_string( $input, 'backup_nonce' );
-		$timestamp               = self::get_updraftplus_backup_timestamp_input( $input );
-		$allow_protected_delete  = true === self::get_input_bool( $input, 'allow_protected_delete' );
-		$processed_instance_ids  = self::get_updraftplus_processed_instance_ids( $input );
+		$nonce                  = self::get_input_string( $input, 'backup_nonce' );
+		$timestamp              = self::get_updraftplus_backup_timestamp_input( $input );
+		$allow_protected_delete = true === self::get_input_bool( $input, 'allow_protected_delete' );
 
 		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) || $timestamp <= 0 || ! self::get_input_bool( $input, 'delete_remote' ) ) {
 			return new \WP_Error(
@@ -593,11 +592,8 @@ class Registry {
 		try {
 			$deletion = $updraftplus_admin->delete_set(
 				array(
-					'backup_timestamp'       => (string) $timestamp,
-					'delete_remote'          => true,
-					'remote_delete_limit'    => self::UPDRAFT_REMOTE_DELETE_SLICE_SECONDS,
-					'is_continuation'        => self::get_input_bool( $input, 'continue_delete' ),
-					'processed_instance_ids' => $processed_instance_ids,
+					'backup_timestamp' => (string) $timestamp,
+					'delete_remote'    => true,
 				)
 			);
 		} catch ( \Throwable $exception ) {
@@ -1806,10 +1802,8 @@ class Registry {
 				'backup_timestamp'       => array( 'type' => 'integer' ),
 				'delete_remote'          => array( 'type' => 'boolean' ),
 				'allow_protected_delete' => array( 'type' => 'boolean' ),
-				'continue_delete'        => array( 'type' => 'boolean' ),
-				'processed_instance_ids' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 			),
-			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'allow_protected_delete', 'continue_delete', 'processed_instance_ids' ),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'allow_protected_delete' ),
 		);
 	}
 
@@ -1828,10 +1822,9 @@ class Registry {
 				'backup_sets_removed'    => array( 'type' => 'integer' ),
 				'local_files_deleted'    => array( 'type' => 'integer' ),
 				'remote_files_deleted'   => array( 'type' => 'integer' ),
-				'processed_instance_ids' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 				'message'                => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'status', 'completed', 'backup_sets_removed', 'local_files_deleted', 'remote_files_deleted', 'processed_instance_ids', 'message' ),
+			'required'   => array( 'backup_nonce', 'backup_timestamp', 'delete_remote', 'status', 'completed', 'backup_sets_removed', 'local_files_deleted', 'remote_files_deleted', 'message' ),
 		);
 	}
 
@@ -2131,9 +2124,9 @@ class Registry {
 	}
 
 	/**
-	 * Convert an UpdraftPlus delete result into a stable Hub contract. A
-	 * continuation deliberately remains pending so the Hub can resume it with
-	 * the provider-issued instance identifiers on its next worker cycle.
+	 * Convert an uninterrupted UpdraftPlus delete result into a stable Hub
+	 * contract. A continuation is treated as incomplete rather than retried
+	 * with partially consumed provider state.
 	 *
 	 * @param string $nonce Backup nonce.
 	 * @param int    $timestamp UpdraftPlus backup history timestamp.
@@ -2145,13 +2138,13 @@ class Registry {
 		$outcome  = isset( $deletion['result'] ) ? (string) $deletion['result'] : 'error';
 		$deleted_timestamps = isset( $deletion['deleted_timestamps'] ) ? explode( ',', (string) $deletion['deleted_timestamps'] ) : array();
 		$completed = 'success' === $outcome && in_array( (string) $timestamp, $deleted_timestamps, true );
-		$status    = $completed ? 'completed' : ( 'continue' === $outcome ? 'running' : 'failed' );
+		$status    = $completed ? 'completed' : 'failed';
 		$message   = '';
 
 		if ( 'completed' === $status ) {
 			$message = 'UpdraftPlus deleted the requested backup locally and from the configured remote storage.';
-		} elseif ( 'running' === $status ) {
-			$message = 'UpdraftPlus is continuing remote deletion for the requested backup.';
+		} elseif ( 'continue' === $outcome ) {
+			$message = 'UpdraftPlus did not complete deletion in one uninterrupted provider operation.';
 		} else {
 			$message = 'UpdraftPlus did not confirm complete deletion of the requested backup set.';
 		}
@@ -2165,7 +2158,6 @@ class Registry {
 			'backup_sets_removed'    => isset( $deletion['backup_sets'] ) ? max( 0, (int) $deletion['backup_sets'] ) : 0,
 			'local_files_deleted'    => isset( $deletion['backup_local'] ) ? max( 0, (int) $deletion['backup_local'] ) : 0,
 			'remote_files_deleted'   => isset( $deletion['backup_remote'] ) ? max( 0, (int) $deletion['backup_remote'] ) : 0,
-			'processed_instance_ids' => self::sanitize_updraftplus_processed_instance_ids( $deletion['processed_instance_ids'] ?? array() ),
 			'message'                => $message,
 		);
 	}
@@ -2194,39 +2186,6 @@ class Registry {
 	 */
 	private static function get_input_bool( $input, $key ) {
 		return is_array( $input ) && isset( $input[ $key ] ) && true === $input[ $key ];
-	}
-
-	/**
-	 * @param mixed $input Ability input.
-	 * @return array
-	 */
-	private static function get_updraftplus_processed_instance_ids( $input ) {
-		return is_array( $input ) && isset( $input['processed_instance_ids'] )
-			? self::sanitize_updraftplus_processed_instance_ids( $input['processed_instance_ids'] )
-			: array();
-	}
-
-	/**
-	 * @param mixed $value Provider continuation values.
-	 * @return array
-	 */
-	private static function sanitize_updraftplus_processed_instance_ids( $value ) {
-		if ( ! is_array( $value ) ) {
-			return array();
-		}
-
-		$ids = array();
-		foreach ( $value as $id ) {
-			if ( ! is_string( $id ) || '' === $id || strlen( $id ) > 255 ) {
-				continue;
-			}
-			$ids[] = $id;
-			if ( count( $ids ) >= 100 ) {
-				break;
-			}
-		}
-
-		return array_values( array_unique( $ids ) );
 	}
 
 	/**

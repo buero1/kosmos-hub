@@ -168,6 +168,7 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
             }
 
         assert ability_name == "kosmos-bridge/delete-updraftplus-backup"
+        assert timeout_seconds == MaintenanceRunService.DELETE_BACKUP_TIMEOUT_SECONDS
         deleted_inputs.append(ability_input)
         return {
             "result": {
@@ -176,7 +177,6 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
                 "backup_sets_removed": 1,
                 "local_files_deleted": 5,
                 "remote_files_deleted": 5,
-                "processed_instance_ids": [],
                 "message": "UpdraftPlus deleted the requested backup locally and from the configured remote storage.",
             }
         }
@@ -297,8 +297,6 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
                 "backup_timestamp": 1700000000,
                 "delete_remote": True,
                 "allow_protected_delete": True,
-                "continue_delete": False,
-                "processed_instance_ids": [],
             },
         ]
         assert verified is not None
@@ -308,8 +306,6 @@ def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(m
             "backup_nonce": old_complete_nonce,
             "backup_timestamp": 1700000000,
             "backup_at": "2023-11-14T22:13:20+00:00",
-            "continue_delete": True,
-            "processed_instance_ids": [],
             "backup_sets_removed": 1,
             "local_files_deleted": 5,
             "remote_files_deleted": 5,

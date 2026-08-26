@@ -36,6 +36,8 @@ class MaintenanceRunService:
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
     START_BACKUP_TIMEOUT_SECONDS = 20
+    DELETE_BACKUP_TIMEOUT_SECONDS = 180
+    REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS = 60
     BACKUP_TIMEOUT = timedelta(minutes=3)
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
@@ -321,8 +323,6 @@ class MaintenanceRunService:
                 "backup_nonce": candidate["backup_nonce"],
                 "backup_timestamp": candidate["backup_timestamp"],
                 "backup_at": candidate["backup_at"],
-                "continue_delete": False,
-                "processed_instance_ids": [],
                 "backup_sets_removed": 0,
                 "local_files_deleted": 0,
                 "remote_files_deleted": 0,
@@ -339,10 +339,8 @@ class MaintenanceRunService:
                     "backup_timestamp": cleanup["backup_timestamp"],
                     "delete_remote": True,
                     "allow_protected_delete": True,
-                    "continue_delete": cleanup.get("continue_delete") is True,
-                    "processed_instance_ids": cleanup.get("processed_instance_ids", []),
                 },
-                timeout_seconds=30,
+                timeout_seconds=self.DELETE_BACKUP_TIMEOUT_SECONDS,
             )
         except SiteMcpProxyError as exc:
             self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not start or continue: {exc.message}")
@@ -352,8 +350,6 @@ class MaintenanceRunService:
         cleanup = {
             **cleanup,
             "status": self._safe_string(result.get("status")) or "failed",
-            "continue_delete": True,
-            "processed_instance_ids": result.get("processed_instance_ids") if isinstance(result.get("processed_instance_ids"), list) else [],
             "backup_sets_removed": int(cleanup.get("backup_sets_removed", 0)) + self._non_negative_int(result.get("backup_sets_removed")),
             "local_files_deleted": int(cleanup.get("local_files_deleted", 0)) + self._non_negative_int(result.get("local_files_deleted")),
             "remote_files_deleted": int(cleanup.get("remote_files_deleted", 0)) + self._non_negative_int(result.get("remote_files_deleted")),
@@ -388,7 +384,7 @@ class MaintenanceRunService:
                     "backup_nonce": cleanup["backup_nonce"],
                     "backup_timestamp": cleanup["backup_timestamp"],
                 },
-                timeout_seconds=30,
+                timeout_seconds=self.REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS,
             )
         except SiteMcpProxyError as exc:
             self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not be verified against remote storage: {exc.message}")
