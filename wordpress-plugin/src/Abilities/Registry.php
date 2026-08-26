@@ -1175,7 +1175,7 @@ class Registry {
 			require_once ABSPATH . WPINC . '/update.php';
 		}
 		if ( ! function_exists( 'get_core_updates' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/update-core.php';
+			require_once ABSPATH . 'wp-admin/includes/update.php';
 		}
 		delete_site_transient( 'update_core' );
 		wp_version_check();
