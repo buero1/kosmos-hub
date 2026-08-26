@@ -14,7 +14,6 @@ from app.services.audit import write_audit_log
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.hub_accounts import HubAccountService
-from app.repositories.site_repository import SiteRepository
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/account", include_in_schema=False)
@@ -356,23 +355,13 @@ def remove_crocoblock(
 def activate_crocoblock(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    site_id: Annotated[int, Form()] = 0,
-    confirm_activation: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_current_user(request)
-    if confirm_activation != "yes":
-        return templates.TemplateResponse(
-            request,
-            "account.html",
-            _account_context(request, user, _account_service(db), error="Confirm the selected site before activating its Crocoblock license."),
-            status_code=400,
-        )
-
     service = CrocoblockLicenseService(db=db, cipher=get_secret_cipher())
     try:
-        outcome = service.activate_for_site(actor=user, site_id=site_id)
+        outcome = service.activate_for_matching_sites(actor=user)
     except CrocoblockLicenseError as exc:
         return templates.TemplateResponse(
             request,
@@ -381,8 +370,15 @@ def activate_crocoblock(
             status_code=400,
         )
 
-    refresh = "refreshed" if outcome["updates_refreshed"] else "pending"
-    return RedirectResponse(url=f"/account?crocoblock=activated&updates={refresh}", status_code=303)
+    return RedirectResponse(
+        url=(
+            "/account?crocoblock=activated"
+            f"&activated={len(outcome['activated'])}"
+            f"&failed={len(outcome['failed'])}"
+            f"&skipped={len(outcome['skipped'])}"
+        ),
+        status_code=303,
+    )
 
 
 @bootstrap_router.post("/internal/bootstrap-token")
@@ -420,11 +416,6 @@ def _account_context(
         "new_mcp_token_name": new_mcp_token_name,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
         "crocoblock_config": CrocoblockLicenseService(db=service.db, cipher=get_secret_cipher()).get_config(),
-        "verified_sites": [
-            site
-            for site in SiteRepository(service.db).list_sites(limit=200)
-            if site.status == "verified"
-        ],
     }
 
 

@@ -15,6 +15,7 @@ from app.services.site_updates import SiteUpdateService
 
 CROCOBLOCK_PROVIDER = "crocoblock"
 CROCOBLOCK_ACTIVATE_ABILITY = "kosmos-bridge/activate-crocoblock-license"
+CROCOBLOCK_LICENSE_MIN_BRIDGE_VERSION = (0, 3, 43)
 
 
 class CrocoblockLicenseError(ValueError):
@@ -135,6 +136,44 @@ class CrocoblockLicenseService:
 
         return {"site": site, "updates_refreshed": updates_refreshed}
 
+    def activate_for_matching_sites(self, *, actor: HubUser) -> dict[str, list[dict[str, str]]]:
+        """Activate the shared license on every verified, inventoried Jet site."""
+        self._require_admin(actor)
+        if self.get_config() is None:
+            raise CrocoblockLicenseError("Save a Crocoblock license in the Hub before activating managed sites.")
+
+        sites = [site for site in self.repository.list_sites(limit=200) if site.status == SiteStatus.verified.value]
+        snapshots = self.repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
+        activated: list[dict[str, str]] = []
+        failed: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+
+        for site in sites:
+            snapshot = snapshots.get(site.id)
+            if snapshot is None:
+                skipped.append({"domain": site.domain, "reason": "site inventory is missing"})
+                continue
+            if not self._has_active_crocoblock_plugin(snapshot.plugins_json):
+                skipped.append({"domain": site.domain, "reason": "no active Jet plugin is inventoried"})
+                continue
+            if not self._bridge_supports_license_activation(site.bridge_version):
+                skipped.append({"domain": site.domain, "reason": "Kosmos Bridge 0.3.43 or newer is required"})
+                continue
+
+            try:
+                outcome = self.activate_for_site(actor=actor, site_id=site.id)
+            except CrocoblockLicenseError as exc:
+                failed.append({"domain": site.domain, "reason": str(exc)})
+                continue
+
+            refresh_state = "update offers refreshed" if outcome["updates_refreshed"] else "activation completed; update refresh pending"
+            activated.append({"domain": site.domain, "reason": refresh_state})
+
+        if not activated and not failed:
+            raise CrocoblockLicenseError("No verified, inventoried site with an active Jet plugin is ready for Crocoblock activation.")
+
+        return {"activated": activated, "failed": failed, "skipped": skipped}
+
     def _require_admin(self, actor: HubUser) -> None:
         if actor.role != "admin":
             raise CrocoblockLicenseError("Only Hub administrators can manage provider licenses.")
@@ -145,3 +184,22 @@ class CrocoblockLicenseService:
         if len(normalized) < 8 or len(normalized) > 512 or any(character.isspace() for character in normalized):
             raise CrocoblockLicenseError("Enter a valid Crocoblock license key without spaces.")
         return normalized
+
+    @staticmethod
+    def _has_active_crocoblock_plugin(plugins: object) -> bool:
+        if not isinstance(plugins, list):
+            return False
+        return any(
+            isinstance(plugin, dict) and str(plugin.get("plugin_file", "")).startswith("jet-")
+            for plugin in plugins
+        )
+
+    @staticmethod
+    def _bridge_supports_license_activation(version: str | None) -> bool:
+        if not version:
+            return False
+        try:
+            current = tuple(int(part) for part in version.split("-", 1)[0].split("."))
+        except ValueError:
+            return False
+        return current >= CROCOBLOCK_LICENSE_MIN_BRIDGE_VERSION
