@@ -11,6 +11,7 @@ class MaintenanceRunStatus(StrEnum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    skipped = "skipped"
 
 
 class MaintenanceRunStepStatus(StrEnum):
@@ -18,6 +19,7 @@ class MaintenanceRunStepStatus(StrEnum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    skipped = "skipped"
 
 
 class MaintenanceRun(TimestampMixin, Base):

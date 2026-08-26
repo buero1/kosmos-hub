@@ -115,6 +115,7 @@
     <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
   {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
+  {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "equalto", "updraftplus-backup") | list %}
   <section class="site-refresh-panel">
     <div>
       <p class="eyebrow">Maintenance pilot</p>
@@ -123,7 +124,7 @@
     </div>
     <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button" type="submit" {% if running_maintenance_runs %}disabled{% endif %}>{{ "Backup maintenance is running" if running_maintenance_runs else "Start verified backup" }}</button>
+      <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup maintenance is running" if running_backup_runs else "Start verified backup" }}</button>
     </form>
   </section>
   {% if request.query_params.get("maintenance") == "started" %}
@@ -136,8 +137,8 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">Maintenance record</p>
-          <h2>Recent backup runs</h2>
-          <p class="subtle">Every run remains documented here. While a run is active, this page refreshes automatically and shows the current Bridge and UpdraftPlus stage.</p>
+          <h2>Recent maintenance runs</h2>
+          <p class="subtle">Every backup and direct plugin update remains documented here. While a run is active, this page refreshes automatically and shows its current stage.</p>
         </div>
       </div>
       <div class="detail-list maintenance-run-list">
@@ -145,13 +146,20 @@
           <article class="card maintenance-run-card">
             <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
             <p><strong>Run:</strong> #{{ run.id }}</p>
+            <p><strong>Type:</strong> {{ run.kind | replace("-", " ") | title }}</p>
             <p><strong>Started:</strong> {{ run.started_at }}</p>
             <p><strong>Completed:</strong> {{ run.completed_at or "Still running" }}</p>
-            {% if run.status == "running" %}
+            {% if run.kind == "updraftplus-backup" and run.status == "running" %}
               <p><strong>Bridge stage:</strong> {{ run.result_json.bridge_status | replace("-", " ") | title }}</p>
               {% if run.result_json.bridge_status_message %}<p class="subtle">{{ run.result_json.bridge_status_message }}</p>{% endif %}
             {% endif %}
-            {% if run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
+            {% if run.kind == "updraftplus-backup" and run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
+            {% if run.kind == "direct-plugin-update" %}
+              <p><strong>Plugin:</strong> {{ run.result_json.plugin_name }}</p>
+              <p><strong>Versions:</strong> {{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
+              <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
+              {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
+            {% endif %}
             {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
             {% for step in run.steps %}
               <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}</p>
@@ -163,7 +171,7 @@
     </section>
   {% endif %}
   {% if running_maintenance_runs %}
-    <p class="subtle">Live status is refreshed automatically every 10 seconds while this backup verification is active.</p>
+    <p class="subtle">Live status is refreshed automatically every 10 seconds while maintenance is active.</p>
     <script>
       window.setTimeout(function () {
         window.location.reload();
@@ -186,9 +194,9 @@
   <section>
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Read-only review plan</p>
+        <p class="eyebrow">Direct maintenance</p>
         <h2>Update details</h2>
-        <p class="subtle">These entries are informational. Protected updates run only through an approved plan with exactly one active plugin.</p>
+        <p class="subtle">Active plugin updates can be started directly from the workbench. WordPress core, themes and inactive plugins remain review-only for now.</p>
       </div>
       <a class="button button-secondary" href="/updates?q={{ site.domain | urlencode }}">Open workbench</a>
     </div>

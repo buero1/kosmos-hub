@@ -98,12 +98,12 @@ class UpdateWorkbenchEntry:
     @property
     def review_note(self) -> str:
         if self.kind == "wordpress":
-            return "Core update: review first"
+            return "Core update: not enabled"
         if self.kind == "plugin" and self.is_active:
-            return "Active plugin: review first"
+            return "Active plugin: direct update ready"
         if self.kind == "plugin":
-            return "Inactive plugin: review first"
-        return "Theme update: review first"
+            return "Inactive plugin: not enabled"
+        return "Theme update: not enabled"
 
     @property
     def plan_key(self) -> str:

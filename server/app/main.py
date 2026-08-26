@@ -46,7 +46,15 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours:
 def _poll_maintenance_runs() -> dict[str, int]:
     with SessionLocal() as db:
         service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
-        return service.poll_active_updraftplus_backups(limit=25)
+        backup_result = service.poll_active_updraftplus_backups(limit=25)
+        plugin_update_result = service.poll_active_plugin_updates(limit=25)
+        return {
+            "checked": backup_result["checked"] + plugin_update_result["checked"],
+            "succeeded": backup_result["succeeded"] + plugin_update_result["succeeded"],
+            "failed": backup_result["failed"] + plugin_update_result["failed"],
+            "waiting": backup_result["waiting"] + plugin_update_result["waiting"],
+            "skipped": plugin_update_result["skipped"],
+        }
 
 
 async def _maintenance_run_poll_loop(initial_delay_seconds: int, interval_seconds: int) -> None:
@@ -55,7 +63,7 @@ async def _maintenance_run_poll_loop(initial_delay_seconds: int, interval_second
         try:
             result = await asyncio.to_thread(_poll_maintenance_runs)
             if result["checked"]:
-                logger.info("Maintenance backup polling: %s", result)
+                logger.info("Maintenance polling: %s", result)
         except Exception:
             logger.exception("Maintenance backup polling failed unexpectedly.")
         await asyncio.sleep(interval_seconds)

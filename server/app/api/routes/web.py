@@ -107,6 +107,9 @@ def update_workbench_page(
     q: str = "",
     kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
     activity: Literal["all", "active", "inactive"] = "all",
+    update_batch: str = "",
+    direct_update: str = "",
+    message: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=200)
@@ -118,6 +121,8 @@ def update_workbench_page(
         activity=activity,
     )
     matching_sites = inventory_service.filter_items(all_items, query=q) if q.strip() else []
+    maintenance_service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    batch_runs = maintenance_service.list_plugin_update_batch(update_batch)
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -127,7 +132,38 @@ def update_workbench_page(
             "filters": {"q": q, "kind": kind, "activity": activity},
             "csrf_token": get_csrf_token(request),
             "matching_sites": matching_sites,
+            "update_batch": update_batch if batch_runs else "",
+            "batch_runs": batch_runs,
+            "batch_running": any(run.status == "running" for run in batch_runs),
+            "direct_update": direct_update,
+            "message": message,
         },
+    )
+
+
+@router.post("/updates/execute-selected-plugins")
+def execute_selected_plugin_updates(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    selected: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    try:
+        outcome = service.start_plugin_updates(selected_keys=selected or [], actor=user.username)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/updates?{urlencode({'direct_update': 'error', 'message': str(exc)})}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/updates?{urlencode({'update_batch': outcome.batch_id, 'direct_update': 'started', 'message': outcome.message})}",
+        status_code=303,
     )
 
 

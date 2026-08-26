@@ -1,6 +1,8 @@
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -15,8 +17,11 @@ from app.models.maintenance_run import (
 from app.models.site import Site, SiteStatus
 from app.repositories.site_repository import SiteRepository
 from app.services.audit import write_audit_log
+from app.services.fleet_inventory import FleetInventoryService, UpdateWorkbenchEntry
 from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
+from app.services.site_inventory import SiteInventoryService
+from app.services.site_updates import SiteUpdateService
 
 
 @dataclass(frozen=True)
@@ -26,15 +31,25 @@ class MaintenanceRunOutcome:
     message: str
 
 
+@dataclass(frozen=True)
+class PluginUpdateBatchOutcome:
+    batch_id: str
+    run_count: int
+    message: str
+
+
 class MaintenanceRunService:
     """Run bounded maintenance tasks and persist evidence for later automation."""
 
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
+    PLUGIN_UPDATE_KIND = "direct-plugin-update"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
+    PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
+    SITE_HEALTH_ABILITY = "kosmos-bridge/check-site-health"
     START_BACKUP_TIMEOUT_SECONDS = 20
     DELETE_BACKUP_TIMEOUT_SECONDS = 180
     REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS = 60
@@ -166,6 +181,523 @@ class MaintenanceRunService:
             result="started",
             message="The protected UpdraftPlus backup was queued for immediate background processing. The Hub will verify it automatically.",
         )
+
+    def start_plugin_updates(
+        self,
+        *,
+        selected_keys: list[str],
+        actor: str,
+    ) -> PluginUpdateBatchOutcome:
+        """Queue selected active plugin updates without creating review plans."""
+        inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
+        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        entries_by_key = {entry.plan_key: entry for entry in entries}
+        requested_keys = list(dict.fromkeys(key for key in selected_keys if key))
+
+        if not requested_keys:
+            raise ValueError("Select at least one active plugin update before starting the run.")
+        if any(key not in entries_by_key for key in requested_keys):
+            raise ValueError("One or more selected updates are no longer available. Refresh the workbench and try again.")
+
+        selected_entries = [entries_by_key[key] for key in requested_keys]
+        for entry in selected_entries:
+            scope_error = self._direct_plugin_update_scope_error(entry)
+            if scope_error:
+                raise ValueError(scope_error)
+
+        selected_site_ids = {entry.site.id for entry in selected_entries}
+        active_runs = self.db.scalars(
+            select(MaintenanceRun).where(
+                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+                MaintenanceRun.site_id.in_(selected_site_ids),
+            )
+        )
+        if any(active_runs):
+            raise ValueError("A direct plugin update is already queued or running for one of the selected sites.")
+
+        batch_id = uuid4().hex
+        now = datetime.now(UTC)
+        runs: list[MaintenanceRun] = []
+        for position, entry in enumerate(selected_entries, start=1):
+            run = MaintenanceRun(
+                site=entry.site,
+                kind=self.PLUGIN_UPDATE_KIND,
+                status=MaintenanceRunStatus.running.value,
+                requested_by=actor,
+                started_at=now,
+                result_json={
+                    "batch_id": batch_id,
+                    "batch_position": position,
+                    "batch_size": len(selected_entries),
+                    "plugin_file": entry.identifier,
+                    "plugin_name": entry.name,
+                    "current_version": entry.current_version,
+                    "target_version": entry.target_version,
+                    "stage": "queued",
+                    "stage_message": "Queued for direct update after a fresh backup and update preflight.",
+                },
+            )
+            run.steps.extend(
+                (
+                    MaintenanceRunStep(
+                        step_key="preflight",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting for a fresh protected-backup and update check.",
+                        result_json={},
+                    ),
+                    MaintenanceRunStep(
+                        step_key="update-plugin",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting for the preflight to pass.",
+                        result_json={},
+                    ),
+                    MaintenanceRunStep(
+                        step_key="postflight-health",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting for the plugin update to complete.",
+                        result_json={},
+                    ),
+                )
+            )
+            self.db.add(run)
+            runs.append(run)
+
+        self.db.flush()
+        for run in runs:
+            write_audit_log(
+                self.db,
+                site=run.site,
+                actor=actor,
+                source="hub-web",
+                action="start-direct-plugin-update-run",
+                result="queued",
+                detail=(
+                    f"Queued direct plugin update run {run.id} in batch {batch_id[:12]} for "
+                    f"{run.result_json['plugin_name']} {run.result_json['current_version']} -> "
+                    f"{run.result_json['target_version']}."
+                ),
+                request_id=batch_id,
+            )
+        self.db.commit()
+        return PluginUpdateBatchOutcome(
+            batch_id=batch_id,
+            run_count=len(runs),
+            message=(
+                f"Queued {len(runs)} direct plugin update{'s' if len(runs) != 1 else ''}. "
+                "Each update will verify the current protected backup and run a health check afterwards."
+            ),
+        )
+
+    def list_plugin_update_batch(self, batch_id: str) -> list[MaintenanceRun]:
+        if not re.fullmatch(r"[a-f0-9]{32}", batch_id):
+            return []
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND)
+            .order_by(MaintenanceRun.id.asc())
+        )
+        return [
+            run
+            for run in self.db.scalars(statement)
+            if isinstance(run.result_json, dict) and run.result_json.get("batch_id") == batch_id
+        ]
+
+    def poll_active_plugin_updates(self, *, limit: int = 25) -> dict[str, int]:
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.started_at.asc(), MaintenanceRun.id.asc())
+            .limit(limit)
+        )
+        runs = list(self.db.scalars(statement))
+        summary = {"checked": 0, "succeeded": 0, "failed": 0, "waiting": 0, "skipped": 0}
+        for run in runs:
+            if run.status != MaintenanceRunStatus.running.value:
+                continue
+            summary["checked"] += 1
+            outcome = self._poll_plugin_update(run)
+            summary[outcome] += 1
+            if outcome == "failed":
+                batch_id = self._plugin_update_batch_id(run)
+                if batch_id:
+                    summary["skipped"] += self._skip_queued_plugin_updates(
+                        batch_id,
+                        failed_run_id=run.id,
+                        message=(
+                            f"Skipped because direct update run {run.id} failed. "
+                            "The batch stops at the first error."
+                        ),
+                    )
+        return summary
+
+    def _poll_plugin_update(self, run: MaintenanceRun) -> str:
+        details = self._plugin_update_details(run)
+        site = self.repository.get_site(run.site_id)
+        if site is None or site.status != SiteStatus.verified.value:
+            self._fail_plugin_update_run(run, "The site is no longer verified for direct updates.")
+            return "failed"
+        if details is None:
+            self._fail_plugin_update_run(run, "The direct update run has an invalid plugin scope.")
+            return "failed"
+
+        preflight_step = self._find_step(run, "preflight")
+        self._start_plugin_update_step(run, preflight_step, "Refreshing protected-backup and available-update evidence.")
+        try:
+            SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(run.site_id)
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
+            return "failed"
+
+        preflight_error = self._direct_plugin_update_preflight_error(run, details)
+        if preflight_error:
+            self._fail_plugin_update_run(run, preflight_error)
+            return "failed"
+        self._complete_plugin_update_step(
+            run,
+            preflight_step,
+            "Fresh protected-backup and selected plugin update checks passed.",
+        )
+
+        update_step = self._find_step(run, "update-plugin")
+        self._start_plugin_update_step(
+            run,
+            update_step,
+            f"Updating {details['plugin_name']} from {details['current_version']} to {details['target_version']}.",
+        )
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.PLUGIN_UPDATE_ABILITY,
+                {
+                    "plugin_file": details["plugin_file"],
+                    "expected_current_version": details["current_version"],
+                    "expected_target_version": details["target_version"],
+                },
+                timeout_seconds=180,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(run, f"{details['plugin_name']} update request failed: {exc.message}")
+            return "failed"
+
+        result = self._result_from_payload(payload)
+        if (
+            result.get("updated") is not True
+            or result.get("plugin_file") != details["plugin_file"]
+            or result.get("installed_version") != details["target_version"]
+            or result.get("active") is not True
+        ):
+            self._fail_plugin_update_run(
+                run,
+                f"{details['plugin_name']} did not return the selected installed version and active state.",
+            )
+            return "failed"
+        self._complete_plugin_update_step(
+            run,
+            update_step,
+            f"Bridge verified {details['plugin_name']} {details['target_version']} active.",
+            result,
+        )
+
+        health_step = self._find_step(run, "postflight-health")
+        self._start_plugin_update_step(run, health_step, "Checking the public homepage and WordPress REST API.")
+        try:
+            health_payload = self.proxy.execute_ability(
+                run.site_id,
+                self.SITE_HEALTH_ABILITY,
+                None,
+                timeout_seconds=45,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(run, f"{details['plugin_name']} was updated, but the health check could not run: {exc.message}")
+            return "failed"
+
+        health_result = self._result_from_payload(health_payload)
+        health_error = self._plugin_update_health_error(health_result)
+        health_detail = self._plugin_update_health_detail(health_result)
+        if health_error:
+            self._fail_plugin_update_run(
+                run,
+                f"{details['plugin_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
+                health_step=health_step,
+            )
+            return "failed"
+
+        self._complete_plugin_update_step(run, health_step, health_detail, health_result)
+        refresh_note = ""
+        try:
+            SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+        except SiteMcpProxyError as exc:
+            refresh_note = f" The update succeeded, but the follow-up scan failed: {exc.message}"
+
+        completed_at = datetime.now(UTC)
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "completed",
+            "stage_message": f"{details['plugin_name']} was updated and verified.{refresh_note}",
+            "installed_version": details["target_version"],
+        }
+        write_audit_log(
+            self.db,
+            site=site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-direct-plugin-update-run",
+            result="succeeded",
+            detail=(
+                f"Direct update run {run.id} updated {details['plugin_name']} "
+                f"{details['current_version']} -> {details['target_version']}. {health_detail}{refresh_note}"
+            ),
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
+        return "succeeded"
+
+    def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, str]) -> str | None:
+        inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
+        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        current_entry = next(
+            (
+                entry
+                for entry in entries
+                if entry.site.id == run.site_id
+                and entry.kind == "plugin"
+                and entry.identifier == details["plugin_file"]
+            ),
+            None,
+        )
+        if current_entry is None:
+            return f"{details['plugin_name']} is no longer listed as an available plugin update."
+        if (
+            current_entry.current_version != details["current_version"]
+            or current_entry.target_version != details["target_version"]
+        ):
+            return f"{details['plugin_name']} changed since it was selected. Refresh the workbench and start a new run."
+
+        scope_error = self._direct_plugin_update_scope_error(current_entry)
+        if scope_error:
+            return scope_error
+
+        snapshot = self.repository.get_latest_backup_snapshots_by_site_ids([run.site_id]).get(run.site_id)
+        return self._direct_backup_preflight_error(snapshot)
+
+    @staticmethod
+    def _direct_plugin_update_scope_error(entry: UpdateWorkbenchEntry) -> str | None:
+        if entry.kind != "plugin":
+            return "Direct updates currently support active WordPress plugins only."
+        if entry.is_active is not True:
+            return f"{entry.name} is inactive. Direct updates currently require an active plugin."
+        if not MaintenanceRunService._is_plugin_file(entry.identifier):
+            return f"{entry.name} does not have a valid WordPress plugin file."
+        if not entry.current_version or not entry.target_version:
+            return f"{entry.name} does not report both the installed and target version."
+        return None
+
+    @staticmethod
+    def _direct_backup_preflight_error(snapshot: object) -> str | None:
+        if snapshot is None:
+            return "Direct update blocked: no current backup check is available."
+        if not getattr(snapshot, "provider_installed", False):
+            return "Direct update blocked: no backup provider is installed."
+        if not getattr(snapshot, "provider_active", False):
+            return "Direct update blocked: the backup provider is inactive."
+        backup_at = getattr(snapshot, "backup_at", None)
+        if not getattr(snapshot, "backup_available", False) or not getattr(snapshot, "backup_complete", False) or backup_at is None:
+            return "Direct update blocked: no complete backup is available."
+        summary = getattr(snapshot, "summary_json", {}) or {}
+        if not isinstance(summary, dict) or summary.get("retention_protected") is not True:
+            return "Direct update blocked: the latest complete backup is not protected from automatic deletion."
+        normalized_backup_at = MaintenanceRunService._as_utc(backup_at)
+        if normalized_backup_at < datetime.now(UTC) - timedelta(days=7):
+            return "Direct update blocked: the latest protected backup is older than seven days."
+        return None
+
+    @staticmethod
+    def _plugin_update_health_error(result: object) -> str | None:
+        if not isinstance(result, dict):
+            return "the Bridge did not return a verifiable health result"
+        if result.get("home_healthy") is not True:
+            return f"the public homepage health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('home_status'))})"
+        if result.get("rest_healthy") is not True:
+            return f"the WordPress REST API health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('rest_status'))})"
+        return None
+
+    @staticmethod
+    def _plugin_update_health_detail(result: object) -> str:
+        if not isinstance(result, dict):
+            return "Post-update health check returned no verifiable result."
+        return (
+            "Post-update health check: "
+            f"homepage HTTP {MaintenanceRunService._health_status(result.get('home_status'))}; "
+            f"WordPress REST API HTTP {MaintenanceRunService._health_status(result.get('rest_status'))}."
+        )
+
+    def _start_plugin_update_step(
+        self,
+        run: MaintenanceRun,
+        step: MaintenanceRunStep | None,
+        detail: str,
+    ) -> None:
+        now = datetime.now(UTC)
+        run.last_checked_at = now
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": step.step_key if step is not None else "running",
+            "stage_message": detail,
+        }
+        if step is not None:
+            step.status = MaintenanceRunStepStatus.running.value
+            step.started_at = now
+            step.detail = detail
+        self.db.commit()
+
+    def _complete_plugin_update_step(
+        self,
+        run: MaintenanceRun,
+        step: MaintenanceRunStep | None,
+        detail: str,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        run.last_checked_at = now
+        if step is not None:
+            step.status = MaintenanceRunStepStatus.succeeded.value
+            step.completed_at = now
+            step.detail = detail
+            step.result_json = dict(result or {})
+        self.db.commit()
+
+    def _fail_plugin_update_run(
+        self,
+        run: MaintenanceRun,
+        message: str,
+        *,
+        health_step: MaintenanceRunStep | None = None,
+    ) -> None:
+        completed_at = datetime.now(UTC)
+        run.status = MaintenanceRunStatus.failed.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.error_message = message
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "failed",
+            "stage_message": message,
+        }
+        target_step = health_step or next(
+            (step for step in run.steps if step.status == MaintenanceRunStepStatus.running.value),
+            None,
+        ) or self._find_step(run, "preflight")
+        for step in run.steps:
+            if step is target_step:
+                step.status = MaintenanceRunStepStatus.failed.value
+                step.completed_at = completed_at
+                step.detail = message
+            elif step.status == MaintenanceRunStepStatus.waiting.value:
+                step.status = MaintenanceRunStepStatus.skipped.value
+                step.completed_at = completed_at
+                step.detail = "Not run because this direct update failed."
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="direct-plugin-update-run",
+            result="failed",
+            detail=f"Direct update run {run.id} failed: {message}",
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
+
+    def _skip_queued_plugin_updates(self, batch_id: str, *, failed_run_id: int, message: str) -> int:
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.id.asc())
+        )
+        skipped = 0
+        completed_at = datetime.now(UTC)
+        for run in self.db.scalars(statement):
+            if run.id == failed_run_id or self._plugin_update_batch_id(run) != batch_id:
+                continue
+            run.status = MaintenanceRunStatus.skipped.value
+            run.completed_at = completed_at
+            run.last_checked_at = completed_at
+            run.error_message = message
+            run.result_json = {
+                **(run.result_json or {}),
+                "stage": "skipped",
+                "stage_message": message,
+            }
+            for step in run.steps:
+                if step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}:
+                    step.status = MaintenanceRunStepStatus.skipped.value
+                    step.completed_at = completed_at
+                    step.detail = message
+            write_audit_log(
+                self.db,
+                site=run.site,
+                actor="kosmos-hub",
+                source="hub-worker",
+                action="direct-plugin-update-run",
+                result="skipped",
+                detail=f"Direct update run {run.id} skipped: {message}",
+                request_id=batch_id,
+            )
+            skipped += 1
+        if skipped:
+            self.db.commit()
+        return skipped
+
+    @staticmethod
+    def _plugin_update_batch_id(run: MaintenanceRun) -> str | None:
+        batch_id = (run.result_json or {}).get("batch_id")
+        return batch_id if isinstance(batch_id, str) and re.fullmatch(r"[a-f0-9]{32}", batch_id) else None
+
+    @staticmethod
+    def _plugin_update_details(run: MaintenanceRun) -> dict[str, str] | None:
+        values = run.result_json or {}
+        if not isinstance(values, dict):
+            return None
+        details = {
+            "plugin_file": values.get("plugin_file"),
+            "plugin_name": values.get("plugin_name"),
+            "current_version": values.get("current_version"),
+            "target_version": values.get("target_version"),
+        }
+        if not all(isinstance(value, str) and value.strip() for value in details.values()):
+            return None
+        if not MaintenanceRunService._is_plugin_file(details["plugin_file"]):
+            return None
+        return {key: value.strip() for key, value in details.items()}
+
+    @staticmethod
+    def _is_plugin_file(identifier: str | None) -> bool:
+        return isinstance(identifier, str) and re.fullmatch(
+            r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php",
+            identifier,
+        ) is not None
+
+    @staticmethod
+    def _health_status(value: object) -> str:
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else "not reported"
 
     def poll_active_updraftplus_backups(self, *, limit: int = 25) -> dict[str, int]:
         statement = (
