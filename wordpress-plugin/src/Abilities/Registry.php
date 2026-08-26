@@ -10,8 +10,8 @@ class Registry {
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
 	const UPDATE_BACKUP_MAX_AGE     = 604800;
 	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
-	const UPDRAFT_BACKUP_SCHEDULED_ACTION  = 'kosmos_bridge_start_updraftplus_backup';
-	const UPDRAFT_BACKUP_REQUEST_TRANSIENT = 'kosmos_bridge_updraft_backup_request';
+	const UPDRAFT_BACKUP_LOOPBACK_ACTION   = 'kosmos_bridge_start_updraftplus_backup';
+	const UPDRAFT_BACKUP_REQUEST_OPTION    = 'kosmos_bridge_updraft_backup_request';
 	const UPDRAFT_BACKUP_REQUEST_TTL       = 300;
 	const UPDRAFT_BACKUP_PENDING_MAX_AGE   = 180;
 
@@ -164,13 +164,30 @@ class Registry {
 	}
 
 	/**
-	 * Run the queued request outside the Hub HTTP request. WordPress Cron uses a
-	 * non-blocking loopback, so a slow UpdraftPlus start never delays the Hub UI.
+	 * Handle the signed local loopback outside the Hub HTTP request. The token is
+	 * single-use and only the matching queued backup request may start work.
+	 *
+	 * @return void
+	 */
+	public static function handle_background_updraftplus_backup() {
+		$nonce = isset( $_POST['backup_nonce'] ) ? (string) wp_unslash( $_POST['backup_nonce'] ) : '';
+		$token = isset( $_POST['token'] ) ? (string) wp_unslash( $_POST['token'] ) : '';
+		if ( ! self::consume_updraftplus_backup_loopback_token( $nonce, $token ) ) {
+			wp_send_json_error( array( 'code' => 'kosmos_bridge_loopback_forbidden' ), 403 );
+		}
+
+		ignore_user_abort( true );
+		self::run_background_updraftplus_backup( $nonce );
+		wp_send_json_success();
+	}
+
+	/**
+	 * Run the protected UpdraftPlus start after the signed loopback is accepted.
 	 *
 	 * @param string $nonce UpdraftPlus backup nonce prepared by the Bridge.
 	 * @return void
 	 */
-	public static function run_scheduled_updraftplus_backup( $nonce ) {
+	private static function run_background_updraftplus_backup( $nonce ) {
 		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) ) {
 			return;
 		}
@@ -400,8 +417,8 @@ class Registry {
 
 	/**
 	 * Queue exactly one full UpdraftPlus backup and return its generated nonce.
-	 * WordPress Cron runs the same UpdraftPlus action in a background request,
-	 * keeping the Hub request responsive while preserving a verifiable nonce.
+	 * A signed non-blocking local loopback runs the same action in the background,
+	 * keeping the Hub request responsive without relying on WordPress Cron.
 	 *
 	 * @param array|null $input Empty ability input.
 	 * @return array|\WP_Error
@@ -424,7 +441,7 @@ class Registry {
 			);
 		}
 
-		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		$pending = self::get_current_updraftplus_backup_request();
 		if ( is_array( $pending ) && ! empty( $pending['nonce'] ) && self::is_valid_updraftplus_backup_nonce( $pending['nonce'] ) ) {
 			$requested_at = isset( $pending['requested_at'] ) ? (int) $pending['requested_at'] : 0;
 			if ( $requested_at > time() - self::UPDRAFT_BACKUP_PENDING_MAX_AGE ) {
@@ -435,7 +452,7 @@ class Registry {
 				);
 			}
 
-			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+			delete_option( self::UPDRAFT_BACKUP_REQUEST_OPTION );
 		}
 
 		$updraftplus = $GLOBALS['updraftplus'];
@@ -456,31 +473,40 @@ class Registry {
 			);
 		}
 
-		set_transient(
-			self::UPDRAFT_BACKUP_REQUEST_TRANSIENT,
+		$token = self::generate_loopback_token();
+		self::store_updraftplus_backup_request(
 			array(
-				'nonce'        => $nonce,
-				'requested_at' => time(),
-				'updated_at'   => time(),
-				'status'       => 'queued',
-				'message'      => 'The Bridge queued the protected backup for the WordPress background worker.',
-			),
-			self::UPDRAFT_BACKUP_REQUEST_TTL
+				'nonce'               => $nonce,
+				'requested_at'        => time(),
+				'updated_at'          => time(),
+				'status'              => 'queued',
+				'message'             => 'The Bridge queued the protected backup for its background worker.',
+				'dispatch_token_hash' => hash( 'sha256', $token ),
+			)
 		);
 
-		$scheduled = wp_schedule_single_event( time(), self::UPDRAFT_BACKUP_SCHEDULED_ACTION, array( $nonce ), true );
-		if ( is_wp_error( $scheduled ) || false === $scheduled ) {
-			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		$response = wp_remote_post(
+			admin_url( 'admin-ajax.php' ),
+			array(
+				'timeout'     => 1,
+				'redirection' => 0,
+				'blocking'    => false,
+				'sslverify'   => true,
+				'body'        => array(
+					'action'       => self::UPDRAFT_BACKUP_LOOPBACK_ACTION,
+					'backup_nonce' => $nonce,
+					'token'        => $token,
+				),
+			)
+		);
+		if ( is_wp_error( $response ) ) {
+			delete_option( self::UPDRAFT_BACKUP_REQUEST_OPTION );
 
 			return new \WP_Error(
-				'kosmos_bridge_updraftplus_schedule_failed',
-				'WordPress could not queue the UpdraftPlus backup background task.',
+				'kosmos_bridge_updraftplus_dispatch_failed',
+				'WordPress could not dispatch the UpdraftPlus backup background task.',
 				array( 'status' => 502 )
 			);
-		}
-
-		if ( function_exists( 'spawn_cron' ) ) {
-			spawn_cron( time() );
 		}
 
 		return array(
@@ -491,7 +517,7 @@ class Registry {
 			'request_status'                 => 'queued',
 			'background_dispatch_requested'  => true,
 			'scheduled_at'                   => gmdate( 'c' ),
-			'message'                        => 'The protected UpdraftPlus backup was queued for background processing.',
+			'message'                        => 'The protected UpdraftPlus backup was queued for immediate background processing.',
 		);
 	}
 
@@ -1472,8 +1498,26 @@ class Registry {
 	private static function clear_updraftplus_backup_request( $nonce ) {
 		$pending = self::get_updraftplus_backup_request( $nonce );
 		if ( ! empty( $pending ) ) {
-			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+			delete_option( self::UPDRAFT_BACKUP_REQUEST_OPTION );
 		}
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function get_current_updraftplus_backup_request() {
+		$pending = get_option( self::UPDRAFT_BACKUP_REQUEST_OPTION, array() );
+		if ( ! is_array( $pending ) || empty( $pending['nonce'] ) || ! self::is_valid_updraftplus_backup_nonce( $pending['nonce'] ) ) {
+			return array();
+		}
+
+		$updated_at = isset( $pending['updated_at'] ) ? (int) $pending['updated_at'] : 0;
+		if ( $updated_at < time() - self::UPDRAFT_BACKUP_REQUEST_TTL ) {
+			delete_option( self::UPDRAFT_BACKUP_REQUEST_OPTION );
+			return array();
+		}
+
+		return $pending;
 	}
 
 	/**
@@ -1485,8 +1529,8 @@ class Registry {
 			return array();
 		}
 
-		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
-		if ( ! is_array( $pending ) || ! isset( $pending['nonce'] ) || $nonce !== $pending['nonce'] ) {
+		$pending = self::get_current_updraftplus_backup_request();
+		if ( empty( $pending ) || $nonce !== $pending['nonce'] ) {
 			return array();
 		}
 
@@ -1504,8 +1548,36 @@ class Registry {
 			return;
 		}
 
-		$pending = array_merge( $pending, $changes, array( 'updated_at' => time() ) );
-		set_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT, $pending, self::UPDRAFT_BACKUP_REQUEST_TTL );
+		self::store_updraftplus_backup_request( array_merge( $pending, $changes, array( 'updated_at' => time() ) ) );
+	}
+
+	/**
+	 * @param array $pending Current Bridge backup request state.
+	 * @return void
+	 */
+	private static function store_updraftplus_backup_request( $pending ) {
+		update_option( self::UPDRAFT_BACKUP_REQUEST_OPTION, $pending, false );
+	}
+
+	/**
+	 * @param string $nonce UpdraftPlus backup nonce.
+	 * @param string $token One-time local loopback token.
+	 * @return bool
+	 */
+	private static function consume_updraftplus_backup_loopback_token( $nonce, $token ) {
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) || '' === $token ) {
+			return false;
+		}
+
+		$pending  = self::get_updraftplus_backup_request( $nonce );
+		$expected = isset( $pending['dispatch_token_hash'] ) ? $pending['dispatch_token_hash'] : '';
+		if ( ! is_string( $expected ) || ! hash_equals( $expected, hash( 'sha256', $token ) ) ) {
+			return false;
+		}
+
+		unset( $pending['dispatch_token_hash'] );
+		self::store_updraftplus_backup_request( array_merge( $pending, array( 'updated_at' => time() ) ) );
+		return true;
 	}
 
 	/**

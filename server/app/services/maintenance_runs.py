@@ -159,7 +159,7 @@ class MaintenanceRunService:
         return MaintenanceRunOutcome(
             run=run,
             result="started",
-            message="A new UpdraftPlus backup was requested. The Hub will verify it automatically.",
+            message="The protected UpdraftPlus backup was queued for immediate background processing. The Hub will verify it automatically.",
         )
 
     def poll_active_updraftplus_backups(self, *, limit: int = 25) -> dict[str, int]:
