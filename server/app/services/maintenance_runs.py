@@ -32,7 +32,8 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
-    BACKUP_TIMEOUT = timedelta(minutes=4)
+    START_BACKUP_TIMEOUT_SECONDS = 180
+    BACKUP_TIMEOUT = timedelta(minutes=3)
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -95,7 +96,12 @@ class MaintenanceRunService:
         self.db.flush()
 
         try:
-            payload = self.proxy.execute_ability(site_id, self.START_BACKUP_ABILITY, {}, timeout_seconds=20)
+            payload = self.proxy.execute_ability(
+                site_id,
+                self.START_BACKUP_ABILITY,
+                {},
+                timeout_seconds=self.START_BACKUP_TIMEOUT_SECONDS,
+            )
         except SiteMcpProxyError as exc:
             self._fail_run(run, actor=actor, message=exc.message)
             return MaintenanceRunOutcome(run=run, result="failed", message=exc.message)
@@ -173,7 +179,7 @@ class MaintenanceRunService:
             self._fail_run(
                 run,
                 actor="kosmos-hub",
-                message="UpdraftPlus did not record the requested complete backup within four minutes.",
+                message="UpdraftPlus did not record the requested complete backup within three minutes.",
             )
             return "failed"
 

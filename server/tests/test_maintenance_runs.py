@@ -18,6 +18,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         assert site_id == 1
         assert ability_name == "kosmos-bridge/start-updraftplus-backup"
         assert ability_input == {}
+        assert timeout_seconds == MaintenanceRunService.START_BACKUP_TIMEOUT_SECONDS
         return {
             "result": {
                 "accepted": True,
@@ -60,6 +61,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         db.commit()
 
         service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        assert service.BACKUP_TIMEOUT.total_seconds() == 180
         started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
 
         assert started.result == "started"

@@ -15,16 +15,6 @@ class McpController {
 	public static function register_routes() {
 		register_rest_route(
 			'kosmos-bridge/v1',
-			'/mcp/run-updraftplus-backup',
-			array(
-				'methods'             => WP_REST_Server::CREATABLE,
-				'permission_callback' => array( Registry::class, 'allow_updraftplus_backup_runner' ),
-				'callback'            => array( Registry::class, 'execute_updraftplus_backup_runner' ),
-			)
-		);
-
-		register_rest_route(
-			'kosmos-bridge/v1',
 			'/mcp/discover-abilities',
 			array(
 				'methods'             => WP_REST_Server::CREATABLE,
