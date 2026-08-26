@@ -140,6 +140,9 @@ class McpController {
 		if ( null === $result ) {
 			return self::not_found_error( $ability_name );
 		}
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
 
 		return array(
 			'ability_name' => $ability_name,
