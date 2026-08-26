@@ -6,8 +6,8 @@ from app.services.update_plans import UpdatePlanService
 def plugin_update_plan(**overrides):
     values = {
         "update_type": "plugin",
-        "update_identifier": "mainwp-child/mainwp-child.php",
-        "update_name": "MainWP Child",
+        "update_identifier": "akismet/akismet.php",
+        "update_name": "Akismet",
         "current_version": "5.4.1",
         "target_version": "5.4.2",
         "is_active": True,
