@@ -568,7 +568,7 @@ class MaintenanceRunService:
             return "Direct updates currently support active WordPress plugins only."
         if entry.is_active is not True:
             return f"{entry.name} is inactive. Direct updates currently require an active plugin."
-        if not self._is_plugin_file(entry.identifier):
+        if not MaintenanceRunService._is_plugin_file(entry.identifier):
             return f"{entry.name} does not have a valid WordPress plugin file."
         if not entry.current_version or not entry.target_version:
             return f"{entry.name} does not report both the installed and target version."
