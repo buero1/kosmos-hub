@@ -189,6 +189,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/activate-crocoblock-license',
+			array(
+				'label'               => __( 'Activate Crocoblock License', 'kosmos-bridge' ),
+				'description'         => __( 'Activates a Crocoblock license through the installed Jet Dashboard and refreshes only update availability. It never returns the license key.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::crocoblock_license_input_schema(),
+				'output_schema'       => self::crocoblock_license_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_activate_crocoblock_license' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/activate-plugin',
 			array(
 				'label'               => __( 'Activate Plugin', 'kosmos-bridge' ),
@@ -922,6 +936,106 @@ class Registry {
 	}
 
 	/**
+	 * Activate one centrally supplied Crocoblock license through the version of
+	 * Jet Dashboard already installed on this site. The key stays inside the
+	 * signed Hub-to-site request and is never included in the result.
+	 *
+	 * @param mixed $input Crocoblock license activation input.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_activate_crocoblock_license( $input = array() ) {
+		$license_key = self::get_input_string( $input, 'license_key' );
+		if ( ! self::is_valid_crocoblock_license_key( $license_key ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_crocoblock_license',
+				'A valid Crocoblock license key is required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) || ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_crocoblock_dashboard_unavailable',
+				'The installed Jet Dashboard does not support Crocoblock license activation.',
+				array( 'status' => 424 )
+			);
+		}
+
+		try {
+			$dashboard       = \Jet_Dashboard\Dashboard::get_instance();
+			$license_manager = isset( $dashboard->license_manager ) ? $dashboard->license_manager : null;
+			if (
+				! is_object( $license_manager ) ||
+				! method_exists( $license_manager, 'license_action_query' ) ||
+				! method_exists( $license_manager, 'update_license_list' )
+			) {
+				return new \WP_Error(
+					'kosmos_bridge_crocoblock_license_manager_unavailable',
+					'The installed Jet Dashboard does not expose a compatible license manager.',
+					array( 'status' => 424 )
+				);
+			}
+
+			$response = $license_manager->license_action_query( 'activate_license', $license_key );
+		} catch ( \Throwable $exception ) {
+			return new \WP_Error(
+				'kosmos_bridge_crocoblock_license_request_failed',
+				'Crocoblock license activation could not contact the installed provider.',
+				array( 'status' => 502 )
+			);
+		}
+
+		$response_data = is_array( $response ) && isset( $response['data'] ) ? self::to_array( $response['data'] ) : array();
+		if (
+			! is_array( $response ) ||
+			'error' === ( $response['status'] ?? '' ) ||
+			empty( $response_data['license'] )
+		) {
+			return new \WP_Error(
+				'kosmos_bridge_crocoblock_license_rejected',
+				'Crocoblock did not accept the license for this site.',
+				array( 'status' => 422 )
+			);
+		}
+
+		try {
+			$license_manager->update_license_list( $license_key, $response_data );
+			set_site_transient( 'update_plugins', null );
+			if ( ! function_exists( 'get_plugins' ) ) {
+				require_once ABSPATH . 'wp-admin/includes/plugin.php';
+			}
+			$plugins = get_plugins();
+			self::refresh_update_transients( $plugins );
+			$site_activated = \Jet_Dashboard\Utils::is_site_activated();
+		} catch ( \Throwable $exception ) {
+			return new \WP_Error(
+				'kosmos_bridge_crocoblock_license_persist_failed',
+				'Crocoblock accepted the license but WordPress could not verify its local activation.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$package_ready = false;
+		foreach ( $plugins as $plugin_file => $plugin_data ) {
+			if ( self::is_crocoblock_plugin_file( (string) $plugin_file ) ) {
+				$package_ready = self::has_crocoblock_update_package( (string) $plugin_file );
+				if ( $package_ready ) {
+					break;
+				}
+			}
+		}
+
+		return array(
+			'activated'            => true,
+			'site_activated'       => (bool) $site_activated,
+			'update_package_ready' => $package_ready,
+			'message'              => $site_activated
+				? 'Crocoblock license activation was verified. Update availability was refreshed.'
+				: 'Crocoblock accepted the license, but Jet Dashboard did not confirm this site as activated.',
+		);
+	}
+
+	/**
 	 * Reactivate one plugin only when the installed version matches the target
 	 * version recorded in the failed Hub update plan.
 	 *
@@ -1376,6 +1490,15 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/activate-crocoblock-license',
+				'label'         => __( 'Activate Crocoblock License', 'kosmos-bridge' ),
+				'description'   => __( 'Activates a Crocoblock license through the installed Jet Dashboard and refreshes update availability without returning the license key.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::crocoblock_license_input_schema(),
+				'output_schema' => self::crocoblock_license_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/activate-plugin',
 				'label'         => __( 'Activate Plugin', 'kosmos-bridge' ),
 				'description'   => __( 'Reactivates one plugin only when its installed version matches the Hub recovery plan.', 'kosmos-bridge' ),
@@ -1418,6 +1541,9 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
+		}
+		if ( 'kosmos-bridge/activate-crocoblock-license' === $ability_name ) {
+			return self::execute_activate_crocoblock_license( $input );
 		}
 		if ( 'kosmos-bridge/activate-plugin' === $ability_name ) {
 			return self::execute_activate_plugin( $input );
@@ -1557,6 +1683,35 @@ class Registry {
 				'active'            => array( 'type' => 'boolean' ),
 			),
 			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function crocoblock_license_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'license_key' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'license_key' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function crocoblock_license_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'activated'            => array( 'type' => 'boolean' ),
+				'site_activated'       => array( 'type' => 'boolean' ),
+				'update_package_ready' => array( 'type' => 'boolean' ),
+				'message'              => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'activated', 'site_activated', 'update_package_ready', 'message' ),
 		);
 	}
 
@@ -2635,6 +2790,17 @@ class Registry {
 	 */
 	private static function is_valid_plugin_file( $plugin_file ) {
 		return 1 === preg_match( '/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php$/', $plugin_file );
+	}
+
+	/**
+	 * @param string $license_key Crocoblock license key supplied by the Hub.
+	 * @return bool
+	 */
+	private static function is_valid_crocoblock_license_key( $license_key ) {
+		return is_string( $license_key ) &&
+			strlen( $license_key ) >= 8 &&
+			strlen( $license_key ) <= 512 &&
+			! preg_match( '/\\s/', $license_key );
 	}
 
 	/**
