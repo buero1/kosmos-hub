@@ -32,7 +32,7 @@ class SiteBackupService:
         if site is None:
             raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
 
-        payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, None, timeout_seconds=30)
+        payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, {}, timeout_seconds=30)
         result = payload.get("result", {})
         result = result if isinstance(result, dict) else {}
         return self.store_backup_status_result(site_id, result)
