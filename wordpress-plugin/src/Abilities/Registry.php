@@ -111,7 +111,7 @@ class Registry {
 				'label'               => __( 'Start UpdraftPlus Backup', 'kosmos-bridge' ),
 				'description'         => __( 'Schedules one full UpdraftPlus backup using the site configuration. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
-				'input_schema'        => array(),
+				'input_schema'        => self::updraftplus_backup_start_input_schema(),
 				'output_schema'       => self::updraftplus_backup_start_output_schema(),
 				'execute_callback'    => array( self::class, 'execute_start_updraftplus_backup' ),
 				'permission_callback' => array( self::class, 'allow_mutation_access' ),
@@ -921,7 +921,7 @@ class Registry {
 				'label'         => __( 'Get Site Info', 'kosmos-bridge' ),
 				'description'   => __( 'Returns basic information about this WordPress site.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
-				'input_schema'  => array(),
+				'input_schema'  => self::updraftplus_backup_start_input_schema(),
 				'output_schema' => self::site_info_output_schema(),
 				'meta'          => self::readonly_meta(),
 			),
@@ -1407,6 +1407,19 @@ class Registry {
 			'properties' => array(
 				'backup_nonce' => array( 'type' => 'string' ),
 			),
+		);
+	}
+
+	/**
+	 * A mutation must explicitly declare its empty object input. WordPress'
+	 * Abilities API validates every provided input, including an empty object.
+	 *
+	 * @return array
+	 */
+	private static function updraftplus_backup_start_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(),
 		);
 	}
 
