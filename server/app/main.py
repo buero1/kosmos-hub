@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def _refresh_fleet_updates() -> dict[str, object]:
     with SessionLocal() as db:
         service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-        result = service.refresh_verified_site_updates(limit=100)
+        result = service.refresh_verified_site_statuses(limit=100)
         result["official_versions"] = OfficialPluginVersionService(db=db).refresh_for_inventory(service.list_items(limit=200))
         db.commit()
         return result
@@ -37,10 +37,9 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours:
         try:
             result = await asyncio.to_thread(_refresh_fleet_updates)
             logger.info(
-                "Fleet update refresh completed: %s refreshed, %s failed, %s skipped, %s official versions checked.",
-                len(result["refreshed"]),
-                len(result["failed"]),
-                len(result["skipped"]),
+                "Fleet status refresh completed: %s site states, %s update checks, %s official versions checked.",
+                len(result["state"]["refreshed"]),
+                len(result["updates"]["refreshed"]),
                 result["official_versions"]["checked"],
             )
         except Exception:

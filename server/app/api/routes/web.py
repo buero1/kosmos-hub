@@ -157,6 +157,7 @@ def refresh_official_plugin_versions(
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
+    status_refresh = inventory_service.refresh_verified_site_statuses(limit=100)
     initial_items = inventory_service.list_items(limit=200)
     jet_site_ids = {
         item.site.id
@@ -175,6 +176,8 @@ def refresh_official_plugin_versions(
     )
     diagnosed_entries = inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
     mismatch_count = sum(1 for entry in diagnosed_entries if entry.official_mismatch)
+    state_refresh_count = len(status_refresh["state"]["refreshed"])
+    update_refresh_count = len(status_refresh["updates"]["refreshed"])
     write_audit_log(
         db,
         site=None,
@@ -188,6 +191,7 @@ def refresh_official_plugin_versions(
             f"{summary['unavailable']} unavailable. Crocoblock: {crocoblock_versions} catalog versions from "
             f"{crocoblock_summary['refreshed']} of "
             f"{crocoblock_summary['eligible']} Jet sites refreshed, {crocoblock_summary['failed']} failed. "
+            f"Refreshed {state_refresh_count} installed states and {update_refresh_count} update offers. "
             f"Diagnosed {mismatch_count} version mismatches."
         ),
     )
@@ -195,7 +199,8 @@ def refresh_official_plugin_versions(
     message = (
         f"Official version evidence refreshed for {summary['checked']} plugins: "
         f"{summary['wordpress_org']} from WordPress.org, {summary['provider_offer']} from site update providers, "
-        f"{summary['unavailable']} not available yet. Diagnosed {mismatch_count} version mismatches; "
+        f"{summary['unavailable']} not available yet. Refreshed installed state for {state_refresh_count} sites and "
+        f"update offers for {update_refresh_count} sites. Diagnosed {mismatch_count} version mismatches; "
         "see the Diagnosis column. "
         + (
             f"Crocoblock update metadata was refreshed on {crocoblock_summary['refreshed']} of "

@@ -439,6 +439,13 @@ class FleetInventoryService:
 
         return {"refreshed": refreshed, "failed": failed, "skipped": skipped}
 
+    def refresh_verified_site_statuses(self, *, limit: int = 25) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        """Keep installed versions and update offers from the same refresh run."""
+        return {
+            "state": self.refresh_verified_site_states(limit=limit),
+            "updates": self.refresh_verified_site_updates(limit=limit),
+        }
+
     def refresh_verified_site_updates(self, *, limit: int = 25) -> dict[str, list[dict[str, Any]]]:
         sites = self.repository.list_sites(limit=limit)
         refreshed: list[dict[str, Any]] = []

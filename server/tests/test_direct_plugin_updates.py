@@ -95,6 +95,17 @@ def test_update_workbench_includes_plugins_without_available_updates():
     assert by_plugin["hello-dolly/hello.php"].review_note == "No update is currently available."
 
 
+def test_status_refresh_combines_installed_state_and_update_checks():
+    service = object.__new__(FleetInventoryService)
+    service.refresh_verified_site_states = lambda *, limit: {"refreshed": [{"site_id": 1}], "failed": [], "skipped": []}
+    service.refresh_verified_site_updates = lambda *, limit: {"refreshed": [{"site_id": 1}], "failed": [], "skipped": []}
+
+    result = service.refresh_verified_site_statuses(limit=25)
+
+    assert result["state"]["refreshed"] == [{"site_id": 1}]
+    assert result["updates"]["refreshed"] == [{"site_id": 1}]
+
+
 def test_direct_updates_reject_plugins_without_an_authorized_package():
     assert MaintenanceRunService._direct_plugin_update_scope_error(
         plugin_entry(execution_ready=False, execution_note="License activation is required.")

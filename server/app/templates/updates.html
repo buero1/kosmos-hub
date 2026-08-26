@@ -59,9 +59,9 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div>
         <p class="eyebrow">Version check and diagnosis</p>
-        <p class="subtle">Check the official latest version for every installed plugin and diagnose mismatches in the table. Public WordPress.org plugins are checked directly. For Jet plugins, the Hub uses the saved Crocoblock license to activate Jet Dashboard update metadata on matching sites. This can connect the stored license to those sites, but never installs or updates a plugin.</p>
+        <p class="subtle">First refresh every verified site's installed plugin state and available updates, then check the official latest version and diagnose mismatches in the table. Public WordPress.org plugins are checked directly. For Jet plugins, the Hub uses the saved Crocoblock license to activate Jet Dashboard update metadata on matching sites. This can connect the stored license to those sites, but never installs or updates a plugin.</p>
       </div>
-      <button class="button button-secondary" type="submit">Check official versions and diagnose</button>
+      <button class="button button-secondary" type="submit">Refresh status, check official versions and diagnose</button>
     </form>
 
     {% if direct_update == "started" %}
