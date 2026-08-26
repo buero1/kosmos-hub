@@ -89,6 +89,8 @@ class UpdateWorkbenchEntry:
     execution_ready: bool
     execution_note: str
     captured_at: datetime
+    fleet_observed_version: str = ""
+    fleet_observed_site_count: int = 0
     official_version: str = ""
     official_source: str = ""
     official_checked_at: datetime | None = None
@@ -315,6 +317,7 @@ class FleetInventoryService:
                     )
                 )
 
+        entries = self._attach_fleet_observed_versions(entries)
         entries = self._attach_official_plugin_versions(entries)
         kind_order = {"wordpress": 0, "plugin": 1, "theme": 2}
         return sorted(entries, key=lambda entry: (entry.site.domain.casefold(), kind_order[entry.kind], entry.name.casefold()))
@@ -363,6 +366,46 @@ class FleetInventoryService:
             "official_version_mismatches": sum(1 for entry in entries if entry.kind == "plugin" and entry.official_mismatch),
         }
 
+    @staticmethod
+    def _attach_fleet_observed_versions(entries: list[UpdateWorkbenchEntry]) -> list[UpdateWorkbenchEntry]:
+        """Expose newer versions seen on other sites without treating them as provider evidence."""
+        observations: dict[str, dict[int, list[str]]] = {}
+        for entry in entries:
+            if entry.kind != "plugin" or not entry.identifier:
+                continue
+            versions = [version for version in (entry.current_version, entry.target_version) if version]
+            if versions:
+                observations.setdefault(entry.identifier, {}).setdefault(entry.site.id, []).extend(versions)
+
+        enriched: list[UpdateWorkbenchEntry] = []
+        for entry in entries:
+            if entry.kind != "plugin" or not entry.identifier or not entry.current_version:
+                enriched.append(entry)
+                continue
+
+            other_sites = {
+                site_id: versions
+                for site_id, versions in observations.get(entry.identifier, {}).items()
+                if site_id != entry.site.id
+            }
+            observed_version = OfficialPluginVersionService._highest_version(
+                version for versions in other_sites.values() for version in versions
+            )
+            if not observed_version or OfficialPluginVersionService._version_key(observed_version) <= OfficialPluginVersionService._version_key(entry.current_version):
+                enriched.append(entry)
+                continue
+
+            observed_sites = sum(1 for versions in other_sites.values() if observed_version in versions)
+            enriched.append(
+                replace(
+                    entry,
+                    fleet_observed_version=observed_version,
+                    fleet_observed_site_count=observed_sites,
+                )
+            )
+
+        return enriched
+
     def _attach_official_plugin_versions(self, entries: list[UpdateWorkbenchEntry]) -> list[UpdateWorkbenchEntry]:
         plugin_files = [entry.identifier for entry in entries if entry.kind == "plugin" and entry.identifier]
         cached_versions = OfficialPluginVersionService(db=self.db).get_cached(plugin_files)
@@ -378,16 +421,25 @@ class FleetInventoryService:
                 enriched.append(entry)
                 continue
 
+            # Older releases stored a per-site update offer as an official version.
+            # Keep that historical record out of comparison and execution decisions.
+            if reference.source.startswith("Site update provider:"):
+                official_version = ""
+                official_source = "No trusted catalog version available"
+            else:
+                official_version = reference.official_version or ""
+                official_source = reference.source
+
             mismatch, note = OfficialPluginVersionService.comparison(
                 current_version=entry.current_version,
                 reported_version=entry.target_version,
-                official_version=reference.official_version,
+                official_version=official_version,
             )
             diagnosis_status, diagnosis_label, diagnosis_note = OfficialPluginVersionService.diagnosis(
                 current_version=entry.current_version,
                 reported_version=entry.target_version,
-                official_version=reference.official_version,
-                official_source=reference.source,
+                official_version=official_version,
+                official_source=official_source,
                 execution_ready=entry.execution_ready,
                 execution_note=entry.execution_note,
                 is_jet_plugin=entry.identifier.startswith("jet-"),
@@ -395,8 +447,8 @@ class FleetInventoryService:
             enriched.append(
                 replace(
                     entry,
-                    official_version=reference.official_version or "",
-                    official_source=reference.source,
+                    official_version=official_version,
+                    official_source=official_source,
                     official_checked_at=reference.checked_at,
                     official_mismatch=mismatch,
                     official_note=note,

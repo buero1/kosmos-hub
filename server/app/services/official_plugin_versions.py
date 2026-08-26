@@ -17,8 +17,6 @@ from app.models.plugin_official_version import PluginOfficialVersion
 @dataclass(frozen=True)
 class OfficialVersionCandidate:
     plugin_file: str
-    reported_versions: tuple[str, ...]
-    reported_sources: tuple[str, ...]
 
 
 class OfficialPluginVersionService:
@@ -91,26 +89,18 @@ class OfficialPluginVersionService:
                 last_error = None
                 summary["wordpress_org"] += 1
             else:
-                reported_version = self._highest_version(candidate.reported_versions)
-                if reported_version:
-                    official_version = reported_version
-                    source_name = next(iter(candidate.reported_sources), "WordPress update provider")
-                    source = f"Site update provider: {source_name}"[:128]
-                    last_error = None
+                record = existing.get(plugin_file)
+                if record is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
+                    # Jet Dashboard may temporarily omit an offer, but its last verified catalog
+                    # version remains better evidence than replacing it with an unknown value.
                     summary["provider_offer"] += 1
-                else:
-                    record = existing.get(plugin_file)
-                    if record is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
-                        # Jet Dashboard may temporarily omit an offer, but its last verified catalog
-                        # version remains better evidence than replacing it with an unknown value.
-                        summary["provider_offer"] += 1
-                        continue
-                    official_version = None
-                    source = "No public or provider version available"
-                    last_error = error
-                    summary["unavailable"] += 1
-                    if error and error != "wordpress_org_not_found":
-                        summary["failed"] += 1
+                    continue
+                official_version = None
+                source = "No public or provider catalog available"
+                last_error = error
+                summary["unavailable"] += 1
+                if error and error != "wordpress_org_not_found":
+                    summary["failed"] += 1
 
             record = existing.get(plugin_file)
             if record is None:
@@ -139,6 +129,8 @@ class OfficialPluginVersionService:
         max_age: timedelta | None,
     ) -> bool:
         if record is None or record.checked_at is None or max_age is None:
+            return False
+        if record.source.startswith("Site update provider:"):
             return False
         checked_at = record.checked_at if record.checked_at.tzinfo is not None else record.checked_at.replace(tzinfo=UTC)
         return now - checked_at <= max_age
@@ -266,8 +258,6 @@ class OfficialPluginVersionService:
         )
 
     def _collect_candidates(self, items: Iterable[Any]) -> dict[str, OfficialVersionCandidate]:
-        reports: dict[str, list[str]] = {}
-        sources: dict[str, list[str]] = {}
         plugin_files: set[str] = set()
 
         for item in items:
@@ -281,21 +271,12 @@ class OfficialPluginVersionService:
                 if not isinstance(update, dict):
                     continue
                 plugin_file = str(update.get("plugin_file", "")).strip()
-                reported_version = str(update.get("new_version", "")).strip()
                 if not plugin_file:
                     continue
                 plugin_files.add(plugin_file)
-                if reported_version:
-                    reports.setdefault(plugin_file, []).append(reported_version)
-                    source = str(update.get("update_source", "")).strip() or "WordPress"
-                    sources.setdefault(plugin_file, []).append(source)
 
         return {
-            plugin_file: OfficialVersionCandidate(
-                plugin_file=plugin_file,
-                reported_versions=tuple(reports.get(plugin_file, ())),
-                reported_sources=tuple(sources.get(plugin_file, ())),
-            )
+            plugin_file: OfficialVersionCandidate(plugin_file=plugin_file)
             for plugin_file in sorted(plugin_files)
         }
 

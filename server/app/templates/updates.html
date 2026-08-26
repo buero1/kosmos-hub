@@ -165,7 +165,8 @@
             <th>Type</th>
             <th>Update</th>
             <th>Versions</th>
-            <th>Official version</th>
+            <th>Official catalog</th>
+            <th>Higher version observed</th>
             <th>Diagnosis</th>
             <th>State</th>
             <th>Captured</th>
@@ -216,6 +217,16 @@
                 {% endif %}
               </td>
               <td>
+                {% if entry.fleet_observed_version %}
+                  <strong>{{ entry.fleet_observed_version }}</strong>
+                  <p class="subtle table-note">Seen on {{ entry.fleet_observed_site_count }} other customer site{{ "s" if entry.fleet_observed_site_count != 1 else "" }}. Informational only; it is not an official catalog version or an update offer for this site.</p>
+                {% elif entry.kind == "plugin" %}
+                  <span class="subtle">None higher observed</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
+              <td>
                 {% if entry.kind == "plugin" and entry.diagnosis_status != "not-checked" %}
                   <span class="pill {% if entry.diagnosis_status in ["aligned", "update-ready"] %}pill-active{% elif entry.diagnosis_status == "official-unavailable" %}pill-unknown{% else %}pill-missing{% endif %}">{{ entry.diagnosis_label }}</span>
                   <p class="subtle table-note">{{ entry.diagnosis_note }}</p>
@@ -231,7 +242,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="10">
+              <td colspan="11">
                 <strong>No plugin inventory or update entries match the selected filters.</strong>
                 {% if matching_sites %}
                   <p class="subtle table-note">The matching site is registered, but has no matching plugin inventory or available update entry.</p>

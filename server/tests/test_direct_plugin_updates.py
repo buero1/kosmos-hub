@@ -1,7 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService
+from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService, UpdateWorkbenchEntry
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings
 from app.services.maintenance_runs import MaintenanceRunService
@@ -95,6 +95,71 @@ def test_update_workbench_includes_plugins_without_available_updates():
     assert by_plugin["hello-dolly/hello.php"].update_available is False
     assert by_plugin["hello-dolly/hello.php"].direct_update_selectable is False
     assert by_plugin["hello-dolly/hello.php"].review_note == "No update is currently available."
+
+
+def test_fleet_observed_versions_are_informational_and_ignore_lower_offers():
+    captured_at = datetime.now(UTC)
+    service = object.__new__(FleetInventoryService)
+    entries = [
+        UpdateWorkbenchEntry(
+            site=SimpleNamespace(id=1, domain="current.example"),
+            kind="plugin",
+            name="Borlabs Cookie",
+            identifier="borlabs-cookie/borlabs-cookie.php",
+            current_version="2.3",
+            target_version="",
+            is_active=True,
+            update_available=False,
+            update_checked=True,
+            execution_ready=False,
+            execution_note="",
+            captured_at=captured_at,
+        ),
+        UpdateWorkbenchEntry(
+            site=SimpleNamespace(id=2, domain="offered.example"),
+            kind="plugin",
+            name="Borlabs Cookie",
+            identifier="borlabs-cookie/borlabs-cookie.php",
+            current_version="2.2.63",
+            target_version="2.2.68",
+            is_active=True,
+            update_available=True,
+            update_checked=True,
+            execution_ready=True,
+            execution_note="",
+            captured_at=captured_at,
+        ),
+        UpdateWorkbenchEntry(
+            site=SimpleNamespace(id=3, domain="newer.example"),
+            kind="plugin",
+            name="Borlabs Cookie",
+            identifier="borlabs-cookie/borlabs-cookie.php",
+            current_version="2.3.7",
+            target_version="",
+            is_active=True,
+            update_available=False,
+            update_checked=True,
+            execution_ready=False,
+            execution_note="",
+            captured_at=captured_at,
+        ),
+    ]
+
+    enriched = service._attach_fleet_observed_versions(entries)
+
+    assert enriched[0].fleet_observed_version == "2.3.7"
+    assert enriched[0].fleet_observed_site_count == 1
+    assert enriched[2].fleet_observed_version == ""
+
+
+def test_legacy_site_update_provider_version_is_never_reused_as_official_cache():
+    record = SimpleNamespace(source="Site update provider: wordpress", checked_at=datetime.now(UTC))
+
+    assert OfficialPluginVersionService._is_fresh(
+        record,
+        now=datetime.now(UTC),
+        max_age=timedelta(hours=24),
+    ) is False
 
 
 def test_status_refresh_combines_installed_state_and_update_checks():
