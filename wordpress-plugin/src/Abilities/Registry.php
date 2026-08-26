@@ -12,7 +12,9 @@ class Registry {
 	const UPDATE_BACKUP_MAX_AGE     = 604800;
 	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
 	const UPDRAFT_BACKUP_REQUEST_TRANSIENT = 'kosmos_bridge_updraft_backup_request';
-	const UPDRAFT_BACKUP_REQUEST_TTL       = 5400;
+	const UPDRAFT_BACKUP_REQUEST_TTL       = 600;
+	const UPDRAFT_BACKUP_PENDING_MAX_AGE   = 240;
+	const UPDRAFT_BACKUP_RUNNER_HEADER     = 'X-Kosmos-Backup-Runner';
 
 	/**
 	 * @return void
@@ -343,13 +345,14 @@ class Registry {
 	}
 
 	/**
-	 * Schedule exactly one full UpdraftPlus backup and return its generated
-	 * nonce. The backup runs through WordPress cron so this authenticated Hub
-	 * request does not need to remain open for the duration of the backup.
+	 * Start exactly one full UpdraftPlus backup and return its generated nonce.
+	 * The actual UpdraftPlus work runs in a one-time authenticated background
+	 * request, so this Hub request does not remain open for the backup duration.
 	 *
+	 * @param array|null $input Empty ability input.
 	 * @return array|\WP_Error
 	 */
-	public static function execute_start_updraftplus_backup() {
+	public static function execute_start_updraftplus_backup( $input = null ) {
 		$plugin_file = 'updraftplus/updraftplus.php';
 		$installed   = file_exists( WP_PLUGIN_DIR . '/' . $plugin_file );
 		$active      = in_array( $plugin_file, (array) get_option( 'active_plugins', array() ), true );
@@ -369,11 +372,16 @@ class Registry {
 
 		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
 		if ( is_array( $pending ) && ! empty( $pending['nonce'] ) && self::is_valid_updraftplus_backup_nonce( $pending['nonce'] ) ) {
-			return new \WP_Error(
-				'kosmos_bridge_updraftplus_backup_pending',
-				'An UpdraftPlus backup requested by Kosmos Hub is already pending.',
-				array( 'status' => 409 )
-			);
+			$requested_at = isset( $pending['requested_at'] ) ? (int) $pending['requested_at'] : 0;
+			if ( $requested_at > time() - self::UPDRAFT_BACKUP_PENDING_MAX_AGE ) {
+				return new \WP_Error(
+					'kosmos_bridge_updraftplus_backup_pending',
+					'An UpdraftPlus backup requested by Kosmos Hub is already pending.',
+					array( 'status' => 409 )
+				);
+			}
+
+			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
 		}
 
 		$updraftplus = $GLOBALS['updraftplus'];
@@ -394,36 +402,80 @@ class Registry {
 			);
 		}
 
-		$scheduled = wp_schedule_single_event(
-			time(),
-			self::UPDRAFT_BACKUP_REQUEST_ACTION,
-			array( array( 'use_nonce' => $nonce ) ),
-			true
-		);
-		if ( is_wp_error( $scheduled ) ) {
-			return new \WP_Error(
-				'kosmos_bridge_updraftplus_schedule_failed',
-				'UpdraftPlus backup could not be scheduled.',
-				array( 'status' => 500 )
-			);
-		}
-
+		$runner_token = wp_generate_password( 48, false, false );
 		set_transient(
 			self::UPDRAFT_BACKUP_REQUEST_TRANSIENT,
 			array(
 				'nonce'        => $nonce,
+				'runner_token' => $runner_token,
 				'requested_at' => time(),
 			),
 			self::UPDRAFT_BACKUP_REQUEST_TTL
 		);
-		self::dispatch_due_updraftplus_backup();
+
+		$dispatched = self::dispatch_updraftplus_backup_runner( $runner_token );
+		if ( is_wp_error( $dispatched ) ) {
+			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_dispatch_failed',
+				'UpdraftPlus backup could not be started in the site background process.',
+				array( 'status' => 502 )
+			);
+		}
 
 		return array(
 			'accepted'     => true,
 			'provider'     => 'updraftplus',
 			'backup_nonce' => $nonce,
 			'scheduled_at' => gmdate( 'c' ),
-			'message'      => 'A full UpdraftPlus backup was scheduled using the existing site configuration.',
+			'message'      => 'A full UpdraftPlus backup was started using the existing site configuration.',
+		);
+	}
+
+	/**
+	 * Allow only the one-time local loopback request that was created for the
+	 * pending backup. This endpoint is never exposed as a Hub ability.
+	 *
+	 * @param \WP_REST_Request $request REST request.
+	 * @return bool
+	 */
+	public static function allow_updraftplus_backup_runner( $request ) {
+		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		$token   = $request->get_header( self::UPDRAFT_BACKUP_RUNNER_HEADER );
+
+		return is_array( $pending )
+			&& isset( $pending['runner_token'] )
+			&& is_string( $token )
+			&& hash_equals( (string) $pending['runner_token'], $token );
+	}
+
+	/**
+	 * Run UpdraftPlus from a detached local request after its one-time token has
+	 * been validated by the REST permission callback.
+	 *
+	 * @return array|\WP_Error
+	 */
+	public static function execute_updraftplus_backup_runner() {
+		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		$nonce   = is_array( $pending ) && isset( $pending['nonce'] ) ? $pending['nonce'] : null;
+
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_updraftplus_runner_expired',
+				'The requested UpdraftPlus backup is no longer pending.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$pending['runner_started_at'] = time();
+		set_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT, $pending, self::UPDRAFT_BACKUP_REQUEST_TTL );
+		do_action( self::UPDRAFT_BACKUP_REQUEST_ACTION, array( 'use_nonce' => $nonce ) );
+
+		return array(
+			'accepted'     => true,
+			'backup_nonce' => $nonce,
+			'message'      => 'UpdraftPlus started its initial backup run.',
 		);
 	}
 
@@ -1495,20 +1547,22 @@ class Registry {
 	}
 
 	/**
-	 * WordPress normally starts due cron events on its next request. Trigger a
-	 * non-blocking local cron request as well, so a Hub backup does not depend
-	 * on a visitor reaching the site first.
+	 * Start the initial UpdraftPlus work in a separate local request. Its random
+	 * one-time token is stored only in the short-lived WordPress transient.
 	 *
-	 * @return void
+	 * @param string $runner_token One-time local request token.
+	 * @return array|\WP_Error
 	 */
-	private static function dispatch_due_updraftplus_backup() {
-		$cron_url = add_query_arg( 'doing_wp_cron', sprintf( '%.22F', microtime( true ) ), site_url( '/wp-cron.php' ) );
-		wp_remote_post(
-			$cron_url,
+	private static function dispatch_updraftplus_backup_runner( $runner_token ) {
+		return wp_remote_post(
+			rest_url( 'kosmos-bridge/v1/mcp/run-updraftplus-backup' ),
 			array(
 				'timeout'   => 0.01,
 				'blocking'  => false,
 				'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
+				'headers'   => array(
+					self::UPDRAFT_BACKUP_RUNNER_HEADER => $runner_token,
+				),
 			)
 		);
 	}

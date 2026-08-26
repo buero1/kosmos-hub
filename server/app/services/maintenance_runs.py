@@ -32,7 +32,7 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
-    BACKUP_TIMEOUT = timedelta(minutes=90)
+    BACKUP_TIMEOUT = timedelta(minutes=4)
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -173,7 +173,7 @@ class MaintenanceRunService:
             self._fail_run(
                 run,
                 actor="kosmos-hub",
-                message="UpdraftPlus did not record the requested complete backup within 90 minutes.",
+                message="UpdraftPlus did not record the requested complete backup within four minutes.",
             )
             return "failed"
 
