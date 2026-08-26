@@ -953,19 +953,17 @@ class Registry {
 			);
 		}
 
-		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) || ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+		$license_manager = self::get_crocoblock_license_manager();
+		if ( ! is_object( $license_manager ) ) {
 			return new \WP_Error(
 				'kosmos_bridge_crocoblock_dashboard_unavailable',
-				'The installed Jet Dashboard does not support Crocoblock license activation.',
+				'The active Jet plugin could not initialize a compatible Crocoblock license manager.',
 				array( 'status' => 424 )
 			);
 		}
 
 		try {
-			$dashboard       = \Jet_Dashboard\Dashboard::get_instance();
-			$license_manager = isset( $dashboard->license_manager ) ? $dashboard->license_manager : null;
 			if (
-				! is_object( $license_manager ) ||
 				! method_exists( $license_manager, 'license_action_query' ) ||
 				! method_exists( $license_manager, 'update_license_list' )
 			) {
@@ -1033,6 +1031,70 @@ class Registry {
 				? 'Crocoblock license activation was verified. Update availability was refreshed.'
 				: 'Crocoblock accepted the license, but Jet Dashboard did not confirm this site as activated.',
 		);
+	}
+
+	/**
+	 * Older Jet plugins bundle Jet Dashboard but only initialize it for wp-admin
+	 * requests. The authenticated Bridge REST request needs that same manager
+	 * without depending on a separate Jet Dashboard plugin.
+	 *
+	 * @return object|null
+	 */
+	private static function get_crocoblock_license_manager() {
+		self::initialize_embedded_jet_dashboard();
+
+		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) || ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+			return null;
+		}
+
+		try {
+			$dashboard = \Jet_Dashboard\Dashboard::get_instance();
+			if ( ! isset( $dashboard->license_manager ) && method_exists( $dashboard, 'init_managers' ) ) {
+				$dashboard->init_managers();
+			}
+		} catch ( \Throwable $exception ) {
+			return null;
+		}
+
+		return isset( $dashboard->license_manager ) && is_object( $dashboard->license_manager )
+			? $dashboard->license_manager
+			: null;
+	}
+
+	/**
+	 * @return void
+	 */
+	private static function initialize_embedded_jet_dashboard() {
+		global $wp_filter;
+
+		if ( ! isset( $wp_filter['init'] ) || ! is_object( $wp_filter['init'] ) || empty( $wp_filter['init']->callbacks ) ) {
+			return;
+		}
+
+		foreach ( (array) $wp_filter['init']->callbacks as $callbacks ) {
+			foreach ( (array) $callbacks as $registered_callback ) {
+				$callback = isset( $registered_callback['function'] ) ? $registered_callback['function'] : null;
+				if (
+					! is_array( $callback ) ||
+					! isset( $callback[0], $callback[1] ) ||
+					! is_object( $callback[0] ) ||
+					'jet_dashboard_init' !== $callback[1] ||
+					! method_exists( $callback[0], 'jet_dashboard_init' )
+				) {
+					continue;
+				}
+
+				try {
+					call_user_func( $callback, true );
+				} catch ( \Throwable $exception ) {
+					continue;
+				}
+
+				if ( class_exists( '\\Jet_Dashboard\\Dashboard' ) && class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+					return;
+				}
+			}
+		}
 	}
 
 	/**
