@@ -31,6 +31,10 @@ def test_direct_updates_accept_active_plugin_with_exact_versions():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry()) is None
 
 
+def test_direct_updates_default_to_five_parallel_customer_sites():
+    assert FleetRefreshRuntimeSettings().max_parallel_direct_updates == 5
+
+
 def test_direct_updates_accept_inactive_plugins():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(is_active=False)) is None
 

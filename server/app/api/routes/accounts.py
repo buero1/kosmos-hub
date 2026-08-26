@@ -360,6 +360,7 @@ def configure_fleet_refresh_settings(
     site_status_max_age_minutes: Annotated[int, Form()] = 15,
     official_version_max_age_hours: Annotated[int, Form()] = 24,
     max_parallel_site_checks: Annotated[int, Form()] = 5,
+    max_parallel_direct_updates: Annotated[int, Form()] = 5,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -371,6 +372,7 @@ def configure_fleet_refresh_settings(
             site_status_max_age_minutes=site_status_max_age_minutes,
             official_version_max_age_hours=official_version_max_age_hours,
             max_parallel_site_checks=max_parallel_site_checks,
+            max_parallel_direct_updates=max_parallel_direct_updates,
         )
     except FleetRefreshSettingsError as exc:
         return templates.TemplateResponse(
@@ -390,7 +392,8 @@ def configure_fleet_refresh_settings(
         detail=(
             f"Set status cache to {config.site_status_max_age_minutes} minutes, official version cache to "
             f"{config.official_version_max_age_hours} hours, and parallel site checks to "
-            f"{config.max_parallel_site_checks}."
+            f"{config.max_parallel_site_checks} and parallel direct updates to "
+            f"{config.max_parallel_direct_updates}."
         ),
     )
     db.commit()

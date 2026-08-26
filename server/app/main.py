@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
+from sqlalchemy import inspect, text
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.routes import accounts, assistant, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
@@ -19,6 +20,25 @@ from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import process_pending_direct_updates
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_phase_one_schema() -> None:
+    """Apply the small additive schema changes used before Alembic is introduced."""
+    inspector = inspect(engine)
+    if "fleet_refresh_settings" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}
+    if "max_parallel_direct_updates" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE fleet_refresh_settings "
+                "ADD COLUMN max_parallel_direct_updates INT NOT NULL DEFAULT 5 "
+                "AFTER max_parallel_site_checks"
+            )
+        )
+    logger.info("Added fleet_refresh_settings.max_parallel_direct_updates with default 5.")
 
 
 def _queue_scheduled_fleet_refresh() -> int | None:
@@ -81,6 +101,7 @@ async def lifespan(_: FastAPI):
     async with AsyncExitStack() as stack:
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
+            _ensure_phase_one_schema()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:
             logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)

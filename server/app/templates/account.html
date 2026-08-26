@@ -183,7 +183,7 @@
         <div>
           <p class="eyebrow">Fleet refresh</p>
           <h3>Refresh settings</h3>
-          <p class="subtle">These limits control the background status check on the Update Workbench. A normal run reuses recent data; a full refresh always ignores these cache limits.</p>
+          <p class="subtle">These limits control background status checks and direct updates on the Update Workbench. A normal status run reuses recent data; a full refresh always ignores these cache limits.</p>
         </div>
         <form method="post" action="/account/fleet-refresh-settings">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -199,7 +199,11 @@
             <span>Parallel website checks</span>
             <input type="number" name="max_parallel_site_checks" value="{{ fleet_refresh_settings.max_parallel_site_checks }}" min="1" max="6" required>
           </label>
-          <p class="subtle">Use fewer parallel checks for slower hosting. The safe range is one to six sites at a time.</p>
+          <label>
+            <span>Parallel direct updates</span>
+            <input type="number" name="max_parallel_direct_updates" value="{{ fleet_refresh_settings.max_parallel_direct_updates }}" min="1" max="10" required>
+          </label>
+          <p class="subtle">Direct updates default to five different websites at once. A single website is always updated one item at a time. Use fewer parallel operations for slower hosting; the safe range is one to ten.</p>
           <button class="button" type="submit">Save refresh settings</button>
         </form>
       </section>

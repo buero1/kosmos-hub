@@ -353,6 +353,78 @@ class MaintenanceRunService:
                     )
         return summary
 
+    def next_parallel_direct_update_run_ids(self, *, limit: int) -> list[int]:
+        """Return one queued update per site, with stale in-progress runs recoverable."""
+        if limit < 1:
+            return []
+
+        stale_before = datetime.now(UTC) - timedelta(minutes=10)
+        statement = (
+            select(MaintenanceRun)
+            .where(
+                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.started_at.asc(), MaintenanceRun.id.asc())
+        )
+        selected_ids: list[int] = []
+        selected_site_ids: set[int] = set()
+        for run in self.db.scalars(statement):
+            details = run.result_json if isinstance(run.result_json, dict) else {}
+            stage = details.get("stage", "queued")
+            stale_processing = (
+                stage == "processing"
+                and (run.last_checked_at is None or self._as_utc(run.last_checked_at) <= stale_before)
+            )
+            if stage != "queued" and not stale_processing:
+                continue
+            if run.site_id in selected_site_ids:
+                continue
+            selected_ids.append(run.id)
+            selected_site_ids.add(run.site_id)
+            if len(selected_ids) >= limit:
+                break
+        return selected_ids
+
+    def poll_direct_update_run(self, run_id: int) -> str:
+        """Run one queued update in its own database session."""
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(MaintenanceRun.id == run_id)
+        )
+        run = self.db.scalar(statement)
+        if run is None or run.kind != self.PLUGIN_UPDATE_KIND:
+            return "skipped"
+        if run.status != MaintenanceRunStatus.running.value:
+            return "skipped"
+
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "processing",
+            "stage_message": "Preparing this update in a dedicated worker.",
+        }
+        run.last_checked_at = datetime.now(UTC)
+        self.db.commit()
+        return self._poll_plugin_update(run)
+
+    def fail_direct_update_worker_run(self, run_id: int) -> None:
+        """Persist an unexpected worker failure instead of leaving a run stuck."""
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(MaintenanceRun.id == run_id)
+        )
+        run = self.db.scalar(statement)
+        if run is None or run.kind != self.PLUGIN_UPDATE_KIND:
+            return
+        if run.status != MaintenanceRunStatus.running.value:
+            return
+        self._fail_plugin_update_run(
+            run,
+            "The Hub update worker stopped unexpectedly. The website was not marked as successfully updated.",
+        )
+
     def _poll_plugin_update(self, run: MaintenanceRun) -> str:
         details = self._direct_update_details(run)
         site = self.repository.get_site(run.site_id)
@@ -826,6 +898,8 @@ class MaintenanceRunService:
         completed_at = datetime.now(UTC)
         for run in self.db.scalars(statement):
             if run.id == failed_run_id or self._plugin_update_batch_id(run) != batch_id:
+                continue
+            if (run.result_json or {}).get("stage") != "queued":
                 continue
             run.status = MaintenanceRunStatus.skipped.value
             run.completed_at = completed_at
