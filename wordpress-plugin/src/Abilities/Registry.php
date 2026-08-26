@@ -8,7 +8,6 @@ class Registry {
 	const UPDATE_LOOPBACK_TTL    = 60;
 	const UPDATE_OFFER_CACHE_OPTION = 'kosmos_bridge_plugin_update_offers_v1';
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
-	const UPDATE_BACKUP_MAX_AGE     = 604800;
 	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
 	const UPDRAFT_BACKUP_LOOPBACK_ACTION   = 'kosmos_bridge_start_updraftplus_backup';
 	const UPDRAFT_BACKUP_REQUEST_OPTION    = 'kosmos_bridge_updraft_backup_request';
@@ -179,7 +178,7 @@ class Registry {
 			'kosmos-bridge/update-plugin',
 			array(
 				'label'               => __( 'Update Plugin', 'kosmos-bridge' ),
-				'description'         => __( 'Updates one active plugin after a fresh full backup and exact version preflight.', 'kosmos-bridge' ),
+				'description'         => __( 'Updates one active plugin after an exact version and active-state preflight.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'input_schema'        => self::plugin_update_input_schema(),
 				'output_schema'       => self::plugin_update_output_schema(),
@@ -858,24 +857,6 @@ class Registry {
 			);
 		}
 
-		$backup_status = self::execute_get_updraftplus_backup_status();
-		$backup_time   = isset( $backup_status['latest_backup_at'] ) ? strtotime( (string) $backup_status['latest_backup_at'] ) : false;
-		if (
-			empty( $backup_status['installed'] ) ||
-			empty( $backup_status['active'] ) ||
-			empty( $backup_status['available'] ) ||
-			empty( $backup_status['complete'] ) ||
-			empty( $backup_status['retention_protected'] ) ||
-			false === $backup_time ||
-			$backup_time < ( time() - self::UPDATE_BACKUP_MAX_AGE )
-		) {
-			return new \WP_Error(
-				'kosmos_bridge_backup_preflight_failed',
-				'A fresh complete UpdraftPlus backup protected from automatic deletion is required before this update.',
-				array( 'status' => 409 )
-			);
-		}
-
 		self::refresh_update_transients( $plugins );
 		$plugin_transient = self::to_array( get_site_transient( 'update_plugins' ) );
 		$responses        = isset( $plugin_transient['response'] ) ? self::to_array( $plugin_transient['response'] ) : array();
@@ -937,7 +918,6 @@ class Registry {
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
 			'active'           => true,
-			'backup_at'        => (string) $backup_status['latest_backup_at'],
 		);
 	}
 
@@ -1337,7 +1317,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/update-plugin',
 				'label'         => __( 'Update Plugin', 'kosmos-bridge' ),
-				'description'   => __( 'Updates one active plugin after a fresh full backup and exact version preflight.', 'kosmos-bridge' ),
+				'description'   => __( 'Updates one active plugin after an exact version and active-state preflight.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => self::plugin_update_input_schema(),
 				'output_schema' => self::plugin_update_output_schema(),
@@ -1523,9 +1503,8 @@ class Registry {
 				'previous_version'  => array( 'type' => 'string' ),
 				'installed_version' => array( 'type' => 'string' ),
 				'active'            => array( 'type' => 'boolean' ),
-				'backup_at'         => array( 'type' => 'string', 'format' => 'date-time' ),
 			),
-			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active', 'backup_at' ),
+			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active' ),
 		);
 	}
 
