@@ -52,6 +52,7 @@ class SiteBackupService:
         available = self._as_bool(result.get("available")) and complete and backup_at is not None
         components = self._components_from(result.get("components"))
         backup_count = self._non_negative_int(result.get("backup_count"))
+        retention_protected = self._as_bool(result.get("retention_protected"))
         message = self._string_or_none(result.get("message"))
 
         snapshot = self.repository.create_site_backup_snapshot(
@@ -67,6 +68,7 @@ class SiteBackupService:
             components_json=components,
             summary_json={
                 "reported_at": self._string_or_none(result.get("reported_at")),
+                "retention_protected": retention_protected,
                 "message": message,
             },
         )
@@ -79,7 +81,7 @@ class SiteBackupService:
             result="ok",
             detail=(
                 f"Stored UpdraftPlus backup status for {site.domain}: "
-                f"available={available}, complete={complete}."
+                f"available={available}, complete={complete}, retention_protected={retention_protected}."
             ),
         )
         self.db.commit()

@@ -12,6 +12,7 @@ def backup_snapshot(**overrides):
         "backup_available": True,
         "backup_complete": True,
         "backup_at": datetime.now(UTC),
+        "summary_json": {"retention_protected": True},
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -41,3 +42,11 @@ def test_preflight_blocks_a_backup_older_than_seven_days():
     )
 
     assert status == "backup stale"
+
+
+def test_preflight_blocks_a_backup_without_retention_protection():
+    status, _, _ = UpdatePlanService._backup_preflight(
+        backup_snapshot(summary_json={"retention_protected": False})
+    )
+
+    assert status == "backup not protected"

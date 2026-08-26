@@ -109,7 +109,7 @@ class Registry {
 			'kosmos-bridge/start-updraftplus-backup',
 			array(
 				'label'               => __( 'Start UpdraftPlus Backup', 'kosmos-bridge' ),
-				'description'         => __( 'Schedules one full UpdraftPlus backup using the site configuration. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
+				'description'         => __( 'Starts one full UpdraftPlus backup using the site configuration and protects it from automatic deletion. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'input_schema'        => self::updraftplus_backup_start_input_schema(),
 				'output_schema'       => self::updraftplus_backup_start_output_schema(),
@@ -264,6 +264,7 @@ class Registry {
 			'active'           => $active,
 			'available'        => false,
 			'complete'         => false,
+			'retention_protected' => false,
 			'latest_backup_at' => '',
 			'backup_nonce'     => '',
 			'backup_count'     => 0,
@@ -302,11 +303,14 @@ class Registry {
 			$result['latest_backup_at'] = gmdate( 'c', $timestamp );
 		}
 
-		$result['available']  = $timestamp > 0;
-		$result['complete']   = true;
-		$result['backup_nonce'] = $nonce;
-		$result['components'] = self::get_updraftplus_backup_components( $backup );
-		$result['message']    = $result['available'] ? 'Complete UpdraftPlus backup found.' : 'A complete backup was found without a usable timestamp.';
+		$result['available']            = $timestamp > 0;
+		$result['complete']             = true;
+		$result['retention_protected']  = ! empty( $backup['always_keep'] );
+		$result['backup_nonce']         = $nonce;
+		$result['components']           = self::get_updraftplus_backup_components( $backup );
+		$result['message']              = $result['available']
+			? ( $result['retention_protected'] ? 'Complete UpdraftPlus backup found and protected from automatic deletion.' : 'Complete UpdraftPlus backup found but is not protected from automatic deletion.' )
+			: 'A complete backup was found without a usable timestamp.';
 
 		if ( '' !== $requested_nonce && $requested_nonce === $nonce ) {
 			self::clear_updraftplus_backup_request( $nonce );
@@ -383,7 +387,13 @@ class Registry {
 		);
 
 		try {
-			do_action( self::UPDRAFT_BACKUP_REQUEST_ACTION, array( 'use_nonce' => $nonce ) );
+			do_action(
+				self::UPDRAFT_BACKUP_REQUEST_ACTION,
+				array(
+					'use_nonce'   => $nonce,
+					'always_keep' => true,
+				)
+			);
 		} catch ( \Throwable $error ) {
 			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
 
@@ -395,11 +405,12 @@ class Registry {
 		}
 
 		return array(
-			'accepted'     => true,
-			'provider'     => 'updraftplus',
-			'backup_nonce' => $nonce,
-			'scheduled_at' => gmdate( 'c' ),
-			'message'      => 'A full UpdraftPlus backup was started using the existing site configuration.',
+			'accepted'                       => true,
+			'provider'                       => 'updraftplus',
+			'backup_nonce'                   => $nonce,
+			'retention_protection_requested' => true,
+			'scheduled_at'                   => gmdate( 'c' ),
+			'message'                        => 'A full UpdraftPlus backup was started and marked for manual deletion only.',
 		);
 	}
 
@@ -484,12 +495,13 @@ class Registry {
 			empty( $backup_status['active'] ) ||
 			empty( $backup_status['available'] ) ||
 			empty( $backup_status['complete'] ) ||
+			empty( $backup_status['retention_protected'] ) ||
 			false === $backup_time ||
 			$backup_time < ( time() - self::UPDATE_BACKUP_MAX_AGE )
 		) {
 			return new \WP_Error(
 				'kosmos_bridge_backup_preflight_failed',
-				'A fresh complete UpdraftPlus backup is required before this update.',
+				'A fresh complete UpdraftPlus backup protected from automatic deletion is required before this update.',
 				array( 'status' => 409 )
 			);
 		}
@@ -1253,6 +1265,7 @@ class Registry {
 				'active'           => array( 'type' => 'boolean' ),
 				'available'        => array( 'type' => 'boolean' ),
 				'complete'         => array( 'type' => 'boolean' ),
+				'retention_protected' => array( 'type' => 'boolean' ),
 				// Empty when UpdraftPlus has no complete backup yet; the Hub parses a timestamp only when present.
 				'latest_backup_at' => array( 'type' => 'string' ),
 				'backup_nonce'     => array( 'type' => 'string' ),
@@ -1267,6 +1280,7 @@ class Registry {
 				'active',
 				'available',
 				'complete',
+				'retention_protected',
 				'latest_backup_at',
 				'backup_nonce',
 				'backup_count',
@@ -1308,13 +1322,14 @@ class Registry {
 		return array(
 			'type'       => 'object',
 			'properties' => array(
-				'accepted'     => array( 'type' => 'boolean' ),
-				'provider'     => array( 'type' => 'string' ),
-				'backup_nonce' => array( 'type' => 'string' ),
-				'scheduled_at' => array( 'type' => 'string', 'format' => 'date-time' ),
-				'message'      => array( 'type' => 'string' ),
+				'accepted'                       => array( 'type' => 'boolean' ),
+				'provider'                       => array( 'type' => 'string' ),
+				'backup_nonce'                   => array( 'type' => 'string' ),
+				'retention_protection_requested' => array( 'type' => 'boolean' ),
+				'scheduled_at'                   => array( 'type' => 'string', 'format' => 'date-time' ),
+				'message'                        => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'accepted', 'provider', 'backup_nonce', 'scheduled_at', 'message' ),
+			'required'   => array( 'accepted', 'provider', 'backup_nonce', 'retention_protection_requested', 'scheduled_at', 'message' ),
 		);
 	}
 

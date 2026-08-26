@@ -108,8 +108,15 @@ class MaintenanceRunService:
 
         result = self._result_from_payload(payload)
         backup_nonce = result.get("backup_nonce")
-        if result.get("accepted") is not True or not self._is_backup_nonce(backup_nonce):
-            message = self._safe_message(result.get("message"), "UpdraftPlus did not accept a new backup request.")
+        if (
+            result.get("accepted") is not True
+            or result.get("retention_protection_requested") is not True
+            or not self._is_backup_nonce(backup_nonce)
+        ):
+            message = self._safe_message(
+                result.get("message"),
+                "UpdraftPlus did not accept a protected backup request.",
+            )
             self._fail_run(run, actor=actor, message=message)
             return MaintenanceRunOutcome(run=run, result="failed", message=message)
 
@@ -117,11 +124,12 @@ class MaintenanceRunService:
         run.result_json = {
             "provider": "updraftplus",
             "backup_nonce": backup_nonce,
+            "retention_protection_requested": True,
             "scheduled_at": self._safe_string(result.get("scheduled_at")),
         }
         request_step.status = MaintenanceRunStepStatus.succeeded.value
         request_step.completed_at = datetime.now(UTC)
-        request_step.detail = "UpdraftPlus accepted a new full backup request."
+        request_step.detail = "UpdraftPlus accepted a new full backup request protected from automatic deletion."
         request_step.result_json = dict(run.result_json)
         self.db.add(
             MaintenanceRunStep(
@@ -129,7 +137,7 @@ class MaintenanceRunService:
                 step_key="verify-backup",
                 status=MaintenanceRunStepStatus.waiting.value,
                 started_at=datetime.now(UTC),
-                detail="Waiting for UpdraftPlus to record the requested complete backup.",
+                detail="Waiting for UpdraftPlus to record the requested complete protected backup.",
                 result_json={},
             )
         )
@@ -179,7 +187,7 @@ class MaintenanceRunService:
             self._fail_run(
                 run,
                 actor="kosmos-hub",
-                message="UpdraftPlus did not record the requested complete backup within three minutes.",
+                message="UpdraftPlus did not record the requested complete protected backup within three minutes.",
             )
             return "failed"
 
@@ -204,6 +212,14 @@ class MaintenanceRunService:
             self._fail_run(run, actor="kosmos-hub", message="UpdraftPlus is no longer installed and active on this site.")
             return "failed"
 
+        if self._is_complete_requested_backup(result, run.bridge_backup_nonce) and result.get("retention_protected") is not True:
+            self._fail_run(
+                run,
+                actor="kosmos-hub",
+                message="UpdraftPlus recorded the requested backup, but it is not protected from automatic deletion.",
+            )
+            return "failed"
+
         if self._is_verified_backup_result(result, run.bridge_backup_nonce):
             snapshot = SiteBackupService(db=self.db, cipher=self.cipher).store_backup_status_result(run.site_id, result)["snapshot"]
             run.status = MaintenanceRunStatus.succeeded.value
@@ -214,11 +230,12 @@ class MaintenanceRunService:
                 "backup_nonce": run.bridge_backup_nonce,
                 "backup_at": snapshot.backup_at.isoformat() if snapshot.backup_at else None,
                 "components": snapshot.components_json,
+                "retention_protected": True,
             }
             if verification_step is not None:
                 verification_step.status = MaintenanceRunStepStatus.succeeded.value
                 verification_step.completed_at = run.completed_at
-                verification_step.detail = "UpdraftPlus recorded the requested complete backup."
+                verification_step.detail = "UpdraftPlus recorded the requested complete backup and its protection from automatic deletion."
                 verification_step.result_json = dict(run.result_json)
             write_audit_log(
                 self.db,
@@ -227,7 +244,7 @@ class MaintenanceRunService:
                 source="hub-worker",
                 action="verify-updraftplus-backup-run",
                 result="succeeded",
-                detail=f"Maintenance run {run.id} verified a fresh complete UpdraftPlus backup.",
+                detail=f"Maintenance run {run.id} verified a fresh complete UpdraftPlus backup protected from automatic deletion.",
             )
             self.db.commit()
             return "succeeded"
@@ -235,7 +252,7 @@ class MaintenanceRunService:
         self._mark_waiting(
             run,
             verification_step,
-            "UpdraftPlus has not yet recorded the requested complete backup. The Hub will check again automatically.",
+            "UpdraftPlus has not yet recorded the requested complete protected backup. The Hub will check again automatically.",
         )
         return "waiting"
 
@@ -287,6 +304,13 @@ class MaintenanceRunService:
 
     @classmethod
     def _is_verified_backup_result(cls, result: dict[str, Any], backup_nonce: str | None) -> bool:
+        return (
+            cls._is_complete_requested_backup(result, backup_nonce)
+            and result.get("retention_protected") is True
+        )
+
+    @staticmethod
+    def _is_complete_requested_backup(result: dict[str, Any], backup_nonce: str | None) -> bool:
         return (
             result.get("available") is True
             and result.get("complete") is True

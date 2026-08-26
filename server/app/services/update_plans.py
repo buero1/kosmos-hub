@@ -583,6 +583,8 @@ class UpdatePlanService:
             return "provider not active", snapshot.provider, backup_at
         if not snapshot.backup_complete or not snapshot.backup_available or backup_at is None:
             return "no complete backup", snapshot.provider, backup_at
+        if not bool((snapshot.summary_json or {}).get("retention_protected")):
+            return "backup not protected", snapshot.provider, backup_at
         if backup_at < datetime.now(UTC) - timedelta(days=7):
             return "backup stale", snapshot.provider, backup_at
         return "available", snapshot.provider, backup_at

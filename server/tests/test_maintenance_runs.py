@@ -23,6 +23,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
             "result": {
                 "accepted": True,
                 "backup_nonce": backup_nonce,
+                "retention_protection_requested": True,
                 "scheduled_at": "2026-08-25T12:00:00+00:00",
             }
         }
@@ -38,6 +39,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
                 "active": True,
                 "available": True,
                 "complete": True,
+                "retention_protected": True,
                 "backup_nonce": backup_nonce,
                 "latest_backup_at": "2026-08-25T12:01:30+00:00",
                 "backup_count": 4,
@@ -76,6 +78,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         assert verified.status == MaintenanceRunStatus.succeeded.value
         assert verified.result_json["backup_nonce"] == backup_nonce
         assert verified.result_json["components"] == ["database", "plugins", "themes", "uploads", "others"]
+        assert verified.result_json["retention_protected"] is True
 
 
 def test_second_running_backup_run_is_blocked(monkeypatch):
@@ -87,6 +90,7 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
             "result": {
                 "accepted": True,
                 "backup_nonce": "a1b2c3d4e5f6",
+                "retention_protection_requested": True,
                 "scheduled_at": "2026-08-25T12:00:00+00:00",
             }
         }
@@ -111,3 +115,56 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
         assert first.result == "started"
         assert second.result == "blocked"
         assert second.run.id == first.run.id
+
+
+def test_unprotected_completed_backup_run_fails(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "a1b2c3d4e5f6"
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        return {
+            "result": {
+                "accepted": True,
+                "backup_nonce": backup_nonce,
+                "retention_protection_requested": True,
+                "scheduled_at": "2026-08-25T12:00:00+00:00",
+            }
+        }
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        return {
+            "result": {
+                "installed": True,
+                "active": True,
+                "available": True,
+                "complete": True,
+                "retention_protected": False,
+                "backup_nonce": backup_nonce,
+                "latest_backup_at": "2026-08-25T12:01:30+00:00",
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="34ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
+
+        summary = service.poll_active_updraftplus_backups()
+
+        assert started.result == "started"
+        assert summary == {"checked": 1, "succeeded": 0, "failed": 1, "waiting": 0}
+        assert started.run.status == MaintenanceRunStatus.failed.value
+        assert "not protected" in (started.run.error_message or "")

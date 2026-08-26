@@ -48,6 +48,7 @@
         <p><strong>Provider:</strong> {{ latest_backup.provider }}</p>
         <p><strong>Latest complete backup:</strong> {{ latest_backup.backup_at or "Not available" }}</p>
         <p><strong>Status:</strong> {{ "Ready" if latest_backup.backup_available and latest_backup.backup_complete else "Not ready" }}</p>
+        <p><strong>Retention protection:</strong> {{ "Manual deletion only" if latest_backup.summary_json.retention_protected else "Not protected" }}</p>
         <p><strong>Components:</strong> {{ latest_backup.components_json | join(", ") or "-" }}</p>
         {% if latest_backup.summary_json.message %}<p class="subtle">{{ latest_backup.summary_json.message }}</p>{% endif %}
       {% else %}
