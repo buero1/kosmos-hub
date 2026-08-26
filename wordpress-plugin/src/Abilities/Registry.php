@@ -1212,19 +1212,18 @@ class Registry {
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
-		if ( true !== $result ) {
-			return new \WP_Error(
-				'kosmos_bridge_core_update_failed',
-				'WordPress did not confirm the core update.',
-				array( 'status' => 500 )
-			);
-		}
 
+		// WordPress returns the installed version string on a successful core update,
+		// rather than a boolean true. The on-disk version is the reliable result.
 		$installed_after = self::wordpress_version_from_disk();
 		if ( $installed_after !== $expected_target ) {
 			return new \WP_Error(
 				'kosmos_bridge_core_update_verification_failed',
-				'WordPress completed the core update but the version written to disk could not be verified.',
+				sprintf(
+					'WordPress did not reach the approved version %1$s. The version written to disk is %2$s.',
+					$expected_target,
+					$installed_after
+				),
 				array( 'status' => 500 )
 			);
 		}
