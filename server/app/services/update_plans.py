@@ -236,6 +236,7 @@ class UpdatePlanService:
                     "plugin_file": item.update_identifier,
                     "expected_current_version": item.current_version,
                     "expected_target_version": item.target_version,
+                    "expected_active": item.is_active,
                 },
                 timeout_seconds=180,
             )

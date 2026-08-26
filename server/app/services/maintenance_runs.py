@@ -192,14 +192,14 @@ class MaintenanceRunService:
         selected_keys: list[str],
         actor: str,
     ) -> PluginUpdateBatchOutcome:
-        """Queue selected active plugin updates without creating review plans."""
+        """Queue selected plugin updates without creating review plans."""
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
         entries = inventory.build_update_workbench(inventory.list_items(limit=200))
         entries_by_key = {entry.plan_key: entry for entry in entries}
         requested_keys = list(dict.fromkeys(key for key in selected_keys if key))
 
         if not requested_keys:
-            raise ValueError("Select at least one active plugin update before starting the run.")
+            raise ValueError("Select at least one plugin update before starting the run.")
         if any(key not in entries_by_key for key in requested_keys):
             raise ValueError("One or more selected updates are no longer available. Refresh the workbench and try again.")
 
@@ -243,6 +243,7 @@ class MaintenanceRunService:
                     "plugin_name": entry.name,
                     "current_version": entry.current_version,
                     "target_version": entry.target_version,
+                    "expected_active": entry.is_active,
                     "stage": "queued",
                     "stage_message": "Queued for direct update after a fresh selected-update preflight.",
                 },
@@ -395,6 +396,7 @@ class MaintenanceRunService:
                     "plugin_file": details["plugin_file"],
                     "expected_current_version": details["current_version"],
                     "expected_target_version": details["target_version"],
+                    "expected_active": details["expected_active"],
                 },
                 timeout_seconds=180,
             )
@@ -407,17 +409,20 @@ class MaintenanceRunService:
             result.get("updated") is not True
             or result.get("plugin_file") != details["plugin_file"]
             or result.get("installed_version") != details["target_version"]
-            or result.get("active") is not True
+            or result.get("active") is not details["expected_active"]
         ):
             self._fail_plugin_update_run(
                 run,
-                f"{details['plugin_name']} did not return the selected installed version and active state.",
+                f"{details['plugin_name']} did not preserve the selected activation state after its update.",
             )
             return "failed"
         self._complete_plugin_update_step(
             run,
             update_step,
-            f"Bridge verified {details['plugin_name']} {details['target_version']} active.",
+            (
+                f"Bridge verified {details['plugin_name']} {details['target_version']} "
+                f"{'active' if details['expected_active'] else 'inactive'}."
+            ),
             result,
         )
 
@@ -519,7 +524,7 @@ class MaintenanceRunService:
             last_result,
         )
 
-    def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, str]) -> str | None:
+    def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, Any]) -> str | None:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
         entries = inventory.build_update_workbench(inventory.list_items(limit=200))
         current_entry = next(
@@ -539,6 +544,8 @@ class MaintenanceRunService:
             or current_entry.target_version != details["target_version"]
         ):
             return f"{details['plugin_name']} changed since it was selected. Refresh the workbench and start a new run."
+        if current_entry.is_active is not details["expected_active"]:
+            return f"{details['plugin_name']} changed activation state since it was selected. Refresh the workbench and start a new run."
 
         scope_error = self._direct_plugin_update_scope_error(current_entry)
         if scope_error:
@@ -549,7 +556,7 @@ class MaintenanceRunService:
     def _activate_crocoblock_license_if_required(
         self,
         run: MaintenanceRun,
-        details: dict[str, str],
+        details: dict[str, Any],
         preflight_step: MaintenanceRunStep | None,
     ) -> str | None:
         entry = self._current_plugin_update_entry(run, details)
@@ -586,7 +593,7 @@ class MaintenanceRunService:
         }
         return None
 
-    def _current_plugin_update_entry(self, run: MaintenanceRun, details: dict[str, str]) -> UpdateWorkbenchEntry | None:
+    def _current_plugin_update_entry(self, run: MaintenanceRun, details: dict[str, Any]) -> UpdateWorkbenchEntry | None:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
         entries = inventory.build_update_workbench(inventory.list_items(limit=200))
         return next(
@@ -608,9 +615,9 @@ class MaintenanceRunService:
         has_stored_crocoblock_license: bool = False,
     ) -> str | None:
         if entry.kind != "plugin":
-            return "Direct updates currently support active WordPress plugins only."
-        if entry.is_active is not True:
-            return f"{entry.name} is inactive. Direct updates currently require an active plugin."
+            return "Direct updates currently support WordPress plugins only."
+        if entry.is_active is None:
+            return f"{entry.name} does not report whether it is active or inactive."
         if not MaintenanceRunService._is_plugin_file(entry.identifier):
             return f"{entry.name} does not have a valid WordPress plugin file."
         if not entry.current_version or not entry.target_version:
@@ -778,7 +785,7 @@ class MaintenanceRunService:
         return batch_id if isinstance(batch_id, str) and re.fullmatch(r"[a-f0-9]{32}", batch_id) else None
 
     @staticmethod
-    def _plugin_update_details(run: MaintenanceRun) -> dict[str, str] | None:
+    def _plugin_update_details(run: MaintenanceRun) -> dict[str, Any] | None:
         values = run.result_json or {}
         if not isinstance(values, dict):
             return None
@@ -792,7 +799,13 @@ class MaintenanceRunService:
             return None
         if not MaintenanceRunService._is_plugin_file(details["plugin_file"]):
             return None
-        return {key: value.strip() for key, value in details.items()}
+        expected_active = values.get("expected_active", True)
+        if not isinstance(expected_active, bool):
+            return None
+        return {
+            **{key: value.strip() for key, value in details.items()},
+            "expected_active": expected_active,
+        }
 
     @staticmethod
     def _is_plugin_file(identifier: str | None) -> bool:

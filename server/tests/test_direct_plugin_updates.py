@@ -23,10 +23,25 @@ def test_direct_updates_accept_active_plugin_with_exact_versions():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry()) is None
 
 
-def test_direct_updates_reject_inactive_plugins():
-    assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(is_active=False)) == (
-        "Smush is inactive. Direct updates currently require an active plugin."
+def test_direct_updates_accept_inactive_plugins():
+    assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(is_active=False)) is None
+
+
+def test_direct_update_details_preserve_an_inactive_selection():
+    details = MaintenanceRunService._plugin_update_details(
+        SimpleNamespace(
+            result_json={
+                "plugin_file": "wp-smushit/wp-smush.php",
+                "plugin_name": "Smush",
+                "current_version": "3.22.1",
+                "target_version": "3.22.2",
+                "expected_active": False,
+            }
+        )
     )
+
+    assert details is not None
+    assert details["expected_active"] is False
 
 
 def test_direct_updates_reject_plugins_without_an_authorized_package():

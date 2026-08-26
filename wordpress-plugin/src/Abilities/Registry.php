@@ -178,7 +178,7 @@ class Registry {
 			'kosmos-bridge/update-plugin',
 			array(
 				'label'               => __( 'Update Plugin', 'kosmos-bridge' ),
-				'description'         => __( 'Updates one active plugin after an exact version and active-state preflight.', 'kosmos-bridge' ),
+				'description'         => __( 'Updates one installed plugin after an exact version and activation-state preflight, preserving whether it is active or inactive.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'input_schema'        => self::plugin_update_input_schema(),
 				'output_schema'       => self::plugin_update_output_schema(),
@@ -821,9 +821,9 @@ class Registry {
 	}
 
 	/**
-	 * Update exactly one approved active WordPress plugin. The Hub must provide
-	 * the plugin file and exact current and target versions from a single-item
-	 * plan. Package URLs and version ranges are never accepted from the Hub.
+	 * Update exactly one approved WordPress plugin. The Hub must provide the
+	 * plugin file, exact current and target versions, and expected activation
+	 * state. Package URLs and version ranges are never accepted from the Hub.
 	 *
 	 * @param mixed $input Plugin file and expected versions from the Hub plan.
 	 * @return array|\WP_Error
@@ -863,10 +863,20 @@ class Registry {
 			);
 		}
 
-		if ( ! is_plugin_active( $plugin_file ) ) {
+		if ( is_array( $input ) && array_key_exists( 'expected_active', $input ) && ! is_bool( $input['expected_active'] ) ) {
 			return new \WP_Error(
-				'kosmos_bridge_plugin_inactive',
-				'The approved plugin must be active before the Hub can update it.',
+				'kosmos_bridge_invalid_update_input',
+				'The approved plugin activation state must be a boolean value.',
+				array( 'status' => 409 )
+			);
+		}
+
+		$current_active  = self::is_plugin_active( $plugin_file );
+		$expected_active = is_array( $input ) && array_key_exists( 'expected_active', $input ) ? $input['expected_active'] : $current_active;
+		if ( $current_active !== $expected_active ) {
+			return new \WP_Error(
+				'kosmos_bridge_plugin_activation_state_changed',
+				'The approved plugin activation state changed since this update was selected.',
 				array( 'status' => 409 )
 			);
 		}
@@ -921,9 +931,21 @@ class Registry {
 			);
 		}
 
-		$activation = self::activate_plugin_and_verify( $plugin_file );
-		if ( is_wp_error( $activation ) ) {
-			return $activation;
+		$active_after = self::is_plugin_active( $plugin_file );
+		if ( $expected_active ) {
+			$activation = self::activate_plugin_and_verify( $plugin_file );
+			if ( is_wp_error( $activation ) ) {
+				return $activation;
+			}
+			$active_after = self::is_plugin_active( $plugin_file );
+		}
+
+		if ( $active_after !== $expected_active ) {
+			return new \WP_Error(
+				'kosmos_bridge_activation_state_verification_failed',
+				'The plugin update completed but WordPress did not preserve the approved activation state.',
+				array( 'status' => 500 )
+			);
 		}
 
 		return array(
@@ -931,7 +953,7 @@ class Registry {
 			'plugin_file'      => $plugin_file,
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
-			'active'           => true,
+			'active'           => $active_after,
 		);
 	}
 
@@ -1545,7 +1567,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/update-plugin',
 				'label'         => __( 'Update Plugin', 'kosmos-bridge' ),
-				'description'   => __( 'Updates one active plugin after an exact version and active-state preflight.', 'kosmos-bridge' ),
+				'description'   => __( 'Updates one installed plugin after an exact version and activation-state preflight, preserving whether it is active or inactive.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => self::plugin_update_input_schema(),
 				'output_schema' => self::plugin_update_output_schema(),
@@ -1726,6 +1748,7 @@ class Registry {
 				'plugin_file'              => array( 'type' => 'string' ),
 				'expected_current_version' => array( 'type' => 'string' ),
 				'expected_target_version'  => array( 'type' => 'string' ),
+				'expected_active'           => array( 'type' => 'boolean' ),
 			),
 			'required'   => array( 'plugin_file', 'expected_current_version', 'expected_target_version' ),
 		);
@@ -2826,7 +2849,7 @@ class Registry {
 	 * @return true|\WP_Error
 	 */
 	private static function activate_plugin_and_verify( $plugin_file ) {
-		if ( is_plugin_active( $plugin_file ) ) {
+		if ( self::is_plugin_active( $plugin_file ) ) {
 			return true;
 		}
 
@@ -2835,7 +2858,7 @@ class Registry {
 			return $activation;
 		}
 
-		if ( ! is_plugin_active( $plugin_file ) ) {
+		if ( ! self::is_plugin_active( $plugin_file ) ) {
 			return new \WP_Error(
 				'kosmos_bridge_activation_verification_failed',
 				'WordPress did not confirm that the approved plugin is active.',
@@ -2844,6 +2867,25 @@ class Registry {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Treat a network-active plugin as active for exact-state update checks.
+	 *
+	 * @param string $plugin_file Plugin file relative to WP_PLUGIN_DIR.
+	 * @return bool
+	 */
+	private static function is_plugin_active( $plugin_file ) {
+		if ( is_plugin_active( $plugin_file ) ) {
+			return true;
+		}
+
+		if ( is_multisite() ) {
+			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
+			return isset( $network_active[ $plugin_file ] );
+		}
+
+		return false;
 	}
 
 	/**

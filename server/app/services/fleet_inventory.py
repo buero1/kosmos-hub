@@ -105,19 +105,21 @@ class UpdateWorkbenchEntry:
             return "Crocoblock update: the saved Hub license is activated automatically before this update."
         if self.kind == "plugin" and not self.execution_ready:
             return self.execution_note or "The update provider has not supplied an authorized package."
-        if self.kind == "plugin" and self.is_active:
+        if self.kind == "plugin" and self.direct_update_selectable and self.is_active:
             return "Active plugin: direct update ready"
+        if self.kind == "plugin" and self.direct_update_selectable:
+            return "Inactive plugin: direct update ready; it will remain inactive."
         if self.kind == "plugin":
-            return "Inactive plugin: not enabled"
+            return self.execution_note or "The update provider has not supplied an authorized package."
         return "Theme update: not enabled"
 
     @property
     def requires_stored_crocoblock_license(self) -> bool:
-        return self.kind == "plugin" and self.is_active is True and not self.execution_ready and self.identifier.startswith("jet-")
+        return self.kind == "plugin" and self.is_active is not None and not self.execution_ready and self.identifier.startswith("jet-")
 
     @property
     def direct_update_selectable(self) -> bool:
-        return self.kind == "plugin" and self.is_active is True and (self.execution_ready or self.requires_stored_crocoblock_license)
+        return self.kind == "plugin" and self.is_active is not None and (self.execution_ready or self.requires_stored_crocoblock_license)
 
     @property
     def plan_key(self) -> str:
