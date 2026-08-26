@@ -9,6 +9,9 @@ from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 
 
 class SiteInventoryService:
+    INSTALLED_PLUGINS_ABILITY = "kosmos-bridge/list-installed-plugins"
+    LEGACY_ACTIVE_PLUGINS_ABILITY = "kosmos-bridge/list-active-plugins"
+
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
         self.repository = SiteRepository(db)
@@ -63,11 +66,18 @@ class SiteInventoryService:
             raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
 
         environment_payload = self.proxy.execute_ability(site_id, "kosmos-bridge/get-environment-info", None)
-        plugins_payload = self.proxy.execute_ability(site_id, "kosmos-bridge/list-active-plugins", None)
+        try:
+            plugins_payload = self.proxy.execute_ability(site_id, self.INSTALLED_PLUGINS_ABILITY, None)
+            plugins_result = plugins_payload.get("result", {})
+            plugins = self._normalize_plugins(plugins_result, default_active=False)
+        except SiteMcpProxyError as exc:
+            if exc.code != "KOSMOS_BRIDGE_ABILITY_NOT_FOUND":
+                raise
+            plugins_payload = self.proxy.execute_ability(site_id, self.LEGACY_ACTIVE_PLUGINS_ABILITY, None)
+            plugins_result = plugins_payload.get("result", {})
+            plugins = self._normalize_plugins(plugins_result, default_active=True)
 
         environment = environment_payload.get("result", {})
-        plugins_result = plugins_payload.get("result", {})
-        plugins = plugins_result.get("plugins", [])
 
         refreshed_at = datetime.now(UTC)
         site.wordpress_version = self._string_or_none(environment.get("wordpress_version"))
@@ -80,7 +90,7 @@ class SiteInventoryService:
             captured_at=refreshed_at,
             wordpress_version=site.wordpress_version,
             php_version=site.php_version,
-            plugins_json=plugins if isinstance(plugins, list) else [],
+            plugins_json=plugins,
             themes_json=[],
             environment_json=environment if isinstance(environment, dict) else {},
         )
@@ -92,7 +102,7 @@ class SiteInventoryService:
             source="hub",
             action="refresh-site-state",
             result="ok",
-            detail=f"Stored site snapshot for {site.domain} with {len(snapshot.plugins_json)} active plugins.",
+            detail=f"Stored site snapshot for {site.domain} with {len(snapshot.plugins_json)} installed plugins.",
         )
         self.db.commit()
         return {
@@ -105,3 +115,20 @@ class SiteInventoryService:
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+    @staticmethod
+    def _normalize_plugins(result: object, *, default_active: bool) -> list[dict]:
+        if not isinstance(result, dict):
+            return []
+        raw_plugins = result.get("plugins", [])
+        if not isinstance(raw_plugins, list):
+            return []
+
+        plugins: list[dict] = []
+        for raw_plugin in raw_plugins:
+            if not isinstance(raw_plugin, dict):
+                continue
+            plugin = dict(raw_plugin)
+            plugin["active"] = plugin["active"] if isinstance(plugin.get("active"), bool) else default_active
+            plugins.append(plugin)
+        return plugins

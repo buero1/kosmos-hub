@@ -79,6 +79,19 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/list-installed-plugins',
+			array(
+				'label'               => __( 'List Installed Plugins', 'kosmos-bridge' ),
+				'description'         => __( 'Returns installed plugin metadata and whether each plugin is active.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'output_schema'       => self::installed_plugins_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_list_installed_plugins' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/get-available-updates',
 			array(
 				'label'               => __( 'Get Available Updates', 'kosmos-bridge' ),
@@ -372,6 +385,41 @@ class Registry {
 		return array(
 			'count'   => count( $items ),
 			'plugins' => $items,
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	public static function execute_list_installed_plugins() {
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$plugins = get_plugins();
+		$items   = array();
+		foreach ( $plugins as $plugin_file => $data ) {
+			$items[] = array(
+				'plugin_file' => (string) $plugin_file,
+				'name'        => isset( $data['Name'] ) ? (string) $data['Name'] : (string) $plugin_file,
+				'version'     => isset( $data['Version'] ) ? (string) $data['Version'] : '',
+				'author'      => isset( $data['AuthorName'] ) ? (string) $data['AuthorName'] : '',
+				'plugin_uri'  => isset( $data['PluginURI'] ) ? (string) $data['PluginURI'] : '',
+				'active'      => self::is_plugin_active( (string) $plugin_file ),
+			);
+		}
+
+		usort(
+			$items,
+			static function ( $left, $right ) {
+				return strcasecmp( $left['name'], $right['name'] );
+			}
+		);
+
+		return array(
+			'count'        => count( $items ),
+			'active_count' => count( array_filter( $items, static function ( $plugin ) { return true === $plugin['active']; } ) ),
+			'plugins'      => $items,
 		);
 	}
 
@@ -1502,6 +1550,15 @@ class Registry {
 				'meta'          => self::readonly_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/list-installed-plugins',
+				'label'         => __( 'List Installed Plugins', 'kosmos-bridge' ),
+				'description'   => __( 'Returns installed plugin metadata and whether each plugin is active.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::installed_plugins_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/get-available-updates',
 				'label'         => __( 'Get Available Updates', 'kosmos-bridge' ),
 				'description'   => __( 'Checks and returns currently available WordPress, plugin, and theme updates for this site.', 'kosmos-bridge' ),
@@ -1644,6 +1701,8 @@ class Registry {
 				return self::execute_get_environment_info();
 			case 'kosmos-bridge/list-active-plugins':
 				return self::execute_list_active_plugins();
+			case 'kosmos-bridge/list-installed-plugins':
+				return self::execute_list_installed_plugins();
 			case 'kosmos-bridge/get-available-updates':
 				return self::execute_get_available_updates();
 			case 'kosmos-bridge/get-updraftplus-backup-status':
@@ -1906,6 +1965,35 @@ class Registry {
 				),
 			),
 			'required'   => array( 'count', 'plugins' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function installed_plugins_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'count'        => array( 'type' => 'integer' ),
+				'active_count' => array( 'type' => 'integer' ),
+				'plugins'      => array(
+					'type'  => 'array',
+					'items' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'plugin_file' => array( 'type' => 'string' ),
+							'name'        => array( 'type' => 'string' ),
+							'version'     => array( 'type' => 'string' ),
+							'author'      => array( 'type' => 'string' ),
+							'plugin_uri'  => array( 'type' => 'string' ),
+							'active'      => array( 'type' => 'boolean' ),
+						),
+						'required'   => array( 'plugin_file', 'name', 'version', 'author', 'plugin_uri', 'active' ),
+					),
+				),
+			),
+			'required'   => array( 'count', 'active_count', 'plugins' ),
 		);
 	}
 

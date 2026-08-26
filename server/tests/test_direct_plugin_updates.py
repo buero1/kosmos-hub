@@ -1,5 +1,7 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 
@@ -42,6 +44,50 @@ def test_direct_update_details_preserve_an_inactive_selection():
 
     assert details is not None
     assert details["expected_active"] is False
+
+
+def test_update_workbench_includes_plugins_without_available_updates():
+    captured_at = datetime.now(UTC)
+    item = FleetInventoryItem(
+        site=SimpleNamespace(id=17, domain="example.test"),
+        snapshot=SimpleNamespace(captured_at=captured_at),
+        update_snapshot=SimpleNamespace(
+            captured_at=captured_at,
+            core_updates_json=[],
+            plugin_updates_json=[
+                {
+                    "plugin_file": "akismet/akismet.php",
+                    "name": "Akismet",
+                    "current_version": "5.4.1",
+                    "new_version": "5.4.2",
+                    "execution_ready": True,
+                }
+            ],
+            theme_updates_json=[],
+        ),
+        plugins=(
+            {
+                "plugin_file": "akismet/akismet.php",
+                "name": "Akismet",
+                "version": "5.4.1",
+                "active": True,
+            },
+            {
+                "plugin_file": "hello-dolly/hello.php",
+                "name": "Hello Dolly",
+                "version": "1.7.2",
+                "active": False,
+            },
+        ),
+    )
+
+    entries = FleetInventoryService.build_update_workbench(SimpleNamespace(), [item])
+    by_plugin = {entry.identifier: entry for entry in entries}
+
+    assert by_plugin["akismet/akismet.php"].direct_update_selectable is True
+    assert by_plugin["hello-dolly/hello.php"].update_available is False
+    assert by_plugin["hello-dolly/hello.php"].direct_update_selectable is False
+    assert by_plugin["hello-dolly/hello.php"].review_note == "No update is currently available."
 
 
 def test_direct_updates_reject_plugins_without_an_authorized_package():

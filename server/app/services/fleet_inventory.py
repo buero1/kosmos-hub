@@ -83,6 +83,8 @@ class UpdateWorkbenchEntry:
     current_version: str
     target_version: str
     is_active: bool | None
+    update_available: bool
+    update_checked: bool
     execution_ready: bool
     execution_note: str
     captured_at: datetime
@@ -101,6 +103,8 @@ class UpdateWorkbenchEntry:
     def review_note(self) -> str:
         if self.kind == "wordpress":
             return "Core update: not enabled"
+        if self.kind == "plugin" and not self.update_available:
+            return "No update is currently available." if self.update_checked else "Plugin inventory is available, but no update check has been recorded yet."
         if self.requires_stored_crocoblock_license:
             return "Crocoblock update: the saved Hub license is activated automatically before this update."
         if self.kind == "plugin" and not self.execution_ready:
@@ -115,11 +119,11 @@ class UpdateWorkbenchEntry:
 
     @property
     def requires_stored_crocoblock_license(self) -> bool:
-        return self.kind == "plugin" and self.is_active is not None and not self.execution_ready and self.identifier.startswith("jet-")
+        return self.kind == "plugin" and self.update_available and self.is_active is not None and not self.execution_ready and self.identifier.startswith("jet-")
 
     @property
     def direct_update_selectable(self) -> bool:
-        return self.kind == "plugin" and self.is_active is not None and (self.execution_ready or self.requires_stored_crocoblock_license)
+        return self.kind == "plugin" and self.update_available and self.is_active is not None and (self.execution_ready or self.requires_stored_crocoblock_license)
 
     @property
     def plan_key(self) -> str:
@@ -195,7 +199,13 @@ class FleetInventoryService:
             "total_sites": len(items),
             "inventoried_sites": len(inventoried),
             "missing_inventory_sites": len(items) - len(inventoried),
-            "active_plugins": sum(item.plugin_count for item in inventoried),
+            "active_plugins": sum(
+                1
+                for item in inventoried
+                for plugin in item.plugins
+                if plugin.get("active") is not False
+            ),
+            "installed_plugins": sum(item.plugin_count for item in inventoried),
             "update_checked_sites": len(update_checked),
             "missing_update_checks": len(items) - len(update_checked),
             "sites_needing_updates": sum(1 for item in update_checked if item.update_count > 0),
@@ -205,15 +215,41 @@ class FleetInventoryService:
     def build_update_workbench(self, items: list[FleetInventoryItem]) -> list[UpdateWorkbenchEntry]:
         entries: list[UpdateWorkbenchEntry] = []
         for item in items:
-            if item.update_snapshot is None:
+            if item.snapshot is None and item.update_snapshot is None:
                 continue
 
-            active_plugin_files = {
-                str(plugin.get("plugin_file", "")).strip()
-                for plugin in item.plugins
-                if str(plugin.get("plugin_file", "")).strip()
+            update_checked = item.update_snapshot is not None
+            captured_at = item.update_snapshot.captured_at if item.update_snapshot is not None else item.snapshot.captured_at
+            plugin_updates_by_file = {
+                str(update.get("plugin_file", "")).strip(): update
+                for update in item.plugin_updates
+                if str(update.get("plugin_file", "")).strip()
             }
-            captured_at = item.update_snapshot.captured_at
+
+            for plugin in item.plugins:
+                plugin_file = str(plugin.get("plugin_file", "")).strip()
+                if not plugin_file:
+                    continue
+                update = plugin_updates_by_file.pop(plugin_file, None)
+                target_version = str(update.get("new_version", "")).strip() if update else ""
+                update_available = bool(target_version)
+                active = plugin.get("active")
+                entries.append(
+                    UpdateWorkbenchEntry(
+                        site=item.site,
+                        kind="plugin",
+                        name=str(plugin.get("name", "")).strip() or plugin_file,
+                        identifier=plugin_file,
+                        current_version=str(plugin.get("version", plugin.get("current_version", ""))).strip(),
+                        target_version=target_version,
+                        is_active=active if isinstance(active, bool) else True,
+                        update_available=update_available,
+                        update_checked=update_checked,
+                        execution_ready=update.get("execution_ready") is not False if update_available else False,
+                        execution_note=str(update.get("execution_note", "")).strip() if update else "",
+                        captured_at=captured_at,
+                    )
+                )
 
             for update in item.core_updates:
                 entries.append(
@@ -225,14 +261,15 @@ class FleetInventoryService:
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=None,
+                        update_available=True,
+                        update_checked=True,
                         execution_ready=False,
                         execution_note="",
                         captured_at=captured_at,
                     )
                 )
 
-            for update in item.plugin_updates:
-                plugin_file = str(update.get("plugin_file", "")).strip()
+            for plugin_file, update in plugin_updates_by_file.items():
                 entries.append(
                     UpdateWorkbenchEntry(
                         site=item.site,
@@ -241,7 +278,9 @@ class FleetInventoryService:
                         identifier=plugin_file,
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
-                        is_active=plugin_file in active_plugin_files,
+                        is_active=None,
+                        update_available=True,
+                        update_checked=True,
                         execution_ready=update.get("execution_ready") is not False,
                         execution_note=str(update.get("execution_note", "")).strip(),
                         captured_at=captured_at,
@@ -259,6 +298,8 @@ class FleetInventoryService:
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=None,
+                        update_available=True,
+                        update_checked=True,
                         execution_ready=False,
                         execution_note="",
                         captured_at=captured_at,
@@ -296,9 +337,11 @@ class FleetInventoryService:
     def summarize_update_workbench(self, entries: list[UpdateWorkbenchEntry]) -> dict[str, int]:
         return {
             "total": len(entries),
-            "wordpress": sum(1 for entry in entries if entry.kind == "wordpress"),
+            "available_updates": sum(1 for entry in entries if entry.update_available),
+            "wordpress": sum(1 for entry in entries if entry.kind == "wordpress" and entry.update_available),
             "plugins": sum(1 for entry in entries if entry.kind == "plugin"),
-            "themes": sum(1 for entry in entries if entry.kind == "theme"),
+            "plugin_updates": sum(1 for entry in entries if entry.kind == "plugin" and entry.update_available),
+            "themes": sum(1 for entry in entries if entry.kind == "theme" and entry.update_available),
             "active_plugins": sum(1 for entry in entries if entry.kind == "plugin" and entry.is_active),
             "inactive_plugins": sum(1 for entry in entries if entry.kind == "plugin" and not entry.is_active),
         }

@@ -23,7 +23,7 @@
         <p><strong>Captured:</strong> {{ latest_snapshot.captured_at }}</p>
         <p><strong>WordPress:</strong> {{ latest_snapshot.wordpress_version or "-" }}</p>
         <p><strong>PHP:</strong> {{ latest_snapshot.php_version or "-" }}</p>
-        <p><strong>Active plugins:</strong> {{ latest_snapshot.plugins_json | length }}</p>
+        <p><strong>Tracked plugins:</strong> {{ latest_snapshot.plugins_json | length }}</p>
       {% else %}
         <p>No stored state snapshot yet.</p>
       {% endif %}
@@ -196,7 +196,7 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update details</h2>
-        <p class="subtle">Active plugin updates can be started directly from the workbench. WordPress core, themes and inactive plugins remain review-only for now.</p>
+        <p class="subtle">Active and inactive plugin updates can be started directly from the workbench. WordPress core and themes remain review-only for now.</p>
       </div>
       <a class="button button-secondary" href="/updates?q={{ site.domain | urlencode }}">Open workbench</a>
     </div>

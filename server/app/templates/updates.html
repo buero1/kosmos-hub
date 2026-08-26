@@ -9,7 +9,7 @@
         <p class="subtle">Select plugin updates and start one fully logged maintenance run. Active plugins remain active; inactive plugins remain inactive. WordPress core and themes remain review-only for now.</p>
       </div>
       <div class="inventory-totals">
-        <span><strong>{{ summary.total }}</strong> updates</span>
+        <span><strong>{{ summary.available_updates }}</strong> updates</span>
         <span><strong>{{ summary.wordpress }}</strong> WordPress</span>
         <span><strong>{{ summary.plugins }}</strong> plugins</span>
         <span><strong>{{ summary.themes }}</strong> themes</span>
@@ -89,7 +89,7 @@
       </section>
     {% endif %}
 
-    <p class="result-count">{{ entries | length }} current update items. Active and inactive plugin updates can be selected and started from this page.</p>
+    <p class="result-count">{{ entries | length }} plugin inventory and update items. Only available active or inactive plugin updates can be selected and started from this page.</p>
     <div class="table-scroll">
       <table class="update-workbench-table">
         <thead>
@@ -122,7 +122,15 @@
                   <p class="subtle table-note">{{ entry.identifier }}</p>
                 {% endif %}
               </td>
-              <td>{{ entry.current_version or "-" }} → {{ entry.target_version or "Not reported" }}</td>
+              <td>
+                {% if entry.update_available %}
+                  {{ entry.current_version or "-" }} → {{ entry.target_version }}
+                {% elif entry.update_checked %}
+                  {{ entry.current_version or "-" }} · Up to date
+                {% else %}
+                  {{ entry.current_version or "-" }} · Update not checked
+                {% endif %}
+              </td>
               <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
               <td>{{ entry.captured_at }}</td>
               <td>{{ entry.review_note }}</td>
@@ -130,9 +138,9 @@
           {% else %}
             <tr>
               <td colspan="8">
-                <strong>No update entries match the selected filters.</strong>
+                <strong>No plugin inventory or update entries match the selected filters.</strong>
                 {% if matching_sites %}
-                  <p class="subtle table-note">The matching site is registered, but has no currently matching update entry. This workbench only lists available WordPress, plugin and theme updates.</p>
+                  <p class="subtle table-note">The matching site is registered, but has no matching plugin inventory or available update entry.</p>
                   <p class="table-note">
                     {% for site in matching_sites %}
                       <a href="/sites/{{ site.id }}">{{ site.domain }}</a>{% if not loop.last %}, {% endif %}
