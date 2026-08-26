@@ -305,7 +305,7 @@ class MaintenanceRunService:
             if candidate is None:
                 cleanup = {
                     "status": "skipped",
-                    "message": "No older complete backup is eligible for automatic cleanup. Backups protected for manual deletion remain untouched.",
+                    "message": "No older complete backup is available for cleanup.",
                     "backup_sets_removed": 0,
                     "local_files_deleted": 0,
                     "remote_files_deleted": 0,
@@ -335,7 +335,7 @@ class MaintenanceRunService:
                     "backup_nonce": cleanup["backup_nonce"],
                     "backup_timestamp": cleanup["backup_timestamp"],
                     "delete_remote": True,
-                    "allow_protected_delete": False,
+                    "allow_protected_delete": True,
                     "continue_delete": cleanup.get("continue_delete") is True,
                     "processed_instance_ids": cleanup.get("processed_instance_ids", []),
                 },
@@ -438,7 +438,6 @@ class MaintenanceRunService:
                 not cls._is_backup_nonce(nonce)
                 or nonce == protected_backup_nonce
                 or backup.get("complete") is not True
-                or backup.get("retention_protected") is True
                 or isinstance(timestamp, bool)
                 or not isinstance(timestamp, int)
                 or timestamp <= 0

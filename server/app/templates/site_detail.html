@@ -118,7 +118,7 @@
     <div>
       <p class="eyebrow">Maintenance pilot</p>
       <h3>Create, verify, and clean up a fresh UpdraftPlus backup</h3>
-      <p class="subtle">Starts one protected full backup using the site&apos;s existing destination, verifies it, then removes the oldest older complete backup that is not protected for manual deletion. Cleanup includes the configured remote storage. No plugin update is performed.</p>
+      <p class="subtle">Starts one protected full backup using the site&apos;s existing destination, verifies it, then removes the oldest older complete backup. Cleanup includes the configured remote storage. No plugin update is performed.</p>
     </div>
     <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

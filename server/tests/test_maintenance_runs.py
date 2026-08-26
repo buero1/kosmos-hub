@@ -142,7 +142,7 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
         assert second.run.id == first.run.id
 
 
-def test_verified_backup_prunes_only_the_oldest_unprotected_backup(monkeypatch):
+def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     backup_nonce = "a1b2c3d4e5f6"
@@ -168,7 +168,7 @@ def test_verified_backup_prunes_only_the_oldest_unprotected_backup(monkeypatch):
             "backup_nonce": old_backup_nonce,
             "backup_timestamp": 1700000000,
             "delete_remote": True,
-            "allow_protected_delete": False,
+            "allow_protected_delete": True,
             "continue_delete": False,
             "processed_instance_ids": [],
         }
@@ -216,14 +216,14 @@ def test_verified_backup_prunes_only_the_oldest_unprotected_backup(monkeypatch):
                         "backup_timestamp": 1720000000,
                         "backup_at": "2024-07-03T09:46:40+00:00",
                         "complete": True,
-                        "retention_protected": False,
+                        "retention_protected": True,
                     },
                     {
                         "backup_nonce": old_backup_nonce,
                         "backup_timestamp": 1700000000,
                         "backup_at": "2023-11-14T22:13:20+00:00",
                         "complete": True,
-                        "retention_protected": False,
+                        "retention_protected": True,
                     },
                     {
                         "backup_nonce": backup_nonce,
