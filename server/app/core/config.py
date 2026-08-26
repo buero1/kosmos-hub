@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     fleet_updates_auto_refresh: bool = True
     fleet_updates_refresh_interval_hours: int = Field(default=24, ge=1, le=168)
     fleet_updates_initial_delay_seconds: int = Field(default=300, ge=0, le=3600)
+    fleet_refresh_worker_poll_interval_seconds: int = Field(default=10, ge=5, le=300)
+    fleet_refresh_worker_initial_delay_seconds: int = Field(default=5, ge=0, le=60)
     maintenance_runs_auto_poll: bool = True
     maintenance_runs_poll_interval_seconds: int = Field(default=15, ge=15, le=900)
     maintenance_runs_initial_delay_seconds: int = Field(default=15, ge=0, le=300)

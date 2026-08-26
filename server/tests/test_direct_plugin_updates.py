@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService
+from app.services.fleet_refresh import FleetRefreshService
+from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.provider_credentials import ProviderCredentialService
@@ -285,3 +287,20 @@ def test_direct_update_health_check_retries_a_transient_bridge_error():
     assert result["home_healthy"] is True
     assert service.proxy.calls == 2
     assert len(progress) == 1
+
+
+def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
+    result = FleetRefreshService._initial_result(
+        FleetRefreshService.MODE_NORMAL,
+        runtime_settings=FleetRefreshRuntimeSettings(
+            site_status_max_age_minutes=20,
+            official_version_max_age_hours=36,
+            max_parallel_site_checks=4,
+        ),
+    )
+
+    assert result["settings"] == {
+        "site_status_max_age_minutes": 20,
+        "official_version_max_age_hours": 36,
+        "max_parallel_site_checks": 4,
+    }

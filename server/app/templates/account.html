@@ -27,6 +27,9 @@
     {% if request.query_params.get("provider_license") == "removed" %}
       <p class="notice-success">The provider license was removed.</p>
     {% endif %}
+    {% if request.query_params.get("fleet_refresh") == "settings-saved" %}
+      <p class="notice-success">Fleet refresh settings were saved. New refresh runs will use them immediately.</p>
+    {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -175,6 +178,32 @@
         </table>
       </div>
     </section>
+    {% if user.role == "admin" %}
+      <section class="account-panel account-panel-wide">
+        <div>
+          <p class="eyebrow">Fleet refresh</p>
+          <h3>Refresh settings</h3>
+          <p class="subtle">These limits control the background status check on the Update Workbench. A normal run reuses recent data; a full refresh always ignores these cache limits.</p>
+        </div>
+        <form method="post" action="/account/fleet-refresh-settings">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>
+            <span>Reuse site status for (minutes)</span>
+            <input type="number" name="site_status_max_age_minutes" value="{{ fleet_refresh_settings.site_status_max_age_minutes }}" min="1" max="180" required>
+          </label>
+          <label>
+            <span>Reuse official versions for (hours)</span>
+            <input type="number" name="official_version_max_age_hours" value="{{ fleet_refresh_settings.official_version_max_age_hours }}" min="1" max="168" required>
+          </label>
+          <label>
+            <span>Parallel website checks</span>
+            <input type="number" name="max_parallel_site_checks" value="{{ fleet_refresh_settings.max_parallel_site_checks }}" min="1" max="6" required>
+          </label>
+          <p class="subtle">Use fewer parallel checks for slower hosting. The safe range is one to six sites at a time.</p>
+          <button class="button" type="submit">Save refresh settings</button>
+        </form>
+      </section>
+    {% endif %}
     <form method="post" action="/account/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button class="button button-secondary" type="submit">Sign out</button>

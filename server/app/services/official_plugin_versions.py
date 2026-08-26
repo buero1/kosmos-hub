@@ -2,7 +2,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -40,16 +40,30 @@ class OfficialPluginVersionService:
         ).all()
         return {record.plugin_file: record for record in records}
 
-    def refresh_for_inventory(self, items: Iterable[Any]) -> dict[str, int]:
+    def refresh_for_inventory(
+        self,
+        items: Iterable[Any],
+        *,
+        force: bool = False,
+        max_age: timedelta | None = None,
+    ) -> dict[str, int]:
         candidates = self._collect_candidates(items)
         if not candidates:
-            return {"checked": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0}
+            return {"total": 0, "checked": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0}
+
+        existing = self.get_cached(candidates)
+        now = datetime.now(UTC)
+        stale_candidates = {
+            plugin_file: candidate
+            for plugin_file, candidate in candidates.items()
+            if force or not self._is_fresh(existing.get(plugin_file), now=now, max_age=max_age)
+        }
 
         wordpress_org_results: dict[str, tuple[str | None, str | None]] = {}
         with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
             futures = {
                 executor.submit(self._fetch_wordpress_org_version, candidate.plugin_file): candidate.plugin_file
-                for candidate in candidates.values()
+                for candidate in stale_candidates.values()
             }
             for future in as_completed(futures):
                 plugin_file = futures[future]
@@ -58,11 +72,18 @@ class OfficialPluginVersionService:
                 except Exception:
                     wordpress_org_results[plugin_file] = (None, "wordpress_org_request_failed")
 
-        existing = self.get_cached(candidates)
-        checked_at = datetime.now(UTC)
-        summary = {"checked": len(candidates), "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0}
+        checked_at = now
+        summary = {
+            "total": len(candidates),
+            "checked": len(stale_candidates),
+            "cached": len(candidates) - len(stale_candidates),
+            "wordpress_org": 0,
+            "provider_offer": 0,
+            "unavailable": 0,
+            "failed": 0,
+        }
 
-        for plugin_file, candidate in candidates.items():
+        for plugin_file, candidate in stale_candidates.items():
             version, error = wordpress_org_results.get(plugin_file, (None, "wordpress_org_request_failed"))
             if version:
                 official_version = version
@@ -109,6 +130,18 @@ class OfficialPluginVersionService:
 
         self.db.flush()
         return summary
+
+    @staticmethod
+    def _is_fresh(
+        record: PluginOfficialVersion | None,
+        *,
+        now: datetime,
+        max_age: timedelta | None,
+    ) -> bool:
+        if record is None or record.checked_at is None or max_age is None:
+            return False
+        checked_at = record.checked_at if record.checked_at.tzinfo is not None else record.checked_at.replace(tzinfo=UTC)
+        return now - checked_at <= max_age
 
     def record_provider_versions(self, versions: Iterable[Any], *, source: str) -> int:
         """Persist the newest verified provider catalog version for each plugin."""

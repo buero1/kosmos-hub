@@ -14,37 +14,38 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
-from app.services.fleet_inventory import FleetInventoryService
+from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.official_plugin_versions import OfficialPluginVersionService
-from app.core.security import get_secret_cipher
 
 logger = logging.getLogger(__name__)
 
 
-def _refresh_fleet_updates() -> dict[str, object]:
-    with SessionLocal() as db:
-        service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-        result = service.refresh_verified_site_statuses(limit=100)
-        result["official_versions"] = OfficialPluginVersionService(db=db).refresh_for_inventory(service.list_items(limit=200))
-        db.commit()
-        return result
+def _queue_scheduled_fleet_refresh() -> int | None:
+    return FleetRefreshService.queue_scheduled_run()
 
 
 async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours: int) -> None:
     await asyncio.sleep(initial_delay_seconds)
     while True:
         try:
-            result = await asyncio.to_thread(_refresh_fleet_updates)
-            logger.info(
-                "Fleet status refresh completed: %s site states, %s update checks, %s official versions checked.",
-                len(result["state"]["refreshed"]),
-                len(result["updates"]["refreshed"]),
-                result["official_versions"]["checked"],
-            )
+            run_id = await asyncio.to_thread(_queue_scheduled_fleet_refresh)
+            if run_id is not None:
+                logger.info("Scheduled fleet status refresh run %s.", run_id)
         except Exception:
-            logger.exception("Fleet update refresh failed unexpectedly.")
+            logger.exception("Fleet update refresh scheduling failed unexpectedly.")
         await asyncio.sleep(interval_hours * 60 * 60)
+
+
+async def _fleet_refresh_worker_loop(initial_delay_seconds: int, interval_seconds: int) -> None:
+    await asyncio.sleep(initial_delay_seconds)
+    while True:
+        try:
+            run_id = await asyncio.to_thread(FleetRefreshService.process_next_queued_run)
+            if run_id is not None:
+                logger.info("Fleet status refresh run %s completed in the background.", run_id)
+        except Exception:
+            logger.exception("Fleet refresh worker failed unexpectedly.")
+        await asyncio.sleep(interval_seconds)
 
 
 def _poll_maintenance_runs() -> dict[str, int]:
@@ -79,7 +80,16 @@ async def lifespan(_: FastAPI):
     async with AsyncExitStack() as stack:
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
+        recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
+        if recovered_runs:
+            logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)
         await stack.enter_async_context(hub_mcp.session_manager.run())
+        fleet_worker_task = asyncio.create_task(
+            _fleet_refresh_worker_loop(
+                settings.fleet_refresh_worker_initial_delay_seconds,
+                settings.fleet_refresh_worker_poll_interval_seconds,
+            )
+        )
         refresh_task = None
         if settings.fleet_updates_auto_refresh:
             refresh_task = asyncio.create_task(
@@ -103,6 +113,9 @@ async def lifespan(_: FastAPI):
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await refresh_task
+            fleet_worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await fleet_worker_task
             if maintenance_task is not None:
                 maintenance_task.cancel()
                 with suppress(asyncio.CancelledError):

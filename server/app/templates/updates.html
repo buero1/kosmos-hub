@@ -59,9 +59,12 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div>
         <p class="eyebrow">Version check and diagnosis</p>
-        <p class="subtle">First refresh every verified site's installed plugin state and available updates, then check the official latest version and diagnose mismatches in the table. Public WordPress.org plugins are checked directly. For Jet plugins, the Hub uses the saved Crocoblock license to activate Jet Dashboard update metadata on matching sites. This can connect the stored license to those sites, but never installs or updates a plugin.</p>
+        <p class="subtle">The normal check reuses site status younger than {{ refresh_settings.site_status_max_age_minutes }} minutes and official provider evidence younger than {{ refresh_settings.official_version_max_age_hours }} hours. It checks up to {{ refresh_settings.max_parallel_site_checks }} sites in parallel and updates this page automatically. Crocoblock is contacted only for stale Jet evidence or Jet mismatches. A full refresh ignores those time limits. Neither option installs or updates a plugin.</p>
       </div>
-      <button class="button button-secondary" type="submit">Refresh status, check official versions and diagnose</button>
+      <div class="filter-actions">
+        <button class="button button-secondary" type="submit" name="mode" value="normal">Refresh stale status and diagnose</button>
+        <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh all sites</button>
+      </div>
     </form>
 
     {% if direct_update == "started" %}
@@ -71,6 +74,39 @@
     {% endif %}
     {% if official_versions == "refreshed" %}
       <p class="notice-success">{{ message }}</p>
+    {% endif %}
+
+    {% if refresh_run %}
+      {% set progress = refresh_run.result_json or {} %}
+      {% set site_progress = progress.get("sites", {}) %}
+      {% set official_progress = progress.get("official_versions", {}) %}
+      {% set crocoblock_progress = progress.get("crocoblock", {}) %}
+      <section class="maintenance-batch">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Fleet refresh run #{{ refresh_run.id }}</p>
+            <h3>{{ refresh_run.status | replace("-", " ") | title }}</h3>
+            {% if refresh_run.status == "queued" %}
+              <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
+            {% elif refresh_run.status == "running" %}
+              <p class="subtle">{{ site_progress.get("completed", 0) }} of {{ site_progress.get("total", 0) }} verified sites processed. {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
+            {% elif refresh_run.status == "succeeded" %}
+              <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
+            {% else %}
+              <p class="notice-error">{{ refresh_run.error_message or "The refresh could not complete." }}</p>
+            {% endif %}
+          </div>
+          <div class="inventory-totals">
+            <span><strong>{{ site_progress.get("completed", 0) }}/{{ site_progress.get("total", 0) }}</strong> sites</span>
+            <span><strong>{{ official_progress.get("checked", 0) }}</strong> official checks</span>
+            <span><strong>{{ official_progress.get("cached", 0) }}</strong> version cache</span>
+            <span><strong>{{ crocoblock_progress.get("refreshed", 0) }}</strong> Jet checks</span>
+          </div>
+        </div>
+        {% if progress.get("errors") %}
+          <p class="notice-error">{{ progress.get("errors") | length }} site check{{ "s" if progress.get("errors") | length != 1 else "" }} reported an issue. The other sites continue independently.</p>
+        {% endif %}
+      </section>
     {% endif %}
 
     {% if batch_runs %}
@@ -195,12 +231,12 @@
       </table>
     </div>
   </section>
-  {% if batch_running %}
+  {% if batch_running or (refresh_run and refresh_run.status in ["queued", "running"]) %}
     <p class="subtle">This page refreshes automatically while the direct update run is active.</p>
     <script>
       window.setTimeout(function () {
         window.location.reload();
-      }, 10000);
+      }, 4000);
     </script>
   {% endif %}
 {% endblock %}

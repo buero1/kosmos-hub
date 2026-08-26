@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.templating import Jinja2Templates
@@ -19,8 +19,8 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.crocoblock_license import CrocoblockLicenseService
-from app.services.official_plugin_versions import OfficialPluginVersionService
+from app.services.fleet_refresh import FleetRefreshService
+from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -112,6 +112,7 @@ def update_workbench_page(
     update_batch: str = "",
     direct_update: str = "",
     official_versions: str = "",
+    refresh_run: int | None = None,
     message: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
@@ -126,6 +127,9 @@ def update_workbench_page(
     matching_sites = inventory_service.filter_items(all_items, query=q) if q.strip() else []
     maintenance_service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
     batch_runs = maintenance_service.list_plugin_update_batch(update_batch)
+    fleet_refresh_service = FleetRefreshService(db=db)
+    fleet_refresh_run = fleet_refresh_service.get_run(refresh_run) if refresh_run else None
+    refresh_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -140,6 +144,8 @@ def update_workbench_page(
             "batch_running": any(run.status == "running" for run in batch_runs),
             "direct_update": direct_update,
             "official_versions": official_versions,
+            "refresh_run": fleet_refresh_run,
+            "refresh_settings": refresh_settings,
             "message": message,
         },
     )
@@ -148,7 +154,9 @@ def update_workbench_page(
 @router.post("/updates/refresh-official-plugin-versions")
 def refresh_official_plugin_versions(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
+    mode: Annotated[Literal["normal", "full"], Form()] = "normal",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -156,61 +164,16 @@ def refresh_official_plugin_versions(
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
-    inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    status_refresh = inventory_service.refresh_verified_site_statuses(limit=100)
-    initial_items = inventory_service.list_items(limit=200)
-    jet_site_ids = {
-        item.site.id
-        for item in initial_items
-        if any(CrocoblockLicenseService.is_jet_plugin_file(str(plugin.get("plugin_file", ""))) for plugin in item.plugins)
-    }
-    crocoblock_summary = CrocoblockLicenseService(db=db, cipher=get_secret_cipher()).refresh_version_evidence(
-        actor=user,
-        site_ids=jet_site_ids,
-    )
-    version_service = OfficialPluginVersionService(db=db)
-    summary = version_service.refresh_for_inventory(inventory_service.list_items(limit=200))
-    crocoblock_versions = version_service.record_provider_versions(
-        crocoblock_summary["versions"],
-        source="Crocoblock Jet Dashboard",
-    )
-    diagnosed_entries = inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
-    mismatch_count = sum(1 for entry in diagnosed_entries if entry.official_mismatch)
-    state_refresh_count = len(status_refresh["state"]["refreshed"])
-    update_refresh_count = len(status_refresh["updates"]["refreshed"])
-    write_audit_log(
-        db,
-        site=None,
-        actor=user.username,
-        source="hub-account",
-        action="refresh-official-plugin-versions",
-        result="success",
-        detail=(
-            f"Checked {summary['checked']} plugins for official version evidence: "
-            f"{summary['wordpress_org']} WordPress.org, {summary['provider_offer']} provider offers, "
-            f"{summary['unavailable']} unavailable. Crocoblock: {crocoblock_versions} catalog versions from "
-            f"{crocoblock_summary['refreshed']} of "
-            f"{crocoblock_summary['eligible']} Jet sites refreshed, {crocoblock_summary['failed']} failed. "
-            f"Refreshed {state_refresh_count} installed states and {update_refresh_count} update offers. "
-            f"Diagnosed {mismatch_count} version mismatches."
-        ),
-    )
+    fleet_refresh_service = FleetRefreshService(db=db)
+    run, created = fleet_refresh_service.create_run(actor=user, mode=mode)
     db.commit()
-    message = (
-        f"Official version evidence refreshed for {summary['checked']} plugins: "
-        f"{summary['wordpress_org']} from WordPress.org, {summary['provider_offer']} from site update providers, "
-        f"{summary['unavailable']} not available yet. Refreshed installed state for {state_refresh_count} sites and "
-        f"update offers for {update_refresh_count} sites. Diagnosed {mismatch_count} version mismatches; "
-        "see the Diagnosis column. "
-        + (
-            f"Crocoblock update metadata was refreshed on {crocoblock_summary['refreshed']} of "
-            f"{crocoblock_summary['eligible']} Jet sites and supplied {crocoblock_versions} official Jet versions."
-            if crocoblock_summary["license_available"]
-            else "No Crocoblock license is stored, so Jet version metadata was not requested."
-        )
-    )
+    if created:
+        background_tasks.add_task(FleetRefreshService.process_run, run.id)
+        message = "The background refresh was queued. This page will update automatically."
+    else:
+        message = "A fleet refresh is already running. This page will show its progress."
     return RedirectResponse(
-        url=f"/updates?{urlencode({'official_versions': 'refreshed', 'message': message})}",
+        url=f"/updates?{urlencode({'refresh_run': run.id, 'message': message})}",
         status_code=303,
     )
 

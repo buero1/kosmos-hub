@@ -64,9 +64,8 @@ class CrocoblockLicenseService:
         """Make a stored license available for one pending Jet plugin update."""
         return self._activate_for_site(actor=actor, site_id=site_id, purpose="plugin update")
 
-    def refresh_version_evidence(self, *, actor: HubUser, site_ids: set[int]) -> dict[str, Any]:
+    def refresh_version_evidence(self, *, actor: str, site_ids: set[int]) -> dict[str, Any]:
         """Authorize Jet Dashboard metadata checks without installing any plugin."""
-        self._require_admin(actor)
         eligible_site_ids = sorted(site_ids)
         config = self.get_config()
         summary = {
@@ -83,7 +82,7 @@ class CrocoblockLicenseService:
 
         for site_id in eligible_site_ids:
             try:
-                activation = self._activate_for_site(actor=actor.username, site_id=site_id, purpose="version check")
+                activation = self._activate_for_site(actor=actor, site_id=site_id, purpose="version check")
             except CrocoblockLicenseError:
                 summary["failed"] += 1
                 continue

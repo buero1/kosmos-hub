@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.services.audit import write_audit_log
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
+from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HubAccountService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 
@@ -352,6 +353,50 @@ def remove_crocoblock(
     return RedirectResponse(url="/account?crocoblock=removed", status_code=303)
 
 
+@router.post("/fleet-refresh-settings")
+def configure_fleet_refresh_settings(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_status_max_age_minutes: Annotated[int, Form()] = 15,
+    official_version_max_age_hours: Annotated[int, Form()] = 24,
+    max_parallel_site_checks: Annotated[int, Form()] = 5,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    service = FleetRefreshSettingsService(db=db)
+    try:
+        config = service.configure(
+            actor=user,
+            site_status_max_age_minutes=site_status_max_age_minutes,
+            official_version_max_age_hours=official_version_max_age_hours,
+            max_parallel_site_checks=max_parallel_site_checks,
+        )
+    except FleetRefreshSettingsError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-fleet-refresh-settings",
+        result="success",
+        detail=(
+            f"Set status cache to {config.site_status_max_age_minutes} minutes, official version cache to "
+            f"{config.official_version_max_age_hours} hours, and parallel site checks to "
+            f"{config.max_parallel_site_checks}."
+        ),
+    )
+    db.commit()
+    return RedirectResponse(url="/account?fleet_refresh=settings-saved", status_code=303)
+
+
 @router.post("/provider-licenses")
 def configure_provider_license(
     request: Request,
@@ -454,6 +499,7 @@ def _account_context(
         "new_mcp_token_name": new_mcp_token_name,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
         "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
+        "fleet_refresh_settings": FleetRefreshSettingsService(db=service.db).get_runtime_settings(),
     }
 
 
