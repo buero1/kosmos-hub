@@ -94,6 +94,9 @@ class UpdateWorkbenchEntry:
     official_checked_at: datetime | None = None
     official_mismatch: bool = False
     official_note: str = "Official version not checked yet."
+    diagnosis_status: str = "not-checked"
+    diagnosis_label: str = "Not checked"
+    diagnosis_note: str = "Run the official version check to diagnose this plugin."
 
     @property
     def kind_label(self) -> str:
@@ -375,6 +378,15 @@ class FleetInventoryService:
                 reported_version=entry.target_version,
                 official_version=reference.official_version,
             )
+            diagnosis_status, diagnosis_label, diagnosis_note = OfficialPluginVersionService.diagnosis(
+                current_version=entry.current_version,
+                reported_version=entry.target_version,
+                official_version=reference.official_version,
+                official_source=reference.source,
+                execution_ready=entry.execution_ready,
+                execution_note=entry.execution_note,
+                is_jet_plugin=entry.identifier.startswith("jet-"),
+            )
             enriched.append(
                 replace(
                     entry,
@@ -383,6 +395,9 @@ class FleetInventoryService:
                     official_checked_at=reference.checked_at,
                     official_mismatch=mismatch,
                     official_note=note,
+                    diagnosis_status=diagnosis_status,
+                    diagnosis_label=diagnosis_label,
+                    diagnosis_note=diagnosis_note,
                 )
             )
 

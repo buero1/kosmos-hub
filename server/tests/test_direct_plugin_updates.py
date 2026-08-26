@@ -152,6 +152,38 @@ def test_official_version_comparison_accepts_matching_reported_target():
     assert note == "The reported update matches the official version."
 
 
+def test_version_diagnosis_explains_a_missing_site_offer():
+    status, label, note = OfficialPluginVersionService.diagnosis(
+        current_version="3.22.1",
+        reported_version="",
+        official_version="3.22.2",
+        official_source="WordPress.org",
+        execution_ready=False,
+        execution_note="",
+        is_jet_plugin=False,
+    )
+
+    assert status == "site-offer-missing"
+    assert label == "Site offer missing"
+    assert "will not update" in note
+
+
+def test_version_diagnosis_blocks_conflicting_provider_information():
+    status, label, note = OfficialPluginVersionService.diagnosis(
+        current_version="3.22.1",
+        reported_version="3.22.3",
+        official_version="3.22.2",
+        official_source="WordPress.org",
+        execution_ready=True,
+        execution_note="",
+        is_jet_plugin=False,
+    )
+
+    assert status == "provider-conflict"
+    assert label == "Provider information conflicts"
+    assert "will not update" in note
+
+
 def test_official_version_lookup_uses_the_documented_wordpress_org_query_shape():
     url = OfficialPluginVersionService.WORDPRESS_ORG_API.format(slug="wordpress-seo")
 

@@ -160,6 +160,78 @@ class OfficialPluginVersionService:
             return False, "The reported update matches the official version."
         return False, "Installed version matches the official version."
 
+    @classmethod
+    def diagnosis(
+        cls,
+        *,
+        current_version: str,
+        reported_version: str,
+        official_version: str | None,
+        official_source: str,
+        execution_ready: bool,
+        execution_note: str,
+        is_jet_plugin: bool,
+    ) -> tuple[str, str, str]:
+        """Explain the evidence state without attempting an update."""
+        if not official_version:
+            return (
+                "official-unavailable",
+                "Official version unavailable",
+                "No public or authorized provider catalog returned a version, so this plugin cannot be compared yet.",
+            )
+
+        if reported_version and reported_version != official_version:
+            return (
+                "provider-conflict",
+                "Provider information conflicts",
+                f"The site offers {reported_version}, while {official_source} reports {official_version}. The Hub will not update until the provider data agrees.",
+            )
+
+        if current_version == official_version:
+            return (
+                "aligned",
+                "Versions match",
+                "The installed version matches the verified official version. No action is needed.",
+            )
+
+        if reported_version == official_version:
+            if execution_ready:
+                return (
+                    "update-ready",
+                    "Verified update ready",
+                    f"The site offer matches {official_source} at {official_version}. The plugin update can be started.",
+                )
+            if is_jet_plugin:
+                return (
+                    "crocoblock-package-pending",
+                    "Crocoblock package pending",
+                    f"Jet Dashboard confirms {official_version}, but has not supplied a WordPress update package yet. The Hub will not update it until a package is available.",
+                )
+            return (
+                "provider-package-unavailable",
+                "Provider package unavailable",
+                execution_note or "The site reports the verified version, but the provider has not supplied an authorized download package.",
+            )
+
+        if current_version and cls._version_key(current_version) > cls._version_key(official_version):
+            return (
+                "site-newer-than-reference",
+                "Site version is newer",
+                f"The site has {current_version}, newer than the {official_version} reported by {official_source}. This may be a beta or a delayed provider catalog; no update will run.",
+            )
+
+        if is_jet_plugin:
+            return (
+                "crocoblock-offer-missing",
+                "Crocoblock offer missing",
+                f"Jet Dashboard confirms {official_version}, but this site returned no WordPress update offer or package. The Hub will not update it yet.",
+            )
+        return (
+            "site-offer-missing",
+            "Site offer missing",
+            f"{official_source} confirms {official_version}, but the site returned no update offer. The Hub will not update it until the provider exposes one.",
+        )
+
     def _collect_candidates(self, items: Iterable[Any]) -> dict[str, OfficialVersionCandidate]:
         reports: dict[str, list[str]] = {}
         sources: dict[str, list[str]] = {}

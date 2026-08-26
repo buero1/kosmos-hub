@@ -173,6 +173,8 @@ def refresh_official_plugin_versions(
         crocoblock_summary["versions"],
         source="Crocoblock Jet Dashboard",
     )
+    diagnosed_entries = inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
+    mismatch_count = sum(1 for entry in diagnosed_entries if entry.official_mismatch)
     write_audit_log(
         db,
         site=None,
@@ -185,14 +187,16 @@ def refresh_official_plugin_versions(
             f"{summary['wordpress_org']} WordPress.org, {summary['provider_offer']} provider offers, "
             f"{summary['unavailable']} unavailable. Crocoblock: {crocoblock_versions} catalog versions from "
             f"{crocoblock_summary['refreshed']} of "
-            f"{crocoblock_summary['eligible']} Jet sites refreshed, {crocoblock_summary['failed']} failed."
+            f"{crocoblock_summary['eligible']} Jet sites refreshed, {crocoblock_summary['failed']} failed. "
+            f"Diagnosed {mismatch_count} version mismatches."
         ),
     )
     db.commit()
     message = (
         f"Official version evidence refreshed for {summary['checked']} plugins: "
         f"{summary['wordpress_org']} from WordPress.org, {summary['provider_offer']} from site update providers, "
-        f"{summary['unavailable']} not available yet. "
+        f"{summary['unavailable']} not available yet. Diagnosed {mismatch_count} version mismatches; "
+        "see the Diagnosis column. "
         + (
             f"Crocoblock update metadata was refreshed on {crocoblock_summary['refreshed']} of "
             f"{crocoblock_summary['eligible']} Jet sites and supplied {crocoblock_versions} official Jet versions."

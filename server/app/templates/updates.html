@@ -58,10 +58,10 @@
     <form class="plan-panel plan-panel-locked" method="post" action="/updates/refresh-official-plugin-versions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div>
-        <p class="eyebrow">Version evidence</p>
-        <p class="subtle">Check the official latest version for every installed plugin. Public WordPress.org plugins are checked directly. For Jet plugins, the Hub uses the saved Crocoblock license to activate Jet Dashboard update metadata on matching sites. This can connect the stored license to those sites, but never installs or updates a plugin.</p>
+        <p class="eyebrow">Version check and diagnosis</p>
+        <p class="subtle">Check the official latest version for every installed plugin and diagnose mismatches in the table. Public WordPress.org plugins are checked directly. For Jet plugins, the Hub uses the saved Crocoblock license to activate Jet Dashboard update metadata on matching sites. This can connect the stored license to those sites, but never installs or updates a plugin.</p>
       </div>
-      <button class="button button-secondary" type="submit">Check official plugin versions</button>
+      <button class="button button-secondary" type="submit">Check official versions and diagnose</button>
     </form>
 
     {% if direct_update == "started" %}
@@ -113,6 +113,7 @@
             <th>Update</th>
             <th>Versions</th>
             <th>Official version</th>
+            <th>Diagnosis</th>
             <th>State</th>
             <th>Captured</th>
             <th>Review</th>
@@ -161,13 +162,23 @@
                   <span class="subtle">Not applicable</span>
                 {% endif %}
               </td>
+              <td>
+                {% if entry.kind == "plugin" and entry.diagnosis_status != "not-checked" %}
+                  <span class="pill {% if entry.diagnosis_status in ["aligned", "update-ready"] %}pill-active{% elif entry.diagnosis_status == "official-unavailable" %}pill-unknown{% else %}pill-missing{% endif %}">{{ entry.diagnosis_label }}</span>
+                  <p class="subtle table-note">{{ entry.diagnosis_note }}</p>
+                {% elif entry.kind == "plugin" %}
+                  <span class="pill pill-unknown">Not checked</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
               <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
               <td>{{ entry.captured_at }}</td>
               <td>{{ entry.review_note }}</td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="9">
+              <td colspan="10">
                 <strong>No plugin inventory or update entries match the selected filters.</strong>
                 {% if matching_sites %}
                   <p class="subtle table-note">The matching site is registered, but has no matching plugin inventory or available update entry.</p>
