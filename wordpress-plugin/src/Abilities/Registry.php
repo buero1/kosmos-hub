@@ -10,6 +10,7 @@ class Registry {
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
 	const UPDATE_BACKUP_MAX_AGE     = 604800;
 	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
+	const UPDRAFT_BACKUP_SCHEDULED_ACTION  = 'kosmos_bridge_start_updraftplus_backup';
 	const UPDRAFT_BACKUP_REQUEST_TRANSIENT = 'kosmos_bridge_updraft_backup_request';
 	const UPDRAFT_BACKUP_REQUEST_TTL       = 300;
 	const UPDRAFT_BACKUP_PENDING_MAX_AGE   = 180;
@@ -163,6 +164,70 @@ class Registry {
 	}
 
 	/**
+	 * Run the queued request outside the Hub HTTP request. WordPress Cron uses a
+	 * non-blocking loopback, so a slow UpdraftPlus start never delays the Hub UI.
+	 *
+	 * @param string $nonce UpdraftPlus backup nonce prepared by the Bridge.
+	 * @return void
+	 */
+	public static function run_scheduled_updraftplus_backup( $nonce ) {
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) ) {
+			return;
+		}
+
+		$pending = self::get_updraftplus_backup_request( $nonce );
+		if ( empty( $pending ) || 'queued' !== ( $pending['status'] ?? '' ) ) {
+			return;
+		}
+
+		self::update_updraftplus_backup_request(
+			$nonce,
+			array(
+				'status'  => 'starting',
+				'message' => 'The WordPress background worker is starting the protected backup with UpdraftPlus.',
+			)
+		);
+
+		if ( ! isset( $GLOBALS['updraftplus'] ) || ! is_object( $GLOBALS['updraftplus'] ) ) {
+			self::update_updraftplus_backup_request(
+				$nonce,
+				array(
+					'status'  => 'failed',
+					'message' => 'The WordPress background worker could not initialize UpdraftPlus.',
+				)
+			);
+			return;
+		}
+
+		try {
+			do_action(
+				self::UPDRAFT_BACKUP_REQUEST_ACTION,
+				array(
+					'use_nonce'   => $nonce,
+					'always_keep' => true,
+				)
+			);
+		} catch ( \Throwable $error ) {
+			self::update_updraftplus_backup_request(
+				$nonce,
+				array(
+					'status'  => 'failed',
+					'message' => 'UpdraftPlus backup could not be started: ' . $error->getMessage(),
+				)
+			);
+			return;
+		}
+
+		self::update_updraftplus_backup_request(
+			$nonce,
+			array(
+				'status'  => 'running',
+				'message' => 'UpdraftPlus accepted the protected backup and is writing it to the configured destination.',
+			)
+		);
+	}
+
+	/**
 	 * @return bool
 	 */
 	public static function allow_readonly_access() {
@@ -258,19 +323,28 @@ class Registry {
 		}
 
 		$result = array(
-			'reported_at'      => gmdate( 'c' ),
-			'provider'         => 'updraftplus',
-			'installed'        => $installed,
-			'active'           => $active,
-			'available'        => false,
-			'complete'         => false,
+			'reported_at'         => gmdate( 'c' ),
+			'provider'            => 'updraftplus',
+			'installed'           => $installed,
+			'active'              => $active,
+			'available'           => false,
+			'complete'            => false,
 			'retention_protected' => false,
-			'latest_backup_at' => '',
-			'backup_nonce'     => '',
-			'backup_count'     => 0,
-			'components'       => array(),
-			'message'          => '',
+			'latest_backup_at'    => '',
+			'backup_nonce'        => '',
+			'backup_count'        => 0,
+			'components'          => array(),
+			'request_status'      => 'not_requested',
+			'request_updated_at'  => '',
+			'request_message'     => '',
+			'message'             => '',
 		);
+		$pending = self::get_updraftplus_backup_request( $requested_nonce );
+		if ( ! empty( $pending ) ) {
+			$result['request_status']     = isset( $pending['status'] ) ? (string) $pending['status'] : 'queued';
+			$result['request_updated_at'] = ! empty( $pending['updated_at'] ) ? gmdate( 'c', (int) $pending['updated_at'] ) : '';
+			$result['request_message']    = isset( $pending['message'] ) ? (string) $pending['message'] : '';
+		}
 
 		if ( ! $installed ) {
 			$result['message'] = 'UpdraftPlus is not installed on this site.';
@@ -294,7 +368,9 @@ class Registry {
 
 		$result['backup_count'] = count( $history );
 		if ( empty( $backup ) ) {
-			$result['message'] = 'No complete UpdraftPlus backup is currently recorded.';
+			$result['message'] = ! empty( $result['request_message'] )
+				? $result['request_message']
+				: 'No complete UpdraftPlus backup is currently recorded.';
 			return $result;
 		}
 
@@ -313,6 +389,9 @@ class Registry {
 			: 'A complete backup was found without a usable timestamp.';
 
 		if ( '' !== $requested_nonce && $requested_nonce === $nonce ) {
+			$result['request_status']     = 'completed';
+			$result['request_updated_at'] = gmdate( 'c' );
+			$result['request_message']    = 'UpdraftPlus recorded the requested protected backup.';
 			self::clear_updraftplus_backup_request( $nonce );
 		}
 
@@ -320,9 +399,9 @@ class Registry {
 	}
 
 	/**
-	 * Start exactly one full UpdraftPlus backup and return its generated nonce.
-	 * This uses the same UpdraftPlus action as its manual start, so a blocked
-	 * WordPress loopback request cannot report a false positive to the Hub.
+	 * Queue exactly one full UpdraftPlus backup and return its generated nonce.
+	 * WordPress Cron runs the same UpdraftPlus action in a background request,
+	 * keeping the Hub request responsive while preserving a verifiable nonce.
 	 *
 	 * @param array|null $input Empty ability input.
 	 * @return array|\WP_Error
@@ -382,26 +461,26 @@ class Registry {
 			array(
 				'nonce'        => $nonce,
 				'requested_at' => time(),
+				'updated_at'   => time(),
+				'status'       => 'queued',
+				'message'      => 'The Bridge queued the protected backup for the WordPress background worker.',
 			),
 			self::UPDRAFT_BACKUP_REQUEST_TTL
 		);
 
-		try {
-			do_action(
-				self::UPDRAFT_BACKUP_REQUEST_ACTION,
-				array(
-					'use_nonce'   => $nonce,
-					'always_keep' => true,
-				)
-			);
-		} catch ( \Throwable $error ) {
+		$scheduled = wp_schedule_single_event( time(), self::UPDRAFT_BACKUP_SCHEDULED_ACTION, array( $nonce ), true );
+		if ( is_wp_error( $scheduled ) || false === $scheduled ) {
 			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
 
 			return new \WP_Error(
-				'kosmos_bridge_updraftplus_start_failed',
-				'UpdraftPlus backup could not be started: ' . $error->getMessage(),
+				'kosmos_bridge_updraftplus_schedule_failed',
+				'WordPress could not queue the UpdraftPlus backup background task.',
 				array( 'status' => 502 )
 			);
+		}
+
+		if ( function_exists( 'spawn_cron' ) ) {
+			spawn_cron( time() );
 		}
 
 		return array(
@@ -409,8 +488,10 @@ class Registry {
 			'provider'                       => 'updraftplus',
 			'backup_nonce'                   => $nonce,
 			'retention_protection_requested' => true,
+			'request_status'                 => 'queued',
+			'background_dispatch_requested'  => true,
 			'scheduled_at'                   => gmdate( 'c' ),
-			'message'                        => 'A full UpdraftPlus backup was started and marked for manual deletion only.',
+			'message'                        => 'The protected UpdraftPlus backup was queued for background processing.',
 		);
 	}
 
@@ -922,7 +1003,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/start-updraftplus-backup',
 				'label'         => __( 'Start UpdraftPlus Backup', 'kosmos-bridge' ),
-				'description'   => __( 'Schedules one full UpdraftPlus backup using the site configuration. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
+				'description'   => __( 'Queues one full protected UpdraftPlus backup in the WordPress background. It cannot download, restore, or change backup settings.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => array(),
 				'output_schema' => self::updraftplus_backup_start_output_schema(),
@@ -1271,6 +1352,9 @@ class Registry {
 				'backup_nonce'     => array( 'type' => 'string' ),
 				'backup_count'     => array( 'type' => 'integer' ),
 				'components'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'request_status'   => array( 'type' => 'string' ),
+				'request_updated_at' => array( 'type' => 'string' ),
+				'request_message'  => array( 'type' => 'string' ),
 				'message'          => array( 'type' => 'string' ),
 			),
 			'required'   => array(
@@ -1285,6 +1369,9 @@ class Registry {
 				'backup_nonce',
 				'backup_count',
 				'components',
+				'request_status',
+				'request_updated_at',
+				'request_message',
 				'message',
 			),
 		);
@@ -1326,10 +1413,12 @@ class Registry {
 				'provider'                       => array( 'type' => 'string' ),
 				'backup_nonce'                   => array( 'type' => 'string' ),
 				'retention_protection_requested' => array( 'type' => 'boolean' ),
+				'request_status'                 => array( 'type' => 'string' ),
+				'background_dispatch_requested'  => array( 'type' => 'boolean' ),
 				'scheduled_at'                   => array( 'type' => 'string', 'format' => 'date-time' ),
 				'message'                        => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'accepted', 'provider', 'backup_nonce', 'retention_protection_requested', 'scheduled_at', 'message' ),
+			'required'   => array( 'accepted', 'provider', 'backup_nonce', 'retention_protection_requested', 'request_status', 'background_dispatch_requested', 'scheduled_at', 'message' ),
 		);
 	}
 
@@ -1381,10 +1470,42 @@ class Registry {
 	 * @return void
 	 */
 	private static function clear_updraftplus_backup_request( $nonce ) {
-		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
-		if ( is_array( $pending ) && isset( $pending['nonce'] ) && $nonce === $pending['nonce'] ) {
+		$pending = self::get_updraftplus_backup_request( $nonce );
+		if ( ! empty( $pending ) ) {
 			delete_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
 		}
+	}
+
+	/**
+	 * @param string $nonce UpdraftPlus backup nonce.
+	 * @return array
+	 */
+	private static function get_updraftplus_backup_request( $nonce ) {
+		if ( ! self::is_valid_updraftplus_backup_nonce( $nonce ) ) {
+			return array();
+		}
+
+		$pending = get_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT );
+		if ( ! is_array( $pending ) || ! isset( $pending['nonce'] ) || $nonce !== $pending['nonce'] ) {
+			return array();
+		}
+
+		return $pending;
+	}
+
+	/**
+	 * @param string $nonce UpdraftPlus backup nonce.
+	 * @param array  $changes Request fields to persist.
+	 * @return void
+	 */
+	private static function update_updraftplus_backup_request( $nonce, $changes ) {
+		$pending = self::get_updraftplus_backup_request( $nonce );
+		if ( empty( $pending ) ) {
+			return;
+		}
+
+		$pending = array_merge( $pending, $changes, array( 'updated_at' => time() ) );
+		set_transient( self::UPDRAFT_BACKUP_REQUEST_TRANSIENT, $pending, self::UPDRAFT_BACKUP_REQUEST_TTL );
 	}
 
 	/**

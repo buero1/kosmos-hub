@@ -108,6 +108,7 @@
   {% elif request.query_params.get("backup_refresh") == "error" %}
     <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
+  {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
   <section class="site-refresh-panel">
     <div>
       <p class="eyebrow">Maintenance pilot</p>
@@ -116,7 +117,7 @@
     </div>
     <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button" type="submit">Start verified backup</button>
+      <button class="button" type="submit" {% if running_maintenance_runs %}disabled{% endif %}>{{ "Backup verification is running" if running_maintenance_runs else "Start verified backup" }}</button>
     </form>
   </section>
   {% if request.query_params.get("maintenance") == "started" %}
@@ -130,7 +131,7 @@
         <div>
           <p class="eyebrow">Maintenance record</p>
           <h2>Recent backup runs</h2>
-          <p class="subtle">Every run remains documented here. A running check continues in the background until it succeeds, fails, or reaches the three-minute limit.</p>
+          <p class="subtle">Every run remains documented here. While a run is active, this page refreshes automatically and shows the current Bridge and UpdraftPlus stage.</p>
         </div>
       </div>
       <div class="detail-list maintenance-run-list">
@@ -140,6 +141,10 @@
             <p><strong>Run:</strong> #{{ run.id }}</p>
             <p><strong>Started:</strong> {{ run.started_at }}</p>
             <p><strong>Completed:</strong> {{ run.completed_at or "Still running" }}</p>
+            {% if run.status == "running" %}
+              <p><strong>Bridge stage:</strong> {{ run.result_json.bridge_status | replace("-", " ") | title }}</p>
+              {% if run.result_json.bridge_status_message %}<p class="subtle">{{ run.result_json.bridge_status_message }}</p>{% endif %}
+            {% endif %}
             {% if run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
             {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
             {% for step in run.steps %}
@@ -150,6 +155,14 @@
         {% endfor %}
       </div>
     </section>
+  {% endif %}
+  {% if running_maintenance_runs %}
+    <p class="subtle">Live status is refreshed automatically every 10 seconds while this backup verification is active.</p>
+    <script>
+      window.setTimeout(function () {
+        window.location.reload();
+      }, 10000);
+    </script>
   {% endif %}
   {% if removable_test_registration %}
     <section class="site-removal-panel">

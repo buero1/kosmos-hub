@@ -36,6 +36,7 @@ class Plugin {
 		add_action( 'init', array( self::class, 'maybe_retry_registration' ) );
 		add_action( 'wp_abilities_api_categories_init', array( AbilityRegistry::class, 'register_categories' ) );
 		add_action( 'wp_abilities_api_init', array( AbilityRegistry::class, 'register_abilities' ) );
+		add_action( AbilityRegistry::UPDRAFT_BACKUP_SCHEDULED_ACTION, array( AbilityRegistry::class, 'run_scheduled_updraftplus_backup' ), 10, 1 );
 		add_action( self::REGISTER_HOOK, array( self::class, 'run_registration' ) );
 		add_action( self::HEARTBEAT_HOOK, array( self::class, 'run_heartbeat' ) );
 		add_action( 'admin_menu', array( StatusPage::class, 'register' ) );
@@ -70,6 +71,7 @@ class Plugin {
 	public static function deactivate() {
 		wp_clear_scheduled_hook( self::REGISTER_HOOK );
 		wp_clear_scheduled_hook( self::HEARTBEAT_HOOK );
+		wp_clear_scheduled_hook( AbilityRegistry::UPDRAFT_BACKUP_SCHEDULED_ACTION );
 	}
 
 	/**

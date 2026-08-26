@@ -32,7 +32,7 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
-    START_BACKUP_TIMEOUT_SECONDS = 180
+    START_BACKUP_TIMEOUT_SECONDS = 20
     BACKUP_TIMEOUT = timedelta(minutes=3)
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
@@ -121,15 +121,19 @@ class MaintenanceRunService:
             return MaintenanceRunOutcome(run=run, result="failed", message=message)
 
         run.bridge_backup_nonce = backup_nonce
+        bridge_status = self._bridge_backup_status(result)
+        bridge_message = self._bridge_backup_message(result, bridge_status)
         run.result_json = {
             "provider": "updraftplus",
             "backup_nonce": backup_nonce,
             "retention_protection_requested": True,
+            "bridge_status": bridge_status,
+            "bridge_status_message": bridge_message,
             "scheduled_at": self._safe_string(result.get("scheduled_at")),
         }
         request_step.status = MaintenanceRunStepStatus.succeeded.value
         request_step.completed_at = datetime.now(UTC)
-        request_step.detail = "UpdraftPlus accepted a new full backup request protected from automatic deletion."
+        request_step.detail = bridge_message
         request_step.result_json = dict(run.result_json)
         self.db.add(
             MaintenanceRunStep(
@@ -137,7 +141,7 @@ class MaintenanceRunService:
                 step_key="verify-backup",
                 status=MaintenanceRunStepStatus.waiting.value,
                 started_at=datetime.now(UTC),
-                detail="Waiting for UpdraftPlus to record the requested complete protected backup.",
+                detail=self._backup_waiting_detail(bridge_status, bridge_message),
                 result_json={},
             )
         )
@@ -208,8 +212,19 @@ class MaintenanceRunService:
 
         result = self._result_from_payload(payload)
         run.last_checked_at = now
+        bridge_status = self._bridge_backup_status(result)
+        bridge_message = self._bridge_backup_message(result, bridge_status)
+        run.result_json = {
+            **(run.result_json or {}),
+            "bridge_status": bridge_status,
+            "bridge_status_message": bridge_message,
+        }
         if result.get("installed") is not True or result.get("active") is not True:
             self._fail_run(run, actor="kosmos-hub", message="UpdraftPlus is no longer installed and active on this site.")
+            return "failed"
+
+        if bridge_status == "failed":
+            self._fail_run(run, actor="kosmos-hub", message=bridge_message)
             return "failed"
 
         if self._is_complete_requested_backup(result, run.bridge_backup_nonce) and result.get("retention_protected") is not True:
@@ -231,6 +246,8 @@ class MaintenanceRunService:
                 "backup_at": snapshot.backup_at.isoformat() if snapshot.backup_at else None,
                 "components": snapshot.components_json,
                 "retention_protected": True,
+                "bridge_status": "completed",
+                "bridge_status_message": "UpdraftPlus recorded the requested protected backup.",
             }
             if verification_step is not None:
                 verification_step.status = MaintenanceRunStepStatus.succeeded.value
@@ -252,7 +269,7 @@ class MaintenanceRunService:
         self._mark_waiting(
             run,
             verification_step,
-            "UpdraftPlus has not yet recorded the requested complete protected backup. The Hub will check again automatically.",
+            self._backup_waiting_detail(bridge_status, bridge_message),
         )
         return "waiting"
 
@@ -297,6 +314,35 @@ class MaintenanceRunService:
     @staticmethod
     def _safe_string(value: object) -> str | None:
         return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @classmethod
+    def _bridge_backup_status(cls, result: dict[str, Any]) -> str:
+        value = cls._safe_string(result.get("request_status"))
+        return value if value in {"queued", "starting", "running", "completed", "failed"} else "queued"
+
+    @classmethod
+    def _bridge_backup_message(cls, result: dict[str, Any], bridge_status: str) -> str:
+        message = cls._safe_string(result.get("request_message")) or cls._safe_string(result.get("message"))
+        if message:
+            return message
+
+        return {
+            "queued": "The Bridge queued the protected backup for the WordPress background worker.",
+            "starting": "The WordPress background worker is starting the protected backup with UpdraftPlus.",
+            "running": "UpdraftPlus is writing the protected backup to the configured destination.",
+            "completed": "UpdraftPlus recorded the requested protected backup.",
+            "failed": "The Bridge could not start the protected backup.",
+        }[bridge_status]
+
+    @classmethod
+    def _backup_waiting_detail(cls, bridge_status: str, bridge_message: str) -> str:
+        if bridge_status == "queued":
+            return f"{bridge_message} The Hub is waiting for WordPress to run it."
+        if bridge_status == "starting":
+            return f"{bridge_message} The Hub will verify the backup record automatically."
+        if bridge_status == "running":
+            return f"{bridge_message} The Hub is waiting for the complete protected backup record."
+        return f"{bridge_message} The Hub will check again automatically."
 
     @staticmethod
     def _is_backup_nonce(value: object) -> bool:

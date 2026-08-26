@@ -24,6 +24,8 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
                 "accepted": True,
                 "backup_nonce": backup_nonce,
                 "retention_protection_requested": True,
+                "request_status": "queued",
+                "background_dispatch_requested": True,
                 "scheduled_at": "2026-08-25T12:00:00+00:00",
             }
         }
@@ -40,6 +42,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
                 "available": True,
                 "complete": True,
                 "retention_protected": True,
+                "request_status": "completed",
                 "backup_nonce": backup_nonce,
                 "latest_backup_at": "2026-08-25T12:01:30+00:00",
                 "backup_count": 4,
@@ -63,6 +66,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         db.commit()
 
         service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        assert service.START_BACKUP_TIMEOUT_SECONDS == 20
         assert service.BACKUP_TIMEOUT.total_seconds() == 180
         started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
 
@@ -79,6 +83,7 @@ def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
         assert verified.result_json["backup_nonce"] == backup_nonce
         assert verified.result_json["components"] == ["database", "plugins", "themes", "uploads", "others"]
         assert verified.result_json["retention_protected"] is True
+        assert verified.result_json["bridge_status"] == "completed"
 
 
 def test_second_running_backup_run_is_blocked(monkeypatch):
@@ -91,6 +96,8 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
                 "accepted": True,
                 "backup_nonce": "a1b2c3d4e5f6",
                 "retention_protection_requested": True,
+                "request_status": "queued",
+                "background_dispatch_requested": True,
                 "scheduled_at": "2026-08-25T12:00:00+00:00",
             }
         }
@@ -128,6 +135,8 @@ def test_unprotected_completed_backup_run_fails(monkeypatch):
                 "accepted": True,
                 "backup_nonce": backup_nonce,
                 "retention_protection_requested": True,
+                "request_status": "queued",
+                "background_dispatch_requested": True,
                 "scheduled_at": "2026-08-25T12:00:00+00:00",
             }
         }
@@ -140,6 +149,7 @@ def test_unprotected_completed_backup_run_fails(monkeypatch):
                 "available": True,
                 "complete": True,
                 "retention_protected": False,
+                "request_status": "completed",
                 "backup_nonce": backup_nonce,
                 "latest_backup_at": "2026-08-25T12:01:30+00:00",
             }
@@ -168,3 +178,57 @@ def test_unprotected_completed_backup_run_fails(monkeypatch):
         assert summary == {"checked": 1, "succeeded": 0, "failed": 1, "waiting": 0}
         assert started.run.status == MaintenanceRunStatus.failed.value
         assert "not protected" in (started.run.error_message or "")
+
+
+def test_queued_background_backup_reports_bridge_progress(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "a1b2c3d4e5f6"
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        return {
+            "result": {
+                "accepted": True,
+                "backup_nonce": backup_nonce,
+                "retention_protection_requested": True,
+                "request_status": "queued",
+                "background_dispatch_requested": True,
+                "scheduled_at": "2026-08-25T12:00:00+00:00",
+            }
+        }
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        return {
+            "result": {
+                "installed": True,
+                "active": True,
+                "available": False,
+                "complete": False,
+                "request_status": "starting",
+                "request_message": "The WordPress background worker is starting the protected backup with UpdraftPlus.",
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="56ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        started = service.start_updraftplus_backup(site_id=site.id, actor="operator")
+
+        summary = service.poll_active_updraftplus_backups()
+
+        assert summary == {"checked": 1, "succeeded": 0, "failed": 0, "waiting": 1}
+        assert started.run.status == MaintenanceRunStatus.running.value
+        assert started.run.result_json["bridge_status"] == "starting"
+        assert "background worker" in started.run.result_json["bridge_status_message"]
