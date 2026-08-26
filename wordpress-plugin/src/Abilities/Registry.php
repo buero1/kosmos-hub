@@ -1100,12 +1100,17 @@ class Registry {
 			$resolved_file = isset( $data['plugin'] ) ? (string) $data['plugin'] : (string) $plugin_file;
 			$plugin_data   = isset( $plugins[ $resolved_file ] ) ? $plugins[ $resolved_file ] : $plugin_record;
 			$new_version   = self::get_update_version( $data );
+			$has_package   = isset( $data['package'] ) && '' !== trim( (string) $data['package'] );
+			$is_crocoblock = self::is_crocoblock_plugin_file( $resolved_file );
 
 			$plugin_updates[] = array(
 				'plugin_file'     => $resolved_file,
 				'name'            => isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : $resolved_file,
 				'current_version' => isset( $plugin_data['Version'] ) ? (string) $plugin_data['Version'] : '',
 				'new_version'     => $new_version,
+				'update_source'   => $is_crocoblock ? 'crocoblock' : 'wordpress',
+				'execution_ready' => $has_package,
+				'execution_note'  => self::plugin_update_execution_note( $has_package, $is_crocoblock ),
 			);
 		}
 
@@ -1196,11 +1201,15 @@ class Registry {
 				continue;
 			}
 
+			$has_package = self::has_crocoblock_update_package( $plugin_file );
 			$plugin_updates[] = array(
 				'plugin_file'     => $plugin_file,
 				'name'            => isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : $plugin_file,
 				'current_version' => $installed,
 				'new_version'     => $new_version,
+				'update_source'   => 'crocoblock',
+				'execution_ready' => $has_package,
+				'execution_note'  => self::plugin_update_execution_note( $has_package, true ),
 			);
 			$known_files[ $plugin_file ] = true;
 		}
@@ -1214,6 +1223,49 @@ class Registry {
 	 */
 	private static function is_crocoblock_plugin_file( $plugin_file ) {
 		return 0 === strpos( $plugin_file, 'jet-' );
+	}
+
+	/**
+	 * A version notice is not necessarily an executable update. Crocoblock only
+	 * exposes its package after the site has an active provider license.
+	 *
+	 * @param bool $has_package Whether WordPress currently has an update package.
+	 * @param bool $is_crocoblock Whether the update is provided by Crocoblock.
+	 * @return string
+	 */
+	private static function plugin_update_execution_note( $has_package, $is_crocoblock ) {
+		if ( $has_package ) {
+			return 'An authorized update package is ready.';
+		}
+
+		if ( $is_crocoblock ) {
+			return 'Crocoblock must activate a valid license for this site before its update package is available.';
+		}
+
+		return 'The update provider did not supply an authorized package for this update.';
+	}
+
+	/**
+	 * Ask the installed Jet Dashboard whether it can provide a package without
+	 * returning or persisting the license-bound URL outside WordPress.
+	 *
+	 * @param string $plugin_file Plugin file relative to WP_PLUGIN_DIR.
+	 * @return bool
+	 */
+	private static function has_crocoblock_update_package( $plugin_file ) {
+		if ( ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+			return false;
+		}
+
+		try {
+			if ( ! \Jet_Dashboard\Utils::is_site_activated() ) {
+				return false;
+			}
+
+			return (bool) \Jet_Dashboard\Utils::package_url( $plugin_file );
+		} catch ( \Throwable $exception ) {
+			return false;
+		}
 	}
 
 	/**
@@ -1627,6 +1679,9 @@ class Registry {
 				'name'            => array( 'type' => 'string' ),
 				'current_version' => array( 'type' => 'string' ),
 				'new_version'     => array( 'type' => 'string' ),
+				'update_source'   => array( 'type' => 'string' ),
+				'execution_ready' => array( 'type' => 'boolean' ),
+				'execution_note'  => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'current_version', 'new_version' ),
 		);

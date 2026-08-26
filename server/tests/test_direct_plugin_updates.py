@@ -11,6 +11,8 @@ def plugin_entry(**overrides):
         "is_active": True,
         "current_version": "3.22.1",
         "target_version": "3.22.2",
+        "execution_ready": True,
+        "execution_note": "",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -24,6 +26,12 @@ def test_direct_updates_reject_inactive_plugins():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(is_active=False)) == (
         "Smush is inactive. Direct updates currently require an active plugin."
     )
+
+
+def test_direct_updates_reject_plugins_without_an_authorized_package():
+    assert MaintenanceRunService._direct_plugin_update_scope_error(
+        plugin_entry(execution_ready=False, execution_note="License activation is required.")
+    ) == "License activation is required."
 
 
 def test_direct_updates_reject_non_plugin_entries():

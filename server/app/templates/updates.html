@@ -108,10 +108,10 @@
           {% for entry in entries %}
             <tr>
               <td>
-                {% if entry.kind == "plugin" and entry.is_active %}
+                {% if entry.kind == "plugin" and entry.is_active and entry.execution_ready %}
                   <input form="direct-update-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
-                  <span class="subtle">Not enabled</span>
+                  <span class="subtle">Not ready</span>
                 {% endif %}
               </td>
               <td><a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a></td>

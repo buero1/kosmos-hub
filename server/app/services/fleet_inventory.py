@@ -83,6 +83,8 @@ class UpdateWorkbenchEntry:
     current_version: str
     target_version: str
     is_active: bool | None
+    execution_ready: bool
+    execution_note: str
     captured_at: datetime
 
     @property
@@ -99,6 +101,8 @@ class UpdateWorkbenchEntry:
     def review_note(self) -> str:
         if self.kind == "wordpress":
             return "Core update: not enabled"
+        if self.kind == "plugin" and not self.execution_ready:
+            return self.execution_note or "The update provider has not supplied an authorized package."
         if self.kind == "plugin" and self.is_active:
             return "Active plugin: direct update ready"
         if self.kind == "plugin":
@@ -209,6 +213,8 @@ class FleetInventoryService:
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=None,
+                        execution_ready=False,
+                        execution_note="",
                         captured_at=captured_at,
                     )
                 )
@@ -224,6 +230,8 @@ class FleetInventoryService:
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=plugin_file in active_plugin_files,
+                        execution_ready=update.get("execution_ready") is not False,
+                        execution_note=str(update.get("execution_note", "")).strip(),
                         captured_at=captured_at,
                     )
                 )
@@ -239,6 +247,8 @@ class FleetInventoryService:
                         current_version=str(update.get("current_version", "")).strip(),
                         target_version=str(update.get("new_version", "")).strip(),
                         is_active=None,
+                        execution_ready=False,
+                        execution_note="",
                         captured_at=captured_at,
                     )
                 )
