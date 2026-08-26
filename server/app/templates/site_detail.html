@@ -104,7 +104,12 @@
     </form>
   </section>
   {% if request.query_params.get("backup_refresh") == "ok" %}
-    <p class="notice-success">The read-only backup status was refreshed successfully.</p>
+    {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
+    {% if latest_backup and latest_backup.backup_available and latest_backup.backup_complete %}
+      <p class="notice-success">Backup status checked: the latest complete backup is from {{ latest_backup.backup_at }} and is {{ "protected from automatic deletion" if latest_backup.summary_json.retention_protected else "not protected from automatic deletion" }}. No backup was created or changed.</p>
+    {% else %}
+      <p class="notice-success">Backup status checked: UpdraftPlus currently reports no complete backup ready for maintenance. No backup was created or changed.</p>
+    {% endif %}
   {% elif request.query_params.get("backup_refresh") == "error" %}
     <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
