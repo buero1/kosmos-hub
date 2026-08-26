@@ -11,6 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.routes import accounts, assistant, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
+from app.core.security import get_secret_cipher
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.mcp_server import hub_mcp, mcp_asgi_app
@@ -101,7 +102,7 @@ async def lifespan(_: FastAPI):
     async with AsyncExitStack() as stack:
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
-            _ensure_phase_one_schema()
+        _ensure_phase_one_schema()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:
             logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)
