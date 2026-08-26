@@ -78,6 +78,12 @@ class OfficialPluginVersionService:
                     last_error = None
                     summary["provider_offer"] += 1
                 else:
+                    record = existing.get(plugin_file)
+                    if record is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
+                        # Jet Dashboard may temporarily omit an offer, but its last verified catalog
+                        # version remains better evidence than replacing it with an unknown value.
+                        summary["provider_offer"] += 1
+                        continue
                     official_version = None
                     source = "No public or provider version available"
                     last_error = error
@@ -103,6 +109,44 @@ class OfficialPluginVersionService:
 
         self.db.flush()
         return summary
+
+    def record_provider_versions(self, versions: Iterable[Any], *, source: str) -> int:
+        """Persist the newest verified provider catalog version for each plugin."""
+        grouped: dict[str, list[str]] = {}
+        for entry in versions:
+            if not isinstance(entry, dict):
+                continue
+            plugin_file = str(entry.get("plugin_file", "")).strip()
+            version = str(entry.get("version", "")).strip()
+            if plugin_file and version:
+                grouped.setdefault(plugin_file, []).append(version)
+
+        if not grouped:
+            return 0
+
+        existing = self.get_cached(grouped)
+        checked_at = datetime.now(UTC)
+        for plugin_file, offered_versions in grouped.items():
+            record = existing.get(plugin_file)
+            official_version = self._highest_version(offered_versions)
+            if record is None:
+                self.db.add(
+                    PluginOfficialVersion(
+                        plugin_file=plugin_file,
+                        official_version=official_version,
+                        source=source[:128],
+                        checked_at=checked_at,
+                        last_error=None,
+                    )
+                )
+                continue
+            record.official_version = official_version
+            record.source = source[:128]
+            record.checked_at = checked_at
+            record.last_error = None
+
+        self.db.flush()
+        return len(grouped)
 
     @staticmethod
     def comparison(*, current_version: str, reported_version: str, official_version: str | None) -> tuple[bool, str]:

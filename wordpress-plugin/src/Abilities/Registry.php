@@ -1075,6 +1075,7 @@ class Registry {
 			$plugins = get_plugins();
 			self::refresh_update_transients( $plugins );
 			$site_activated = \Jet_Dashboard\Utils::is_site_activated();
+			$provider_versions = self::get_crocoblock_remote_plugin_versions( $plugins );
 		} catch ( \Throwable $exception ) {
 			return new \WP_Error(
 				'kosmos_bridge_crocoblock_license_persist_failed',
@@ -1097,6 +1098,7 @@ class Registry {
 			'activated'            => true,
 			'site_activated'       => (bool) $site_activated,
 			'update_package_ready' => $package_ready,
+			'plugins'              => $provider_versions,
 			'message'              => $site_activated
 				? 'Crocoblock license activation was verified. Update availability was refreshed.'
 				: 'Crocoblock accepted the license, but Jet Dashboard did not confirm this site as activated.',
@@ -1129,6 +1131,64 @@ class Registry {
 		return isset( $dashboard->license_manager ) && is_object( $dashboard->license_manager )
 			? $dashboard->license_manager
 			: null;
+	}
+
+	/**
+	 * Read the Jet Dashboard's authoritative plugin catalog after the provider
+	 * license has been verified. This includes already-current plugins so the
+	 * Hub can distinguish no update from no provider information.
+	 *
+	 * @param array $plugins Installed plugin metadata keyed by plugin file.
+	 * @return array
+	 */
+	private static function get_crocoblock_remote_plugin_versions( $plugins ) {
+		self::initialize_embedded_jet_dashboard();
+
+		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) ) {
+			return array();
+		}
+
+		try {
+			$dashboard = \Jet_Dashboard\Dashboard::get_instance();
+			if ( ! isset( $dashboard->plugin_manager ) && method_exists( $dashboard, 'init_managers' ) ) {
+				$dashboard->init_managers();
+			}
+			$manager   = isset( $dashboard->plugin_manager ) ? $dashboard->plugin_manager : null;
+			$offers    = is_object( $manager ) && method_exists( $manager, 'get_remote_jet_plugin_list' ) ? $manager->get_remote_jet_plugin_list() : false;
+		} catch ( \Throwable $exception ) {
+			return array();
+		}
+
+		if ( ! is_array( $offers ) ) {
+			return array();
+		}
+
+		$versions = array();
+		foreach ( $offers as $offer ) {
+			$offer_data  = self::to_array( $offer );
+			$plugin_file = isset( $offer_data['slug'] ) ? (string) $offer_data['slug'] : '';
+			$version     = isset( $offer_data['version'] ) ? trim( (string) $offer_data['version'] ) : '';
+			$plugin_data = isset( $plugins[ $plugin_file ] ) && is_array( $plugins[ $plugin_file ] ) ? $plugins[ $plugin_file ] : array();
+
+			if ( '' === $plugin_file || '' === $version || empty( $plugin_data ) || ! self::is_crocoblock_plugin_file( $plugin_file ) ) {
+				continue;
+			}
+
+			$versions[] = array(
+				'plugin_file' => $plugin_file,
+				'name'        => isset( $plugin_data['Name'] ) ? (string) $plugin_data['Name'] : $plugin_file,
+				'version'     => $version,
+			);
+		}
+
+		usort(
+			$versions,
+			static function ( $left, $right ) {
+				return strcmp( $left['plugin_file'], $right['plugin_file'] );
+			}
+		);
+
+		return $versions;
 	}
 
 	/**
@@ -1847,15 +1907,26 @@ class Registry {
 	 * @return array
 	 */
 	private static function crocoblock_license_output_schema() {
+		$plugin_item = array(
+			'type'       => 'object',
+			'properties' => array(
+				'plugin_file' => array( 'type' => 'string' ),
+				'name'        => array( 'type' => 'string' ),
+				'version'     => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'plugin_file', 'name', 'version' ),
+		);
+
 		return array(
 			'type'       => 'object',
 			'properties' => array(
 				'activated'            => array( 'type' => 'boolean' ),
 				'site_activated'       => array( 'type' => 'boolean' ),
 				'update_package_ready' => array( 'type' => 'boolean' ),
+				'plugins'              => array( 'type' => 'array', 'items' => $plugin_item ),
 				'message'              => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'activated', 'site_activated', 'update_package_ready', 'message' ),
+			'required'   => array( 'activated', 'site_activated', 'update_package_ready', 'plugins', 'message' ),
 		);
 	}
 

@@ -19,6 +19,7 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.update_plans import UpdatePlanService
 
@@ -156,7 +157,22 @@ def refresh_official_plugin_versions(
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    summary = OfficialPluginVersionService(db=db).refresh_for_inventory(inventory_service.list_items(limit=200))
+    initial_items = inventory_service.list_items(limit=200)
+    jet_site_ids = {
+        item.site.id
+        for item in initial_items
+        if any(CrocoblockLicenseService.is_jet_plugin_file(str(plugin.get("plugin_file", ""))) for plugin in item.plugins)
+    }
+    crocoblock_summary = CrocoblockLicenseService(db=db, cipher=get_secret_cipher()).refresh_version_evidence(
+        actor=user,
+        site_ids=jet_site_ids,
+    )
+    version_service = OfficialPluginVersionService(db=db)
+    summary = version_service.refresh_for_inventory(inventory_service.list_items(limit=200))
+    crocoblock_versions = version_service.record_provider_versions(
+        crocoblock_summary["versions"],
+        source="Crocoblock Jet Dashboard",
+    )
     write_audit_log(
         db,
         site=None,
@@ -167,14 +183,22 @@ def refresh_official_plugin_versions(
         detail=(
             f"Checked {summary['checked']} plugins for official version evidence: "
             f"{summary['wordpress_org']} WordPress.org, {summary['provider_offer']} provider offers, "
-            f"{summary['unavailable']} unavailable."
+            f"{summary['unavailable']} unavailable. Crocoblock: {crocoblock_versions} catalog versions from "
+            f"{crocoblock_summary['refreshed']} of "
+            f"{crocoblock_summary['eligible']} Jet sites refreshed, {crocoblock_summary['failed']} failed."
         ),
     )
     db.commit()
     message = (
         f"Official version evidence refreshed for {summary['checked']} plugins: "
         f"{summary['wordpress_org']} from WordPress.org, {summary['provider_offer']} from site update providers, "
-        f"{summary['unavailable']} not available yet."
+        f"{summary['unavailable']} not available yet. "
+        + (
+            f"Crocoblock update metadata was refreshed on {crocoblock_summary['refreshed']} of "
+            f"{crocoblock_summary['eligible']} Jet sites and supplied {crocoblock_versions} official Jet versions."
+            if crocoblock_summary["license_available"]
+            else "No Crocoblock license is stored, so Jet version metadata was not requested."
+        )
     )
     return RedirectResponse(
         url=f"/updates?{urlencode({'official_versions': 'refreshed', 'message': message})}",

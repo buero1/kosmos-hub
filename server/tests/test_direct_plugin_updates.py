@@ -5,6 +5,7 @@ from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryServi
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.provider_credentials import ProviderCredentialService
+from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 
 
@@ -160,6 +161,25 @@ def test_official_version_lookup_uses_the_documented_wordpress_org_query_shape()
 def test_provider_license_normalization_keeps_elementor_in_one_row():
     assert ProviderCredentialService.normalize_provider("Elementor Pro") == "elementor"
     assert ProviderCredentialService.normalize_provider(" Elementor ") == "elementor"
+
+
+def test_crocoblock_version_evidence_does_not_consider_non_jet_plugin_sites():
+    assert CrocoblockLicenseService.is_jet_plugin_file("jet-elements/jet-elements.php") is True
+    assert CrocoblockLicenseService.is_jet_plugin_file("elementor-pro/elementor-pro.php") is False
+
+
+def test_crocoblock_provider_versions_ignore_invalid_catalog_entries():
+    versions = CrocoblockLicenseService._provider_versions(
+        {
+            "plugins": [
+                {"plugin_file": "jet-elements/jet-elements.php", "version": "2.7.3"},
+                {"plugin_file": "elementor-pro/elementor-pro.php", "version": "3.30.0"},
+                {"plugin_file": "jet-engine/jet-engine.php", "version": ""},
+            ]
+        }
+    )
+
+    assert versions == [{"plugin_file": "jet-elements/jet-elements.php", "version": "2.7.3"}]
 
 
 def test_direct_updates_require_healthy_homepage_and_rest_api():
