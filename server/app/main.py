@@ -16,6 +16,7 @@ from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.maintenance_worker import process_pending_direct_updates
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,14 @@ def _poll_maintenance_runs() -> dict[str, int]:
     with SessionLocal() as db:
         service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
         backup_result = service.poll_active_updraftplus_backups(limit=25)
-        plugin_update_result = service.poll_active_plugin_updates(limit=25)
-        return {
-            "checked": backup_result["checked"] + plugin_update_result["checked"],
-            "succeeded": backup_result["succeeded"] + plugin_update_result["succeeded"],
-            "failed": backup_result["failed"] + plugin_update_result["failed"],
-            "waiting": backup_result["waiting"] + plugin_update_result["waiting"],
-            "skipped": plugin_update_result["skipped"],
-        }
+    plugin_update_result = process_pending_direct_updates()
+    return {
+        "checked": backup_result["checked"] + plugin_update_result["checked"],
+        "succeeded": backup_result["succeeded"] + plugin_update_result["succeeded"],
+        "failed": backup_result["failed"] + plugin_update_result["failed"],
+        "waiting": backup_result["waiting"] + plugin_update_result["waiting"],
+        "skipped": plugin_update_result["skipped"],
+    }
 
 
 async def _maintenance_run_poll_loop(initial_delay_seconds: int, interval_seconds: int) -> None:
