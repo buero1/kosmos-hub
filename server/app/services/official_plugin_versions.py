@@ -24,7 +24,7 @@ class OfficialVersionCandidate:
 class OfficialPluginVersionService:
     """Keeps inspectable version evidence separate from update execution."""
 
-    WORDPRESS_ORG_API = "https://api.wordpress.org/plugins/info/1.2/{slug}.json"
+    WORDPRESS_ORG_API = "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request[slug]={slug}"
     REQUEST_TIMEOUT_SECONDS = 8
     MAX_CONCURRENT_REQUESTS = 6
 

@@ -151,6 +151,12 @@ def test_official_version_comparison_accepts_matching_reported_target():
     assert note == "The reported update matches the official version."
 
 
+def test_official_version_lookup_uses_the_documented_wordpress_org_query_shape():
+    url = OfficialPluginVersionService.WORDPRESS_ORG_API.format(slug="wordpress-seo")
+
+    assert url == "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request[slug]=wordpress-seo"
+
+
 def test_provider_license_normalization_keeps_elementor_in_one_row():
     assert ProviderCredentialService.normalize_provider("Elementor Pro") == "elementor"
     assert ProviderCredentialService.normalize_provider(" Elementor ") == "elementor"
