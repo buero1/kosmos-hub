@@ -40,6 +40,23 @@
           <option value="inactive" {% if filters.activity == "inactive" %}selected{% endif %}>Inactive plugins</option>
         </select>
       </label>
+      <label>
+        <span>Diagnosis</span>
+        <select name="diagnosis">
+          <option value="all" {% if filters.diagnosis == "all" %}selected{% endif %}>All diagnoses</option>
+          <option value="attention" {% if filters.diagnosis == "attention" %}selected{% endif %}>Needs attention</option>
+          <option value="update-ready" {% if filters.diagnosis == "update-ready" %}selected{% endif %}>Verified update ready</option>
+          <option value="aligned" {% if filters.diagnosis == "aligned" %}selected{% endif %}>Versions match</option>
+          <option value="provider-conflict" {% if filters.diagnosis == "provider-conflict" %}selected{% endif %}>Provider information conflicts</option>
+          <option value="provider-package-unavailable" {% if filters.diagnosis == "provider-package-unavailable" %}selected{% endif %}>Provider package unavailable</option>
+          <option value="site-offer-missing" {% if filters.diagnosis == "site-offer-missing" %}selected{% endif %}>Site update offer missing</option>
+          <option value="crocoblock-license-step" {% if filters.diagnosis == "crocoblock-license-step" %}selected{% endif %}>Crocoblock license step</option>
+          <option value="crocoblock-offer-missing" {% if filters.diagnosis == "crocoblock-offer-missing" %}selected{% endif %}>Crocoblock offer missing</option>
+          <option value="site-newer-than-reference" {% if filters.diagnosis == "site-newer-than-reference" %}selected{% endif %}>Site version is newer</option>
+          <option value="official-unavailable" {% if filters.diagnosis == "official-unavailable" %}selected{% endif %}>Official version unavailable</option>
+          <option value="not-checked" {% if filters.diagnosis == "not-checked" %}selected{% endif %}>Not checked</option>
+        </select>
+      </label>
       <div class="filter-actions">
         <button class="button" type="submit">Apply filters</button>
         <a href="/updates">Reset</a>

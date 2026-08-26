@@ -326,6 +326,7 @@ class FleetInventoryService:
         query: str = "",
         kind: str = "all",
         activity: str = "all",
+        diagnosis: str = "all",
     ) -> list[UpdateWorkbenchEntry]:
         normalized_query = query.strip().casefold()
 
@@ -335,6 +336,10 @@ class FleetInventoryService:
             if activity == "active" and entry.is_active is not True:
                 return False
             if activity == "inactive" and entry.is_active is not False:
+                return False
+            if diagnosis == "attention" and not entry.official_mismatch:
+                return False
+            if diagnosis not in {"all", "attention"} and entry.diagnosis_status != diagnosis:
                 return False
             if not normalized_query:
                 return True

@@ -109,6 +109,20 @@ def update_workbench_page(
     q: str = "",
     kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
     activity: Literal["all", "active", "inactive"] = "all",
+    diagnosis: Literal[
+        "all",
+        "attention",
+        "update-ready",
+        "aligned",
+        "provider-conflict",
+        "provider-package-unavailable",
+        "site-offer-missing",
+        "crocoblock-license-step",
+        "crocoblock-offer-missing",
+        "site-newer-than-reference",
+        "official-unavailable",
+        "not-checked",
+    ] = "all",
     update_batch: str = "",
     direct_update: str = "",
     official_versions: str = "",
@@ -123,6 +137,7 @@ def update_workbench_page(
         query=q,
         kind=kind,
         activity=activity,
+        diagnosis=diagnosis,
     )
     matching_sites = inventory_service.filter_items(all_items, query=q) if q.strip() else []
     maintenance_service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
@@ -136,7 +151,7 @@ def update_workbench_page(
         {
             "entries": filtered_entries,
             "summary": inventory_service.summarize_update_workbench(entries),
-            "filters": {"q": q, "kind": kind, "activity": activity},
+            "filters": {"q": q, "kind": kind, "activity": activity, "diagnosis": diagnosis},
             "csrf_token": get_csrf_token(request),
             "matching_sites": matching_sites,
             "update_batch": update_batch if batch_runs else "",

@@ -304,3 +304,30 @@ def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
         "official_version_max_age_hours": 36,
         "max_parallel_site_checks": 4,
     }
+
+
+def test_update_workbench_filters_by_diagnosis_and_attention():
+    service = object.__new__(FleetInventoryService)
+    entries = [
+        SimpleNamespace(
+            kind="plugin",
+            is_active=True,
+            diagnosis_status="provider-conflict",
+            official_mismatch=True,
+            site=SimpleNamespace(domain="first.example"),
+            name="First",
+            identifier="first/first.php",
+        ),
+        SimpleNamespace(
+            kind="plugin",
+            is_active=True,
+            diagnosis_status="aligned",
+            official_mismatch=False,
+            site=SimpleNamespace(domain="second.example"),
+            name="Second",
+            identifier="second/second.php",
+        ),
+    ]
+
+    assert service.filter_update_workbench(entries, diagnosis="attention") == [entries[0]]
+    assert service.filter_update_workbench(entries, diagnosis="aligned") == [entries[1]]
