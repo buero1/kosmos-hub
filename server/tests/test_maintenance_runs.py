@@ -142,11 +142,13 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
         assert second.run.id == first.run.id
 
 
-def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(monkeypatch):
+def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     backup_nonce = "a1b2c3d4e5f6"
-    old_backup_nonce = "b1b2c3d4e5f6"
+    partial_backup_nonce = "d1b2c3d4e5f6"
+    old_complete_nonce = "b1b2c3d4e5f6"
+    deleted_inputs = []
 
     def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
         assert site_id == 1
@@ -164,14 +166,7 @@ def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(m
             }
 
         assert ability_name == "kosmos-bridge/delete-updraftplus-backup"
-        assert ability_input == {
-            "backup_nonce": old_backup_nonce,
-            "backup_timestamp": 1700000000,
-            "delete_remote": True,
-            "allow_protected_delete": True,
-            "continue_delete": False,
-            "processed_instance_ids": [],
-        }
+        deleted_inputs.append(ability_input)
         return {
             "result": {
                 "status": "completed",
@@ -199,7 +194,7 @@ def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(m
                     "request_status": "completed",
                     "backup_nonce": backup_nonce,
                     "latest_backup_at": "2026-08-25T12:01:30+00:00",
-                    "backup_count": 3,
+                    "backup_count": 6,
                     "components": ["database", "plugins", "themes", "uploads", "others"],
                 }
             }
@@ -212,16 +207,30 @@ def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(m
                 "active": True,
                 "backups": [
                     {
-                        "backup_nonce": "c1b2c3d4e5f6",
-                        "backup_timestamp": 1720000000,
-                        "backup_at": "2024-07-03T09:46:40+00:00",
+                        "backup_nonce": partial_backup_nonce,
+                        "backup_timestamp": 1600000000,
+                        "backup_at": "2020-09-13T12:26:40+00:00",
+                        "complete": False,
+                        "retention_protected": True,
+                    },
+                    {
+                        "backup_nonce": "f1b2c3d4e5f6",
+                        "backup_timestamp": 1650000000,
+                        "backup_at": "2022-04-15T05:20:00+00:00",
+                        "complete": True,
+                        "retention_protected": False,
+                    },
+                    {
+                        "backup_nonce": old_complete_nonce,
+                        "backup_timestamp": 1700000000,
+                        "backup_at": "2023-11-14T22:13:20+00:00",
                         "complete": True,
                         "retention_protected": True,
                     },
                     {
-                        "backup_nonce": old_backup_nonce,
-                        "backup_timestamp": 1700000000,
-                        "backup_at": "2023-11-14T22:13:20+00:00",
+                        "backup_nonce": "c1b2c3d4e5f6",
+                        "backup_timestamp": 1720000000,
+                        "backup_at": "2024-07-03T09:46:40+00:00",
                         "complete": True,
                         "retention_protected": True,
                     },
@@ -230,6 +239,13 @@ def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(m
                         "backup_timestamp": 1756123290,
                         "backup_at": "2025-08-25T12:01:30+00:00",
                         "complete": True,
+                        "retention_protected": True,
+                    },
+                    {
+                        "backup_nonce": "e1b2c3d4e5f6",
+                        "backup_timestamp": 1756123300,
+                        "backup_at": "2025-08-25T12:01:40+00:00",
+                        "complete": False,
                         "retention_protected": True,
                     },
                 ],
@@ -256,11 +272,21 @@ def test_verified_backup_prunes_the_oldest_backup_even_when_manually_protected(m
         verified = db.get(MaintenanceRun, started.run.id)
 
         assert summary == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
+        assert deleted_inputs == [
+            {
+                "backup_nonce": old_complete_nonce,
+                "backup_timestamp": 1700000000,
+                "delete_remote": True,
+                "allow_protected_delete": True,
+                "continue_delete": False,
+                "processed_instance_ids": [],
+            },
+        ]
         assert verified is not None
         assert verified.status == MaintenanceRunStatus.succeeded.value
         assert verified.result_json["cleanup"] == {
             "status": "completed",
-            "backup_nonce": old_backup_nonce,
+            "backup_nonce": old_complete_nonce,
             "backup_timestamp": 1700000000,
             "backup_at": "2023-11-14T22:13:20+00:00",
             "continue_delete": True,

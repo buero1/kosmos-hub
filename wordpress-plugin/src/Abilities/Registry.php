@@ -139,7 +139,7 @@ class Registry {
 			'kosmos-bridge/delete-updraftplus-backup',
 			array(
 				'label'               => __( 'Delete UpdraftPlus Backup', 'kosmos-bridge' ),
-				'description'         => __( 'Deletes one exact UpdraftPlus backup set locally and from its configured remote storage. The Hub must provide the exact nonce and timestamp.', 'kosmos-bridge' ),
+				'description'         => __( 'Deletes one exact complete or partial UpdraftPlus backup set locally and from its configured remote storage. The Hub must provide the exact nonce and timestamp.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'input_schema'        => self::updraftplus_backup_delete_input_schema(),
 				'output_schema'       => self::updraftplus_backup_delete_output_schema(),
@@ -555,14 +555,6 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_updraftplus_backup_not_found',
 				'The requested UpdraftPlus backup no longer matches the observed backup set.',
-				array( 'status' => 409 )
-			);
-		}
-
-		if ( ! self::is_complete_updraftplus_backup( $backup ) ) {
-			return new \WP_Error(
-				'kosmos_bridge_updraftplus_backup_incomplete',
-				'The requested UpdraftPlus backup is not a complete backup set and cannot be deleted by Kosmos Hub.',
 				array( 'status' => 409 )
 			);
 		}
@@ -1237,7 +1229,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/delete-updraftplus-backup',
 				'label'         => __( 'Delete UpdraftPlus Backup', 'kosmos-bridge' ),
-				'description'   => __( 'Deletes one exact UpdraftPlus backup set locally and from its configured remote storage.', 'kosmos-bridge' ),
+				'description'   => __( 'Deletes one exact complete or partial UpdraftPlus backup set locally and from its configured remote storage.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => self::updraftplus_backup_delete_input_schema(),
 				'output_schema' => self::updraftplus_backup_delete_output_schema(),

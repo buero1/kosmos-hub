@@ -276,7 +276,7 @@ class MaintenanceRunService:
                 step_key="prune-oldest-backup",
                 status=MaintenanceRunStepStatus.running.value,
                 started_at=datetime.now(UTC),
-                detail="Finding the oldest complete backup that is eligible for automatic cleanup.",
+                detail="Finding the oldest eligible complete backup marked for manual deletion.",
                 result_json={},
             )
             self.db.add(cleanup_step)
@@ -298,14 +298,14 @@ class MaintenanceRunService:
                 self._fail_run(run, actor="kosmos-hub", message=f"Backup cleanup could not list backup sets: {exc.message}")
                 return "failed"
 
-            candidate = self._oldest_automatic_cleanup_candidate(
+            candidate = self._oldest_manually_protected_cleanup_candidate(
                 self._result_from_payload(payload).get("backups"),
                 run.bridge_backup_nonce,
             )
             if candidate is None:
                 cleanup = {
                     "status": "skipped",
-                    "message": "No older complete backup is available for cleanup.",
+                    "message": "No older complete backup marked for manual deletion is available for cleanup.",
                     "backup_sets_removed": 0,
                     "local_files_deleted": 0,
                     "remote_files_deleted": 0,
@@ -323,7 +323,7 @@ class MaintenanceRunService:
                 "backup_sets_removed": 0,
                 "local_files_deleted": 0,
                 "remote_files_deleted": 0,
-                "message": "Deleting the oldest eligible complete backup locally and from the configured remote storage.",
+                "message": "Deleting the oldest eligible complete backup marked for manual deletion locally and from the configured remote storage.",
             }
             self._store_cleanup_result(run, cleanup_step, cleanup)
 
@@ -419,7 +419,7 @@ class MaintenanceRunService:
         self.db.commit()
 
     @classmethod
-    def _oldest_automatic_cleanup_candidate(
+    def _oldest_manually_protected_cleanup_candidate(
         cls,
         backups: object,
         protected_backup_nonce: str | None,
@@ -427,7 +427,7 @@ class MaintenanceRunService:
         if not isinstance(backups, list):
             return None
 
-        candidates: list[dict[str, Any]] = []
+        normalized_backups: list[dict[str, Any]] = []
         for backup in backups:
             if not isinstance(backup, dict):
                 continue
@@ -436,8 +436,6 @@ class MaintenanceRunService:
             backup_at = backup.get("backup_at")
             if (
                 not cls._is_backup_nonce(nonce)
-                or nonce == protected_backup_nonce
-                or backup.get("complete") is not True
                 or isinstance(timestamp, bool)
                 or not isinstance(timestamp, int)
                 or timestamp <= 0
@@ -445,14 +443,30 @@ class MaintenanceRunService:
                 or not backup_at.strip()
             ):
                 continue
-            candidates.append(
-                {
-                    "backup_nonce": nonce,
-                    "backup_timestamp": timestamp,
-                    "backup_at": backup_at,
-                }
-            )
+            normalized = {
+                "backup_nonce": nonce,
+                "backup_timestamp": timestamp,
+                "backup_at": backup_at,
+                "complete": backup.get("complete") is True,
+                "retention_protected": backup.get("retention_protected") is True,
+            }
+            normalized_backups.append(normalized)
 
+        protected_backup = next(
+            (backup for backup in normalized_backups if backup["backup_nonce"] == protected_backup_nonce),
+            None,
+        )
+        if protected_backup is None:
+            return None
+
+        candidates = [
+            backup
+            for backup in normalized_backups
+            if backup["backup_nonce"] != protected_backup_nonce
+            and backup["backup_timestamp"] < protected_backup["backup_timestamp"]
+            and backup["complete"] is True
+            and backup["retention_protected"] is True
+        ]
         return min(candidates, key=lambda candidate: candidate["backup_timestamp"]) if candidates else None
 
     @staticmethod
