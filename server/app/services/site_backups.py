@@ -13,6 +13,7 @@ class SiteBackupService:
     """Store provider-reported backup metadata without handling backup data."""
 
     ABILITY_NAME = "kosmos-bridge/get-updraftplus-backup-status"
+    LIST_ABILITY_NAME = "kosmos-bridge/list-updraftplus-backups"
     PROVIDER = "updraftplus"
     COMPONENTS = {"database", "plugins", "themes", "uploads", "others"}
 
@@ -32,9 +33,16 @@ class SiteBackupService:
         if site is None:
             raise SiteMcpProxyError("SITE_NOT_FOUND", f"Site {site_id} was not found.", status_code=404)
 
-        payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, {}, timeout_seconds=30)
-        result = payload.get("result", {})
-        result = result if isinstance(result, dict) else {}
+        try:
+            payload = self.proxy.execute_ability(site_id, self.LIST_ABILITY_NAME, {}, timeout_seconds=30)
+            result = self._status_result_from_backup_list(payload.get("result", {}))
+        except SiteMcpProxyError as exc:
+            if exc.code != "KOSMOS_BRIDGE_ABILITY_NOT_FOUND":
+                raise
+            payload = self.proxy.execute_ability(site_id, self.ABILITY_NAME, {}, timeout_seconds=30)
+            result = payload.get("result", {})
+            result = result if isinstance(result, dict) else {}
+            result["backup_list_available"] = False
         return self.store_backup_status_result(site_id, result)
 
     def store_backup_status_result(self, site_id: int, result: dict[str, Any]):
@@ -54,6 +62,18 @@ class SiteBackupService:
         backup_count = self._non_negative_int(result.get("backup_count"))
         retention_protected = self._as_bool(result.get("retention_protected"))
         message = self._string_or_none(result.get("message"))
+        backup_sets = self._backup_sets_from(result.get("backups"))
+        if not backup_sets and backup_at is not None:
+            backup_sets = [
+                {
+                    "backup_at": backup_at.isoformat(),
+                    "complete": complete,
+                    "retention_protected": retention_protected,
+                    "components": components,
+                }
+            ]
+        if backup_sets:
+            backup_count = max(backup_count, len(backup_sets))
 
         snapshot = self.repository.create_site_backup_snapshot(
             site=site,
@@ -70,6 +90,8 @@ class SiteBackupService:
                 "reported_at": self._string_or_none(result.get("reported_at")),
                 "retention_protected": retention_protected,
                 "message": message,
+                "backup_list_available": self._as_bool(result.get("backup_list_available", False)),
+                "backups": backup_sets,
             },
         )
         write_audit_log(
@@ -86,6 +108,47 @@ class SiteBackupService:
         )
         self.db.commit()
         return {"site_id": site.id, "refreshed_at": captured_at, "snapshot": snapshot}
+
+    @classmethod
+    def _status_result_from_backup_list(cls, result: object) -> dict[str, Any]:
+        result = result if isinstance(result, dict) else {}
+        backup_sets = cls._backup_sets_from(result.get("backups"))
+        latest_complete = next((backup for backup in backup_sets if backup["complete"]), None)
+        return {
+            "installed": result.get("installed"),
+            "active": result.get("active"),
+            "available": latest_complete is not None,
+            "complete": latest_complete is not None,
+            "retention_protected": latest_complete["retention_protected"] if latest_complete else False,
+            "latest_backup_at": latest_complete["backup_at"] if latest_complete else "",
+            "backup_count": len(backup_sets),
+            "components": latest_complete["components"] if latest_complete else [],
+            "message": result.get("message"),
+            "backups": backup_sets,
+            "backup_list_available": True,
+        }
+
+    @classmethod
+    def _backup_sets_from(cls, value: object) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+
+        backup_sets: list[dict[str, Any]] = []
+        for raw_backup in value:
+            if not isinstance(raw_backup, dict):
+                continue
+            backup_at = cls._parse_datetime(raw_backup.get("backup_at"))
+            if backup_at is None:
+                continue
+            backup_sets.append(
+                {
+                    "backup_at": backup_at.isoformat(),
+                    "complete": cls._as_bool(raw_backup.get("complete")),
+                    "retention_protected": cls._as_bool(raw_backup.get("retention_protected")),
+                    "components": cls._components_from(raw_backup.get("components")),
+                }
+            )
+        return sorted(backup_sets, key=lambda backup: backup["backup_at"], reverse=True)
 
     @staticmethod
     def _as_bool(value: object) -> bool:

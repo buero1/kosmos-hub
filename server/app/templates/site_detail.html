@@ -154,7 +154,7 @@
           <div>
             <p class="eyebrow">Data protection</p>
             <h2 id="backups-heading">Backups</h2>
-            <p class="subtle">Read the latest UpdraftPlus state or create one verified protected backup.</p>
+            <p class="subtle">Read all UpdraftPlus backup sets or create one verified protected backup.</p>
           </div>
         </div>
         <article class="card backup-status-card">
@@ -185,6 +185,31 @@
             </form>
           </div>
         </article>
+        {% if latest_backup %}
+          {% set backup_sets = latest_backup.summary_json.backups or [] %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr><th>Backup time</th><th>Set</th><th>Retention</th><th>Components</th></tr>
+              </thead>
+              <tbody>
+                {% for backup_set in backup_sets %}
+                  <tr>
+                    <td>{{ backup_set.backup_at | berlin_time }}</td>
+                    <td><span class="pill pill-{{ "active" if backup_set.complete else "missing" }}">{{ "Complete" if backup_set.complete else "Partial" }}</span></td>
+                    <td>{{ "Manual deletion only" if backup_set.retention_protected else "Automatic retention" }}</td>
+                    <td>{{ backup_set.components | join(", ") or "-" }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="4">No UpdraftPlus backup sets are currently reported.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if not latest_backup.summary_json.backup_list_available %}
+            <p class="subtle">This Bridge reported only its latest backup. Update it to document the complete UpdraftPlus history.</p>
+          {% endif %}
+        {% endif %}
       </section>
 
       <section id="updates" class="site-section" aria-labelledby="updates-heading">

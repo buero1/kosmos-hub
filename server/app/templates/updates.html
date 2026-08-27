@@ -127,6 +127,7 @@
       {% set site_progress = progress.get("sites", {}) %}
       {% set official_progress = progress.get("official_versions", {}) %}
       {% set crocoblock_progress = progress.get("crocoblock", {}) %}
+      {% set backup_progress = progress.get("backups", {}) %}
       {% set completed_sites = site_progress.get("completed", 0) %}
       {% set total_sites = site_progress.get("total", 0) %}
       <section class="maintenance-batch">
@@ -139,7 +140,7 @@
             {% elif refresh_run.status == "running" %}
               <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
             {% elif refresh_run.status == "succeeded" %}
-              <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
+              <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ backup_progress.get("refreshed", 0) }} backup statuses refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
             {% else %}
               <p class="notice-error">{{ refresh_run.error_message or "The refresh could not complete." }}</p>
             {% endif %}
@@ -149,6 +150,7 @@
             <span><strong>{{ official_progress.get("checked", 0) }}</strong> official checks</span>
             <span><strong>{{ official_progress.get("cached", 0) }}</strong> version cache</span>
             <span><strong>{{ crocoblock_progress.get("refreshed", 0) }}</strong> Jet checks</span>
+            <span><strong>{{ backup_progress.get("refreshed", 0) }}</strong> backup checks</span>
           </div>
         </div>
         {% if refresh_run.status == "running" and total_sites %}

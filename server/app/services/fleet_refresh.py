@@ -18,6 +18,7 @@ from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings, FleetRefreshSettingsService
 from app.services.official_plugin_versions import OfficialPluginVersionService
+from app.services.site_backups import SiteBackupService
 from app.services.site_inventory import SiteInventoryService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
@@ -210,6 +211,7 @@ class FleetRefreshService:
                 "skipped": skipped_count,
             }
         )
+        result["backups"].update({"cached": cached_count, "skipped": skipped_count})
         cls._store_progress(run_id, result)
 
         if targets:
@@ -221,7 +223,14 @@ class FleetRefreshService:
                     try:
                         outcome = future.result()
                     except Exception as exc:
-                        outcome = {"site_id": target["site_id"], "domain": target["domain"], "state": "failed", "updates": "skipped", "error": str(exc)}
+                        outcome = {
+                            "site_id": target["site_id"],
+                            "domain": target["domain"],
+                            "state": "failed",
+                            "updates": "skipped",
+                            "backups": "skipped",
+                            "errors": [str(exc)],
+                        }
                     cls._record_site_outcome(result, outcome)
                     cls._store_progress(run_id, result)
 
@@ -247,6 +256,7 @@ class FleetRefreshService:
             sites = repository.list_sites(limit=1000)
             snapshots = repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
             update_snapshots = repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])
+            backup_snapshots = repository.get_latest_backup_snapshots_by_site_ids([site.id for site in sites])
             now = datetime.now(UTC)
             targets: list[dict[str, Any]] = []
             cached_count = 0
@@ -258,7 +268,8 @@ class FleetRefreshService:
                 max_age = timedelta(minutes=runtime_settings.site_status_max_age_minutes)
                 state_is_fresh = cls._is_fresh(snapshots.get(site.id), now=now, max_age=max_age)
                 updates_are_fresh = cls._is_fresh(update_snapshots.get(site.id), now=now, max_age=max_age)
-                if not force and state_is_fresh and updates_are_fresh:
+                backups_are_fresh = cls._is_fresh(backup_snapshots.get(site.id), now=now, max_age=max_age)
+                if not force and state_is_fresh and updates_are_fresh and backups_are_fresh:
                     cached_count += 1
                     continue
                 targets.append({"site_id": site.id, "domain": site.domain})
@@ -271,21 +282,31 @@ class FleetRefreshService:
             repository = SiteRepository(db)
             site = repository.get_site(site_id)
             if site is None:
-                return {"site_id": site_id, "domain": target["domain"], "state": "failed", "updates": "skipped", "error": "Site no longer exists."}
+                return {"site_id": site_id, "domain": target["domain"], "state": "failed", "updates": "skipped", "backups": "skipped", "errors": ["Site no longer exists."]}
 
             try:
                 SiteInventoryService(db=db, cipher=get_secret_cipher()).refresh_site_state(site_id)
             except SiteMcpProxyError as exc:
-                return {"site_id": site_id, "domain": site.domain, "state": "failed", "updates": "skipped", "error": exc.message}
+                return {"site_id": site_id, "domain": site.domain, "state": "failed", "updates": "skipped", "backups": "skipped", "errors": [exc.message]}
+
+            errors: list[str] = []
+            try:
+                SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)
+                backup_status = "refreshed"
+            except SiteMcpProxyError as exc:
+                backup_status = "failed"
+                errors.append(exc.message)
 
             if not cls._bridge_supports_updates(site.bridge_version):
-                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "skipped", "error": "Bridge update support is unavailable."}
+                errors.append("Bridge update support is unavailable.")
+                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "skipped", "backups": backup_status, "errors": errors}
 
             try:
                 SiteUpdateService(db=db, cipher=get_secret_cipher()).refresh_site_updates(site_id)
             except SiteMcpProxyError as exc:
-                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "failed", "error": exc.message}
-            return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "refreshed"}
+                errors.append(exc.message)
+                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "failed", "backups": backup_status, "errors": errors}
+            return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "refreshed", "backups": backup_status, "errors": errors}
 
     @classmethod
     def _record_site_outcome(cls, result: dict[str, Any], outcome: dict[str, Any]) -> None:
@@ -303,8 +324,12 @@ class FleetRefreshService:
             result["updates"]["failed"] += 1
         else:
             result["updates"]["skipped"] += 1
-        if outcome.get("error"):
-            result["errors"].append({"site": outcome.get("domain", "unknown"), "detail": str(outcome["error"])[:240]})
+        if outcome.get("backups") == "refreshed":
+            result["backups"]["refreshed"] += 1
+        elif outcome.get("backups") == "failed":
+            result["backups"]["failed"] += 1
+        for error in outcome.get("errors", []):
+            result["errors"].append({"site": outcome.get("domain", "unknown"), "detail": str(error)[:240]})
 
     @classmethod
     def _refresh_provider_evidence(
@@ -444,6 +469,7 @@ class FleetRefreshService:
             "sites": {"total": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "skipped": 0},
             "state": {"refreshed": 0, "failed": 0},
             "updates": {"refreshed": 0, "failed": 0, "skipped": 0},
+            "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "crocoblock": {"eligible": 0, "refreshed": 0, "cached": 0, "failed": 0, "catalog_versions": 0},
             "official_versions": {"total": 0, "checked": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
             "mismatches": 0,
