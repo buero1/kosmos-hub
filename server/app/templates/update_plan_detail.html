@@ -10,7 +10,7 @@
       <h2>{{ plan.name }}</h2>
       <p><strong>Status:</strong> <span class="pill pill-{{ plan.status }}">{{ plan.status }}</span></p>
       <p><strong>Created by:</strong> {{ plan.created_by }}</p>
-      <p><strong>Created:</strong> {{ plan.created_at }}</p>
+      <p><strong>Created:</strong> {{ plan.created_at | berlin_time }}</p>
       {% if plan.notes %}<p><strong>Notes:</strong> {{ plan.notes }}</p>{% endif %}
     </article>
     <article class="card">
@@ -70,7 +70,7 @@
       <h3>Site health check</h3>
       {% if postflight %}
         <p><strong>Status:</strong> <span class="pill pill-{{ "active" if postflight.result == "passed" else "postflight_failed" }}">{{ "Passed" if postflight.result == "passed" else "Needs review" }}</span></p>
-        <p><strong>Checked:</strong> {{ postflight.timestamp }}</p>
+        <p><strong>Checked:</strong> {{ postflight.timestamp | berlin_time }}</p>
         <p class="{{ "notice-success" if postflight.result == "passed" else "notice-error" }}">{{ postflight.detail }}</p>
       {% else %}
         <p class="subtle">No post-update health check is recorded for this earlier plan.</p>
@@ -110,7 +110,7 @@
               <td>
                 <strong>{{ check.backup_status }}</strong>
                 {% if check.backup_provider %}<p class="subtle table-note">{{ check.backup_provider }}</p>{% endif %}
-                {% if check.backup_at %}<p class="subtle table-note">{{ check.backup_at }}</p>{% endif %}
+                {% if check.backup_at %}<p class="subtle table-note">{{ check.backup_at | berlin_time }}</p>{% endif %}
               </td>
               <td><span class="pill pill-{{ "active" if check.execution_ready else "missing" }}">{{ check.status_label }}</span></td>
               <td>{{ check.next_step }}</td>

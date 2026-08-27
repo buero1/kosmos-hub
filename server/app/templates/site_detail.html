@@ -28,7 +28,7 @@
       {% if request.query_params.get("backup_refresh") == "ok" %}
         {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
         {% if latest_backup and latest_backup.backup_available and latest_backup.backup_complete %}
-          <p class="notice-success">Backup status checked: the latest complete backup is from {{ latest_backup.backup_at }} and is {{ "protected from automatic deletion" if latest_backup.summary_json.retention_protected else "not protected from automatic deletion" }}. No backup was created or changed.</p>
+          <p class="notice-success">Backup status checked: the latest complete backup is from {{ latest_backup.backup_at | berlin_time }} and is {{ "protected from automatic deletion" if latest_backup.summary_json.retention_protected else "not protected from automatic deletion" }}. No backup was created or changed.</p>
         {% else %}
           <p class="notice-success">Backup status checked: UpdraftPlus currently reports no complete backup ready for maintenance. No backup was created or changed.</p>
         {% endif %}
@@ -62,13 +62,13 @@
             <p><strong>WordPress:</strong> {{ site.wordpress_version or "-" }}</p>
             <p><strong>PHP:</strong> {{ site.php_version or "-" }}</p>
             <p><strong>Bridge:</strong> {{ site.bridge_version or "-" }}</p>
-            <p><strong>Last seen:</strong> {{ site.last_seen_at or "-" }}</p>
+            <p><strong>Last seen:</strong> {{ (site.last_seen_at or "-") | berlin_time }}</p>
           </article>
           <article class="card">
             <h3>Latest Snapshot</h3>
             {% set latest_snapshot = site.snapshots[0] if site.snapshots else None %}
             {% if latest_snapshot %}
-              <p><strong>Captured:</strong> {{ latest_snapshot.captured_at }}</p>
+              <p><strong>Captured:</strong> {{ latest_snapshot.captured_at | berlin_time }}</p>
               <p><strong>WordPress:</strong> {{ latest_snapshot.wordpress_version or "-" }}</p>
               <p><strong>PHP:</strong> {{ latest_snapshot.php_version or "-" }}</p>
               <p><strong>Tracked plugins:</strong> {{ latest_snapshot.plugins_json | length }}</p>
@@ -80,7 +80,7 @@
             <h3>Available Updates</h3>
             {% set latest_updates = site.update_snapshots[0] if site.update_snapshots else None %}
             {% if latest_updates %}
-              <p><strong>Captured:</strong> {{ latest_updates.captured_at }}</p>
+              <p><strong>Captured:</strong> {{ latest_updates.captured_at | berlin_time }}</p>
               <p><strong>WordPress:</strong> {{ latest_updates.core_updates_json | length }}</p>
               <p><strong>Plugins:</strong> {{ latest_updates.plugin_updates_json | length }}</p>
               <p><strong>Themes:</strong> {{ latest_updates.theme_updates_json | length }}</p>
@@ -162,9 +162,9 @@
             <h3>UpdraftPlus status</h3>
             {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
             {% if latest_backup %}
-              <p><strong>Checked:</strong> {{ latest_backup.captured_at }}</p>
+              <p><strong>Checked:</strong> {{ latest_backup.captured_at | berlin_time }}</p>
               <p><strong>Provider:</strong> {{ latest_backup.provider }}</p>
-              <p><strong>Latest complete backup:</strong> {{ latest_backup.backup_at or "Not available" }}</p>
+              <p><strong>Latest complete backup:</strong> {% if latest_backup.backup_at %}{{ latest_backup.backup_at | berlin_time }}{% else %}Not available{% endif %}</p>
               <p><strong>Known backup sets:</strong> {{ latest_backup.backup_count }}</p>
               <p><strong>Status:</strong> {{ "Ready" if latest_backup.backup_available and latest_backup.backup_complete else "Not ready" }}</p>
               <p><strong>Retention protection:</strong> {{ "Manual deletion only" if latest_backup.summary_json.retention_protected else "Not protected" }}</p>
@@ -222,7 +222,7 @@
                         <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
                       </td>
                       <td>{{ run.result_json.stage | replace("-", " ") | title }}</td>
-                      <td>{{ run.started_at }}</td>
+                      <td>{{ run.started_at | berlin_time }}</td>
                       <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
                       <td>{{ run.result_json.stage_message or "Waiting for the Bridge." }}</td>
                     </tr>
@@ -325,7 +325,7 @@
                     {% endif %}
                   </td>
                   <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
-                  <td>{{ entry.captured_at }}</td>
+                  <td>{{ entry.captured_at | berlin_time }}</td>
                   <td>{{ entry.review_note }}</td>
                 </tr>
               {% else %}
@@ -370,14 +370,14 @@
                       <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
                     {% elif run.kind == "updraftplus-backup" %}
                       <strong>UpdraftPlus backup</strong>
-                      {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at }}</p>{% endif %}
+                      {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at | berlin_time }}</p>{% endif %}
                     {% else %}
                       <span class="subtle">-</span>
                     {% endif %}
                   </td>
                   <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
-                  <td>{{ run.started_at }}</td>
-                  <td>{{ run.completed_at or "Still running" }}</td>
+                  <td>{{ run.started_at | berlin_time }}</td>
+                  <td>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Still running{% endif %}</td>
                   <td>{{ run.error_message or run.result_json.stage_message or "Completed" }}</td>
                 </tr>
               {% else %}

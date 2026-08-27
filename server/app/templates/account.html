@@ -94,8 +94,8 @@
               <tr>
                 <td>{{ token.name }}</td>
                 <td><code>{{ token.token_prefix }}...</code></td>
-                <td>{{ token.created_at }}</td>
-                <td>{{ token.last_used_at or "Never" }}</td>
+                <td>{{ token.created_at | berlin_time }}</td>
+                <td>{% if token.last_used_at %}{{ token.last_used_at | berlin_time }}{% else %}Never{% endif %}</td>
                 <td>
                   {% if token.revoked_at %}
                     <span class="pill pill-missing">Revoked</span>
@@ -119,7 +119,7 @@
         <p class="eyebrow">AI provider</p>
         <h3>OpenAI for Kosmos Assistant</h3>
         {% if openai_config and openai_config.enabled %}
-          <p class="subtle">Connected with <strong>{{ openai_config.model }}</strong>. Last used: {{ openai_config.last_used_at or "Never" }}.</p>
+          <p class="subtle">Connected with <strong>{{ openai_config.model }}</strong>. Last used: {% if openai_config.last_used_at %}{{ openai_config.last_used_at | berlin_time }}{% else %}Never{% endif %}.</p>
           {% if openai_config.last_error %}<p class="notice-error">Last assistant request: {{ openai_config.last_error }}</p>{% endif %}
         {% else %}
           <p class="subtle">Not connected yet. The assistant remains unavailable until an API key is saved.</p>
@@ -176,8 +176,8 @@
               <tr>
                 <td><strong>{{ license.label }}</strong><p class="subtle table-note">{{ license.provider }}</p></td>
                 <td>{% if license.automatic_use %}Automatic for supported updates{% else %}Stored, not transmitted automatically{% endif %}</td>
-                <td>{{ license.configured_at }}</td>
-                <td>{{ license.last_used_at or "Never" }}</td>
+                <td>{{ license.configured_at | berlin_time }}</td>
+                <td>{% if license.last_used_at %}{{ license.last_used_at | berlin_time }}{% else %}Never{% endif %}</td>
                 <td>
                   {% if license.last_error %}<span class="pill pill-missing">Last use failed</span><p class="subtle table-note">{{ license.last_error }}</p>
                   {% else %}<span class="pill">Encrypted</span>{% endif %}
@@ -202,7 +202,7 @@
         <h3>Zoho CRM Accounts</h3>
         <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
         {% if zoho_status.configured %}
-          <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
+          <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
           {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
           {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
         {% else %}
@@ -295,7 +295,20 @@
             <span>Parallel direct updates</span>
             <input type="number" name="max_parallel_direct_updates" value="{{ fleet_refresh_settings.max_parallel_direct_updates }}" min="1" max="10" required>
           </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="auto_refresh_enabled" value="true" {% if fleet_refresh_settings.auto_refresh_enabled %}checked{% endif %}>
+            <span>Run the automatic fleet refresh</span>
+          </label>
+          <label>
+            <span>Automatic interval (hours)</span>
+            <input type="number" name="auto_refresh_interval_hours" value="{{ fleet_refresh_settings.auto_refresh_interval_hours }}" min="24" max="168" required>
+          </label>
+          <label>
+            <span>Automatic start time (Berlin)</span>
+            <input type="time" name="auto_refresh_time" value="{{ fleet_refresh_settings.auto_refresh_time }}" step="300" required>
+          </label>
           <p class="subtle">Direct updates default to five different websites at once. A single website is always updated one item at a time. Use fewer parallel operations for slower hosting; the safe range is one to ten.</p>
+          <p class="subtle">The automatic run starts at the selected time in <strong>Europe/Berlin</strong>. 24 hours means daily, 48 hours means every second day. Daylight-saving changes are handled automatically.</p>
           <button class="button" type="submit">Save refresh settings</button>
         </form>
       </section>

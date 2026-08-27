@@ -32,7 +32,7 @@
               <td><span class="pill pill-{{ plan.status }}">{{ plan.status }}</span></td>
               <td>{{ plan.items | length }}</td>
               <td>{{ plan.created_by }}</td>
-              <td>{{ plan.created_at }}</td>
+              <td>{{ plan.created_at | berlin_time }}</td>
             </tr>
           {% else %}
             <tr>

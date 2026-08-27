@@ -18,8 +18,8 @@
         <dl class="metadata-list">
           <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
           <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
-          <div><dt>Last changed in Zoho</dt><dd>{{ detail.entry.customer.zoho_modified_at or "-" }}</dd></div>
-          <div><dt>Last synchronized</dt><dd>{{ detail.entry.customer.zoho_synced_at or "-" }}</dd></div>
+          <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
+          <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
         </dl>
       </article>
       <article class="card">

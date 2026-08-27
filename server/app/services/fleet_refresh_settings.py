@@ -17,6 +17,9 @@ class FleetRefreshRuntimeSettings:
     official_version_max_age_hours: int = 24
     max_parallel_site_checks: int = 5
     max_parallel_direct_updates: int = 5
+    auto_refresh_enabled: bool = True
+    auto_refresh_interval_hours: int = 24
+    auto_refresh_time: str = "03:00"
 
 
 class FleetRefreshSettingsService:
@@ -30,6 +33,8 @@ class FleetRefreshSettingsService:
     MAX_PARALLEL_SITE_CHECKS = 6
     MIN_PARALLEL_DIRECT_UPDATES = 1
     MAX_PARALLEL_DIRECT_UPDATES = 10
+    MIN_AUTO_REFRESH_INTERVAL_HOURS = 24
+    MAX_AUTO_REFRESH_INTERVAL_HOURS = 168
 
     def __init__(self, *, db: Session):
         self.db = db
@@ -43,6 +48,9 @@ class FleetRefreshSettingsService:
             official_version_max_age_hours=config.official_version_max_age_hours,
             max_parallel_site_checks=config.max_parallel_site_checks,
             max_parallel_direct_updates=config.max_parallel_direct_updates,
+            auto_refresh_enabled=config.auto_refresh_enabled,
+            auto_refresh_interval_hours=config.auto_refresh_interval_hours,
+            auto_refresh_time=config.auto_refresh_time,
         )
 
     def configure(
@@ -53,6 +61,9 @@ class FleetRefreshSettingsService:
         official_version_max_age_hours: int,
         max_parallel_site_checks: int,
         max_parallel_direct_updates: int,
+        auto_refresh_enabled: bool,
+        auto_refresh_interval_hours: int,
+        auto_refresh_time: str,
     ) -> FleetRefreshSettings:
         if actor.role != "admin":
             raise FleetRefreshSettingsError("Only Hub administrators can change fleet refresh settings.")
@@ -61,6 +72,8 @@ class FleetRefreshSettingsService:
             official_version_max_age_hours=official_version_max_age_hours,
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
+            auto_refresh_interval_hours=auto_refresh_interval_hours,
+            auto_refresh_time=auto_refresh_time,
         )
 
         config = self.db.get(FleetRefreshSettings, 1)
@@ -71,6 +84,9 @@ class FleetRefreshSettingsService:
         config.official_version_max_age_hours = official_version_max_age_hours
         config.max_parallel_site_checks = max_parallel_site_checks
         config.max_parallel_direct_updates = max_parallel_direct_updates
+        config.auto_refresh_enabled = auto_refresh_enabled
+        config.auto_refresh_interval_hours = auto_refresh_interval_hours
+        config.auto_refresh_time = auto_refresh_time
         config.configured_by_user_id = actor.id
         config.configured_at = datetime.now(UTC)
         self.db.flush()
@@ -84,6 +100,8 @@ class FleetRefreshSettingsService:
         official_version_max_age_hours: int,
         max_parallel_site_checks: int,
         max_parallel_direct_updates: int,
+        auto_refresh_interval_hours: int,
+        auto_refresh_time: str,
     ) -> None:
         if not cls.MIN_STATUS_MAX_AGE_MINUTES <= site_status_max_age_minutes <= cls.MAX_STATUS_MAX_AGE_MINUTES:
             raise FleetRefreshSettingsError(
@@ -103,3 +121,14 @@ class FleetRefreshSettingsService:
                 "Parallel direct updates must be between "
                 f"{cls.MIN_PARALLEL_DIRECT_UPDATES} and {cls.MAX_PARALLEL_DIRECT_UPDATES}."
             )
+        if not cls.MIN_AUTO_REFRESH_INTERVAL_HOURS <= auto_refresh_interval_hours <= cls.MAX_AUTO_REFRESH_INTERVAL_HOURS:
+            raise FleetRefreshSettingsError(
+                "Automatic refresh interval must be between "
+                f"{cls.MIN_AUTO_REFRESH_INTERVAL_HOURS} and {cls.MAX_AUTO_REFRESH_INTERVAL_HOURS} hours."
+            )
+        if auto_refresh_interval_hours % 24:
+            raise FleetRefreshSettingsError("Automatic refresh interval must be a whole number of days (24, 48, ..., 168 hours).")
+        try:
+            datetime.strptime(auto_refresh_time, "%H:%M")
+        except ValueError as exc:
+            raise FleetRefreshSettingsError("Automatic refresh time must use the HH:MM format.") from exc

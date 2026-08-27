@@ -5,16 +5,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from starlette.templating import Jinja2Templates
 
 from app.api.routes.accounts import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
+from app.core.templates import create_templates
 from app.db.session import get_db
 from app.services.ai_assistant import AssistantError, HubAssistantService
 from app.services.ai_provider import AiProviderConfigService
 from app.services.audit import write_audit_log
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
+templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/assistant", include_in_schema=False)
 _MIN_REQUEST_INTERVAL_SECONDS = 3.0
 

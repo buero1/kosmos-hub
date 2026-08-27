@@ -5,10 +5,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from starlette.templating import Jinja2Templates
 
 from app.core.config import get_settings
 from app.core.security import get_secret_cipher
+from app.core.templates import create_templates
 from app.db.session import get_db
 from app.services.audit import write_audit_log
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
@@ -18,7 +18,7 @@ from app.services.hub_accounts import HubAccountService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
+templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/account", include_in_schema=False)
 bootstrap_router = APIRouter(include_in_schema=False)
 
@@ -362,6 +362,9 @@ def configure_fleet_refresh_settings(
     official_version_max_age_hours: Annotated[int, Form()] = 24,
     max_parallel_site_checks: Annotated[int, Form()] = 5,
     max_parallel_direct_updates: Annotated[int, Form()] = 5,
+    auto_refresh_enabled: Annotated[bool, Form()] = False,
+    auto_refresh_interval_hours: Annotated[int, Form()] = 24,
+    auto_refresh_time: Annotated[str, Form()] = "03:00",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -374,6 +377,9 @@ def configure_fleet_refresh_settings(
             official_version_max_age_hours=official_version_max_age_hours,
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
+            auto_refresh_enabled=auto_refresh_enabled,
+            auto_refresh_interval_hours=auto_refresh_interval_hours,
+            auto_refresh_time=auto_refresh_time,
         )
     except FleetRefreshSettingsError as exc:
         return templates.TemplateResponse(
@@ -394,7 +400,9 @@ def configure_fleet_refresh_settings(
             f"Set status cache to {config.site_status_max_age_minutes} minutes, official version cache to "
             f"{config.official_version_max_age_hours} hours, and parallel site checks to "
             f"{config.max_parallel_site_checks} and parallel direct updates to "
-            f"{config.max_parallel_direct_updates}."
+            f"{config.max_parallel_direct_updates}. Automatic refresh is "
+            f"{'enabled' if config.auto_refresh_enabled else 'disabled'} at "
+            f"{config.auto_refresh_time} Europe/Berlin every {config.auto_refresh_interval_hours} hours."
         ),
     )
     db.commit()

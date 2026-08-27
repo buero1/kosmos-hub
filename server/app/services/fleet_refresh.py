@@ -2,6 +2,7 @@ import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -27,6 +28,8 @@ class FleetRefreshService:
 
     MODE_NORMAL = "normal"
     MODE_FULL = "full"
+    SCHEDULED_REQUESTED_BY = "kosmos-scheduler"
+    BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
     def __init__(self, *, db: Session):
         self.db = db
 
@@ -64,6 +67,10 @@ class FleetRefreshService:
     @classmethod
     def queue_scheduled_run(cls) -> int | None:
         with SessionLocal() as db:
+            runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
+            if not runtime_settings.auto_refresh_enabled:
+                return None
+
             active_run = db.scalar(
                 select(FleetRefreshRun)
                 .where(FleetRefreshRun.status.in_((FleetRefreshRunStatus.queued.value, FleetRefreshRunStatus.running.value)))
@@ -73,16 +80,50 @@ class FleetRefreshService:
             if active_run is not None:
                 return None
 
+            now = datetime.now(UTC)
+            if not cls._is_scheduled_run_due(db=db, runtime_settings=runtime_settings, now=now):
+                return None
+
             run = FleetRefreshRun(
                 mode=cls.MODE_NORMAL,
                 status=FleetRefreshRunStatus.queued.value,
-                requested_by="kosmos-hub",
+                requested_by=cls.SCHEDULED_REQUESTED_BY,
                 allow_provider_activation=False,
                 result_json=cls._initial_result(cls.MODE_NORMAL),
             )
             db.add(run)
             db.commit()
             return run.id
+
+    @classmethod
+    def _is_scheduled_run_due(
+        cls,
+        *,
+        db: Session,
+        runtime_settings: FleetRefreshRuntimeSettings,
+        now: datetime,
+    ) -> bool:
+        berlin_now = now.astimezone(cls.BERLIN_TIMEZONE)
+        scheduled_time = datetime.strptime(runtime_settings.auto_refresh_time, "%H:%M").time()
+        if berlin_now.time().replace(tzinfo=None) < scheduled_time:
+            return False
+
+        latest_scheduled = db.scalar(
+            select(FleetRefreshRun)
+            .where(FleetRefreshRun.requested_by == cls.SCHEDULED_REQUESTED_BY)
+            .order_by(FleetRefreshRun.created_at.desc())
+            .limit(1)
+        )
+        if latest_scheduled is not None:
+            last_scheduled_day = cls._as_utc(latest_scheduled.created_at).astimezone(cls.BERLIN_TIMEZONE).date()
+            interval_days = runtime_settings.auto_refresh_interval_hours // 24
+            return (berlin_now.date() - last_scheduled_day).days >= interval_days
+
+        # Do not add an unnecessary automatic run immediately after a manual full refresh.
+        latest_any_run = db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
+        if latest_any_run is not None and now - cls._as_utc(latest_any_run.created_at) < timedelta(hours=24):
+            return False
+        return True
 
     @classmethod
     def process_next_queued_run(cls) -> int | None:
@@ -417,6 +458,10 @@ class FleetRefreshService:
             return False
         timestamp = captured_at if captured_at.tzinfo is not None else captured_at.replace(tzinfo=UTC)
         return now - timestamp <= max_age
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
     @staticmethod
     def _bridge_supports_updates(version: str | None) -> bool:

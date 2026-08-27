@@ -5,10 +5,10 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from starlette.templating import Jinja2Templates
 
 from app.api.routes.accounts import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
+from app.core.templates import create_templates
 from app.db.session import get_db
 from app.repositories.site_repository import SiteRepository
 from app.schemas.dashboard import DashboardSummary
@@ -26,7 +26,7 @@ from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
+templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
 
 

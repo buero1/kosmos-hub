@@ -30,16 +30,18 @@ def _ensure_phase_one_schema() -> None:
 
     if "fleet_refresh_settings" in table_names:
         columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}
-        if "max_parallel_direct_updates" not in columns:
+        additions = {
+            "max_parallel_direct_updates": "INT NOT NULL DEFAULT 5 AFTER max_parallel_site_checks",
+            "auto_refresh_enabled": "TINYINT(1) NOT NULL DEFAULT 1 AFTER max_parallel_direct_updates",
+            "auto_refresh_interval_hours": "INT NOT NULL DEFAULT 24 AFTER auto_refresh_enabled",
+            "auto_refresh_time": "VARCHAR(5) NOT NULL DEFAULT '03:00' AFTER auto_refresh_interval_hours",
+        }
+        missing = [(name, definition) for name, definition in additions.items() if name not in columns]
+        if missing:
             with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "ALTER TABLE fleet_refresh_settings "
-                        "ADD COLUMN max_parallel_direct_updates INT NOT NULL DEFAULT 5 "
-                        "AFTER max_parallel_site_checks"
-                    )
-                )
-            logger.info("Added fleet_refresh_settings.max_parallel_direct_updates with default 5.")
+                for name, definition in missing:
+                    connection.execute(text(f"ALTER TABLE fleet_refresh_settings ADD COLUMN {name} {definition}"))
+            logger.info("Added fleet_refresh_settings columns: %s", ", ".join(name for name, _ in missing))
 
     if "customers" in table_names:
         columns = {column["name"] for column in inspector.get_columns("customers")}
@@ -77,7 +79,7 @@ def _queue_scheduled_fleet_refresh() -> int | None:
     return FleetRefreshService.queue_scheduled_run()
 
 
-async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours: int) -> None:
+async def _fleet_update_refresh_loop(initial_delay_seconds: int) -> None:
     await asyncio.sleep(initial_delay_seconds)
     while True:
         try:
@@ -86,7 +88,7 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int, interval_hours:
                 logger.info("Scheduled fleet status refresh run %s.", run_id)
         except Exception:
             logger.exception("Fleet update refresh scheduling failed unexpectedly.")
-        await asyncio.sleep(interval_hours * 60 * 60)
+        await asyncio.sleep(60)
 
 
 async def _fleet_refresh_worker_loop(initial_delay_seconds: int, interval_seconds: int) -> None:
@@ -149,7 +151,6 @@ async def lifespan(_: FastAPI):
             refresh_task = asyncio.create_task(
                 _fleet_update_refresh_loop(
                     settings.fleet_updates_initial_delay_seconds,
-                    settings.fleet_updates_refresh_interval_hours,
                 )
             )
         maintenance_task = None

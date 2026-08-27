@@ -109,7 +109,7 @@
               <td>
                 {% if item.snapshot %}
                   <strong>Stored</strong>
-                  <p class="subtle table-note">{{ item.snapshot.captured_at }}</p>
+                  <p class="subtle table-note">{{ item.snapshot.captured_at | berlin_time }}</p>
                 {% else %}
                   <span class="pill pill-missing">Not collected</span>
                 {% endif %}
@@ -139,7 +139,7 @@
                   {% else %}
                     <span class="pill">Up to date</span>
                   {% endif %}
-                  <p class="subtle table-note">{{ item.update_snapshot.captured_at }}</p>
+                  <p class="subtle table-note">{{ item.update_snapshot.captured_at | berlin_time }}</p>
                 {% else %}
                   <span class="pill pill-missing">Not collected</span>
                 {% endif %}

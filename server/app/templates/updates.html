@@ -281,7 +281,7 @@
                 {% endif %}
               </td>
               <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
-              <td>{{ entry.captured_at }}</td>
+              <td>{{ entry.captured_at | berlin_time }}</td>
               <td>{{ entry.review_note }}</td>
             </tr>
           {% else %}

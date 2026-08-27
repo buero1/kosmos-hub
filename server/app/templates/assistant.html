@@ -35,7 +35,7 @@
       <section class="assistant-answer">
         <p class="eyebrow">Assistant answer</p>
         <div class="assistant-text">{{ answer.text }}</div>
-        <p class="subtle">Generated {{ answer.generated_at }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at }}{% endif %}.</p>
+        <p class="subtle">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at | berlin_time }}{% endif %}.</p>
       </section>
     {% endif %}
   </section>
