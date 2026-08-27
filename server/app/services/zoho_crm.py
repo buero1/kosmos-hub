@@ -1,4 +1,4 @@
-"""Zoho CRM connection and the current status-filtered Account synchronization."""
+"""Zoho CRM connection and full Account synchronization with status-based visibility."""
 
 from __future__ import annotations
 
@@ -132,7 +132,9 @@ class ZohoFieldMappingRow:
 class ZohoSyncResult:
     created_customers: int
     updated_customers: int
-    relevant_accounts: int
+    synchronized_accounts: int
+    visible_accounts: int
+    hidden_customers: int
     unique_site_match_candidates: int
     unmapped_fields: tuple[str, ...]
 
@@ -268,7 +270,7 @@ class ZohoCrmService:
     def sync_accounts(self) -> ZohoSyncResult:
         connection = self._require_connected_connection()
         if not self._has_current_scope_grant(connection):
-            raise ZohoCrmError("Reconnect Zoho CRM once to approve the full CRM scope before status-filtered Account synchronization.")
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve the full CRM scope before full Account synchronization.")
         mapping_rows = self.refresh_field_mapping()
         mapping = {row.key: row.api_name for row in mapping_rows}
         required_fields = ("customer_name", "account_status")
@@ -276,19 +278,24 @@ class ZohoCrmService:
         if missing_required:
             raise ZohoCrmError(f"The required Zoho Account field(s) {', '.join(missing_required)} were not found. No customers were changed.")
 
-        records = self._get_relevant_account_records(connection, mapping)
+        records = self._get_all_account_records(connection, mapping)
         created_customers = 0
         updated_customers = 0
+        visible_accounts = 0
         unique_site_match_candidates = 0
         synced_at = datetime.now(UTC)
+        synchronized_zoho_ids: set[str] = set()
 
         for record in records:
             record_id = self._as_text(record.get("id"))
             if not record_id:
                 continue
+            synchronized_zoho_ids.add(record_id)
 
             profile = self._build_profile(record, mapping, synced_at)
             name = self._as_text(record.get(mapping["customer_name"])) or f"Zoho Account {record_id}"
+            account_status = self._as_text(record.get(mapping["account_status"]))
+            is_visible = self._is_relevant_account_status(account_status)
             customer_number = self._as_text(record.get(mapping["customer_number"]))
             website_domain = self.normalize_website_domain(record.get(mapping["website"]))
             customer = self.db.scalar(select(Customer).where(Customer.zoho_id == record_id))
@@ -301,14 +308,27 @@ class ZohoCrmService:
 
             customer.name = name
             customer.external_id = customer_number
+            customer.zoho_status = account_status
+            customer.is_visible = is_visible
             customer.website_domain = website_domain
             customer.encrypted_profile_json = self.cipher.encrypt(json.dumps(profile, ensure_ascii=False, default=str))
             customer.zoho_modified_at = self._parse_datetime(record.get("Modified_Time"))
             customer.zoho_synced_at = synced_at
             self.db.flush()
 
-            if website_domain and self._has_unique_unlinked_site_match(website_domain):
+            if is_visible:
+                visible_accounts += 1
+            if is_visible and website_domain and self._has_unique_unlinked_site_match(website_domain):
                 unique_site_match_candidates += 1
+
+        existing_zoho_customers = list(self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all())
+        for customer in existing_zoho_customers:
+            if customer.zoho_id in synchronized_zoho_ids:
+                continue
+            customer.zoho_status = None
+            customer.is_visible = False
+
+        hidden_customers = sum(not customer.is_visible for customer in existing_zoho_customers)
 
         connection.last_sync_at = synced_at
         connection.last_error = None
@@ -316,7 +336,9 @@ class ZohoCrmService:
         return ZohoSyncResult(
             created_customers=created_customers,
             updated_customers=updated_customers,
-            relevant_accounts=len(records),
+            synchronized_accounts=len(records),
+            visible_accounts=visible_accounts,
+            hidden_customers=hidden_customers,
             unique_site_match_candidates=unique_site_match_candidates,
             unmapped_fields=tuple(row.label for row in mapping_rows if row.api_name is None),
         )
@@ -380,39 +402,35 @@ class ZohoCrmService:
             hostname = hostname[4:]
         return hostname or None
 
-    def _get_relevant_account_records(self, connection: ZohoConnection, mapping: dict[str, str | None]) -> list[dict[str, object]]:
-        status_field = mapping["account_status"]
-        assert status_field is not None
+    def _get_all_account_records(self, connection: ZohoConnection, mapping: dict[str, str | None]) -> list[dict[str, object]]:
         requested_fields = sorted({api_name for api_name in mapping.values() if api_name and api_name != "id"} | {"Modified_Time"})
         records_by_id: dict[str, dict[str, object]] = {}
-        for account_status in ZOHO_RELEVANT_ACCOUNT_STATUSES:
-            for page in range(1, _MAX_PAGE_REQUESTS + 1):
-                response = self._api_get(
-                    connection,
-                    f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/search",
-                    {
-                        "criteria": f"({status_field}:equals:{account_status})",
-                        "fields": ",".join(requested_fields),
-                        "per_page": "200",
-                        "page": str(page),
-                    },
-                    allow_empty_response=True,
-                )
-                data = response.get("data")
-                if not isinstance(data, list):
-                    raise ZohoCrmError("Zoho returned an invalid filtered Accounts response. No customers were changed.")
-                for record in data:
-                    if not isinstance(record, dict):
-                        continue
-                    record_id = self._as_text(record.get("id"))
-                    if record_id and self._is_relevant_account_status(record.get(status_field)):
-                        records_by_id[record_id] = record
-                info = response.get("info")
-                more_records = isinstance(info, dict) and info.get("more_records") is True
-                if not more_records:
-                    break
-            else:
-                raise ZohoCrmError(f"Zoho returned more than 2,000 Accounts with status “{account_status}”. Bulk synchronization must be enabled before importing them.")
+        for page in range(1, _MAX_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{ZOHO_ACCOUNT_MODULE}",
+                {
+                    "fields": ",".join(requested_fields),
+                    "per_page": "200",
+                    "page": str(page),
+                },
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError("Zoho returned an invalid Accounts response. No customers were changed.")
+            for record in data:
+                if not isinstance(record, dict):
+                    continue
+                record_id = self._as_text(record.get("id"))
+                if record_id:
+                    records_by_id[record_id] = record
+            info = response.get("info")
+            more_records = isinstance(info, dict) and info.get("more_records") is True
+            if not more_records:
+                break
+        else:
+            raise ZohoCrmError("Zoho returned more than 2,000 Accounts. Bulk synchronization must be enabled before importing them.")
         return list(records_by_id.values())
 
     def _api_get(

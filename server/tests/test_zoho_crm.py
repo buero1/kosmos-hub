@@ -109,7 +109,7 @@ def test_zoho_sync_preserves_an_encrypted_customer_profile_without_linking_sites
         def fake_api_get(_connection, path, params, **_kwargs):
             if path.endswith("/settings/fields"):
                 return {"fields": _metadata()}
-            if path.endswith("/Accounts/search") and params["criteria"] == "(Account_Status:equals:Aktuell)":
+            if path.endswith("/Accounts"):
                 return {
                     "data": [
                         {
@@ -122,7 +122,12 @@ def test_zoho_sync_preserves_an_encrypted_customer_profile_without_linking_sites
                             "Important_Info": "Internal note",
                             "Contact_Email": "contact@example-customer.de",
                             "Modified_Time": "2026-08-27T10:15:00+02:00",
-                        }
+                        },
+                        {
+                            "id": "4150868000001944197",
+                            "Account_Name": "Former Customer GmbH",
+                            "Account_Status": "Archiviert",
+                        },
                     ],
                     "info": {"more_records": False},
                 }
@@ -136,6 +141,7 @@ def test_zoho_sync_preserves_an_encrypted_customer_profile_without_linking_sites
         db.commit()
 
         customer = db.scalar(select(Customer).where(Customer.zoho_id == "4150868000001944196"))
+        hidden_customer = db.scalar(select(Customer).where(Customer.zoho_id == "4150868000001944197"))
         site = db.scalar(select(Site).where(Site.domain == "www.example-customer.de"))
         assert customer is not None
         assert customer.name == "Example Customer GmbH"
@@ -144,20 +150,27 @@ def test_zoho_sync_preserves_an_encrypted_customer_profile_without_linking_sites
         assert customer.encrypted_profile_json is not None
         assert "Internal note" not in customer.encrypted_profile_json
         assert json.loads(cipher.decrypt(customer.encrypted_profile_json))["fields"]["Wichtige Infos"] == "Internal note"
-        assert result.created_customers == 1
-        assert result.relevant_accounts == 1
+        assert customer.zoho_status == "Aktuell"
+        assert customer.is_visible is True
+        assert hidden_customer is not None
+        assert hidden_customer.zoho_status == "Archiviert"
+        assert hidden_customer.is_visible is False
+        assert result.created_customers == 2
+        assert result.synchronized_accounts == 2
+        assert result.visible_accounts == 1
+        assert result.hidden_customers == 1
         assert result.unique_site_match_candidates == 1
         assert site is not None and site.customer_id is None
 
 
-def test_zoho_sync_preserves_existing_imports_not_returned_by_allowed_status_filter():
+def test_zoho_sync_hides_existing_imports_missing_from_full_sync_without_unlinking_sites():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
         user = _user()
         retained = Customer(name="Retained", zoho_id="zoho-current")
-        obsolete = Customer(name="Obsolete", zoho_id="zoho-old")
+        obsolete = Customer(name="Obsolete", zoho_id="zoho-old", zoho_status="Aktuell", is_visible=True)
         linked_site = Site(
             uuid="7b0f66ae-4f6e-4c6f-8f59-2a49f92f1599",
             domain="obsolete.example",
@@ -181,7 +194,7 @@ def test_zoho_sync_preserves_existing_imports_not_returned_by_allowed_status_fil
         def fake_api_get(_connection, path, params, **_kwargs):
             if path.endswith("/settings/fields"):
                 return {"fields": _metadata()}
-            if params["criteria"] == "(Account_Status:equals:Neu)":
+            if path.endswith("/Accounts"):
                 return {
                     "data": [{"id": "zoho-current", "Account_Name": "Retained", "Account_Status": "Neu"}],
                     "info": {"more_records": False},
@@ -192,8 +205,12 @@ def test_zoho_sync_preserves_existing_imports_not_returned_by_allowed_status_fil
         result = service.sync_accounts()
         db.commit()
 
-        assert result.relevant_accounts == 1
+        assert result.synchronized_accounts == 1
+        assert result.visible_accounts == 1
+        assert result.hidden_customers == 1
         assert db.get(Customer, obsolete.id) is not None
+        assert db.get(Customer, obsolete.id).zoho_status is None
+        assert db.get(Customer, obsolete.id).is_visible is False
         assert db.get(Site, linked_site.id).customer_id == obsolete.id
 
 

@@ -117,7 +117,7 @@ def customers_page(
         raise HTTPException(status_code=422, detail="Unknown customer status filter.")
     service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
     entries = service.list_entries(query=q, status=None if status == "all" else status)
-    candidate_count = sum(entry.exact_match_candidate is not None for entry in service.list_entries())
+    candidate_count = sum(entry.exact_match_candidate is not None for entry in entries)
     return templates.TemplateResponse(
         request,
         "customers.html",

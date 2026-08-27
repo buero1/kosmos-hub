@@ -44,6 +44,8 @@ def _ensure_phase_one_schema() -> None:
     if "customers" in table_names:
         columns = {column["name"] for column in inspector.get_columns("customers")}
         additions = {
+            "zoho_status": "VARCHAR(255) NULL",
+            "is_visible": "TINYINT(1) NOT NULL DEFAULT 1",
             "website_domain": "VARCHAR(255) NULL",
             "encrypted_profile_json": "TEXT NULL",
             "zoho_modified_at": "DATETIME NULL",
@@ -58,10 +60,17 @@ def _ensure_phase_one_schema() -> None:
 
         inspector = inspect(engine)
         index_names = {index["name"] for index in inspector.get_indexes("customers")}
-        if "ix_customers_website_domain" not in index_names:
+        customer_indexes = {
+            "ix_customers_website_domain": "website_domain",
+            "ix_customers_zoho_status": "zoho_status",
+            "ix_customers_is_visible": "is_visible",
+        }
+        for index_name, column_name in customer_indexes.items():
+            if index_name in index_names:
+                continue
             with engine.begin() as connection:
-                connection.execute(text("CREATE INDEX ix_customers_website_domain ON customers (website_domain)"))
-            logger.info("Added customers.website_domain index.")
+                connection.execute(text(f"CREATE INDEX {index_name} ON customers ({column_name})"))
+            logger.info("Added customers.%s index.", column_name)
 
 
 def _queue_scheduled_fleet_refresh() -> int | None:

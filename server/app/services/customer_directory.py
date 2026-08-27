@@ -123,7 +123,9 @@ class CustomerDirectoryService:
     ) -> CustomerDirectoryEntry:
         fields = profile_fields if profile_fields is not None else self._profile_fields(customer)
         candidate_sites = unlinked_by_domain.get(customer.website_domain or "", [])
-        account_status = next((field.value for field in fields if field.label == "Status"), None)
+        account_status = customer.zoho_status
+        if account_status is None and customer.is_visible:
+            account_status = next((field.value for field in fields if field.label == "Status"), None)
         return CustomerDirectoryEntry(
             customer=customer,
             account_status=account_status,
