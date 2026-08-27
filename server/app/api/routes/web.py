@@ -110,7 +110,7 @@ def customers_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
-    status: str = "Aktuell",
+    status: str = "all",
 ):
     valid_statuses = {*ZOHO_RELEVANT_ACCOUNT_STATUSES, "all"}
     if status not in valid_statuses:
