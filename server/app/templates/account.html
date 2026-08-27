@@ -34,7 +34,7 @@
       <p class="notice-success">Zoho client credentials were encrypted and saved. Connect the Zoho account next.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "connected" %}
-      <p class="notice-success">Zoho CRM is connected with read-only access. The Account field mapping was retrieved.</p>
+      <p class="notice-success">Zoho CRM is connected with the Hub's full configured scope. The Account field mapping was retrieved; the currently implemented synchronization remains read-only.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "mapping-refreshed" %}
       <p class="notice-success">The technical Zoho field mapping was refreshed.</p>
@@ -203,7 +203,7 @@
         <p class="subtle">Only Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are imported. Client secret, refresh token, and all transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
         {% if zoho_status.configured %}
           <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
-          {% if zoho_status.requires_search_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync. The Hub needs the additional read-only search permission to request only the allowed Account statuses.</p>{% endif %}
+          {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
           {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
         {% else %}
           <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
@@ -233,7 +233,7 @@
       {% if zoho_status.configured %}
         <div class="button-row">
           <a class="button" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
-          {% if zoho_status.connected and not zoho_status.requires_search_reconnect %}
+          {% if zoho_status.connected and not zoho_status.requires_scope_reconnect %}
             <form method="post" action="/account/zoho/mapping">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="button button-secondary" type="submit">Refresh field mapping</button>

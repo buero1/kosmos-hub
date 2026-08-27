@@ -7,7 +7,7 @@ from app.models.base import Base, TimestampMixin
 
 
 class ZohoConnection(TimestampMixin, Base):
-    """The single read-only Zoho CRM connection configured for this Hub."""
+    """The single Zoho CRM connection configured for this Hub."""
 
     __tablename__ = "zoho_connections"
 

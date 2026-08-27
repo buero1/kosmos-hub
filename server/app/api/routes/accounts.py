@@ -494,9 +494,9 @@ def configure_zoho(
         site=None,
         actor=user.username,
         source="zoho-crm",
-        action="configure-read-only-connection",
+        action="configure-zoho-crm-connection",
         result="success",
-        detail="Stored encrypted Zoho CRM OAuth client credentials. OAuth access still requires explicit connection.",
+        detail="Stored encrypted Zoho CRM OAuth client credentials. Full CRM OAuth access still requires explicit connection.",
     )
     db.commit()
     return RedirectResponse(url="/account?zoho=configured", status_code=303)
@@ -549,9 +549,13 @@ def zoho_callback(
         site=None,
         actor=user.username,
         source="zoho-crm",
-        action="connect-read-only-accounts",
+        action="connect-zoho-crm",
         result="success",
-        detail=f"Connected Zoho CRM with {sum(row.api_name is not None for row in mappings)} mapped Account fields.",
+        detail=(
+            "Connected Zoho CRM with the full configured scope and "
+            f"{sum(row.api_name is not None for row in mappings)} mapped Account fields. "
+            "The currently implemented Account sync remains read-only."
+        ),
     )
     db.commit()
     return RedirectResponse(url="/account?zoho=connected", status_code=303)

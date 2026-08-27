@@ -9,7 +9,7 @@ from app.models.customer import Customer
 from app.models.hub_user import HubUser
 from app.models.site import Site
 from app.services.hub_accounts import hash_password
-from app.services.zoho_crm import ZohoCrmService
+from app.services.zoho_crm import ZOHO_CRM_SCOPES, ZohoCrmService
 
 
 def _user() -> HubUser:
@@ -50,7 +50,11 @@ def test_zoho_client_credentials_are_encrypted_and_require_a_new_connection():
         assert connection.encrypted_client_secret != "client-secret-for-kosmos"
         assert service.get_status().redirect_uri == "https://hub.example/account/zoho/callback"
         assert service.get_status().connected is False
-        assert "ZohoSearch.securesearch.READ" in connection.scopes
+        assert connection.scopes == ZOHO_CRM_SCOPES
+        assert "ZohoCRM.modules.ALL" in connection.scopes
+        assert "ZohoCRM.settings.ALL" in connection.scopes
+        assert "ZohoCRM.send_mail.all.CREATE" in connection.scopes
+        assert "ZohoCRM.share.all" in connection.scopes
 
 
 def test_zoho_mapping_uses_field_labels_and_does_not_guess_duplicates():

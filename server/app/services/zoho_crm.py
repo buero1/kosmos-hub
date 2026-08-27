@@ -1,4 +1,4 @@
-"""Read-only synchronization of Zoho CRM Accounts into Kosmos Hub."""
+"""Zoho CRM connection and the current status-filtered Account synchronization."""
 
 from __future__ import annotations
 
@@ -22,7 +22,27 @@ from app.models.site import Site
 from app.models.zoho_connection import ZohoConnection
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
-ZOHO_READ_SCOPES = "ZohoCRM.modules.accounts.READ,ZohoCRM.settings.fields.READ,ZohoSearch.securesearch.READ"
+# Request the complete CRM API scope once. Individual Hub workflows still decide
+# whether a connected capability may create, change, or delete CRM data.
+ZOHO_CRM_SCOPES = ",".join(
+    (
+        "ZohoCRM.modules.ALL",
+        "ZohoCRM.settings.ALL",
+        "ZohoCRM.users.ALL",
+        "ZohoCRM.org.ALL",
+        "ZohoCRM.bulk.ALL",
+        "ZohoCRM.coql.READ",
+        "ZohoCRM.notifications.READ",
+        "ZohoCRM.notifications.CREATE",
+        "ZohoCRM.notifications.UPDATE",
+        "ZohoCRM.notifications.DELETE",
+        "ZohoCRM.apis.READ",
+        "ZohoCRM.send_mail.all.CREATE",
+        "ZohoCRM.share.all",
+        "ZohoCRM.signals.ALL",
+        "ZohoSearch.securesearch.READ",
+    )
+)
 _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
 ZOHO_RELEVANT_ACCOUNT_STATUSES = ("Aktuell", "Neu", "gekündigt", "Kündigung liegt vor")
@@ -97,7 +117,7 @@ class ZohoConnectionStatus:
     last_error: str | None
     mapped_field_count: int
     missing_fields: tuple[str, ...]
-    requires_search_reconnect: bool
+    requires_scope_reconnect: bool
 
 
 @dataclass(frozen=True)
@@ -120,7 +140,7 @@ class ZohoSyncResult:
 
 
 class ZohoCrmService:
-    """Keeps OAuth credentials and CRM customer data encrypted and read-only."""
+    """Keeps OAuth credentials encrypted and synchronizes Accounts safely."""
 
     def __init__(self, *, db: Session, cipher: SecretCipher, public_base_url: str):
         self.db = db
@@ -150,7 +170,7 @@ class ZohoCrmService:
             last_error=connection.last_error if connection is not None else None,
             mapped_field_count=sum(row.api_name is not None for row in rows),
             missing_fields=tuple(row.label for row in rows if row.api_name is None),
-            requires_search_reconnect=connection is not None and connection.encrypted_refresh_token is not None and not self._has_search_scope(connection),
+            requires_scope_reconnect=connection is not None and connection.encrypted_refresh_token is not None and not self._has_current_scope_grant(connection),
         )
 
     def configure(self, *, actor: HubUser, data_center: str, client_id: str, client_secret: str) -> ZohoConnection:
@@ -164,7 +184,7 @@ class ZohoCrmService:
                 data_center=center.key,
                 encrypted_client_id=self.cipher.encrypt(normalized_client_id),
                 encrypted_client_secret=self.cipher.encrypt(normalized_client_secret),
-                scopes=ZOHO_READ_SCOPES,
+                scopes=ZOHO_CRM_SCOPES,
                 configured_by_user_id=actor.id,
             )
             self.db.add(connection)
@@ -174,7 +194,7 @@ class ZohoCrmService:
             connection.encrypted_client_id = self.cipher.encrypt(normalized_client_id)
             connection.encrypted_client_secret = self.cipher.encrypt(normalized_client_secret)
             connection.encrypted_refresh_token = None
-            connection.scopes = ZOHO_READ_SCOPES
+            connection.scopes = ZOHO_CRM_SCOPES
             connection.field_map_json = None
             connection.connected_at = None
             connection.last_metadata_at = None
@@ -194,7 +214,7 @@ class ZohoCrmService:
             {
                 "response_type": "code",
                 "client_id": client_id,
-                "scope": ZOHO_READ_SCOPES,
+                "scope": ZOHO_CRM_SCOPES,
                 "redirect_uri": self.redirect_uri,
                 "access_type": "offline",
                 "prompt": "consent",
@@ -226,7 +246,7 @@ class ZohoCrmService:
             raise ZohoCrmError("Zoho did not grant persistent read access. Please approve the requested access again.")
 
         connection.encrypted_refresh_token = self.cipher.encrypt(refresh_token)
-        connection.scopes = ZOHO_READ_SCOPES
+        connection.scopes = ZOHO_CRM_SCOPES
         connection.api_domain = self._safe_api_domain(token_data.get("api_domain"), data_center)
         connection.connected_at = datetime.now(UTC)
         connection.last_error = None
@@ -249,8 +269,8 @@ class ZohoCrmService:
 
     def sync_accounts(self) -> ZohoSyncResult:
         connection = self._require_connected_connection()
-        if not self._has_search_scope(connection):
-            raise ZohoCrmError("Reconnect Zoho CRM once to approve the additional read-only search permission for status-filtered Account synchronization.")
+        if not self._has_current_scope_grant(connection):
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve the full CRM scope before status-filtered Account synchronization.")
         mapping_rows = self.refresh_field_mapping()
         mapping = {row.key: row.api_name for row in mapping_rows}
         required_fields = ("customer_name", "account_status")
@@ -447,7 +467,7 @@ class ZohoCrmService:
         )
         access_token = response.get("access_token")
         if not isinstance(access_token, str) or not access_token:
-            raise ZohoCrmError("Zoho could not refresh the read-only access token. Reconnect the Zoho account.")
+            raise ZohoCrmError("Zoho could not refresh the access token. Reconnect the Zoho account.")
         connection.api_domain = self._safe_api_domain(response.get("api_domain"), data_center)
         return access_token
 
@@ -480,8 +500,9 @@ class ZohoCrmService:
         return status is not None and status.casefold() in {item.casefold() for item in ZOHO_RELEVANT_ACCOUNT_STATUSES}
 
     @staticmethod
-    def _has_search_scope(connection: ZohoConnection) -> bool:
-        return "ZohoSearch.securesearch.READ" in {scope.strip() for scope in connection.scopes.split(",")}
+    def _has_current_scope_grant(connection: ZohoConnection) -> bool:
+        granted_scopes = {scope.strip() for scope in connection.scopes.split(",")}
+        return set(ZOHO_CRM_SCOPES.split(",")).issubset(granted_scopes)
 
     def _require_connection(self) -> ZohoConnection:
         connection = self.get_connection()
