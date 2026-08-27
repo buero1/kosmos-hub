@@ -196,24 +196,50 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update details</h2>
-        <p class="subtle">WordPress core, themes, and active or inactive plugin updates can be started directly from the workbench.</p>
+        <p class="subtle">Select available WordPress, theme, or plugin updates and start them directly for this customer site. Active plugins remain active; inactive plugins remain inactive.</p>
       </div>
       <a class="button button-secondary" href="/updates?q={{ site.domain | urlencode }}">Open workbench</a>
     </div>
+    <form id="site-direct-update-form" class="plan-panel" method="post" action="/updates/execute-selected-updates">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="site_id" value="{{ site.id }}">
+      <div>
+        <p class="eyebrow">Run selected updates</p>
+        <p class="subtle">Before every update, the Hub refreshes the update evidence and verifies the exact installed version. Afterwards it verifies WordPress again, checks homepage and REST API, and stops the remaining selection if anything fails.</p>
+      </div>
+      <button class="button" type="submit">Run selected updates</button>
+    </form>
+    {% if request.query_params.get("direct_update") == "started" %}
+      <p class="notice-success">{{ request.query_params.get("message") }}</p>
+    {% elif request.query_params.get("direct_update") == "error" %}
+      <p class="notice-error">Direct update could not start: {{ request.query_params.get("message") }}</p>
+    {% endif %}
     <div class="table-scroll">
-      <table>
+      <table class="update-workbench-table">
         <thead>
           <tr>
+            <th>Select</th>
             <th>Type</th>
             <th>Update</th>
             <th>Versions</th>
+            <th>Official catalog</th>
+            <th>Higher version observed</th>
+            <th>Diagnosis</th>
             <th>State</th>
+            <th>Captured</th>
             <th>Review</th>
           </tr>
         </thead>
         <tbody>
           {% for entry in update_entries %}
             <tr>
+              <td>
+                {% if entry.direct_update_selectable %}
+                  <input form="site-direct-update-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }}">
+                {% else %}
+                  <span class="subtle">Not ready</span>
+                {% endif %}
+              </td>
               <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
               <td>
                 <strong>{{ entry.name }}</strong>
@@ -221,13 +247,58 @@
                   <p class="subtle table-note">{{ entry.identifier }}</p>
                 {% endif %}
               </td>
-              <td>{{ entry.current_version or "-" }} → {{ entry.target_version or "Not reported" }}</td>
+              <td>
+                {% if entry.update_available %}
+                  {{ entry.current_version or "-" }} → {{ entry.target_version }}
+                {% elif entry.update_checked %}
+                  {{ entry.current_version or "-" }} · Up to date
+                {% else %}
+                  {{ entry.current_version or "-" }} · Update not checked
+                {% endif %}
+              </td>
+              <td>
+                {% if entry.official_checked_at %}
+                  <strong>{{ entry.official_version or "Not available" }}</strong>
+                  <p class="subtle table-note">{{ entry.official_source }}</p>
+                  {% if entry.official_mismatch %}
+                    <span class="pill pill-missing">Mismatch</span>
+                    <p class="table-note">{{ entry.official_note }}</p>
+                  {% else %}
+                    <p class="subtle table-note">{{ entry.official_note }}</p>
+                  {% endif %}
+                {% elif entry.kind == "plugin" %}
+                  <span class="pill pill-unknown">Not checked</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if entry.fleet_observed_version %}
+                  <strong>{{ entry.fleet_observed_version }}</strong>
+                  <p class="subtle table-note">Seen on {{ entry.fleet_observed_site_count }} other customer site{{ "s" if entry.fleet_observed_site_count != 1 else "" }}. Informational only; it is not an official catalog version or an update offer for this site.</p>
+                {% elif entry.kind == "plugin" %}
+                  <span class="subtle">None higher observed</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if entry.kind == "plugin" and entry.diagnosis_status != "not-checked" %}
+                  <span class="pill {% if entry.diagnosis_status in ["aligned", "update-ready"] %}pill-active{% elif entry.diagnosis_status == "official-unavailable" %}pill-unknown{% else %}pill-missing{% endif %}">{{ entry.diagnosis_label }}</span>
+                  <p class="subtle table-note">{{ entry.diagnosis_note }}</p>
+                {% elif entry.kind == "plugin" %}
+                  <span class="pill pill-unknown">Not checked</span>
+                {% else %}
+                  <span class="subtle">Not applicable</span>
+                {% endif %}
+              </td>
               <td><span class="pill pill-{{ "active" if entry.is_active else "inactive" if entry.kind == "plugin" else "system" }}">{{ entry.activity_label }}</span></td>
+              <td>{{ entry.captured_at }}</td>
               <td>{{ entry.review_note }}</td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="5">No stored update details yet.</td>
+              <td colspan="10">No stored update details yet.</td>
             </tr>
           {% endfor %}
         </tbody>

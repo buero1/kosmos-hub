@@ -204,6 +204,7 @@ def execute_selected_plugin_updates(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     selected: Annotated[list[str] | None, Form()] = None,
+    site_id: Annotated[int | None, Form()] = None,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -212,16 +213,20 @@ def execute_selected_plugin_updates(
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    redirect_path = f"/sites/{site_id}" if site_id is not None else "/updates"
     try:
-        outcome = service.start_plugin_updates(selected_keys=selected or [], actor=user.username)
+        if site_id is None:
+            outcome = service.start_direct_updates(selected_keys=selected or [], actor=user.username)
+        else:
+            outcome = service.start_site_updates(site_id=site_id, selected_keys=selected or [], actor=user.username)
     except ValueError as exc:
         return RedirectResponse(
-            url=f"/updates?{urlencode({'direct_update': 'error', 'message': str(exc)})}",
+            url=f"{redirect_path}?{urlencode({'direct_update': 'error', 'message': str(exc)})}",
             status_code=303,
         )
     schedule_pending_direct_updates()
     return RedirectResponse(
-        url=f"/updates?{urlencode({'update_batch': outcome.batch_id, 'direct_update': 'started', 'message': outcome.message})}",
+        url=f"{redirect_path}?{urlencode({'update_batch': outcome.batch_id, 'direct_update': 'started', 'message': outcome.message})}",
         status_code=303,
     )
 

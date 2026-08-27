@@ -104,6 +104,17 @@ def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():
     assert MaintenanceRunService._direct_plugin_update_scope_error(core) is None
 
 
+def test_site_direct_updates_reject_a_selection_from_another_site():
+    entries = [
+        SimpleNamespace(site=SimpleNamespace(id=7)),
+        SimpleNamespace(site=SimpleNamespace(id=8)),
+    ]
+
+    assert MaintenanceRunService._selection_scope_error(entries, expected_site_id=7) == (
+        "Select updates from this customer site only."
+    )
+
+
 def test_update_workbench_requires_the_matching_bridge_ability_for_core_and_themes():
     captured_at = datetime.now(UTC)
     item = FleetInventoryItem(

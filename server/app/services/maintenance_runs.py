@@ -188,11 +188,12 @@ class MaintenanceRunService:
             message="The protected UpdraftPlus backup was queued for immediate background processing. The Hub will verify it automatically.",
         )
 
-    def start_plugin_updates(
+    def start_direct_updates(
         self,
         *,
         selected_keys: list[str],
         actor: str,
+        expected_site_id: int | None = None,
     ) -> PluginUpdateBatchOutcome:
         """Queue selected WordPress, theme, or plugin updates without review plans."""
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
@@ -206,6 +207,9 @@ class MaintenanceRunService:
             raise ValueError("One or more selected updates are no longer available. Refresh the workbench and try again.")
 
         selected_entries = [entries_by_key[key] for key in requested_keys]
+        scope_error = self._selection_scope_error(selected_entries, expected_site_id=expected_site_id)
+        if scope_error:
+            raise ValueError(scope_error)
         has_stored_crocoblock_license = self._has_stored_crocoblock_license()
         for entry in selected_entries:
             scope_error = self._direct_plugin_update_scope_error(
@@ -304,6 +308,29 @@ class MaintenanceRunService:
                 f"Queued {len(runs)} direct update{'s' if len(runs) != 1 else ''}. "
                 "Each update will verify the selected version and run a health check afterwards."
             ),
+        )
+
+    def start_plugin_updates(
+        self,
+        *,
+        selected_keys: list[str],
+        actor: str,
+    ) -> PluginUpdateBatchOutcome:
+        """Backward-compatible name for starting updates from the global workbench."""
+        return self.start_direct_updates(selected_keys=selected_keys, actor=actor)
+
+    def start_site_updates(
+        self,
+        *,
+        site_id: int,
+        selected_keys: list[str],
+        actor: str,
+    ) -> PluginUpdateBatchOutcome:
+        """Start updates selected from one customer site's detail page only."""
+        return self.start_direct_updates(
+            selected_keys=selected_keys,
+            actor=actor,
+            expected_site_id=site_id,
         )
 
     def list_plugin_update_batch(self, batch_id: str) -> list[MaintenanceRun]:
@@ -675,6 +702,16 @@ class MaintenanceRunService:
             ),
             None,
         )
+
+    @staticmethod
+    def _selection_scope_error(
+        selected_entries: list[UpdateWorkbenchEntry],
+        *,
+        expected_site_id: int | None,
+    ) -> str | None:
+        if expected_site_id is not None and any(entry.site.id != expected_site_id for entry in selected_entries):
+            return "Select updates from this customer site only."
+        return None
 
     @staticmethod
     def _direct_plugin_update_scope_error(
