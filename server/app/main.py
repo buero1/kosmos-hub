@@ -26,20 +26,42 @@ logger = logging.getLogger(__name__)
 def _ensure_phase_one_schema() -> None:
     """Apply the small additive schema changes used before Alembic is introduced."""
     inspector = inspect(engine)
-    if "fleet_refresh_settings" not in inspector.get_table_names():
-        return
-    columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}
-    if "max_parallel_direct_updates" in columns:
-        return
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "ALTER TABLE fleet_refresh_settings "
-                "ADD COLUMN max_parallel_direct_updates INT NOT NULL DEFAULT 5 "
-                "AFTER max_parallel_site_checks"
-            )
-        )
-    logger.info("Added fleet_refresh_settings.max_parallel_direct_updates with default 5.")
+    table_names = set(inspector.get_table_names())
+
+    if "fleet_refresh_settings" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}
+        if "max_parallel_direct_updates" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE fleet_refresh_settings "
+                        "ADD COLUMN max_parallel_direct_updates INT NOT NULL DEFAULT 5 "
+                        "AFTER max_parallel_site_checks"
+                    )
+                )
+            logger.info("Added fleet_refresh_settings.max_parallel_direct_updates with default 5.")
+
+    if "customers" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("customers")}
+        additions = {
+            "website_domain": "VARCHAR(255) NULL",
+            "encrypted_profile_json": "TEXT NULL",
+            "zoho_modified_at": "DATETIME NULL",
+            "zoho_synced_at": "DATETIME NULL",
+        }
+        missing = [(name, definition) for name, definition in additions.items() if name not in columns]
+        if missing:
+            with engine.begin() as connection:
+                for name, definition in missing:
+                    connection.execute(text(f"ALTER TABLE customers ADD COLUMN {name} {definition}"))
+            logger.info("Added Zoho customer columns: %s", ", ".join(name for name, _ in missing))
+
+        inspector = inspect(engine)
+        index_names = {index["name"] for index in inspector.get_indexes("customers")}
+        if "ix_customers_website_domain" not in index_names:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE INDEX ix_customers_website_domain ON customers (website_domain)"))
+            logger.info("Added customers.website_domain index.")
 
 
 def _queue_scheduled_fleet_refresh() -> int | None:

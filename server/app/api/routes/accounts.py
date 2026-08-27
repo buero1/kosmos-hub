@@ -16,6 +16,7 @@ from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLi
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HubAccountService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
+from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/account", include_in_schema=False)
@@ -467,6 +468,191 @@ def remove_provider_license(
     return RedirectResponse(url="/account?provider_license=removed", status_code=303)
 
 
+@router.post("/zoho")
+def configure_zoho(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    data_center: Annotated[str, Form()] = "eu",
+    client_id: Annotated[str, Form()] = "",
+    client_secret: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_service(db)
+    try:
+        service.configure(actor=user, data_center=data_center, client_id=client_id, client_secret=client_secret)
+    except ZohoCrmError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="configure-read-only-connection",
+        result="success",
+        detail="Stored encrypted Zoho CRM OAuth client credentials. OAuth access still requires explicit connection.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho=configured", status_code=303)
+
+
+@router.get("/zoho/connect")
+def connect_zoho(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_admin_user(request)
+    service = _zoho_service(db)
+    state = service.new_oauth_state()
+    request.session["zoho_oauth_state"] = state
+    try:
+        authorization_url = service.build_authorization_url(state=state)
+    except ZohoCrmError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+    return RedirectResponse(url=authorization_url, status_code=303)
+
+
+@router.get("/zoho/callback")
+def zoho_callback(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    code: str = "",
+    state: str = "",
+    error: str = "",
+):
+    user = _require_admin_user(request)
+    expected_state = request.session.pop("zoho_oauth_state", "")
+    if not isinstance(expected_state, str) or not expected_state or not compare_digest(expected_state, state):
+        _zoho_service(db).record_error("The Zoho connection state did not match. Start the connection again.")
+        db.commit()
+        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+    if error:
+        _zoho_service(db).record_error("Zoho access was not approved.")
+        db.commit()
+        return RedirectResponse(url="/account?zoho=not-approved", status_code=303)
+
+    service = _zoho_service(db)
+    try:
+        service.complete_authorization(code=code)
+        mappings = service.refresh_field_mapping()
+    except ZohoCrmError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="connect-read-only-accounts",
+        result="success",
+        detail=f"Connected Zoho CRM with {sum(row.api_name is not None for row in mappings)} mapped Account fields.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho=connected", status_code=303)
+
+
+@router.post("/zoho/mapping")
+def refresh_zoho_mapping(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_service(db)
+    try:
+        mappings = service.refresh_field_mapping()
+    except ZohoCrmError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho=mapping-failed", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="refresh-accounts-field-mapping",
+        result="success",
+        detail=f"Refreshed {sum(row.api_name is not None for row in mappings)} Zoho Account field mappings.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho=mapping-refreshed", status_code=303)
+
+
+@router.post("/zoho/sync")
+def sync_zoho_accounts(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_service(db)
+    try:
+        result = service.sync_accounts()
+    except ZohoCrmError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho=sync-failed", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="sync-accounts-read-only",
+        result="success",
+        detail=(
+            f"Created {result.created_customers} and updated {result.updated_customers} customers from Zoho Accounts; "
+            f"{result.unique_site_match_candidates} unlinked sites have an exact domain match candidate."
+        ),
+    )
+    db.commit()
+    return RedirectResponse(
+        url=(
+            f"/account?zoho=synced&zoho_created={result.created_customers}&zoho_updated={result.updated_customers}"
+            f"&zoho_candidates={result.unique_site_match_candidates}"
+        ),
+        status_code=303,
+    )
+
+
+@router.post("/zoho/remove")
+def remove_zoho_connection(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_service(db)
+    try:
+        service.remove_connection(actor=user)
+    except ZohoCrmError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="remove-connection",
+        result="success",
+        detail="Removed the encrypted Zoho OAuth credentials. Imported customer data remains until a separate customer-data action is added.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho=removed", status_code=303)
+
+
 @bootstrap_router.post("/internal/bootstrap-token")
 def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_db)]):
     # This endpoint is only reachable from an SSH shell on the Hub host, never through the public proxy.
@@ -482,6 +668,14 @@ def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_
 
 def _account_service(db: Session) -> HubAccountService:
     return HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+
+
+def _zoho_service(db: Session) -> ZohoCrmService:
+    return ZohoCrmService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
 
 
 def _account_context(
@@ -503,6 +697,9 @@ def _account_context(
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
         "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
         "fleet_refresh_settings": FleetRefreshSettingsService(db=service.db).get_runtime_settings(),
+        "zoho_status": _zoho_service(service.db).get_status(),
+        "zoho_mapping": _zoho_service(service.db).mapping_rows(),
+        "zoho_data_centers": ZOHO_DATA_CENTERS.values(),
     }
 
 
@@ -514,6 +711,13 @@ def _require_current_user(request: Request):
     user = _current_user(request)
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
+    return user
+
+
+def _require_admin_user(request: Request):
+    user = _require_current_user(request)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
     return user
 
 
