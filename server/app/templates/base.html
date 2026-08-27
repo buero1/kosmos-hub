@@ -114,6 +114,9 @@
       .filter-panel-workbench {
         grid-template-columns: repeat(4, minmax(150px, 1fr));
       }
+      .customer-filter-panel {
+        grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.75fr) auto;
+      }
       .filter-panel label {
         display: grid;
         gap: 0.3rem;
@@ -489,6 +492,9 @@
         margin: 0.25rem 0 0;
         overflow-wrap: anywhere;
       }
+      .inline-form { margin-top: 0.65rem; }
+      .inline-form .button { padding: 0.55rem 0.8rem; }
+      .customer-directory-table { min-width: 970px; }
       table {
         width: 100%;
         border-collapse: collapse;
@@ -682,6 +688,7 @@
         <nav>
           <a href="/">Dashboard</a>
           <a href="/sites">Sites</a>
+          <a href="/customers">Customers</a>
           <a href="/updates">Update workbench</a>
           <a href="/update-plans">Plans</a>
           <a href="/assistant">Assistant</a>

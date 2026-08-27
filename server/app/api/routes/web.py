@@ -23,6 +23,7 @@ from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
+from app.services.customer_directory import CustomerDirectoryService
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -100,6 +101,65 @@ def sites_page(
                 ),
             },
         },
+    )
+
+
+@router.get("/customers", response_class=HTMLResponse)
+def customers_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    q: str = "",
+    view: Literal["all", "candidates"] = "all",
+):
+    service = CustomerDirectoryService(db=db)
+    entries = service.list_entries(query=q, candidates_only=view == "candidates")
+    candidate_count = len(service.list_entries(candidates_only=True))
+    return templates.TemplateResponse(
+        request,
+        "customers.html",
+        {
+            "entries": entries,
+            "candidate_count": candidate_count,
+            "filters": {"q": q, "view": view},
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/customers/{customer_id}/link-site")
+def link_customer_site(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[int, Form()],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    try:
+        customer, site = CustomerDirectoryService(db=db).link_exact_match(customer_id=customer_id, site_id=site_id)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/customers?{urlencode({'linked': 'error', 'message': str(exc)})}",
+            status_code=303,
+        )
+
+    write_audit_log(
+        db,
+        site=site,
+        actor=user.username,
+        source="hub-web",
+        action="link-zoho-customer-to-site",
+        result="ok",
+        detail=f"Linked Zoho customer {customer.name} ({customer.zoho_id}) after exact domain review.",
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/customers?{urlencode({'linked': 'ok', 'customer': customer.name, 'site': site.domain})}",
+        status_code=303,
     )
 
 
