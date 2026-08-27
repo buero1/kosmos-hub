@@ -400,4 +400,43 @@
       }, 10000);
     </script>
   {% endif %}
+  <script>
+    (function () {
+      var sections = Array.prototype.slice.call(document.querySelectorAll(".site-section"));
+      var links = Array.prototype.slice.call(document.querySelectorAll(".site-section-nav a[href^='#']"));
+      var knownSectionIds = sections.map(function (section) {
+        return section.id;
+      });
+
+      function activeSectionId() {
+        var requestedId = window.location.hash.slice(1);
+        return knownSectionIds.indexOf(requestedId) !== -1 ? requestedId : "dashboard";
+      }
+
+      function showActiveSection() {
+        var sectionId = activeSectionId();
+        sections.forEach(function (section) {
+          section.hidden = section.id !== sectionId;
+        });
+        links.forEach(function (link) {
+          var isActive = link.getAttribute("href") === "#" + sectionId;
+          link.setAttribute("aria-current", isActive ? "page" : "false");
+        });
+
+        if (window.location.hash !== "#" + sectionId) {
+          window.history.replaceState(null, "", "#" + sectionId);
+        }
+      }
+
+      links.forEach(function (link) {
+        link.addEventListener("click", function (event) {
+          event.preventDefault();
+          window.location.hash = link.getAttribute("href");
+          window.scrollTo({ top: 0, behavior: "auto" });
+        });
+      });
+      window.addEventListener("hashchange", showActiveSection);
+      showActiveSection();
+    }());
+  </script>
 {% endblock %}

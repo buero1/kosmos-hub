@@ -289,6 +289,10 @@
         background: var(--accent-soft);
         color: #075f4e;
       }
+      .site-section-nav a[aria-current="page"] {
+        background: var(--accent);
+        color: white;
+      }
       .site-back-link.button {
         width: 100%;
         margin-top: 1rem;
@@ -296,6 +300,9 @@
       }
       .site-section {
         scroll-margin-top: 1rem;
+      }
+      .site-section[hidden] {
+        display: none;
       }
       .site-section + .site-section {
         margin-top: 3rem;
