@@ -1,5 +1,8 @@
 import json
+from io import BytesIO
+from urllib.error import HTTPError
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -9,7 +12,7 @@ from app.models.customer import Customer
 from app.models.hub_user import HubUser
 from app.models.site import Site
 from app.services.hub_accounts import hash_password
-from app.services.zoho_crm import ZOHO_CRM_SCOPES, ZohoCrmService
+from app.services.zoho_crm import ZOHO_CRM_SCOPES, ZohoCrmError, ZohoCrmService
 
 
 def _user() -> HubUser:
@@ -194,3 +197,26 @@ def test_zoho_sync_removes_prior_imports_outside_allowed_statuses_after_complete
         assert result.unlinked_sites == 1
         assert db.get(Customer, obsolete.id) is None
         assert db.get(Site, linked_site.id).customer_id is None
+
+
+def test_zoho_request_surfaces_an_http_error_before_handling_empty_responses(monkeypatch):
+    error = HTTPError(
+        url="https://accounts.zoho.eu/oauth/v2/token",
+        code=400,
+        msg="Bad Request",
+        hdrs=None,
+        fp=BytesIO(b'{"error":"invalid_client"}'),
+    )
+
+    def raise_http_error(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr("app.services.zoho_crm.urlopen", raise_http_error)
+
+    with pytest.raises(ZohoCrmError, match="invalid_client"):
+        ZohoCrmService._request_json(
+            "https://accounts.zoho.eu/oauth/v2/token",
+            method="POST",
+            form={"grant_type": "authorization_code"},
+            allow_empty_response=True,
+        )

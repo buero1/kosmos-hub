@@ -604,8 +604,6 @@ class ZohoCrmService:
         if body is not None:
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         request = Request(url, data=body, headers=request_headers, method=method)
-        if not payload.strip() and allow_empty_response:
-            return {"data": [], "info": {"more_records": False}}
         try:
             with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
                 payload = response.read().decode("utf-8")
@@ -613,13 +611,18 @@ class ZohoCrmService:
             code = "unknown_error"
             try:
                 error_payload = json.loads(exc.read().decode("utf-8"))
-                if isinstance(error_payload, dict) and isinstance(error_payload.get("code"), str):
-                    code = error_payload["code"]
+                if isinstance(error_payload, dict):
+                    provider_code = error_payload.get("code") or error_payload.get("error")
+                    if isinstance(provider_code, str):
+                        code = provider_code
             except Exception:
                 pass
             raise ZohoCrmError(f"Zoho rejected the request ({code}).") from exc
         except URLError as exc:
             raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.") from exc
+
+        if not payload.strip() and allow_empty_response:
+            return {"data": [], "info": {"more_records": False}}
         try:
             decoded = json.loads(payload)
         except json.JSONDecodeError as exc:
