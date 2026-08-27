@@ -257,6 +257,62 @@ class Registry {
 			)
 		);
 
+		wp_register_ability(
+			'kosmos-bridge/list-wp-users',
+			array(
+				'label'               => __( 'List WordPress Users', 'kosmos-bridge' ),
+				'description'         => __( 'Returns read-only WordPress user metadata without passwords or session data.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::empty_object_input_schema(),
+				'output_schema'       => self::wp_user_list_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_list_wp_users' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/create-wp-user',
+			array(
+				'label'               => __( 'Create WordPress User', 'kosmos-bridge' ),
+				'description'         => __( 'Creates one WordPress user with an explicit role. Passwords are accepted only for this request and are never returned.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::wp_user_create_input_schema(),
+				'output_schema'       => self::wp_user_mutation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_create_wp_user' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/update-wp-user-password',
+			array(
+				'label'               => __( 'Update WordPress User Password', 'kosmos-bridge' ),
+				'description'         => __( 'Changes the password of one existing WordPress user. The password is never returned or stored by the Bridge.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::wp_user_password_input_schema(),
+				'output_schema'       => self::wp_user_mutation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_wp_user_password' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
+			'kosmos-bridge/delete-wp-user',
+			array(
+				'label'               => __( 'Delete WordPress User', 'kosmos-bridge' ),
+				'description'         => __( 'Deletes one WordPress user only after a different existing user is selected for content reassignment. The last administrator cannot be deleted.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::wp_user_delete_input_schema(),
+				'output_schema'       => self::wp_user_delete_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_delete_wp_user' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::destructive_mutation_meta(),
+			)
+		);
+
 	}
 
 	/**
@@ -1030,6 +1086,145 @@ class Registry {
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
 			'active'           => $active_after,
+		);
+	}
+
+	/**
+	 * List user metadata only. Password hashes, reset tokens, sessions and other
+	 * authentication material are intentionally never included in the response.
+	 *
+	 * @return array
+	 */
+	public static function execute_list_wp_users() {
+		$users = get_users(
+			array(
+				'orderby' => 'login',
+				'order'   => 'ASC',
+			)
+		);
+
+		return array(
+			'available' => true,
+			'users'     => array_map( array( self::class, 'wp_user_response' ), $users ),
+			'message'   => __( 'WordPress user metadata was read successfully.', 'kosmos-bridge' ),
+		);
+	}
+
+	/**
+	 * @param mixed $input Requested WordPress user metadata.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_create_wp_user( $input = array() ) {
+		$username     = self::get_input_string( $input, 'username' );
+		$email        = self::get_input_string( $input, 'email' );
+		$password     = self::get_input_string( $input, 'password' );
+		$role         = self::get_input_string( $input, 'role' );
+		$display_name = self::get_input_string( $input, 'display_name' );
+
+		if ( '' === $username || '' === $email || '' === $password || '' === $role ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_input', 'Username, email, password, and role are required.', 400 );
+		}
+		if ( strlen( $password ) < 12 ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_password', 'The password must contain at least 12 characters.', 400 );
+		}
+		if ( ! is_email( $email ) ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_email', 'A valid email address is required.', 400 );
+		}
+		if ( username_exists( $username ) || email_exists( $email ) ) {
+			return self::wp_user_error( 'kosmos_bridge_user_exists', 'The requested username or email address already exists.', 409 );
+		}
+		if ( ! self::is_valid_wp_role( $role ) ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_role', 'The requested WordPress role does not exist on this site.', 400 );
+		}
+
+		$user_id = wp_insert_user(
+			array(
+				'user_login'   => $username,
+				'user_email'   => $email,
+				'user_pass'    => $password,
+				'display_name' => '' === $display_name ? $username : $display_name,
+				'role'         => $role,
+			)
+		);
+		if ( is_wp_error( $user_id ) ) {
+			return $user_id;
+		}
+
+		$user = get_user_by( 'id', (int) $user_id );
+		if ( ! $user instanceof \WP_User ) {
+			return self::wp_user_error( 'kosmos_bridge_user_create_unverified', 'WordPress created the user but did not return the resulting record.', 500 );
+		}
+
+		return array(
+			'created' => true,
+			'user'    => self::wp_user_response( $user ),
+		);
+	}
+
+	/**
+	 * @param mixed $input User identifier and a one-request password.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_wp_user_password( $input = array() ) {
+		$user_id  = self::get_input_positive_int( $input, 'user_id' );
+		$password = self::get_input_string( $input, 'password' );
+		if ( $user_id <= 0 || '' === $password ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_password_input', 'A valid user and password are required.', 400 );
+		}
+		if ( strlen( $password ) < 12 ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_password', 'The password must contain at least 12 characters.', 400 );
+		}
+		$user = get_user_by( 'id', $user_id );
+		if ( ! $user instanceof \WP_User ) {
+			return self::wp_user_error( 'kosmos_bridge_user_not_found', 'The requested WordPress user no longer exists.', 404 );
+		}
+
+		wp_set_password( $password, $user_id );
+		$updated = get_user_by( 'id', $user_id );
+		if ( ! $updated instanceof \WP_User ) {
+			return self::wp_user_error( 'kosmos_bridge_user_password_unverified', 'WordPress did not return the changed user record.', 500 );
+		}
+		return array(
+			'password_updated' => true,
+			'user'             => self::wp_user_response( $updated ),
+		);
+	}
+
+	/**
+	 * @param mixed $input User identifier and explicit reassignment target.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_delete_wp_user( $input = array() ) {
+		if ( is_multisite() ) {
+			return self::wp_user_error( 'kosmos_bridge_multisite_user_delete_blocked', 'Deleting users through Kosmos Bridge is not enabled for WordPress multisite.', 409 );
+		}
+		$user_id          = self::get_input_positive_int( $input, 'user_id' );
+		$reassign_user_id = self::get_input_positive_int( $input, 'reassign_to_user_id' );
+		if ( $user_id <= 0 || $reassign_user_id <= 0 || $user_id === $reassign_user_id ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_delete_input', 'A user and a different replacement user are required.', 400 );
+		}
+		$user        = get_user_by( 'id', $user_id );
+		$replacement = get_user_by( 'id', $reassign_user_id );
+		if ( ! $user instanceof \WP_User || ! $replacement instanceof \WP_User ) {
+			return self::wp_user_error( 'kosmos_bridge_user_not_found', 'The user to delete or the replacement user no longer exists.', 404 );
+		}
+		if ( in_array( 'administrator', (array) $user->roles, true ) ) {
+			$user_counts = count_users();
+			$admin_count = isset( $user_counts['avail_roles']['administrator'] ) ? (int) $user_counts['avail_roles']['administrator'] : 0;
+			if ( $admin_count <= 1 ) {
+				return self::wp_user_error( 'kosmos_bridge_last_administrator_blocked', 'The last WordPress administrator cannot be deleted.', 409 );
+			}
+		}
+
+		require_once ABSPATH . 'wp-admin/includes/user.php';
+		if ( ! wp_delete_user( $user_id, $reassign_user_id ) ) {
+			return self::wp_user_error( 'kosmos_bridge_user_delete_failed', 'WordPress did not confirm deletion of the requested user.', 500 );
+		}
+
+		return array(
+			'deleted'               => true,
+			'deleted_user_id'       => $user_id,
+			'reassigned_to_user_id' => $reassign_user_id,
 		);
 	}
 
@@ -1957,6 +2152,42 @@ class Registry {
 				'output_schema' => self::plugin_activation_output_schema(),
 				'meta'          => self::mutation_meta(),
 			),
+			array(
+				'name'          => 'kosmos-bridge/list-wp-users',
+				'label'         => __( 'List WordPress Users', 'kosmos-bridge' ),
+				'description'   => __( 'Returns read-only WordPress user metadata without passwords or session data.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::empty_object_input_schema(),
+				'output_schema' => self::wp_user_list_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/create-wp-user',
+				'label'         => __( 'Create WordPress User', 'kosmos-bridge' ),
+				'description'   => __( 'Creates one WordPress user without returning the supplied password.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::wp_user_create_input_schema(),
+				'output_schema' => self::wp_user_mutation_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/update-wp-user-password',
+				'label'         => __( 'Update WordPress User Password', 'kosmos-bridge' ),
+				'description'   => __( 'Changes one WordPress user password without returning it.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::wp_user_password_input_schema(),
+				'output_schema' => self::wp_user_mutation_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
+				'name'          => 'kosmos-bridge/delete-wp-user',
+				'label'         => __( 'Delete WordPress User', 'kosmos-bridge' ),
+				'description'   => __( 'Deletes one WordPress user and reassigns content to another existing user.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::wp_user_delete_input_schema(),
+				'output_schema' => self::wp_user_delete_output_schema(),
+				'meta'          => self::destructive_mutation_meta(),
+			),
 		);
 	}
 
@@ -2004,6 +2235,15 @@ class Registry {
 		if ( 'kosmos-bridge/activate-plugin' === $ability_name ) {
 			return self::execute_activate_plugin( $input );
 		}
+		if ( 'kosmos-bridge/create-wp-user' === $ability_name ) {
+			return self::execute_create_wp_user( $input );
+		}
+		if ( 'kosmos-bridge/update-wp-user-password' === $ability_name ) {
+			return self::execute_update_wp_user_password( $input );
+		}
+		if ( 'kosmos-bridge/delete-wp-user' === $ability_name ) {
+			return self::execute_delete_wp_user( $input );
+		}
 
 		if ( null !== $input && ! empty( $input ) && 'kosmos-bridge/get-updraftplus-backup-status' !== $ability_name ) {
 			return null;
@@ -2026,6 +2266,8 @@ class Registry {
 				return self::execute_list_updraftplus_backups();
 			case 'kosmos-bridge/check-site-health':
 				return self::execute_check_site_health();
+			case 'kosmos-bridge/list-wp-users':
+				return self::execute_list_wp_users();
 		}
 
 		return null;
@@ -2125,6 +2367,124 @@ class Registry {
 				'expected_active'           => array( 'type' => 'boolean' ),
 			),
 			'required'   => array( 'plugin_file', 'expected_current_version', 'expected_target_version' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function empty_object_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'id'            => array( 'type' => 'integer' ),
+				'username'      => array( 'type' => 'string' ),
+				'display_name'  => array( 'type' => 'string' ),
+				'email'         => array( 'type' => 'string' ),
+				'roles'         => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'registered_at' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'id', 'username', 'display_name', 'email', 'roles', 'registered_at' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_list_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'available' => array( 'type' => 'boolean' ),
+				'users'     => array( 'type' => 'array', 'items' => self::wp_user_output_schema() ),
+				'message'   => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'available', 'users', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_create_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'username'     => array( 'type' => 'string' ),
+				'email'        => array( 'type' => 'string' ),
+				'password'     => array( 'type' => 'string' ),
+				'role'         => array( 'type' => 'string' ),
+				'display_name' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'username', 'email', 'password', 'role' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_password_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'user_id'  => array( 'type' => 'integer' ),
+				'password' => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'user_id', 'password' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_delete_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'user_id'             => array( 'type' => 'integer' ),
+				'reassign_to_user_id' => array( 'type' => 'integer' ),
+			),
+			'required'   => array( 'user_id', 'reassign_to_user_id' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_mutation_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'created'          => array( 'type' => 'boolean' ),
+				'password_updated' => array( 'type' => 'boolean' ),
+				'user'             => self::wp_user_output_schema(),
+			),
+			'required'   => array( 'user' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function wp_user_delete_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'deleted'               => array( 'type' => 'boolean' ),
+				'deleted_user_id'       => array( 'type' => 'integer' ),
+				'reassigned_to_user_id' => array( 'type' => 'integer' ),
+			),
+			'required'   => array( 'deleted', 'deleted_user_id', 'reassigned_to_user_id' ),
 		);
 	}
 
@@ -3450,6 +3810,59 @@ class Registry {
 		}
 
 		return trim( (string) $input[ $key ] );
+	}
+
+	/**
+	 * @param mixed  $input Ability input.
+	 * @param string $key Input field name.
+	 * @return int
+	 */
+	private static function get_input_positive_int( $input, $key ) {
+		if ( ! is_array( $input ) || ! isset( $input[ $key ] ) ) {
+			return 0;
+		}
+
+		$value = $input[ $key ];
+		if ( is_int( $value ) && $value > 0 ) {
+			return $value;
+		}
+
+		return is_string( $value ) && ctype_digit( $value ) && (int) $value > 0 ? (int) $value : 0;
+	}
+
+	/**
+	 * @param \WP_User $user WordPress user object.
+	 * @return array
+	 */
+	private static function wp_user_response( $user ) {
+		$registered_at = isset( $user->user_registered ) ? strtotime( (string) $user->user_registered . ' UTC' ) : false;
+		return array(
+			'id'            => (int) $user->ID,
+			'username'      => (string) $user->user_login,
+			'display_name'  => (string) $user->display_name,
+			'email'         => (string) $user->user_email,
+			'roles'         => array_values( array_map( 'strval', (array) $user->roles ) ),
+			'registered_at' => $registered_at ? gmdate( 'c', $registered_at ) : '',
+		);
+	}
+
+	/**
+	 * @param string $role WordPress role key.
+	 * @return bool
+	 */
+	private static function is_valid_wp_role( $role ) {
+		$roles = wp_roles();
+		return is_object( $roles ) && isset( $roles->roles[ $role ] );
+	}
+
+	/**
+	 * @param string $code Error code.
+	 * @param string $message Safe operator-facing error message.
+	 * @param int    $status HTTP status.
+	 * @return \WP_Error
+	 */
+	private static function wp_user_error( $code, $message, $status ) {
+		return new \WP_Error( $code, $message, array( 'status' => $status ) );
 	}
 
 	/**

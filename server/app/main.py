@@ -14,6 +14,7 @@ from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.site_user_snapshot import SiteUserSnapshot
 from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
@@ -27,6 +28,10 @@ def _ensure_phase_one_schema() -> None:
     """Apply the small additive schema changes used before Alembic is introduced."""
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+
+    if "site_user_snapshots" not in table_names:
+        SiteUserSnapshot.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created site_user_snapshots table.")
 
     if "fleet_refresh_settings" in table_names:
         columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}

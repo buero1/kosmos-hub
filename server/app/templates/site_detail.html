@@ -13,6 +13,7 @@
       <nav class="site-section-nav" aria-label="Customer site navigation">
         <a href="#updates">Aktualisierungen</a>
         <a href="#backups">Backups</a>
+        <a href="#users">Benutzer</a>
         <a href="#dashboard">Dashboard</a>
         <a href="#protocol">Protokoll</a>
       </nav>
@@ -38,6 +39,11 @@
       {% if request.query_params.get("maintenance") == "started" %}
         <p class="notice-success">{{ request.query_params.get("message") }}</p>
       {% elif request.query_params.get("maintenance") in ["blocked", "failed"] %}
+        <p class="notice-error">{{ request.query_params.get("message") }}</p>
+      {% endif %}
+      {% if request.query_params.get("users") == "ok" %}
+        <p class="notice-success">{{ request.query_params.get("message") }}</p>
+      {% elif request.query_params.get("users") in ["error", "unsupported"] %}
         <p class="notice-error">{{ request.query_params.get("message") }}</p>
       {% endif %}
 
@@ -363,6 +369,118 @@
         </div>
       </section>
 
+      <section id="users" class="site-section" aria-labelledby="users-heading">
+        <div class="section-heading site-section-heading">
+          <div>
+            <p class="eyebrow">WordPress access</p>
+            <h2 id="users-heading">Benutzer</h2>
+            <p class="subtle">Documented WordPress users can be added, have passwords changed, or be deleted with a required content reassignment.</p>
+          </div>
+          <form method="post" action="/sites/{{ site.id }}/users/refresh">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">Refresh users</button>
+          </form>
+        </div>
+
+        {% if user_inventory %}
+          <article class="card user-inventory-summary">
+            <p><strong>Checked:</strong> {{ user_inventory.snapshot.captured_at | berlin_time }}</p>
+            <p><strong>Users:</strong> {{ user_inventory.snapshot.user_count }}</p>
+            <p><strong>Bridge support:</strong> {{ "Available" if user_inventory.snapshot.available else "Bridge update required" }}</p>
+            {% if user_inventory.snapshot.message %}<p class="subtle">{{ user_inventory.snapshot.message }}</p>{% endif %}
+          </article>
+        {% else %}
+          <p class="notice-error">No WordPress user inventory has been stored yet. Refresh it once before making changes.</p>
+        {% endif %}
+
+        {% if user_inventory and user_inventory.snapshot.available %}
+          <details class="site-user-create">
+            <summary>Add WordPress user</summary>
+            <form class="site-user-form" method="post" action="/sites/{{ site.id }}/users">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label>Username<input name="username" required autocomplete="username"></label>
+              <label>Email<input name="email" type="email" required autocomplete="email"></label>
+              <label>Display name<input name="display_name" autocomplete="name"></label>
+              <label>Role
+                <select name="role">
+                  <option value="subscriber">Subscriber</option>
+                  <option value="contributor">Contributor</option>
+                  <option value="author">Author</option>
+                  <option value="editor">Editor</option>
+                  <option value="administrator">Administrator</option>
+                </select>
+              </label>
+              <label>New password<input class="password-input" name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+              <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
+              <div class="site-user-form-actions">
+                <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
+                <button class="button" type="submit">Create user</button>
+              </div>
+            </form>
+          </details>
+
+          <div class="table-scroll">
+            <table class="site-users-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Registered</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for wp_user in user_inventory.users %}
+                  <tr>
+                    <td><strong>{{ wp_user.username }}</strong><p class="subtle table-note">ID {{ wp_user.id }}</p></td>
+                    <td>{{ wp_user.display_name or "-" }}</td>
+                    <td>{{ wp_user.email or "-" }}</td>
+                    <td>{{ wp_user.roles | join(", ") or "-" }}</td>
+                    <td>{{ wp_user.registered_at | berlin_time if wp_user.registered_at else "-" }}</td>
+                    <td class="site-user-actions">
+                      <details>
+                        <summary>Change password</summary>
+                        <form class="site-user-form compact" method="post" action="/sites/{{ site.id }}/users/{{ wp_user.id }}/password">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                          <label>New password<input class="password-input" name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+                          <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
+                          <div class="site-user-form-actions">
+                            <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
+                            <button class="button" type="submit">Save password</button>
+                          </div>
+                        </form>
+                      </details>
+                      {% if user_inventory.users | length > 1 %}
+                        <details class="site-user-delete">
+                          <summary>Delete user</summary>
+                          <form class="site-user-form compact" method="post" action="/sites/{{ site.id }}/users/{{ wp_user.id }}/delete">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <label>Reassign content to
+                              <select name="reassign_to_user_id" required>
+                                <option value="">Choose a user</option>
+                                {% for replacement in user_inventory.users if replacement.id != wp_user.id %}
+                                  <option value="{{ replacement.id }}">{{ replacement.username }} (ID {{ replacement.id }})</option>
+                                {% endfor %}
+                              </select>
+                            </label>
+                            <label>Enter <strong>{{ wp_user.username }}</strong> to confirm<input name="confirmation_username" required autocomplete="off"></label>
+                            <button class="button button-danger" type="submit">Delete and reassign</button>
+                          </form>
+                        </details>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="6">No WordPress users were reported by this site.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+
       <section id="protocol" class="site-section maintenance-history" aria-labelledby="protocol-heading">
         <div class="section-heading site-section-heading">
           <div>
@@ -460,6 +578,28 @@
       });
       window.addEventListener("hashchange", showActiveSection);
       showActiveSection();
+    }());
+  </script>
+  <script>
+    (function () {
+      function securePassword() {
+        var alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*-_";
+        var bytes = new Uint32Array(20);
+        window.crypto.getRandomValues(bytes);
+        return Array.prototype.map.call(bytes, function (value) {
+          return alphabet.charAt(value % alphabet.length);
+        }).join("");
+      }
+
+      document.querySelectorAll("[data-generate-password]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var form = button.closest("form");
+          var password = securePassword();
+          form.querySelectorAll(".password-input, .password-confirmation").forEach(function (input) {
+            input.value = password;
+          });
+        });
+      });
     }());
   </script>
 {% endblock %}

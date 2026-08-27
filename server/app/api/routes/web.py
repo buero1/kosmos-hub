@@ -18,6 +18,7 @@ from app.services.site_inventory import SiteInventoryService
 from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
+from app.services.site_users import SiteUserService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
@@ -510,6 +511,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
         raise HTTPException(status_code=404, detail="Site not found.")
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     maintenance_runs = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_site_runs(site_id)
+    user_inventory = SiteUserService(db=db, cipher=get_secret_cipher()).get_latest_inventory(site_id)
     site_entries = [
         entry
         for entry in inventory_service.build_update_workbench(inventory_service.list_items(limit=1000))
@@ -523,6 +525,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
             "update_entries": site_entries,
             "csrf_token": get_csrf_token(request),
             "maintenance_runs": maintenance_runs,
+            "user_inventory": user_inventory,
             "removable_test_registration": _is_removable_empty_test_registration(site),
         },
     )
@@ -634,6 +637,107 @@ def refresh_site_backup_from_detail(
     return RedirectResponse(url=f"/sites/{site_id}?backup_refresh=ok", status_code=303)
 
 
+@router.post("/sites/{site_id}/users/refresh")
+def refresh_site_users_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        inventory = SiteUserService(db=db, cipher=get_secret_cipher()).refresh_site_users(site_id, actor=user.username)
+    except SiteMcpProxyError as exc:
+        return _site_users_redirect(site_id, "error", f"User inventory refresh failed: {exc.message}")
+    if inventory.snapshot.available:
+        return _site_users_redirect(site_id, "ok", f"Stored {inventory.snapshot.user_count} WordPress user(s).")
+    return _site_users_redirect(site_id, "unsupported", inventory.snapshot.message or "User inventory is not available on this Bridge version.")
+
+
+@router.post("/sites/{site_id}/users")
+def create_site_user_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    username: Annotated[str, Form()] = "",
+    email: Annotated[str, Form()] = "",
+    display_name: Annotated[str, Form()] = "",
+    role: Annotated[str, Form()] = "subscriber",
+    password: Annotated[str, Form()] = "",
+    password_confirmation: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    if password != password_confirmation:
+        return _site_users_redirect(site_id, "error", "Password confirmation does not match.")
+    try:
+        created = SiteUserService(db=db, cipher=get_secret_cipher()).create_user(
+            site_id=site_id,
+            username=username,
+            email=email,
+            password=password,
+            role=role,
+            display_name=display_name,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _site_users_redirect(site_id, "error", f"User was not created: {str(exc)}")
+    return _site_users_redirect(site_id, "ok", f"WordPress user {created['username']} was created.")
+
+
+@router.post("/sites/{site_id}/users/{user_id}/password")
+def update_site_user_password_from_detail(
+    site_id: int,
+    user_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    password_confirmation: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    if password != password_confirmation:
+        return _site_users_redirect(site_id, "error", "Password confirmation does not match.")
+    try:
+        changed = SiteUserService(db=db, cipher=get_secret_cipher()).update_password(
+            site_id=site_id,
+            user_id=user_id,
+            password=password,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _site_users_redirect(site_id, "error", f"Password was not changed: {str(exc)}")
+    return _site_users_redirect(site_id, "ok", f"Password changed for WordPress user {changed['username']}.")
+
+
+@router.post("/sites/{site_id}/users/{user_id}/delete")
+def delete_site_user_from_detail(
+    site_id: int,
+    user_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    reassign_to_user_id: Annotated[int, Form()] = 0,
+    confirmation_username: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        SiteUserService(db=db, cipher=get_secret_cipher()).delete_user(
+            site_id=site_id,
+            user_id=user_id,
+            reassign_to_user_id=reassign_to_user_id,
+            confirmed_username=confirmation_username,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _site_users_redirect(site_id, "error", f"User was not deleted: {str(exc)}")
+    return _site_users_redirect(site_id, "ok", "WordPress user was deleted and their content was reassigned.")
+
+
 @router.post("/sites/{site_id}/maintenance/updraftplus-backup")
 def start_updraftplus_backup_from_detail(
     site_id: int,
@@ -700,6 +804,23 @@ def _is_removable_empty_test_registration(site) -> bool:
         and not site.snapshots
         and not site.update_snapshots
         and not site.backup_snapshots
+        and not site.user_snapshots
         and not site.capabilities
         and not site.update_plan_items
     )
+
+
+def _site_users_redirect(site_id: int, result: str, message: str) -> RedirectResponse:
+    return RedirectResponse(
+        url=f"/sites/{site_id}?{urlencode({'users': result, 'message': message})}#users",
+        status_code=303,
+    )
+
+
+def _require_hub_admin(request: Request):
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only Hub administrators can manage WordPress users.")
+    return user

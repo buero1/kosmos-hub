@@ -48,5 +48,11 @@ class Site(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="desc(SiteBackupSnapshot.captured_at)",
     )
+    user_snapshots = relationship(
+        "SiteUserSnapshot",
+        back_populates="site",
+        cascade="all, delete-orphan",
+        order_by="desc(SiteUserSnapshot.captured_at)",
+    )
     maintenance_runs = relationship("MaintenanceRun", back_populates="site", cascade="all, delete-orphan")
     update_plan_items = relationship("UpdatePlanItem", back_populates="site", cascade="all, delete-orphan")
