@@ -150,7 +150,7 @@ def test_zoho_sync_preserves_an_encrypted_customer_profile_without_linking_sites
         assert site is not None and site.customer_id is None
 
 
-def test_zoho_sync_removes_prior_imports_outside_allowed_statuses_after_complete_filtered_search():
+def test_zoho_sync_preserves_existing_imports_not_returned_by_allowed_status_filter():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -193,10 +193,8 @@ def test_zoho_sync_removes_prior_imports_outside_allowed_statuses_after_complete
         db.commit()
 
         assert result.relevant_accounts == 1
-        assert result.removed_customers == 1
-        assert result.unlinked_sites == 1
-        assert db.get(Customer, obsolete.id) is None
-        assert db.get(Site, linked_site.id).customer_id is None
+        assert db.get(Customer, obsolete.id) is not None
+        assert db.get(Site, linked_site.id).customer_id == obsolete.id
 
 
 def test_zoho_request_surfaces_an_http_error_before_handling_empty_responses(monkeypatch):

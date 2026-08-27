@@ -40,7 +40,7 @@
       <p class="notice-success">The technical Zoho field mapping was refreshed.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "synced" %}
-      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_relevant", "0") }} relevant Accounts, {{ request.query_params.get("zoho_created", "0") }} created, {{ request.query_params.get("zoho_updated", "0") }} updated, and {{ request.query_params.get("zoho_removed", "0") }} previous non-matching imports removed. {{ request.query_params.get("zoho_candidates", "0") }} exact website-domain matches are ready for review.</p>
+      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_relevant", "0") }} allowed Accounts, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_candidates", "0") }} exact website-domain matches are ready for review.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>

@@ -132,8 +132,6 @@ class ZohoFieldMappingRow:
 class ZohoSyncResult:
     created_customers: int
     updated_customers: int
-    removed_customers: int
-    unlinked_sites: int
     relevant_accounts: int
     unique_site_match_candidates: int
     unmapped_fields: tuple[str, ...]
@@ -282,15 +280,12 @@ class ZohoCrmService:
         created_customers = 0
         updated_customers = 0
         unique_site_match_candidates = 0
-        unlinked_sites = 0
         synced_at = datetime.now(UTC)
-        relevant_zoho_ids: set[str] = set()
 
         for record in records:
             record_id = self._as_text(record.get("id"))
             if not record_id:
                 continue
-            relevant_zoho_ids.add(record_id)
 
             profile = self._build_profile(record, mapping, synced_at)
             name = self._as_text(record.get(mapping["customer_name"])) or f"Zoho Account {record_id}"
@@ -315,26 +310,13 @@ class ZohoCrmService:
             if website_domain and self._has_unique_unlinked_site_match(website_domain):
                 unique_site_match_candidates += 1
 
-        removed_customers = 0
-        existing_zoho_customers = list(self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all())
-        for customer in existing_zoho_customers:
-            if customer.zoho_id in relevant_zoho_ids:
-                continue
-            for site in list(customer.sites):
-                site.customer_id = None
-                unlinked_sites += 1
-            self.db.delete(customer)
-            removed_customers += 1
-
         connection.last_sync_at = synced_at
         connection.last_error = None
         self.db.flush()
         return ZohoSyncResult(
             created_customers=created_customers,
             updated_customers=updated_customers,
-            removed_customers=removed_customers,
-            unlinked_sites=unlinked_sites,
-            relevant_accounts=len(relevant_zoho_ids),
+            relevant_accounts=len(records),
             unique_site_match_candidates=unique_site_match_candidates,
             unmapped_fields=tuple(row.label for row in mapping_rows if row.api_name is None),
         )
