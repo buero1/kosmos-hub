@@ -234,12 +234,18 @@
         background: var(--accent-soft);
         color: #075f4e;
       }
-      .site-refresh-panel {
-        display: flex;
-        align-items: end;
-        justify-content: space-between;
-        gap: 1.25rem;
+      .site-action-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
         margin: 1.25rem 0;
+      }
+      .site-action-card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1rem;
+        min-width: 0;
         padding: 1.15rem;
         border: 1px solid var(--border);
         border-radius: 18px;
@@ -256,8 +262,8 @@
         border-radius: 18px;
         background: #fbf0e9;
       }
-      .site-refresh-panel h3,
-      .site-refresh-panel p,
+      .site-action-card h3,
+      .site-action-card p,
       .site-removal-panel h3,
       .site-removal-panel p { margin: 0.25rem 0; }
       button.button.button-danger {
@@ -385,8 +391,70 @@
       .detail-list .card p {
         margin: 0.25rem 0;
       }
+      .capability-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+        margin: 0.75rem 0;
+      }
+      .capability-summary p {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        margin: 0 !important;
+        padding: 0.55rem 0.6rem;
+        border-radius: 12px;
+        background: var(--accent-soft);
+      }
+      .capability-summary strong {
+        color: var(--accent);
+        font-size: 1.15rem;
+      }
+      .capability-summary span {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .capability-details {
+        margin-top: 0.85rem;
+      }
+      .capability-details summary {
+        color: var(--accent);
+        cursor: pointer;
+        font-weight: 700;
+      }
+      .capability-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.75rem;
+      }
+      .capability-tag {
+        max-width: 100%;
+        overflow: hidden;
+        padding: 0.3rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--paper);
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        overflow-wrap: anywhere;
+      }
       .maintenance-run-list {
         margin: 0 0 1.5rem;
+      }
+      .latest-maintenance-run {
+        margin-bottom: 1.5rem;
+      }
+      .maintenance-step-summary {
+        margin-top: 0.85rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border);
+      }
+      .maintenance-step-summary p {
+        margin: 0.4rem 0 !important;
+      }
+      .maintenance-history {
+        margin-top: 1.75rem;
       }
       .maintenance-run-card .notice-error {
         margin: 0.75rem 0;
@@ -417,9 +485,8 @@
         .plan-panel {
           grid-template-columns: 1fr;
         }
-        .site-refresh-panel {
-          align-items: flex-start;
-          flex-direction: column;
+        .site-action-grid {
+          grid-template-columns: 1fr;
         }
         .site-removal-panel {
           align-items: flex-start;

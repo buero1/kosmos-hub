@@ -68,42 +68,71 @@
     </article>
     <article class="card">
       <h3>Stored Capabilities</h3>
-      <p><strong>Count:</strong> {{ site.capabilities | length }}</p>
-      {% for capability in site.capabilities[:8] %}
-        <p><strong>{{ capability.ability_name }}</strong></p>
-        <p class="subtle">{{ capability.provider }} · readonly={{ capability.read_only }} · destructive={{ capability.destructive }}</p>
+      {% set read_only_capabilities = site.capabilities | selectattr("read_only") | list %}
+      {% set writable_capabilities = site.capabilities | rejectattr("read_only") | list %}
+      {% set destructive_capabilities = site.capabilities | selectattr("destructive") | list %}
+      {% if site.capabilities %}
+        <div class="capability-summary">
+          <p><strong>{{ site.capabilities | length }}</strong><span>registered</span></p>
+          <p><strong>{{ read_only_capabilities | length }}</strong><span>read-only</span></p>
+          <p><strong>{{ writable_capabilities | length }}</strong><span>write actions</span></p>
+          <p><strong>{{ destructive_capabilities | length }}</strong><span>high risk</span></p>
+        </div>
+        <details class="capability-details">
+          <summary>Show all capabilities</summary>
+          <div class="capability-tags">
+            {% for capability in site.capabilities %}
+              <span class="capability-tag">{{ capability.ability_name }}</span>
+            {% endfor %}
+          </div>
+        </details>
       {% else %}
         <p>No capability inventory stored yet.</p>
-      {% endfor %}
+      {% endif %}
     </article>
   </section>
-  <section class="site-refresh-panel">
-    <div>
-      <p class="eyebrow">Live data</p>
-      <h3>Refresh current status</h3>
-      <p class="subtle">Fetches the Bridge version, WordPress environment and available updates directly from this site. It does not install or change anything.</p>
-    </div>
-    <form method="post" action="/sites/{{ site.id }}/refresh">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button" type="submit">Refresh status and updates</button>
-    </form>
+  {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
+  {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "equalto", "updraftplus-backup") | list %}
+  <section class="site-action-grid" aria-label="Site actions">
+    <article class="site-action-card">
+      <div>
+        <p class="eyebrow">Live data</p>
+        <h3>Status and updates</h3>
+        <p class="subtle">Read the current WordPress, plugin, theme, and update state. No changes are made.</p>
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/refresh">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-secondary" type="submit">Refresh status</button>
+      </form>
+    </article>
+    <article class="site-action-card">
+      <div>
+        <p class="eyebrow">Read-only check</p>
+        <h3>UpdraftPlus backups</h3>
+        <p class="subtle">Read the latest complete backup metadata. No backup is created, changed, or removed.</p>
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/backup-refresh">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-secondary" type="submit">Check backups</button>
+      </form>
+    </article>
+    <article class="site-action-card">
+      <div>
+        <p class="eyebrow">Maintenance</p>
+        <h3>Verified UpdraftPlus backup</h3>
+        <p class="subtle">Create and verify one protected backup, then clean up at most one eligible older protected backup.</p>
+      </div>
+      <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup is running" if running_backup_runs else "Start backup" }}</button>
+      </form>
+    </article>
   </section>
   {% if request.query_params.get("refresh") == "ok" %}
     <p class="notice-success">Current status and update data were refreshed successfully.</p>
   {% elif request.query_params.get("refresh") == "error" %}
     <p class="notice-error">Refresh failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
-  <section class="site-refresh-panel">
-    <div>
-      <p class="eyebrow">Read-only backup check</p>
-      <h3>Refresh UpdraftPlus backup status</h3>
-      <p class="subtle">Reads only the metadata of the latest complete backup. It does not create, download, restore or modify backups.</p>
-    </div>
-    <form method="post" action="/sites/{{ site.id }}/backup-refresh">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button button-secondary" type="submit">Check backup status</button>
-    </form>
-  </section>
   {% if request.query_params.get("backup_refresh") == "ok" %}
     {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
     {% if latest_backup and latest_backup.backup_available and latest_backup.backup_complete %}
@@ -114,19 +143,6 @@
   {% elif request.query_params.get("backup_refresh") == "error" %}
     <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
   {% endif %}
-  {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
-  {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "equalto", "updraftplus-backup") | list %}
-  <section class="site-refresh-panel">
-    <div>
-      <p class="eyebrow">Maintenance pilot</p>
-      <h3>Create, verify, and clean up a fresh UpdraftPlus backup</h3>
-      <p class="subtle">Starts one protected full backup using the site&apos;s existing destination, verifies it, then removes the oldest eligible complete backup marked for manual deletion, if one exists. Partial backups remain untouched. Cleanup includes the configured remote storage. No plugin update is performed.</p>
-    </div>
-    <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup maintenance is running" if running_backup_runs else "Start verified backup" }}</button>
-    </form>
-  </section>
   {% if request.query_params.get("maintenance") == "started" %}
     <p class="notice-success">{{ request.query_params.get("message") }}</p>
   {% elif request.query_params.get("maintenance") in ["blocked", "failed"] %}
@@ -136,38 +152,33 @@
     <section>
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Maintenance record</p>
-          <h2>Recent maintenance runs</h2>
-          <p class="subtle">Every backup and direct WordPress, theme, or plugin update remains documented here. While a run is active, this page refreshes automatically and shows its current stage.</p>
+          <p class="eyebrow">Latest activity</p>
+          <h2>{{ "Current maintenance run" if running_maintenance_runs else "Last maintenance run" }}</h2>
+          <p class="subtle">The full maintenance log is shown below the update table.</p>
         </div>
       </div>
-      <div class="detail-list maintenance-run-list">
-        {% for run in maintenance_runs %}
-          <article class="card maintenance-run-card">
-            <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
-            <p><strong>Run:</strong> #{{ run.id }}</p>
-            <p><strong>Type:</strong> {{ run.kind | replace("-", " ") | title }}</p>
-            <p><strong>Started:</strong> {{ run.started_at }}</p>
-            <p><strong>Completed:</strong> {{ run.completed_at or "Still running" }}</p>
-            {% if run.kind == "updraftplus-backup" and run.status == "running" %}
-              <p><strong>Bridge stage:</strong> {{ run.result_json.bridge_status | replace("-", " ") | title }}</p>
-              {% if run.result_json.bridge_status_message %}<p class="subtle">{{ run.result_json.bridge_status_message }}</p>{% endif %}
-            {% endif %}
-            {% if run.kind == "updraftplus-backup" and run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ run.result_json.backup_at }}</p>{% endif %}
-            {% if run.kind == "direct-plugin-update" %}
-              <p><strong>{{ run.result_json.update_kind | default("plugin", true) | title }}:</strong> {{ run.result_json.update_name or run.result_json.plugin_name }}</p>
-              <p><strong>Versions:</strong> {{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
-              <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
-              {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
-            {% endif %}
-            {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
-            {% for step in run.steps %}
-              <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}</p>
-              {% if step.detail %}<p class="subtle">{{ step.detail }}</p>{% endif %}
-            {% endfor %}
-          </article>
-        {% endfor %}
-      </div>
+      {% set latest_run = running_maintenance_runs[0] if running_maintenance_runs else maintenance_runs[0] %}
+      <article class="card maintenance-run-card latest-maintenance-run">
+        <p><span class="pill pill-{{ latest_run.status }}">{{ latest_run.status }}</span></p>
+        <p><strong>Run:</strong> #{{ latest_run.id }} · {{ latest_run.kind | replace("-", " ") | title }}</p>
+        <p><strong>Started:</strong> {{ latest_run.started_at }} · <strong>Completed:</strong> {{ latest_run.completed_at or "Still running" }}</p>
+        {% if latest_run.kind == "updraftplus-backup" and latest_run.status == "running" %}
+          <p><strong>Bridge stage:</strong> {{ latest_run.result_json.bridge_status | replace("-", " ") | title }}</p>
+          {% if latest_run.result_json.bridge_status_message %}<p class="subtle">{{ latest_run.result_json.bridge_status_message }}</p>{% endif %}
+        {% endif %}
+        {% if latest_run.kind == "updraftplus-backup" and latest_run.result_json.backup_at %}<p><strong>Verified backup:</strong> {{ latest_run.result_json.backup_at }}</p>{% endif %}
+        {% if latest_run.kind == "direct-plugin-update" %}
+          <p><strong>{{ latest_run.result_json.update_kind | default("plugin", true) | title }}:</strong> {{ latest_run.result_json.update_name or latest_run.result_json.plugin_name }} · {{ latest_run.result_json.current_version }} → {{ latest_run.result_json.target_version }}</p>
+          <p><strong>Stage:</strong> {{ latest_run.result_json.stage | replace("-", " ") | title }}</p>
+          {% if latest_run.result_json.stage_message %}<p class="subtle">{{ latest_run.result_json.stage_message }}</p>{% endif %}
+        {% endif %}
+        {% if latest_run.error_message %}<p class="notice-error">{{ latest_run.error_message }}</p>{% endif %}
+        <div class="maintenance-step-summary">
+          {% for step in latest_run.steps %}
+            <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}{% if step.detail %} · {{ step.detail }}{% endif %}</p>
+          {% endfor %}
+        </div>
+      </article>
     </section>
   {% endif %}
   {% if running_maintenance_runs %}
@@ -305,5 +316,55 @@
       </table>
     </div>
   </section>
+  {% set historical_runs = maintenance_runs | rejectattr("id", "equalto", latest_run.id) | list if maintenance_runs else [] %}
+  {% if historical_runs %}
+    <section class="maintenance-history">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Maintenance record</p>
+          <h2>Recent maintenance runs</h2>
+          <p class="subtle">Previous backup and direct-update runs remain documented here.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Type</th>
+              <th>Target</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Completed</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in historical_runs %}
+              <tr>
+                <td>#{{ run.id }}</td>
+                <td>{{ run.kind | replace("-", " ") | title }}</td>
+                <td>
+                  {% if run.kind == "direct-plugin-update" %}
+                    <strong>{{ run.result_json.update_name or run.result_json.plugin_name }}</strong>
+                    <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
+                  {% elif run.kind == "updraftplus-backup" %}
+                    <strong>UpdraftPlus backup</strong>
+                    {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at }}</p>{% endif %}
+                  {% else %}
+                    <span class="subtle">-</span>
+                  {% endif %}
+                </td>
+                <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
+                <td>{{ run.started_at }}</td>
+                <td>{{ run.completed_at or "Still running" }}</td>
+                <td>{{ run.error_message or run.result_json.stage_message or "Completed" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
   <a class="button" href="/sites">Back to sites</a>
 {% endblock %}
