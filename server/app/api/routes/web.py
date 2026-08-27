@@ -55,6 +55,7 @@ def sites_page(
     q: str = "",
     plugin: str = "",
     status: str = "",
+    customer_status: str = "",
     inventory: Literal["all", "present", "missing"] = "all",
     updates: Literal["all", "available", "wordpress", "plugins", "themes", "none", "missing"] = "all",
     update_plugin: str = "",
@@ -68,6 +69,7 @@ def sites_page(
         query=q,
         plugin=plugin,
         status=status,
+        customer_status=customer_status,
         inventory_state=inventory,
         updates_state=updates,
         update_plugin=update_plugin,
@@ -84,6 +86,7 @@ def sites_page(
                 "q": q,
                 "plugin": plugin,
                 "status": status,
+                "customer_status": customer_status,
                 "inventory": inventory,
                 "updates": updates,
                 "update_plugin": update_plugin,
@@ -92,6 +95,13 @@ def sites_page(
             },
             "filter_options": {
                 "statuses": sorted({item.site.status for item in all_items}),
+                "customer_statuses": sorted(
+                    {
+                        item.site.customer.zoho_status
+                        for item in all_items
+                        if item.site.customer is not None and item.site.customer.zoho_status
+                    }
+                ),
                 "wordpress_versions": sorted(
                     {item.site.wordpress_version for item in all_items if item.site.wordpress_version},
                     reverse=True,

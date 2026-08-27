@@ -78,6 +78,16 @@
           {% endfor %}
         </select>
       </label>
+      <label>
+        <span>Customer status</span>
+        <select name="customer_status">
+          <option value="">All customers</option>
+          <option value="unlinked" {% if filters.customer_status == "unlinked" %}selected{% endif %}>No linked customer</option>
+          {% for customer_status in filter_options.customer_statuses %}
+            <option value="{{ customer_status }}" {% if filters.customer_status == customer_status %}selected{% endif %}>{{ customer_status }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <div class="filter-actions">
         <button class="button" type="submit">Apply filters</button>
         <a href="/sites">Reset</a>

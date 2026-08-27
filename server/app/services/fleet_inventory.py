@@ -175,6 +175,7 @@ class FleetInventoryService:
         query: str = "",
         plugin: str = "",
         status: str = "",
+        customer_status: str = "",
         inventory_state: str = "all",
         updates_state: str = "all",
         update_plugin: str = "",
@@ -188,6 +189,12 @@ class FleetInventoryService:
         def matches(item: FleetInventoryItem) -> bool:
             if status and item.site.status != status:
                 return False
+            if customer_status == "unlinked" and item.site.customer is not None:
+                return False
+            if customer_status and customer_status != "unlinked":
+                customer = item.site.customer
+                if customer is None or customer.zoho_status != customer_status:
+                    return False
             if wordpress_version and item.site.wordpress_version != wordpress_version:
                 return False
             if bridge_version and item.site.bridge_version != bridge_version:
