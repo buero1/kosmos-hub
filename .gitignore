@@ -9,5 +9,6 @@ __pycache__/
 dist/
 server/.env
 server/.venv/
+server/*.egg-info/
 wordpress-plugin/vendor/
 wordpress-plugin/composer.lock
