@@ -22,14 +22,16 @@
 
     <form class="filter-panel customer-filter-panel" method="get" action="/customers">
       <label>
-        <span>Customer or website</span>
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, status, or domain">
+        <span>Search customer data</span>
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, address, contact, note, or domain">
       </label>
       <label>
-        <span>View</span>
-        <select name="view">
-          <option value="all" {% if filters.view == "all" %}selected{% endif %}>All imported customers</option>
-          <option value="candidates" {% if filters.view == "candidates" %}selected{% endif %}>Exact site matches to review</option>
+        <span>Status</span>
+        <select name="status">
+          {% for option in status_options %}
+            <option value="{{ option }}" {% if filters.status == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+          <option value="all" {% if filters.status == "all" %}selected{% endif %}>All statuses</option>
         </select>
       </label>
       <div class="filter-actions">

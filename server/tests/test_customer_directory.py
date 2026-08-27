@@ -36,7 +36,7 @@ def test_customer_directory_requires_explicit_review_before_linking_exact_domain
         db.commit()
 
         service = _service(db)
-        entry = service.list_entries(candidates_only=True)[0]
+        entry = service.list_entries()[0]
         assert entry.customer.id == customer.id
         assert entry.exact_match_candidate is not None
         assert entry.exact_match_candidate.id == site.id
@@ -59,7 +59,7 @@ def test_customer_directory_rejects_non_matching_or_ambiguous_sites():
         db.commit()
 
         service = _service(db)
-        assert service.list_entries(candidates_only=True) == []
+        assert service.list_entries()[0].exact_match_candidate is None
 
         try:
             service.link_exact_match(customer_id=customer.id, site_id=other_site.id)
@@ -86,7 +86,15 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
             name="Example Customer",
             zoho_id="zoho-1",
             encrypted_profile_json=cipher.encrypt(
-                json.dumps({"fields": {"Status": "Aktuell", "Kontakt-E-Mail": "team@example-customer.de"}})
+                json.dumps(
+                    {
+                        "fields": {
+                            "Status": "Aktuell",
+                            "Kontakt-E-Mail": "team@example-customer.de",
+                            "Rechnungsadresse - Stadt": "Muenchen",
+                        }
+                    }
+                )
             ),
         )
         db.add(customer)
@@ -96,8 +104,11 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
         detail = _service(db).get_detail(customer_id=customer.id)
 
         assert entry.account_status == "Aktuell"
+        assert len(_service(db).list_entries(query="muenchen", status="Aktuell")) == 1
+        assert _service(db).list_entries(status="Neu") == []
         assert detail is not None
         assert [(field.label, field.value) for field in detail.profile_fields] == [
             ("Status", "Aktuell"),
             ("Kontakt-E-Mail", "team@example-customer.de"),
+            ("Rechnungsadresse - Stadt", "Muenchen"),
         ]

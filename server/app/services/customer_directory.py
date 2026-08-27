@@ -41,22 +41,25 @@ class CustomerDirectoryService:
         self.db = db
         self.cipher = cipher
 
-    def list_entries(self, *, query: str = "", candidates_only: bool = False) -> list[CustomerDirectoryEntry]:
+    def list_entries(self, *, query: str = "", status: str | None = None) -> list[CustomerDirectoryEntry]:
         customers = list(self.db.scalars(select(Customer).order_by(Customer.name.asc(), Customer.id.asc())).all())
         linked_by_customer, unlinked_by_domain = self._site_maps()
 
         needle = query.strip().casefold()
         entries: list[CustomerDirectoryEntry] = []
         for customer in customers:
-            entry = self._build_entry(customer, linked_by_customer, unlinked_by_domain)
+            profile_fields = self._profile_fields(customer)
+            entry = self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields)
+            if status is not None and (entry.account_status or "").casefold() != status.casefold():
+                continue
+            searchable_values = [customer.name, customer.external_id, customer.website_domain, customer.zoho_id]
+            searchable_values.extend(f"{field.label} {field.value or ''}" for field in profile_fields)
             searchable = " ".join(
                 value
-                for value in (customer.name, entry.account_status, customer.external_id, customer.website_domain, customer.zoho_id)
+                for value in searchable_values
                 if value
             ).casefold()
             if needle and needle not in searchable:
-                continue
-            if candidates_only and entry.exact_match_candidate is None:
                 continue
             entries.append(entry)
         return entries

@@ -24,6 +24,7 @@ from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
+from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -109,18 +110,22 @@ def customers_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
-    view: Literal["all", "candidates"] = "all",
+    status: str = "Aktuell",
 ):
+    valid_statuses = {*ZOHO_RELEVANT_ACCOUNT_STATUSES, "all"}
+    if status not in valid_statuses:
+        raise HTTPException(status_code=422, detail="Unknown customer status filter.")
     service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
-    entries = service.list_entries(query=q, candidates_only=view == "candidates")
-    candidate_count = len(service.list_entries(candidates_only=True))
+    entries = service.list_entries(query=q, status=None if status == "all" else status)
+    candidate_count = sum(entry.exact_match_candidate is not None for entry in service.list_entries())
     return templates.TemplateResponse(
         request,
         "customers.html",
         {
             "entries": entries,
             "candidate_count": candidate_count,
-            "filters": {"q": q, "view": view},
+            "filters": {"q": q, "status": status},
+            "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
             "csrf_token": get_csrf_token(request),
         },
     )
