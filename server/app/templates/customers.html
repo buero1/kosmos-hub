@@ -23,7 +23,7 @@
     <form class="filter-panel customer-filter-panel" method="get" action="/customers">
       <label>
         <span>Customer or website</span>
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, number, or domain">
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, status, or domain">
       </label>
       <label>
         <span>View</span>
@@ -44,8 +44,8 @@
         <thead>
           <tr>
             <th>Customer</th>
-            <th>Customer number</th>
-            <th>Zoho website</th>
+            <th>Status</th>
+            <th>Website</th>
             <th>Linked Hub sites</th>
             <th>Exact match review</th>
           </tr>
@@ -54,10 +54,10 @@
           {% for entry in entries %}
             <tr>
               <td>
-                <strong>{{ entry.customer.name }}</strong>
+                <a href="/customers/{{ entry.customer.id }}"><strong>{{ entry.customer.name }}</strong></a>
                 <p class="subtle table-note">Zoho ID {{ entry.customer.zoho_id or "-" }}</p>
               </td>
-              <td>{{ entry.customer.external_id or "-" }}</td>
+              <td><span class="pill">{{ entry.account_status or "Not available" }}</span></td>
               <td>{{ entry.customer.website_domain or "-" }}</td>
               <td>
                 {% for site in entry.linked_sites %}

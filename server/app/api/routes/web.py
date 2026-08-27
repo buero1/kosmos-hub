@@ -111,7 +111,7 @@ def customers_page(
     q: str = "",
     view: Literal["all", "candidates"] = "all",
 ):
-    service = CustomerDirectoryService(db=db)
+    service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
     entries = service.list_entries(query=q, candidates_only=view == "candidates")
     candidate_count = len(service.list_entries(candidates_only=True))
     return templates.TemplateResponse(
@@ -121,6 +121,25 @@ def customers_page(
             "entries": entries,
             "candidate_count": candidate_count,
             "filters": {"q": q, "view": view},
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.get("/customers/{customer_id}", response_class=HTMLResponse)
+def customer_detail_page(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_detail(customer_id=customer_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+    return templates.TemplateResponse(
+        request,
+        "customer_detail.html",
+        {
+            "detail": detail,
             "csrf_token": get_csrf_token(request),
         },
     )
@@ -140,7 +159,7 @@ def link_customer_site(
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     try:
-        customer, site = CustomerDirectoryService(db=db).link_exact_match(customer_id=customer_id, site_id=site_id)
+        customer, site = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).link_exact_match(customer_id=customer_id, site_id=site_id)
     except ValueError as exc:
         return RedirectResponse(
             url=f"/customers?{urlencode({'linked': 'error', 'message': str(exc)})}",

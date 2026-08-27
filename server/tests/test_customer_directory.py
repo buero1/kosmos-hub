@@ -1,6 +1,9 @@
+import json
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.site import Site
@@ -18,6 +21,10 @@ def _site(*, site_id: int, domain: str, customer_id: int | None = None) -> Site:
     )
 
 
+def _service(db: Session) -> CustomerDirectoryService:
+    return CustomerDirectoryService(db=db, cipher=SecretCipher("a" * 32))
+
+
 def test_customer_directory_requires_explicit_review_before_linking_exact_domain():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -28,7 +35,7 @@ def test_customer_directory_requires_explicit_review_before_linking_exact_domain
         db.add_all([customer, site])
         db.commit()
 
-        service = CustomerDirectoryService(db=db)
+        service = _service(db)
         entry = service.list_entries(candidates_only=True)[0]
         assert entry.customer.id == customer.id
         assert entry.exact_match_candidate is not None
@@ -51,7 +58,7 @@ def test_customer_directory_rejects_non_matching_or_ambiguous_sites():
         db.add_all([customer, same_domain_first, same_domain_second, other_site])
         db.commit()
 
-        service = CustomerDirectoryService(db=db)
+        service = _service(db)
         assert service.list_entries(candidates_only=True) == []
 
         try:
@@ -67,3 +74,30 @@ def test_customer_directory_rejects_non_matching_or_ambiguous_sites():
             assert "ambiguous" in str(exc)
         else:
             raise AssertionError("An ambiguous domain must not be linkable.")
+
+
+def test_customer_directory_exposes_status_and_decrypted_profile_fields():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Example Customer",
+            zoho_id="zoho-1",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps({"fields": {"Status": "Aktuell", "Kontakt-E-Mail": "team@example-customer.de"}})
+            ),
+        )
+        db.add(customer)
+        db.commit()
+
+        entry = _service(db).list_entries()[0]
+        detail = _service(db).get_detail(customer_id=customer.id)
+
+        assert entry.account_status == "Aktuell"
+        assert detail is not None
+        assert [(field.label, field.value) for field in detail.profile_fields] == [
+            ("Status", "Aktuell"),
+            ("Kontakt-E-Mail", "team@example-customer.de"),
+        ]

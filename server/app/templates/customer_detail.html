@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <a class="button button-secondary" href="/customers">Back to customers</a>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">CRM customer</p>
+        <h2>{{ detail.entry.customer.name }}</h2>
+        <p class="subtle">Imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
+      </div>
+      <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
+    </div>
+
+    <section class="detail-list">
+      <article class="card">
+        <h3>Hub data</h3>
+        <dl class="metadata-list">
+          <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
+          <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
+          <div><dt>Last changed in Zoho</dt><dd>{{ detail.entry.customer.zoho_modified_at or "-" }}</dd></div>
+          <div><dt>Last synchronized</dt><dd>{{ detail.entry.customer.zoho_synced_at or "-" }}</dd></div>
+        </dl>
+      </article>
+      <article class="card">
+        <h3>Linked Hub sites</h3>
+        {% for site in detail.entry.linked_sites %}
+          <p><a href="/sites/{{ site.id }}">{{ site.domain }}</a></p>
+        {% else %}
+          <p class="subtle">No Hub site linked yet.</p>
+        {% endfor %}
+        {% if detail.entry.exact_match_candidate %}
+          <p class="subtle">Exact unlinked match available: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>. It can be linked from the customer directory.</p>
+        {% endif %}
+      </article>
+    </section>
+
+    <section>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Zoho CRM</p>
+          <h3>Customer data</h3>
+          <p class="subtle">All fields imported from this Zoho Account.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            {% for field in detail.profile_fields %}
+              <tr><td><strong>{{ field.label }}</strong></td><td>{{ field.value or "-" }}</td></tr>
+            {% else %}
+              <tr><td colspan="2">No Zoho customer data is available for this record.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+{% endblock %}
