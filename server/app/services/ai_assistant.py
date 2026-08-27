@@ -54,7 +54,7 @@ class HubAssistantService:
 
     def _build_readonly_context(self) -> tuple[dict[str, Any], datetime | None]:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        items = inventory.list_items(limit=200)
+        items = inventory.list_items(limit=1000)
         update_entries = inventory.build_update_workbench(items)
         plan_service = UpdatePlanService(db=self.db, cipher=self.cipher)
         plans = plan_service.list_plans()[:50]

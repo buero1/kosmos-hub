@@ -81,7 +81,7 @@ class UpdatePlanService:
         created_by: str,
     ) -> UpdatePlan:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
         entries_by_key = {entry.plan_key: entry for entry in entries}
         requested_keys = list(dict.fromkeys(key for key in selected_keys if key))
 
@@ -517,7 +517,7 @@ class UpdatePlanService:
 
     def build_preflight(self, plan: UpdatePlan) -> list[UpdatePlanPreflightItem]:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
         current_entries = {
             (entry.site.id, entry.kind, entry.identifier): entry
             for entry in entries

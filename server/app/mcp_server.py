@@ -164,7 +164,7 @@ def search_sites(query: str = "") -> dict[str, Any]:
     """Search registered sites by domain or URL."""
     with SessionLocal() as db:
         repository = SiteRepository(db)
-        sites = repository.list_sites(limit=200)
+        sites = repository.list_sites(limit=1000)
         normalized_query = query.strip().lower()
         if normalized_query:
             sites = [
@@ -396,7 +396,7 @@ def search_site_inventory(
     with SessionLocal() as db:
         service = FleetInventoryService(db=db, cipher=get_secret_cipher())
         items = service.filter_items(
-            service.list_items(limit=200),
+            service.list_items(limit=1000),
             query=query,
             plugin=plugin,
             inventory_state=inventory_state,

@@ -36,7 +36,7 @@ def dashboard(request: Request, db: Annotated[Session, Depends(get_db)]):
     summary = DashboardSummary.model_validate(repository.get_dashboard_summary())
     latest_sites = repository.list_sites(limit=10)
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    inventory_summary = inventory_service.summarize(inventory_service.list_items(limit=200))
+    inventory_summary = inventory_service.summarize(inventory_service.list_items(limit=1000))
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -62,7 +62,7 @@ def sites_page(
     bridge: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    all_items = inventory_service.list_items(limit=200)
+    all_items = inventory_service.list_items(limit=1000)
     items = inventory_service.filter_items(
         all_items,
         query=q,
@@ -217,7 +217,7 @@ def update_workbench_page(
     message: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    all_items = inventory_service.list_items(limit=200)
+    all_items = inventory_service.list_items(limit=1000)
     entries = inventory_service.build_update_workbench(all_items)
     selected_site_id = int(site_id) if site_id.isdigit() else None
     filtered_entries = inventory_service.filter_update_workbench(
@@ -502,7 +502,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
     maintenance_runs = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_site_runs(site_id)
     site_entries = [
         entry
-        for entry in inventory_service.build_update_workbench(inventory_service.list_items(limit=200))
+        for entry in inventory_service.build_update_workbench(inventory_service.list_items(limit=1000))
         if entry.site.id == site.id
     ]
     return templates.TemplateResponse(

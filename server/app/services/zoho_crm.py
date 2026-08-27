@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.hub_user import HubUser
-from app.models.site import Site
+from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
@@ -135,7 +136,9 @@ class ZohoSyncResult:
     synchronized_accounts: int
     visible_accounts: int
     hidden_customers: int
-    unique_site_match_candidates: int
+    created_sites: int
+    linked_sites: int
+    site_conflicts: int
     unmapped_fields: tuple[str, ...]
 
 
@@ -282,9 +285,12 @@ class ZohoCrmService:
         created_customers = 0
         updated_customers = 0
         visible_accounts = 0
-        unique_site_match_candidates = 0
+        created_sites = 0
+        linked_sites = 0
+        site_conflicts = 0
         synced_at = datetime.now(UTC)
         synchronized_zoho_ids: set[str] = set()
+        sites_by_domain = self._sites_by_normalized_domain()
 
         for record in records:
             record_id = self._as_text(record.get("id"))
@@ -318,8 +324,18 @@ class ZohoCrmService:
 
             if is_visible:
                 visible_accounts += 1
-            if is_visible and website_domain and self._has_unique_unlinked_site_match(website_domain):
-                unique_site_match_candidates += 1
+            if is_visible and website_domain:
+                site_result = self._synchronize_customer_site(
+                    customer=customer,
+                    website_domain=website_domain,
+                    sites_by_domain=sites_by_domain,
+                )
+                if site_result == "created":
+                    created_sites += 1
+                elif site_result == "linked":
+                    linked_sites += 1
+                elif site_result == "conflict":
+                    site_conflicts += 1
 
         existing_zoho_customers = list(self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all())
         for customer in existing_zoho_customers:
@@ -339,7 +355,9 @@ class ZohoCrmService:
             synchronized_accounts=len(records),
             visible_accounts=visible_accounts,
             hidden_customers=hidden_customers,
-            unique_site_match_candidates=unique_site_match_candidates,
+            created_sites=created_sites,
+            linked_sites=linked_sites,
+            site_conflicts=site_conflicts,
             unmapped_fields=tuple(row.label for row in mapping_rows if row.api_name is None),
         )
 
@@ -486,13 +504,46 @@ class ZohoCrmService:
             values[field.label] = record.get(api_name) if api_name else None
         return profile
 
-    def _has_unique_unlinked_site_match(self, website_domain: str) -> bool:
-        candidates = [
-            site
-            for site in self.db.scalars(select(Site).where(Site.customer_id.is_(None))).all()
-            if self.normalize_website_domain(site.domain) == website_domain
-        ]
-        return len(candidates) == 1
+    def _sites_by_normalized_domain(self) -> dict[str, list[Site]]:
+        sites_by_domain: dict[str, list[Site]] = {}
+        for site in self.db.scalars(select(Site)).all():
+            domain = self.normalize_website_domain(site.domain)
+            if domain:
+                sites_by_domain.setdefault(domain, []).append(site)
+        return sites_by_domain
+
+    def _synchronize_customer_site(
+        self,
+        *,
+        customer: Customer,
+        website_domain: str,
+        sites_by_domain: dict[str, list[Site]],
+    ) -> str:
+        """Create or safely reuse the Hub record for a current Zoho customer site."""
+        candidates = sites_by_domain.get(website_domain, [])
+        if any(site.customer_id == customer.id for site in candidates):
+            return "existing"
+
+        if len(candidates) == 1 and candidates[0].customer_id is None:
+            candidates[0].customer_id = customer.id
+            return "linked"
+
+        if candidates:
+            return "conflict"
+
+        home_url = f"https://{website_domain}/"
+        site = Site(
+            uuid=str(uuid.uuid4()),
+            customer_id=customer.id,
+            domain=website_domain,
+            home_url=home_url,
+            site_url=home_url,
+            status=SiteStatus.pending.value,
+        )
+        self.db.add(site)
+        self.db.flush()
+        sites_by_domain[website_domain] = [site]
+        return "created"
 
     @staticmethod
     def _is_relevant_account_status(value: object) -> bool:

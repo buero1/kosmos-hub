@@ -31,7 +31,18 @@ class SiteRegistrationService:
         raw_body: bytes,
     ) -> RegistrationResponse:
         site = self.repository.get_by_uuid(payload.site_uuid)
-        self._validate_headers(site=site, payload=payload, headers=headers, raw_body=raw_body)
+        adopted_preprovisioned_site = False
+        if site is None:
+            site = self._find_preprovisioned_site(str(payload.home_url))
+            adopted_preprovisioned_site = site is not None
+
+        self._validate_headers(
+            site=site,
+            payload=payload,
+            headers=headers,
+            raw_body=raw_body,
+            allow_bootstrap=adopted_preprovisioned_site,
+        )
 
         created = site is None
         if site is None:
@@ -41,6 +52,10 @@ class SiteRegistrationService:
                 registered_at=payload.registration_timestamp,
             )
             self.db.add(site)
+        elif adopted_preprovisioned_site:
+            # A Zoho-imported pending site has no credentials yet. Adopt the
+            # Bridge UUID only after its signed bootstrap request is validated.
+            site.uuid = payload.site_uuid
 
         site.domain = self._extract_domain(str(payload.home_url))
         site.home_url = str(payload.home_url)
@@ -63,7 +78,7 @@ class SiteRegistrationService:
         connection.endpoint = str(payload.mcp_endpoint or payload.site_url)
         connection.auth_type = "hmac-sha256"
         connection.status = "active"
-        if created:
+        if created or adopted_preprovisioned_site:
             if not payload.site_secret:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,7 +108,12 @@ class SiteRegistrationService:
         self.db.commit()
         self.db.refresh(site)
 
-        message = "Site created." if created else "Site updated."
+        if created:
+            message = "Site created."
+        elif adopted_preprovisioned_site:
+            message = "Pre-provisioned Zoho site connected."
+        else:
+            message = "Site updated."
         return RegistrationResponse(site_id=site.id, site_uuid=site.uuid, status=site.status, message=message)
 
     def _validate_headers(
@@ -103,6 +123,7 @@ class SiteRegistrationService:
         payload: RegistrationRequest,
         headers: RegistrationHeaders,
         raw_body: bytes,
+        allow_bootstrap: bool = False,
     ) -> None:
         if not all([headers.site_uuid, headers.timestamp, headers.nonce, headers.body_sha256, headers.signature]):
             raise HTTPException(
@@ -124,7 +145,7 @@ class SiteRegistrationService:
         if abs(datetime.now(UTC) - request_time) > timedelta(minutes=10):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Timestamp outside allowed window.")
 
-        if site is None:
+        if site is None or allow_bootstrap:
             if not payload.site_secret:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -183,8 +204,32 @@ class SiteRegistrationService:
             self.db.rollback()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Replay detected.") from exc
 
+    def _find_preprovisioned_site(self, home_url: str) -> Site | None:
+        expected_domain = self._normalize_domain(home_url)
+        if not expected_domain:
+            return None
+
+        candidates = []
+        for candidate in self.db.scalars(
+            select(Site).where(
+                Site.status == SiteStatus.pending.value,
+                Site.registered_at.is_(None),
+                Site.customer_id.is_not(None),
+            )
+        ).all():
+            if candidate.connections:
+                continue
+            if self._normalize_domain(candidate.domain) == expected_domain:
+                candidates.append(candidate)
+        return candidates[0] if len(candidates) == 1 else None
+
     def _extract_domain(self, url: str) -> str:
         return (urlparse(url).hostname or "").lower()
+
+    def _normalize_domain(self, value: str) -> str:
+        parsed = urlparse(value if "://" in value else f"//{value}")
+        domain = (parsed.hostname or "").lower().strip(".")
+        return domain[4:] if domain.startswith("www.") else domain
 
     def _is_auto_verified(self, domain: str) -> bool:
         domain = domain.lower()

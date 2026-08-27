@@ -45,7 +45,7 @@ class SiteRepository:
         )
         return self.db.scalar(statement)
 
-    def list_sites(self, limit: int = 100) -> list[Site]:
+    def list_sites(self, limit: int = 1000) -> list[Site]:
         statement = (
             select(Site)
             .options(selectinload(Site.connections), selectinload(Site.capabilities))

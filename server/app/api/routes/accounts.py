@@ -614,7 +614,8 @@ def sync_zoho_accounts(
         detail=(
             f"Synchronized {result.synchronized_accounts} Zoho Accounts: created {result.created_customers}, "
             f"updated {result.updated_customers}, {result.visible_accounts} visible, and {result.hidden_customers} hidden; "
-            f"{result.unique_site_match_candidates} visible unlinked sites have an exact domain match candidate."
+            f"created {result.created_sites} managed site records, linked {result.linked_sites} existing site records, "
+            f"and found {result.site_conflicts} site conflicts."
         ),
     )
     db.commit()
@@ -622,7 +623,8 @@ def sync_zoho_accounts(
         url=(
             f"/account?zoho=synced&zoho_created={result.created_customers}&zoho_updated={result.updated_customers}"
             f"&zoho_total={result.synchronized_accounts}&zoho_visible={result.visible_accounts}"
-            f"&zoho_hidden={result.hidden_customers}&zoho_candidates={result.unique_site_match_candidates}"
+            f"&zoho_hidden={result.hidden_customers}&zoho_sites_created={result.created_sites}"
+            f"&zoho_sites_linked={result.linked_sites}&zoho_site_conflicts={result.site_conflicts}"
         ),
         status_code=303,
     )

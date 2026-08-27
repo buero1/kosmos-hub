@@ -203,7 +203,7 @@ class FleetRefreshService:
     ) -> tuple[list[dict[str, Any]], int, int]:
         with SessionLocal() as db:
             repository = SiteRepository(db)
-            sites = repository.list_sites(limit=200)
+            sites = repository.list_sites(limit=1000)
             snapshots = repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
             update_snapshots = repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])
             now = datetime.now(UTC)
@@ -278,7 +278,7 @@ class FleetRefreshService:
     ) -> None:
         with SessionLocal() as db:
             inventory = FleetInventoryService(db=db, cipher=get_secret_cipher())
-            items = inventory.list_items(limit=200)
+            items = inventory.list_items(limit=1000)
             entries = inventory.build_update_workbench(items)
             version_service = OfficialPluginVersionService(db=db)
             jet_site_ids = cls._jet_sites_requiring_provider(
@@ -301,7 +301,7 @@ class FleetRefreshService:
                         "catalog_versions": len(crocoblock["versions"]),
                     }
                 )
-                items = inventory.list_items(limit=200)
+                items = inventory.list_items(limit=1000)
             elif jet_site_ids:
                 result["crocoblock"]["cached"] = len(jet_site_ids)
 
@@ -316,7 +316,7 @@ class FleetRefreshService:
                     source="Crocoblock Jet Dashboard",
                 )
             result["official_versions"] = official
-            refreshed_entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+            refreshed_entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
             result["mismatches"] = sum(1 for entry in refreshed_entries if entry.official_mismatch)
             write_audit_log(
                 db,

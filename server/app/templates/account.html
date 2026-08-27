@@ -40,7 +40,7 @@
       <p class="notice-success">The technical Zoho field mapping was refreshed.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "synced" %}
-      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_candidates", "0") }} visible exact website-domain matches are ready for review.</p>
+      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_sites_created", "0") }} customer websites were added for Bridge onboarding and {{ request.query_params.get("zoho_sites_linked", "0") }} existing sites were linked automatically. {{ request.query_params.get("zoho_site_conflicts", "0") }} domain conflicts need review.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
@@ -200,7 +200,7 @@
       <div>
         <p class="eyebrow">CRM integration</p>
         <h3>Zoho CRM Accounts</h3>
-        <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
+        <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
         {% if zoho_status.configured %}
           <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
           {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}

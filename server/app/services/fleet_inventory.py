@@ -162,7 +162,7 @@ class FleetInventoryService:
         self.cipher = cipher
         self.repository = SiteRepository(db)
 
-    def list_items(self, *, limit: int = 200) -> list[FleetInventoryItem]:
+    def list_items(self, *, limit: int = 1000) -> list[FleetInventoryItem]:
         sites = self.repository.list_sites(limit=limit)
         snapshots = self.repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
         update_snapshots = self.repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])

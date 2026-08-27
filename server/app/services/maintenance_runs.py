@@ -197,7 +197,7 @@ class MaintenanceRunService:
     ) -> PluginUpdateBatchOutcome:
         """Queue selected WordPress, theme, or plugin updates without review plans."""
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
         entries_by_key = {entry.plan_key: entry for entry in entries}
         requested_keys = list(dict.fromkeys(key for key in selected_keys if key))
 
@@ -691,7 +691,7 @@ class MaintenanceRunService:
 
     def _current_plugin_update_entry(self, run: MaintenanceRun, details: dict[str, Any]) -> UpdateWorkbenchEntry | None:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
-        entries = inventory.build_update_workbench(inventory.list_items(limit=200))
+        entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
         return next(
             (
                 entry
