@@ -12,7 +12,7 @@ class SiteUserSnapshot(TimestampMixin, Base):
     __tablename__ = "site_user_snapshots"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"), index=True)
+    site_id: Mapped[int] = mapped_column(Integer(), ForeignKey("sites.id"), index=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     available: Mapped[bool] = mapped_column(Boolean(), default=True)
     user_count: Mapped[int] = mapped_column(Integer(), default=0)
