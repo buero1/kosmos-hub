@@ -111,6 +111,9 @@
         border-radius: 18px;
         background: rgba(255, 250, 242, 0.72);
       }
+      .filter-panel-workbench {
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
+      }
       .filter-panel label {
         display: grid;
         gap: 0.3rem;
@@ -149,6 +152,68 @@
       }
       .plan-panel textarea { resize: vertical; }
       .plan-panel-locked { grid-template-columns: 1fr; }
+      .workbench-action-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin: 1.25rem 0;
+      }
+      .workbench-action-card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1rem;
+        min-width: 0;
+        padding: 1.15rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .workbench-action-card .filter-actions {
+        flex-wrap: wrap;
+      }
+      .info-tooltip {
+        position: relative;
+        display: inline-grid;
+        width: 1.2rem;
+        height: 1.2rem;
+        place-items: center;
+        margin-left: 0.25rem;
+        padding: 0;
+        border: 1px solid var(--accent);
+        border-radius: 50%;
+        background: var(--panel);
+        color: var(--accent);
+        cursor: help;
+        font-family: "Trebuchet MS", sans-serif;
+        font-size: 0.72rem;
+        font-weight: 700;
+        line-height: 1;
+        vertical-align: text-bottom;
+      }
+      .info-tooltip-content {
+        position: absolute;
+        z-index: 10;
+        top: calc(100% + 0.45rem);
+        left: 0;
+        display: none;
+        width: min(25rem, calc(100vw - 3rem));
+        padding: 0.75rem;
+        border: 1px solid #8dbdae;
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: 0 12px 28px rgba(40, 45, 44, 0.16);
+        color: var(--ink);
+        font-family: "Georgia", "Times New Roman", serif;
+        font-size: 0.9rem;
+        font-weight: 400;
+        line-height: 1.35;
+        text-align: left;
+      }
+      .info-tooltip:hover .info-tooltip-content,
+      .info-tooltip:focus-visible .info-tooltip-content {
+        display: block;
+      }
       .account-panel {
         max-width: 42rem;
         display: grid;
@@ -396,6 +461,12 @@
       .update-workbench-table {
         min-width: 1320px;
       }
+      .select-all-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        white-space: nowrap;
+      }
       .table-note {
         max-width: 18rem;
         margin: 0.25rem 0 0;
@@ -554,6 +625,9 @@
           grid-template-columns: 1fr;
         }
         .plan-panel {
+          grid-template-columns: 1fr;
+        }
+        .workbench-action-grid {
           grid-template-columns: 1fr;
         }
         .site-detail-layout {

@@ -492,3 +492,30 @@ def test_update_workbench_filters_by_diagnosis_and_attention():
 
     assert service.filter_update_workbench(entries, diagnosis="attention") == [entries[0]]
     assert service.filter_update_workbench(entries, diagnosis="aligned") == [entries[1]]
+
+
+def test_update_workbench_filters_by_site_and_plugin():
+    service = object.__new__(FleetInventoryService)
+    entries = [
+        SimpleNamespace(
+            kind="plugin",
+            is_active=True,
+            diagnosis_status="aligned",
+            official_mismatch=False,
+            site=SimpleNamespace(id=11, domain="first.example"),
+            name="First",
+            identifier="first/first.php",
+        ),
+        SimpleNamespace(
+            kind="plugin",
+            is_active=True,
+            diagnosis_status="aligned",
+            official_mismatch=False,
+            site=SimpleNamespace(id=12, domain="second.example"),
+            name="Second",
+            identifier="second/second.php",
+        ),
+    ]
+
+    assert service.filter_update_workbench(entries, site_id=11) == [entries[0]]
+    assert service.filter_update_workbench(entries, plugin_identifier="second/second.php") == [entries[1]]

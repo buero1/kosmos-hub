@@ -6,7 +6,6 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update workbench</h2>
-        <p class="subtle">Select WordPress, theme, or plugin updates and start one fully logged maintenance run. Active plugins remain active; inactive plugins remain inactive.</p>
       </div>
       <div class="inventory-totals">
         <span><strong>{{ summary.available_updates }}</strong> updates</span>
@@ -18,10 +17,28 @@
       </div>
     </div>
 
-    <form class="filter-panel" method="get" action="/updates">
+    <form class="filter-panel filter-panel-workbench" method="get" action="/updates">
       <label>
-        <span>Site or update</span>
+        <span>Search</span>
         <input type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
+      </label>
+      <label>
+        <span>Site</span>
+        <select name="site_id">
+          <option value="">All sites</option>
+          {% for site_option in site_options %}
+            <option value="{{ site_option.id }}" {% if filters.site_id == site_option.id %}selected{% endif %}>{{ site_option.domain }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Plugin</span>
+        <select name="plugin">
+          <option value="">All plugins</option>
+          {% for plugin_identifier, plugin_name in plugin_options %}
+            <option value="{{ plugin_identifier }}" {% if filters.plugin == plugin_identifier %}selected{% endif %}>{{ plugin_name }}</option>
+          {% endfor %}
+        </select>
       </label>
       <label>
         <span>Type</span>
@@ -63,26 +80,38 @@
       </div>
     </form>
 
-    <form id="direct-update-form" class="plan-panel" method="post" action="/updates/execute-selected-updates">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div>
-        <p class="eyebrow">Run selected updates</p>
-        <p class="subtle">Before every update, the Hub refreshes the update evidence and verifies the exact installed version. Active plugins remain active; inactive plugins remain inactive. Afterwards it verifies WordPress again, checks homepage and REST API, and stops the remaining selection if anything fails.</p>
-      </div>
-      <button class="button" type="submit">Run selected updates</button>
-    </form>
+    <div class="workbench-action-grid">
+      <form id="direct-update-form" class="workbench-action-card" method="post" action="/updates/execute-selected-updates">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+          <p class="eyebrow">
+            Run selected updates
+            <button class="info-tooltip" type="button" aria-label="Show information about selected updates">
+              <span aria-hidden="true">i</span>
+              <span class="info-tooltip-content" role="tooltip">Before every update, the Hub refreshes the update evidence and verifies the exact installed version. Active plugins remain active; inactive plugins remain inactive. Afterwards it verifies WordPress again, checks homepage and REST API, and stops the remaining selection if anything fails.</span>
+            </button>
+          </p>
+        </div>
+        <button class="button" type="submit">Run selected updates</button>
+      </form>
 
-    <form class="plan-panel plan-panel-locked" method="post" action="/updates/refresh-official-plugin-versions">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div>
-        <p class="eyebrow">Version check and diagnosis</p>
-        <p class="subtle">The normal check reuses site status younger than {{ refresh_settings.site_status_max_age_minutes }} minutes and official provider evidence younger than {{ refresh_settings.official_version_max_age_hours }} hours. It checks up to {{ refresh_settings.max_parallel_site_checks }} sites in parallel and updates this page automatically. Crocoblock is contacted only for stale Jet evidence or Jet mismatches. A full refresh ignores those time limits. Neither option installs or updates a plugin.</p>
-      </div>
-      <div class="filter-actions">
-        <button class="button button-secondary" type="submit" name="mode" value="normal">Refresh stale status and diagnose</button>
-        <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh all sites</button>
-      </div>
-    </form>
+      <form class="workbench-action-card" method="post" action="/updates/refresh-official-plugin-versions">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+          <p class="eyebrow">
+            Version check and diagnosis
+            <button class="info-tooltip" type="button" aria-label="Show information about the version check">
+              <span aria-hidden="true">i</span>
+              <span class="info-tooltip-content" role="tooltip">The normal check reuses site status younger than {{ refresh_settings.site_status_max_age_minutes }} minutes and official provider evidence younger than {{ refresh_settings.official_version_max_age_hours }} hours. It checks up to {{ refresh_settings.max_parallel_site_checks }} sites in parallel and updates this page automatically. Crocoblock is contacted only for stale Jet evidence or Jet mismatches. A full refresh ignores those time limits. Neither option installs or updates a plugin.</span>
+            </button>
+          </p>
+        </div>
+        <div class="filter-actions">
+          <button class="button button-secondary" type="submit" name="mode" value="normal">Refresh stale status and diagnose</button>
+          <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh all sites</button>
+        </div>
+      </form>
+    </div>
 
     {% if direct_update == "started" %}
       <p class="notice-success">{{ message }}</p>
@@ -160,7 +189,12 @@
       <table class="update-workbench-table">
         <thead>
           <tr>
-            <th>Select</th>
+            <th>
+              <label class="select-all-control">
+                <input id="select-all-filtered-updates" type="checkbox" aria-label="Select all executable updates in the current filtered list">
+                <span>Select all</span>
+              </label>
+            </th>
             <th>Site</th>
             <th>Type</th>
             <th>Update</th>
@@ -178,7 +212,7 @@
             <tr>
               <td>
                 {% if entry.direct_update_selectable %}
-                  <input form="direct-update-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
+                  <input class="update-selection" form="direct-update-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
                   <span class="subtle">Not ready</span>
                 {% endif %}
@@ -267,4 +301,37 @@
       }, 4000);
     </script>
   {% endif %}
+  <script>
+    (function () {
+      var selectAll = document.getElementById("select-all-filtered-updates");
+      if (!selectAll) {
+        return;
+      }
+
+      function selections() {
+        return Array.prototype.slice.call(document.querySelectorAll(".update-selection:not(:disabled)"));
+      }
+
+      function syncSelectAll() {
+        var selectable = selections();
+        var selected = selectable.filter(function (selection) {
+          return selection.checked;
+        }).length;
+        selectAll.disabled = selectable.length === 0;
+        selectAll.checked = selectable.length > 0 && selected === selectable.length;
+        selectAll.indeterminate = selected > 0 && selected < selectable.length;
+      }
+
+      selectAll.addEventListener("change", function () {
+        selections().forEach(function (selection) {
+          selection.checked = selectAll.checked;
+        });
+        syncSelectAll();
+      });
+      selections().forEach(function (selection) {
+        selection.addEventListener("change", syncSelectAll);
+      });
+      syncSelectAll();
+    }());
+  </script>
 {% endblock %}

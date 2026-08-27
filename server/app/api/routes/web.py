@@ -108,6 +108,8 @@ def update_workbench_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
+    site_id: str = "",
+    plugin: str = "",
     kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
     activity: Literal["all", "active", "inactive"] = "all",
     diagnosis: Literal[
@@ -133,14 +135,35 @@ def update_workbench_page(
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=200)
     entries = inventory_service.build_update_workbench(all_items)
+    selected_site_id = int(site_id) if site_id.isdigit() else None
     filtered_entries = inventory_service.filter_update_workbench(
         entries,
         query=q,
         kind=kind,
         activity=activity,
         diagnosis=diagnosis,
+        site_id=selected_site_id,
+        plugin_identifier=plugin,
     )
-    matching_sites = inventory_service.filter_items(all_items, query=q) if q.strip() else []
+    matching_items = inventory_service.filter_items(all_items, query=q) if q.strip() else all_items
+    if selected_site_id is not None:
+        matching_items = [item for item in matching_items if item.site.id == selected_site_id]
+    if plugin:
+        matching_items = [
+            item
+            for item in matching_items
+            if any(str(item_plugin.get("plugin_file", "")).strip() == plugin for item_plugin in item.plugins)
+        ]
+    matching_sites = [item.site for item in matching_items]
+    site_options = sorted((item.site for item in all_items), key=lambda site: site.domain.casefold())
+    plugin_options = sorted(
+        {
+            (entry.identifier, entry.name)
+            for entry in entries
+            if entry.kind == "plugin" and entry.identifier
+        },
+        key=lambda option: (option[1].casefold(), option[0].casefold()),
+    )
     maintenance_service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
     batch_runs = maintenance_service.list_plugin_update_batch(update_batch)
     batch_running = any(run.status == "running" for run in batch_runs)
@@ -156,7 +179,16 @@ def update_workbench_page(
         {
             "entries": filtered_entries,
             "summary": inventory_service.summarize_update_workbench(entries),
-            "filters": {"q": q, "kind": kind, "activity": activity, "diagnosis": diagnosis},
+            "filters": {
+                "q": q,
+                "site_id": selected_site_id,
+                "plugin": plugin,
+                "kind": kind,
+                "activity": activity,
+                "diagnosis": diagnosis,
+            },
+            "site_options": site_options,
+            "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
             "matching_sites": matching_sites,
             "update_batch": update_batch if batch_runs else "",

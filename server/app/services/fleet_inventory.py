@@ -355,10 +355,17 @@ class FleetInventoryService:
         kind: str = "all",
         activity: str = "all",
         diagnosis: str = "all",
+        site_id: int | None = None,
+        plugin_identifier: str = "",
     ) -> list[UpdateWorkbenchEntry]:
         normalized_query = query.strip().casefold()
+        normalized_plugin_identifier = plugin_identifier.strip()
 
         def matches(entry: UpdateWorkbenchEntry) -> bool:
+            if site_id is not None and entry.site.id != site_id:
+                return False
+            if normalized_plugin_identifier and entry.identifier != normalized_plugin_identifier:
+                return False
             if kind != "all" and entry.kind != kind:
                 return False
             if activity == "active" and entry.is_active is not True:
