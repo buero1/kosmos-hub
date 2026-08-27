@@ -234,23 +234,6 @@
         background: var(--accent-soft);
         color: #075f4e;
       }
-      .site-action-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 1rem;
-        margin: 1.25rem 0;
-      }
-      .site-action-card {
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        gap: 1rem;
-        min-width: 0;
-        padding: 1.15rem;
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        background: rgba(255, 250, 242, 0.82);
-      }
       .site-removal-panel {
         display: flex;
         align-items: end;
@@ -262,10 +245,107 @@
         border-radius: 18px;
         background: #fbf0e9;
       }
-      .site-action-card h3,
-      .site-action-card p,
       .site-removal-panel h3,
       .site-removal-panel p { margin: 0.25rem 0; }
+      .site-detail-layout {
+        display: grid;
+        grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+        align-items: start;
+        gap: 1.5rem;
+        margin: 1.5rem 0 2rem;
+      }
+      .site-detail-content {
+        min-width: 0;
+      }
+      .site-sidebar {
+        position: sticky;
+        top: 1rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.82);
+      }
+      .site-sidebar h2 {
+        margin: 0.25rem 0;
+        overflow-wrap: anywhere;
+      }
+      .site-sidebar .subtle {
+        margin: 0.5rem 0 1rem;
+      }
+      .site-section-nav {
+        display: grid;
+        gap: 0.35rem;
+      }
+      .site-section-nav a {
+        margin-right: 0;
+        padding: 0.65rem 0.75rem;
+        border-radius: 10px;
+        color: var(--ink);
+        font-family: "Trebuchet MS", sans-serif;
+        font-weight: 700;
+      }
+      .site-section-nav a:hover,
+      .site-section-nav a:focus-visible {
+        background: var(--accent-soft);
+        color: #075f4e;
+      }
+      .site-back-link.button {
+        width: 100%;
+        margin-top: 1rem;
+        text-align: center;
+      }
+      .site-section {
+        scroll-margin-top: 1rem;
+      }
+      .site-section + .site-section {
+        margin-top: 3rem;
+      }
+      .site-section-heading {
+        margin-top: 0;
+      }
+      .site-dashboard-action,
+      .backup-status-card {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 1.25rem;
+        margin-top: 1rem;
+      }
+      .site-dashboard-action {
+        padding: 1.15rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .site-dashboard-action h3,
+      .site-dashboard-action p,
+      .backup-status-card h3,
+      .backup-status-card p {
+        margin: 0.25rem 0;
+      }
+      .backup-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.75rem;
+      }
+      .active-update-status {
+        margin: 1.25rem 0;
+        padding: 1.15rem;
+        border: 1px solid #8dbdae;
+        border-radius: 18px;
+        background: rgba(215, 239, 232, 0.48);
+      }
+      .active-update-status h3,
+      .active-update-status p {
+        margin: 0.25rem 0;
+      }
+      .active-update-status .table-scroll {
+        margin-top: 0.85rem;
+      }
+      .site-update-panel {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
       button.button.button-danger {
         background: #a34a2b;
         color: white;
@@ -439,25 +519,8 @@
         font-size: 0.72rem;
         overflow-wrap: anywhere;
       }
-      .maintenance-run-list {
-        margin: 0 0 1.5rem;
-      }
-      .latest-maintenance-run {
-        margin-bottom: 1.5rem;
-      }
-      .maintenance-step-summary {
-        margin-top: 0.85rem;
-        padding-top: 0.75rem;
-        border-top: 1px solid var(--border);
-      }
-      .maintenance-step-summary p {
-        margin: 0.4rem 0 !important;
-      }
       .maintenance-history {
-        margin-top: 1.75rem;
-      }
-      .maintenance-run-card .notice-error {
-        margin: 0.75rem 0;
+        margin-top: 0;
       }
       a.button {
         display: inline-block;
@@ -485,7 +548,24 @@
         .plan-panel {
           grid-template-columns: 1fr;
         }
-        .site-action-grid {
+        .site-detail-layout {
+          grid-template-columns: 1fr;
+        }
+        .site-sidebar {
+          position: static;
+        }
+        .site-section-nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .site-dashboard-action,
+        .backup-status-card {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .backup-actions {
+          justify-content: flex-start;
+        }
+        .site-update-panel {
           grid-template-columns: 1fr;
         }
         .site-removal-panel {
