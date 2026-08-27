@@ -127,6 +127,8 @@
       {% set site_progress = progress.get("sites", {}) %}
       {% set official_progress = progress.get("official_versions", {}) %}
       {% set crocoblock_progress = progress.get("crocoblock", {}) %}
+      {% set completed_sites = site_progress.get("completed", 0) %}
+      {% set total_sites = site_progress.get("total", 0) %}
       <section class="maintenance-batch">
         <div class="section-heading">
           <div>
@@ -135,7 +137,7 @@
             {% if refresh_run.status == "queued" %}
               <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
             {% elif refresh_run.status == "running" %}
-              <p class="subtle">{{ site_progress.get("completed", 0) }} of {{ site_progress.get("total", 0) }} verified sites processed. {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
+              <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
             {% elif refresh_run.status == "succeeded" %}
               <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
             {% else %}
@@ -149,6 +151,14 @@
             <span><strong>{{ crocoblock_progress.get("refreshed", 0) }}</strong> Jet checks</span>
           </div>
         </div>
+        {% if refresh_run.status == "running" and total_sites %}
+          <progress class="fleet-refresh-progress" value="{{ completed_sites }}" max="{{ total_sites }}">{{ completed_sites }} of {{ total_sites }}</progress>
+          <div class="fleet-refresh-progress-details">
+            <span><strong>{{ site_progress.get("refreshed", 0) }}</strong> refreshed</span>
+            <span><strong>{{ site_progress.get("failed", 0) }}</strong> failed</span>
+            <span><strong>{{ site_progress.get("skipped", 0) }}</strong> pending / skipped</span>
+          </div>
+        {% endif %}
         {% if progress.get("errors") %}
           <p class="notice-error">{{ progress.get("errors") | length }} site check{{ "s" if progress.get("errors") | length != 1 else "" }} reported an issue. The other sites continue independently.</p>
         {% endif %}

@@ -255,7 +255,7 @@ def update_workbench_page(
         # Resume a user-started batch if a process restart interrupted polling.
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
-    fleet_refresh_run = fleet_refresh_service.get_run(refresh_run) if refresh_run else None
+    fleet_refresh_run = fleet_refresh_service.get_run(refresh_run) if refresh_run else fleet_refresh_service.get_latest_run()
     refresh_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
     return templates.TemplateResponse(
         request,
