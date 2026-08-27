@@ -608,15 +608,17 @@ def sync_zoho_accounts(
         action="sync-accounts-read-only",
         result="success",
         detail=(
-            f"Created {result.created_customers} and updated {result.updated_customers} customers from Zoho Accounts; "
-            f"{result.unique_site_match_candidates} unlinked sites have an exact domain match candidate."
+            f"Synchronized {result.relevant_accounts} allowed Zoho Accounts: created {result.created_customers}, "
+            f"updated {result.updated_customers}, and removed {result.removed_customers} non-matching imported customers; "
+            f"{result.unlinked_sites} sites were unlinked and {result.unique_site_match_candidates} unlinked sites have an exact domain match candidate."
         ),
     )
     db.commit()
     return RedirectResponse(
         url=(
             f"/account?zoho=synced&zoho_created={result.created_customers}&zoho_updated={result.updated_customers}"
-            f"&zoho_candidates={result.unique_site_match_candidates}"
+            f"&zoho_removed={result.removed_customers}&zoho_unlinked={result.unlinked_sites}"
+            f"&zoho_relevant={result.relevant_accounts}&zoho_candidates={result.unique_site_match_candidates}"
         ),
         status_code=303,
     )

@@ -22,9 +22,10 @@ from app.models.site import Site
 from app.models.zoho_connection import ZohoConnection
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
-ZOHO_READ_SCOPES = "ZohoCRM.modules.accounts.READ,ZohoCRM.settings.fields.READ"
+ZOHO_READ_SCOPES = "ZohoCRM.modules.accounts.READ,ZohoCRM.settings.fields.READ,ZohoSearch.securesearch.READ"
 _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
+ZOHO_RELEVANT_ACCOUNT_STATUSES = ("Aktuell", "Neu", "gekündigt", "Kündigung liegt vor")
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class ZohoAccountField:
 ZOHO_ACCOUNT_FIELDS = (
     ZohoAccountField("record_id", "Eintrag-ID", True),
     ZohoAccountField("customer_name", "Kunde-Name", True),
+    ZohoAccountField("account_status", "Status", True),
     ZohoAccountField("phone", "Tel."),
     ZohoAccountField("website", "Webseite"),
     ZohoAccountField("customer_number", "Kunde-Nummer"),
@@ -95,6 +97,7 @@ class ZohoConnectionStatus:
     last_error: str | None
     mapped_field_count: int
     missing_fields: tuple[str, ...]
+    requires_search_reconnect: bool
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,9 @@ class ZohoFieldMappingRow:
 class ZohoSyncResult:
     created_customers: int
     updated_customers: int
+    removed_customers: int
+    unlinked_sites: int
+    relevant_accounts: int
     unique_site_match_candidates: int
     unmapped_fields: tuple[str, ...]
 
@@ -144,6 +150,7 @@ class ZohoCrmService:
             last_error=connection.last_error if connection is not None else None,
             mapped_field_count=sum(row.api_name is not None for row in rows),
             missing_fields=tuple(row.label for row in rows if row.api_name is None),
+            requires_search_reconnect=connection is not None and connection.encrypted_refresh_token is not None and not self._has_search_scope(connection),
         )
 
     def configure(self, *, actor: HubUser, data_center: str, client_id: str, client_secret: str) -> ZohoConnection:
@@ -187,7 +194,7 @@ class ZohoCrmService:
             {
                 "response_type": "code",
                 "client_id": client_id,
-                "scope": connection.scopes,
+                "scope": ZOHO_READ_SCOPES,
                 "redirect_uri": self.redirect_uri,
                 "access_type": "offline",
                 "prompt": "consent",
@@ -219,6 +226,7 @@ class ZohoCrmService:
             raise ZohoCrmError("Zoho did not grant persistent read access. Please approve the requested access again.")
 
         connection.encrypted_refresh_token = self.cipher.encrypt(refresh_token)
+        connection.scopes = ZOHO_READ_SCOPES
         connection.api_domain = self._safe_api_domain(token_data.get("api_domain"), data_center)
         connection.connected_at = datetime.now(UTC)
         connection.last_error = None
@@ -241,21 +249,28 @@ class ZohoCrmService:
 
     def sync_accounts(self) -> ZohoSyncResult:
         connection = self._require_connected_connection()
+        if not self._has_search_scope(connection):
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve the additional read-only search permission for status-filtered Account synchronization.")
         mapping_rows = self.refresh_field_mapping()
         mapping = {row.key: row.api_name for row in mapping_rows}
-        if mapping["customer_name"] is None:
-            raise ZohoCrmError("The required Zoho field “Kunde-Name” was not found in Accounts. No customers were changed.")
+        required_fields = ("customer_name", "account_status")
+        missing_required = [next(field.label for field in ZOHO_ACCOUNT_FIELDS if field.key == key) for key in required_fields if mapping[key] is None]
+        if missing_required:
+            raise ZohoCrmError(f"The required Zoho Account field(s) {', '.join(missing_required)} were not found. No customers were changed.")
 
-        records = self._get_account_records(connection, mapping)
+        records = self._get_relevant_account_records(connection, mapping)
         created_customers = 0
         updated_customers = 0
         unique_site_match_candidates = 0
+        unlinked_sites = 0
         synced_at = datetime.now(UTC)
+        relevant_zoho_ids: set[str] = set()
 
         for record in records:
             record_id = self._as_text(record.get("id"))
             if not record_id:
                 continue
+            relevant_zoho_ids.add(record_id)
 
             profile = self._build_profile(record, mapping, synced_at)
             name = self._as_text(record.get(mapping["customer_name"])) or f"Zoho Account {record_id}"
@@ -280,12 +295,26 @@ class ZohoCrmService:
             if website_domain and self._has_unique_unlinked_site_match(website_domain):
                 unique_site_match_candidates += 1
 
+        removed_customers = 0
+        existing_zoho_customers = list(self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all())
+        for customer in existing_zoho_customers:
+            if customer.zoho_id in relevant_zoho_ids:
+                continue
+            for site in list(customer.sites):
+                site.customer_id = None
+                unlinked_sites += 1
+            self.db.delete(customer)
+            removed_customers += 1
+
         connection.last_sync_at = synced_at
         connection.last_error = None
         self.db.flush()
         return ZohoSyncResult(
             created_customers=created_customers,
             updated_customers=updated_customers,
+            removed_customers=removed_customers,
+            unlinked_sites=unlinked_sites,
+            relevant_accounts=len(relevant_zoho_ids),
             unique_site_match_candidates=unique_site_match_candidates,
             unmapped_fields=tuple(row.label for row in mapping_rows if row.api_name is None),
         )
@@ -349,31 +378,59 @@ class ZohoCrmService:
             hostname = hostname[4:]
         return hostname or None
 
-    def _get_account_records(self, connection: ZohoConnection, mapping: dict[str, str | None]) -> list[dict[str, object]]:
+    def _get_relevant_account_records(self, connection: ZohoConnection, mapping: dict[str, str | None]) -> list[dict[str, object]]:
+        status_field = mapping["account_status"]
+        assert status_field is not None
         requested_fields = sorted({api_name for api_name in mapping.values() if api_name and api_name != "id"} | {"Modified_Time"})
-        records: list[dict[str, object]] = []
-        for page in range(1, _MAX_PAGE_REQUESTS + 1):
-            response = self._api_get(
-                connection,
-                f"/crm/v8/{ZOHO_ACCOUNT_MODULE}",
-                {"fields": ",".join(requested_fields), "per_page": "200", "page": str(page)},
-            )
-            data = response.get("data")
-            if not isinstance(data, list):
-                raise ZohoCrmError("Zoho returned an invalid Accounts response. No customers were changed.")
-            records.extend(record for record in data if isinstance(record, dict))
-            info = response.get("info")
-            more_records = isinstance(info, dict) and info.get("more_records") is True
-            if not more_records:
-                return records
-        raise ZohoCrmError("The initial Zoho sync exceeds 2,000 Accounts. Bulk synchronization must be enabled before importing more records.")
+        records_by_id: dict[str, dict[str, object]] = {}
+        for account_status in ZOHO_RELEVANT_ACCOUNT_STATUSES:
+            for page in range(1, _MAX_PAGE_REQUESTS + 1):
+                response = self._api_get(
+                    connection,
+                    f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/search",
+                    {
+                        "criteria": f"({status_field}:equals:{account_status})",
+                        "fields": ",".join(requested_fields),
+                        "per_page": "200",
+                        "page": str(page),
+                    },
+                    allow_empty_response=True,
+                )
+                data = response.get("data")
+                if not isinstance(data, list):
+                    raise ZohoCrmError("Zoho returned an invalid filtered Accounts response. No customers were changed.")
+                for record in data:
+                    if not isinstance(record, dict):
+                        continue
+                    record_id = self._as_text(record.get("id"))
+                    if record_id and self._is_relevant_account_status(record.get(status_field)):
+                        records_by_id[record_id] = record
+                info = response.get("info")
+                more_records = isinstance(info, dict) and info.get("more_records") is True
+                if not more_records:
+                    break
+            else:
+                raise ZohoCrmError(f"Zoho returned more than 2,000 Accounts with status “{account_status}”. Bulk synchronization must be enabled before importing them.")
+        return list(records_by_id.values())
 
-    def _api_get(self, connection: ZohoConnection, path: str, params: dict[str, str]) -> dict[str, object]:
+    def _api_get(
+        self,
+        connection: ZohoConnection,
+        path: str,
+        params: dict[str, str],
+        *,
+        allow_empty_response: bool = False,
+    ) -> dict[str, object]:
         access_token = self._refresh_access_token(connection)
         data_center = self._data_center(connection.data_center)
         api_domain = connection.api_domain or data_center.api_domain
         url = f"{api_domain}{path}?{urlencode(params)}"
-        return self._request_json(url, method="GET", headers={"Authorization": f"Zoho-oauthtoken {access_token}"})
+        return self._request_json(
+            url,
+            method="GET",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+            allow_empty_response=allow_empty_response,
+        )
 
     def _refresh_access_token(self, connection: ZohoConnection) -> str:
         refresh_token = self._decrypt(connection.encrypted_refresh_token or "", "Zoho refresh token")
@@ -416,6 +473,15 @@ class ZohoCrmService:
             if self.normalize_website_domain(site.domain) == website_domain
         ]
         return len(candidates) == 1
+
+    @staticmethod
+    def _is_relevant_account_status(value: object) -> bool:
+        status = ZohoCrmService._as_text(value)
+        return status is not None and status.casefold() in {item.casefold() for item in ZOHO_RELEVANT_ACCOUNT_STATUSES}
+
+    @staticmethod
+    def _has_search_scope(connection: ZohoConnection) -> bool:
+        return "ZohoSearch.securesearch.READ" in {scope.strip() for scope in connection.scopes.split(",")}
 
     def _require_connection(self) -> ZohoConnection:
         connection = self.get_connection()
@@ -510,12 +576,15 @@ class ZohoCrmService:
         method: str,
         form: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
+        allow_empty_response: bool = False,
     ) -> dict[str, object]:
         body = urlencode(form).encode("utf-8") if form is not None else None
         request_headers = {"Accept": "application/json", **(headers or {})}
         if body is not None:
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         request = Request(url, data=body, headers=request_headers, method=method)
+        if not payload.strip() and allow_empty_response:
+            return {"data": [], "info": {"more_records": False}}
         try:
             with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
                 payload = response.read().decode("utf-8")

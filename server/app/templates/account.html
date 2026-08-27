@@ -40,7 +40,7 @@
       <p class="notice-success">The technical Zoho field mapping was refreshed.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "synced" %}
-      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_created", "0") }} created, {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_candidates", "0") }} exact website-domain matches are ready for review.</p>
+      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_relevant", "0") }} relevant Accounts, {{ request.query_params.get("zoho_created", "0") }} created, {{ request.query_params.get("zoho_updated", "0") }} updated, and {{ request.query_params.get("zoho_removed", "0") }} previous non-matching imports removed. {{ request.query_params.get("zoho_candidates", "0") }} exact website-domain matches are ready for review.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
@@ -200,9 +200,10 @@
       <div>
         <p class="eyebrow">CRM integration</p>
         <h3>Zoho CRM Accounts</h3>
-        <p class="subtle">Accounts are imported read-only. Client secret, refresh token, and all transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
+        <p class="subtle">Only Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are imported. Client secret, refresh token, and all transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
         {% if zoho_status.configured %}
           <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
+          {% if zoho_status.requires_search_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync. The Hub needs the additional read-only search permission to request only the allowed Account statuses.</p>{% endif %}
           {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
         {% else %}
           <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
@@ -232,14 +233,14 @@
       {% if zoho_status.configured %}
         <div class="button-row">
           <a class="button" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
-          {% if zoho_status.connected %}
+          {% if zoho_status.connected and not zoho_status.requires_search_reconnect %}
             <form method="post" action="/account/zoho/mapping">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="button button-secondary" type="submit">Refresh field mapping</button>
             </form>
             <form method="post" action="/account/zoho/sync">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button" type="submit">Sync Accounts now</button>
+              <button class="button" type="submit">Sync allowed Accounts now</button>
             </form>
           {% endif %}
           <form method="post" action="/account/zoho/remove">
