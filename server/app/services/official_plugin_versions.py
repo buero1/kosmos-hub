@@ -3,7 +3,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -44,10 +44,21 @@ class OfficialPluginVersionService:
         *,
         force: bool = False,
         max_age: timedelta | None = None,
+        progress_callback: Callable[[dict[str, int]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, int]:
         candidates = self._collect_candidates(items)
         if not candidates:
-            return {"total": 0, "checked": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0}
+            return {
+                "total": 0,
+                "checked": 0,
+                "completed": 0,
+                "cached": 0,
+                "wordpress_org": 0,
+                "provider_offer": 0,
+                "unavailable": 0,
+                "failed": 0,
+            }
 
         existing = self.get_cached(candidates)
         now = datetime.now(UTC)
@@ -57,50 +68,76 @@ class OfficialPluginVersionService:
             if force or not self._is_fresh(existing.get(plugin_file), now=now, max_age=max_age)
         }
 
-        wordpress_org_results: dict[str, tuple[str | None, str | None]] = {}
-        with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
-            futures = {
-                executor.submit(self._fetch_wordpress_org_version, candidate.plugin_file): candidate.plugin_file
-                for candidate in stale_candidates.values()
-            }
-            for future in as_completed(futures):
-                plugin_file = futures[future]
-                try:
-                    wordpress_org_results[plugin_file] = future.result()
-                except Exception:
-                    wordpress_org_results[plugin_file] = (None, "wordpress_org_request_failed")
-
-        checked_at = now
         summary = {
             "total": len(candidates),
             "checked": len(stale_candidates),
+            "completed": 0,
             "cached": len(candidates) - len(stale_candidates),
             "wordpress_org": 0,
             "provider_offer": 0,
             "unavailable": 0,
             "failed": 0,
         }
+        if progress_callback is not None:
+            progress_callback(summary.copy())
 
-        for plugin_file, candidate in stale_candidates.items():
+        wordpress_org_results: dict[str, tuple[str | None, str | None]] = {}
+        cancellation_requested = bool(should_cancel and should_cancel())
+        with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
+            candidates_iter = iter(stale_candidates.values())
+            futures: dict[Any, str] = {}
+            if not cancellation_requested:
+                for _ in range(self.MAX_CONCURRENT_REQUESTS):
+                    try:
+                        candidate = next(candidates_iter)
+                    except StopIteration:
+                        break
+                    futures[executor.submit(self._fetch_wordpress_org_version, candidate.plugin_file)] = candidate.plugin_file
+            while futures:
+                future = next(as_completed(futures))
+                plugin_file = futures.pop(future)
+                try:
+                    wordpress_org_results[plugin_file] = future.result()
+                except Exception:
+                    wordpress_org_results[plugin_file] = (None, "wordpress_org_request_failed")
+                summary["completed"] += 1
+                version, error = wordpress_org_results[plugin_file]
+                if version:
+                    summary["wordpress_org"] += 1
+                elif (record := existing.get(plugin_file)) is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
+                    summary["provider_offer"] += 1
+                else:
+                    summary["unavailable"] += 1
+                    if error and error != "wordpress_org_not_found":
+                        summary["failed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
+
+                cancellation_requested = cancellation_requested or bool(should_cancel and should_cancel())
+                if cancellation_requested:
+                    continue
+                try:
+                    candidate = next(candidates_iter)
+                except StopIteration:
+                    continue
+                futures[executor.submit(self._fetch_wordpress_org_version, candidate.plugin_file)] = candidate.plugin_file
+
+        checked_at = now
+        for plugin_file in wordpress_org_results:
             version, error = wordpress_org_results.get(plugin_file, (None, "wordpress_org_request_failed"))
             if version:
                 official_version = version
                 source = "WordPress.org"
                 last_error = None
-                summary["wordpress_org"] += 1
             else:
                 record = existing.get(plugin_file)
                 if record is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
                     # Jet Dashboard may temporarily omit an offer, but its last verified catalog
                     # version remains better evidence than replacing it with an unknown value.
-                    summary["provider_offer"] += 1
                     continue
                 official_version = None
                 source = "No public or provider catalog available"
                 last_error = error
-                summary["unavailable"] += 1
-                if error and error != "wordpress_org_not_found":
-                    summary["failed"] += 1
 
             record = existing.get(plugin_file)
             if record is None:

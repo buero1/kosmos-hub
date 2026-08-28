@@ -504,6 +504,24 @@ def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
     }
 
 
+def test_official_version_refresh_reports_each_completed_catalogue_check():
+    service = object.__new__(OfficialPluginVersionService)
+    service.db = SimpleNamespace(add=lambda _record: None, flush=lambda: None)
+    service._collect_candidates = lambda _items: {
+        "first/first.php": SimpleNamespace(plugin_file="first/first.php"),
+        "second/second.php": SimpleNamespace(plugin_file="second/second.php"),
+    }
+    service.get_cached = lambda _candidates: {}
+    service._fetch_wordpress_org_version = lambda plugin_file: ("1.2.3", None)
+    progress = []
+
+    summary = service.refresh_for_inventory([], progress_callback=progress.append)
+
+    assert summary["checked"] == 2
+    assert summary["completed"] == 2
+    assert [entry["completed"] for entry in progress] == [0, 1, 2]
+
+
 def test_update_workbench_filters_by_diagnosis_and_attention():
     service = object.__new__(FleetInventoryService)
     entries = [

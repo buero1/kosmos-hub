@@ -120,6 +120,7 @@
       {% set official_progress = progress.get("official_versions", {}) %}
       {% set crocoblock_progress = progress.get("crocoblock", {}) %}
       {% set backup_progress = progress.get("backups", {}) %}
+      {% set phase = progress.get("phase", {}) %}
       {% set completed_sites = site_progress.get("completed", 0) %}
       {% set total_sites = site_progress.get("total", 0) %}
       <section class="maintenance-batch">
@@ -130,7 +131,11 @@
             {% if refresh_run.status == "queued" %}
               <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
             {% elif refresh_run.status == "running" %}
-              <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
+              {% if phase.get("key") == "site-checks" %}
+                <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
+              {% else %}
+                <p class="subtle">Website checks are complete. <strong>{{ phase.get("label", "Finishing the refresh") }}</strong>{% if phase.get("total", 0) %}: {{ phase.get("completed", 0) }} of {{ phase.get("total", 0) }} complete.{% endif %}</p>
+              {% endif %}
             {% elif refresh_run.status == "cancelling" %}
               <p class="notice-warning">Cancellation requested. The active site checks will finish safely; no further sites or provider checks will start.</p>
             {% elif refresh_run.status == "cancelled" %}
@@ -143,9 +148,9 @@
           </div>
           <div class="inventory-totals">
             <span><strong>{{ site_progress.get("completed", 0) }}/{{ site_progress.get("total", 0) }}</strong> sites</span>
-            <span><strong>{{ official_progress.get("checked", 0) }}</strong> official checks</span>
+            <span><strong>{{ official_progress.get("completed", official_progress.get("checked", 0)) }}/{{ official_progress.get("checked", 0) }}</strong> official checks</span>
             <span><strong>{{ official_progress.get("cached", 0) }}</strong> version cache</span>
-            <span><strong>{{ crocoblock_progress.get("refreshed", 0) }}</strong> Jet checks</span>
+            <span><strong>{{ crocoblock_progress.get("completed", 0) }}/{{ crocoblock_progress.get("eligible", 0) }}</strong> Jet checks</span>
             <span><strong>{{ backup_progress.get("refreshed", 0) }}</strong> backup checks</span>
           </div>
         </div>
@@ -155,12 +160,17 @@
             <button class="button button-danger" type="submit">Cancel refresh</button>
           </form>
         {% endif %}
-        {% if refresh_run.status == "running" and total_sites %}
-          <progress class="fleet-refresh-progress" value="{{ completed_sites }}" max="{{ total_sites }}">{{ completed_sites }} of {{ total_sites }}</progress>
+        {% if refresh_run.status == "running" and phase.get("total", 0) %}
+          <progress class="fleet-refresh-progress" value="{{ phase.get("completed", 0) }}" max="{{ phase.get("total", 0) }}">{{ phase.get("completed", 0) }} of {{ phase.get("total", 0) }}</progress>
           <div class="fleet-refresh-progress-details">
-            <span><strong>{{ site_progress.get("refreshed", 0) }}</strong> refreshed</span>
-            <span><strong>{{ site_progress.get("failed", 0) }}</strong> failed</span>
-            <span><strong>{{ site_progress.get("skipped", 0) }}</strong> pending / skipped</span>
+            {% if phase.get("key") == "site-checks" %}
+              <span><strong>{{ site_progress.get("refreshed", 0) }}</strong> refreshed</span>
+              <span><strong>{{ site_progress.get("failed", 0) }}</strong> failed</span>
+              <span><strong>{{ site_progress.get("skipped", 0) }}</strong> pending / skipped</span>
+            {% else %}
+              <span><strong>{{ phase.get("completed", 0) }}</strong> completed in this phase</span>
+              <span><strong>{{ phase.get("total", 0) - phase.get("completed", 0) }}</strong> remaining</span>
+            {% endif %}
           </div>
         {% endif %}
         {% if progress.get("errors") %}

@@ -276,6 +276,12 @@ class FleetRefreshService:
         )
         result["backups"].update({"cached": cached_count, "skipped": skipped_count})
         result["users"].update({"cached": cached_count, "skipped": skipped_count})
+        result["phase"] = {
+            "key": "site-checks",
+            "label": "Checking website status",
+            "completed": cached_count,
+            "total": len(targets) + cached_count,
+        }
         cls._store_progress(run_id, result)
 
         if targets and not cls._is_cancellation_requested(run_id):
@@ -307,6 +313,7 @@ class FleetRefreshService:
                             "errors": [str(exc)],
                         }
                     cls._record_site_outcome(result, outcome)
+                    result["phase"]["completed"] = result["sites"]["completed"]
                     cls._store_progress(run_id, result)
 
                     cancellation_requested = cancellation_requested or cls._is_cancellation_requested(run_id)
@@ -458,13 +465,28 @@ class FleetRefreshService:
                 provider_max_age=timedelta(hours=runtime_settings.official_version_max_age_hours),
             )
             result["crocoblock"]["eligible"] = len(jet_site_ids)
+            result["phase"] = {
+                "key": "jet-catalogue",
+                "label": "Checking Jet provider catalogues",
+                "completed": 0,
+                "total": len(jet_site_ids),
+            }
+            cls._store_progress(run_id, result)
             if jet_site_ids and allow_provider_activation:
+                def report_crocoblock_progress(summary: dict[str, Any]) -> None:
+                    result["crocoblock"].update(summary)
+                    result["phase"]["completed"] = summary["completed"]
+                    cls._store_progress(run_id, result)
+
                 crocoblock = CrocoblockLicenseService(db=db, cipher=get_secret_cipher()).refresh_version_evidence(
                     actor=requested_by,
                     site_ids=jet_site_ids,
+                    progress_callback=report_crocoblock_progress,
+                    should_cancel=lambda: cls._is_cancellation_requested(run_id),
                 )
                 result["crocoblock"].update(
                     {
+                        "completed": crocoblock["completed"],
                         "refreshed": crocoblock["refreshed"],
                         "failed": crocoblock["failed"],
                         "catalog_versions": len(crocoblock["versions"]),
@@ -476,19 +498,42 @@ class FleetRefreshService:
 
             if cls._is_cancellation_requested(run_id):
                 return
+            result["phase"] = {
+                "key": "official-versions",
+                "label": "Checking official plugin catalogues",
+                "completed": 0,
+                "total": 0,
+            }
+
+            def report_official_progress(summary: dict[str, int]) -> None:
+                result["official_versions"] = summary
+                result["phase"].update({"completed": summary["completed"], "total": summary["checked"]})
+                cls._store_progress(run_id, result)
+
             official = version_service.refresh_for_inventory(
                 items,
                 force=force,
                 max_age=timedelta(hours=runtime_settings.official_version_max_age_hours),
+                progress_callback=report_official_progress,
+                should_cancel=lambda: cls._is_cancellation_requested(run_id),
             )
+            if cls._is_cancellation_requested(run_id):
+                return
             if jet_site_ids and allow_provider_activation:
                 result["crocoblock"]["catalog_versions"] = version_service.record_provider_versions(
                     crocoblock["versions"],
                     source="Crocoblock Jet Dashboard",
                 )
             result["official_versions"] = official
+            result["phase"] = {
+                "key": "diagnosis",
+                "label": "Finishing the diagnosis",
+                "completed": 0,
+                "total": 1,
+            }
             refreshed_entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
             result["mismatches"] = sum(1 for entry in refreshed_entries if entry.official_mismatch)
+            result["phase"]["completed"] = 1
             write_audit_log(
                 db,
                 site=None,
@@ -589,8 +634,9 @@ class FleetRefreshService:
             "updates": {"refreshed": 0, "failed": 0, "skipped": 0},
             "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "users": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0, "unsupported": 0},
-            "crocoblock": {"eligible": 0, "refreshed": 0, "cached": 0, "failed": 0, "catalog_versions": 0},
-            "official_versions": {"total": 0, "checked": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
+            "crocoblock": {"eligible": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "catalog_versions": 0},
+            "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
+            "phase": {"key": "queued", "label": "Waiting for a background worker", "completed": 0, "total": 0},
             "mismatches": 0,
             "last_site": "",
             "errors": [],

@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -64,12 +64,20 @@ class CrocoblockLicenseService:
         """Make a stored license available for one pending Jet plugin update."""
         return self._activate_for_site(actor=actor, site_id=site_id, purpose="plugin update")
 
-    def refresh_version_evidence(self, *, actor: str, site_ids: set[int]) -> dict[str, Any]:
+    def refresh_version_evidence(
+        self,
+        *,
+        actor: str,
+        site_ids: set[int],
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Authorize Jet Dashboard metadata checks without installing any plugin."""
         eligible_site_ids = sorted(site_ids)
         config = self.get_config()
         summary = {
             "eligible": len(eligible_site_ids),
+            "completed": 0,
             "activated": 0,
             "refreshed": 0,
             "failed": 0,
@@ -78,13 +86,25 @@ class CrocoblockLicenseService:
             "versions": [],
         }
         if config is None or not config.enabled:
+            summary["skipped"] = len(eligible_site_ids)
+            summary["completed"] = len(eligible_site_ids)
+            if progress_callback is not None:
+                progress_callback(summary.copy())
             return summary
 
+        if progress_callback is not None:
+            progress_callback(summary.copy())
+
         for site_id in eligible_site_ids:
+            if should_cancel is not None and should_cancel():
+                break
             try:
                 activation = self._activate_for_site(actor=actor, site_id=site_id, purpose="version check")
             except CrocoblockLicenseError:
                 summary["failed"] += 1
+                summary["completed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
                 continue
 
             summary["activated"] += 1
@@ -93,8 +113,14 @@ class CrocoblockLicenseService:
                 SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(site_id)
             except SiteMcpProxyError:
                 summary["failed"] += 1
+                summary["completed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
                 continue
             summary["refreshed"] += 1
+            summary["completed"] += 1
+            if progress_callback is not None:
+                progress_callback(summary.copy())
 
         return summary
 
