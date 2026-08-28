@@ -41,6 +41,9 @@ _SITE_SELECTION_COMMAND_PATTERN = re.compile(
 )
 _WITHOUT_UPDATE_PATTERN = re.compile(r"\b(?:ohne|kein(?:e|en|em|er|es)?)\b.*\bupdates?\b")
 _WITH_UPDATE_PATTERN = re.compile(r"\b(?:mit|nur)\b.*\bupdates?\b")
+_INSTALLED_PATTERN = re.compile(r"\binstallier(?:t|te|ten)?\b")
+_ACTIVE_PLUGIN_PATTERN = re.compile(r"\b(?:aktiv|aktiviert|aktive|aktiven)\b")
+_INACTIVE_PLUGIN_PATTERN = re.compile(r"\b(?:inaktiv|deaktiviert|deaktivierte|deaktivierten)\b")
 
 
 class AssistantError(ValueError):
@@ -189,11 +192,17 @@ class HubAssistantService:
     ) -> AssistantAnswer:
         target = self._find_update_target(question, update_entries)
         matching_question = self._normalize_for_matching(question)
-        if target is None or not (_WITHOUT_UPDATE_PATTERN.search(matching_question) or _WITH_UPDATE_PATTERN.search(matching_question)):
+        wants_without_update = bool(_WITHOUT_UPDATE_PATTERN.search(matching_question))
+        wants_with_update = bool(_WITH_UPDATE_PATTERN.search(matching_question))
+        wants_inactive = bool(_INACTIVE_PLUGIN_PATTERN.search(matching_question))
+        wants_active = bool(_ACTIVE_PLUGIN_PATTERN.search(matching_question)) and not wants_inactive
+        wants_installed = bool(_INSTALLED_PATTERN.search(matching_question))
+        if target is None or not (wants_without_update or wants_with_update or wants_installed or wants_active or wants_inactive):
             return AssistantAnswer(
                 text=(
-                    "Ich kann im Seitenpanel Websites mit oder ohne ein bestimmtes Plugin-Update auswaehlen. "
-                    "Beispiel: 'Wähle alle Websites ohne Elementor Update'."
+                    "Ich kann im Seitenpanel Websites nach Plugin-Update oder Plugin-Status auswaehlen. "
+                    "Beispiele: 'Wähle alle Websites ohne Elementor Update' oder "
+                    "'Wähle alle Websites mit 13 Lazy Load installiert und aktiv'."
                 ),
                 generated_at=datetime.now(UTC),
                 data_captured_at=captured_at,
@@ -226,7 +235,6 @@ class HubAssistantService:
                 if self._customer_name_for_entry(entry).casefold().startswith(customer_initial)
             ]
 
-        wants_without_update = bool(_WITHOUT_UPDATE_PATTERN.search(matching_question))
         if wants_without_update:
             selected_site_ids = tuple(sorted({
                 entry.site.id
@@ -239,7 +247,7 @@ class HubAssistantService:
                 if not entry.update_checked
             })
             selection_description = f"auf denen {target.label} installiert ist und kein Update gemeldet wird"
-        else:
+        elif wants_with_update:
             selected_site_ids = tuple(sorted({
                 entry.site.id
                 for entry in component_entries
@@ -247,6 +255,32 @@ class HubAssistantService:
             }))
             unknown_site_count = 0
             selection_description = f"auf denen ein Update fuer {target.label} gemeldet wird"
+        elif target.kind != "plugin":
+            return AssistantAnswer(
+                text=f"Der Status installiert, aktiv oder inaktiv kann nur fuer Plugins wie {target.label} ausgewertet werden.",
+                generated_at=datetime.now(UTC),
+                data_captured_at=captured_at,
+            )
+        elif wants_inactive:
+            selected_site_ids = tuple(sorted({
+                entry.site.id
+                for entry in component_entries
+                if entry.is_active is False
+            }))
+            unknown_site_count = 0
+            selection_description = f"auf denen {target.label} installiert und inaktiv ist"
+        elif wants_active:
+            selected_site_ids = tuple(sorted({
+                entry.site.id
+                for entry in component_entries
+                if entry.is_active is True
+            }))
+            unknown_site_count = 0
+            selection_description = f"auf denen {target.label} installiert und aktiv ist"
+        else:
+            selected_site_ids = tuple(sorted({entry.site.id for entry in component_entries}))
+            unknown_site_count = 0
+            selection_description = f"auf denen {target.label} installiert ist"
 
         filter_label = self._customer_filter_label(
             customer_status=customer_status,

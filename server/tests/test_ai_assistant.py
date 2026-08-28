@@ -202,6 +202,34 @@ def test_assistant_selects_sites_without_a_named_plugin_update():
     assert "nicht beruecksichtigt" in answer.text
 
 
+def test_assistant_selects_sites_with_a_named_active_plugin():
+    checked_at = datetime.now(UTC)
+    answer = _assistant_service()._answer_site_selection_command(
+        "Wähle alle Websites die 13 Lazy Load installiert und aktiviert haben",
+        [
+            _update_entry(
+                site_id=7,
+                domain="active.example",
+                checked_at=checked_at,
+                name="13 Lazy Load",
+                identifier="13-lazy-load/13-lazy-load.php",
+            ),
+            _update_entry(
+                site_id=8,
+                domain="inactive.example",
+                checked_at=checked_at,
+                name="13 Lazy Load",
+                identifier="13-lazy-load/13-lazy-load.php",
+                is_active=False,
+            ),
+        ],
+        captured_at=checked_at,
+    )
+
+    assert answer.selection_site_ids == (7,)
+    assert "installiert und aktiv" in answer.text
+
+
 def _assistant_service() -> HubAssistantService:
     return object.__new__(HubAssistantService)
 
@@ -228,6 +256,7 @@ def _update_entry(
     customer_status: str = "",
     update_available: bool = True,
     update_checked: bool = True,
+    is_active: bool | None = True,
 ) -> UpdateWorkbenchEntry:
     site = SimpleNamespace(
         id=site_id,
@@ -241,7 +270,7 @@ def _update_entry(
         identifier=identifier,
         current_version="4.3.0",
         target_version="4.3.2" if update_available else "",
-        is_active=True if kind == "plugin" else None,
+        is_active=is_active if kind == "plugin" else None,
         update_available=update_available,
         update_checked=update_checked,
         execution_ready=direct_ready,
