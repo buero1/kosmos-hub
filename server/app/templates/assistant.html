@@ -8,9 +8,9 @@
       <div>
         <p class="eyebrow">AI operations assistant</p>
         <h2>Kosmos Assistant</h2>
-        <p class="subtle">Analyses the selected Hub scope and can queue directly executable WordPress, theme, and plugin updates.</p>
+        <p class="subtle">Understands natural-language requests and uses controlled Hub data tools to inspect and select websites.</p>
       </div>
-      <span class="pill pill-success">Guided actions</span>
+      <span class="pill pill-success">Controlled tools</span>
     </div>
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
@@ -36,9 +36,9 @@
         <label for="assistant-question">What should Kosmos Hub do or analyse?</label>
         <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Update all themes.">{{ question }}</textarea>
         <p class="subtle">Scope: <span data-site-selector-target-summary>{% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}</span>. Changes in the side panel apply immediately.</p>
-        <p class="subtle">Examples: "Show all websites with a Smush update", "Select all websites without an Elementor update", "Select all websites with 13 Lazy Load installed and active", "Update all themes", "Update WordPress Core", or "Update all plugins for current customers".</p>
-        <p class="subtle">The panel is the binding scope. A direct update uses the same protected maintenance queue as the Update workbench.</p>
-        <p class="subtle">For open questions, the required Hub snapshot is sent server-side to OpenAI. Direct update commands are resolved and validated inside the Hub. Never enter customer credentials or other secrets here.</p>
+        <p class="subtle">Examples: "Welche Updates von Lackiererei Aschenbrunner sind offen?", "Prüfe, welche Websites A3 Lazy Load installiert haben", or "Wähle alle Websites mit einem Elementor Update".</p>
+        <p class="subtle">The panel is the binding scope when you refer to selected websites. The assistant can select matching sites, but does not execute maintenance changes.</p>
+        <p class="subtle">OpenAI receives only the request and small local tool results it asks for, never a complete database, credentials, passwords, license keys, or private customer profile fields.</p>
         <button class="button" type="submit">Ask Assistant</button>
       </form>
     {% endif %}
@@ -47,39 +47,8 @@
       <section class="assistant-answer">
         <p class="eyebrow">Assistant answer</p>
         <div class="assistant-text">{{ answer.text }}</div>
-        {% if answer.action and answer.action.batch_id %}
-          <p class="notice-success">{{ answer.action.message }}</p>
-          <a class="button button-secondary" href="/updates?update_batch={{ answer.action.batch_id }}">Open direct update run</a>
-        {% elif answer.action and answer.action.error %}
-          <p class="notice-error">{{ answer.action.error }}</p>
-        {% endif %}
-        {% if answer.update_matches %}
-          <div class="table-scroll assistant-update-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Website</th>
-                  <th>Type</th>
-                  <th>Update</th>
-                  <th>Installed</th>
-                  <th>Target</th>
-                  <th>Direct maintenance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for match in answer.update_matches %}
-                  <tr>
-                    <td>{{ match.site_domain }}</td>
-                    <td><span class="pill pill-{{ match.component_kind | lower }}">{{ match.component_kind }}</span></td>
-                    <td>{{ match.component_name }}</td>
-                    <td>{{ match.current_version }}</td>
-                    <td>{{ match.target_version }}</td>
-                    <td>{% if match.direct_update_selectable %}<span class="pill pill-success">Ready</span>{% else %}<span class="pill pill-unknown">Not ready</span>{% endif %}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+        {% if answer.selection_site_ids is not none %}
+          <p class="notice-success">The matching website selection has been applied to the side panel.</p>
         {% endif %}
         <p class="subtle">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at | berlin_time }}{% endif %}.</p>
       </section>

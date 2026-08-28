@@ -13,8 +13,6 @@ from app.db.session import get_db
 from app.services.ai_assistant import AssistantError, HubAssistantService
 from app.services.ai_provider import AiProviderConfigService
 from app.services.audit import write_audit_log
-from app.services.maintenance_runs import MaintenanceRunService
-from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.site_selection import build_site_selector_context
 
@@ -73,10 +71,7 @@ def ask_assistant(
         _require_request_interval(request)
         answer = HubAssistantService(db=db, cipher=get_secret_cipher()).answer(
             question,
-            previous_site_ids=_assistant_previous_site_ids(request),
             selected_site_ids=selection["selected_site_ids"],
-            selection_is_explicit=selection["is_explicit"],
-            selection_label=selection["label"],
         )
     except (AssistantError, ValueError) as exc:
         write_audit_log(
@@ -92,10 +87,6 @@ def ask_assistant(
         context["error"] = str(exc)
         return templates.TemplateResponse(request, "assistant.html", context, status_code=400)
 
-    if answer.update_matches:
-        request.session["assistant_previous_site_ids"] = list(
-            dict.fromkeys(match.site_id for match in answer.update_matches)
-        )
     if answer.selection_site_ids is not None:
         selection = _assistant_selection(
             db,
@@ -104,39 +95,7 @@ def ask_assistant(
         )
         context["site_selector"] = selection["site_selector"]
         context["assistant_selection"] = selection
-        request.session["assistant_previous_site_ids"] = list(answer.selection_site_ids)
-
-    if answer.action is not None:
-        try:
-            outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_direct_updates(
-                selected_keys=list(answer.action.selected_keys),
-                actor=user.username,
-            )
-        except ValueError as exc:
-            answer = answer.with_action_error(str(exc))
-            action_result = "error"
-            action_detail = "The assistant could not queue the validated direct updates."
-        else:
-            schedule_pending_direct_updates()
-            answer = answer.with_queued_action(batch_id=outcome.batch_id, message=outcome.message)
-            action_result = "queued"
-            action_detail = (
-                f"The assistant queued {outcome.run_count} validated direct plugin update run(s) "
-                f"for {answer.action.update_label} "
-                f"in batch {outcome.batch_id[:12]}."
-            )
-        write_audit_log(
-            db,
-            site=None,
-            actor=user.username,
-            source="hub-assistant",
-            action="assistant-direct-update-command",
-            result=action_result,
-            detail=action_detail,
-            request_id=answer.action.batch_id,
-        )
-    else:
-        action_detail = "Assistant answer generated. Question content is intentionally not stored."
+    action_detail = "Assistant answer generated from controlled local data tools. Question content is intentionally not stored."
 
     write_audit_log(
         db,
@@ -176,13 +135,6 @@ def _require_request_interval(request: Request) -> None:
     if isinstance(previous, (int, float)) and now - previous < _MIN_REQUEST_INTERVAL_SECONDS:
         raise AssistantError("Please wait a few seconds before asking the next question.")
     request.session["assistant_request_at"] = now
-
-
-def _assistant_previous_site_ids(request: Request) -> tuple[int, ...]:
-    values = request.session.get("assistant_previous_site_ids", [])
-    if not isinstance(values, list):
-        return ()
-    return tuple(value for value in values if isinstance(value, int) and value > 0)
 
 
 def _assistant_selection(
