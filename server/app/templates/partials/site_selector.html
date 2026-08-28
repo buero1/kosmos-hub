@@ -129,6 +129,10 @@
       scope.value = "selected";
       syncSelection();
     });
+    selector.querySelector("form").addEventListener("submit", function () {
+      var includeIndividualIds = scope.value !== "all";
+      siteChecks.forEach(function (checkbox) { checkbox.disabled = !includeIndividualIds; });
+    });
     search.addEventListener("input", applySearch);
     syncSelection();
   }());

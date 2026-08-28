@@ -21,8 +21,21 @@ _UPDATE_ACTION_PATTERN = re.compile(
     r"(?:\b(?:aktualisier(?:e|en|t)?|updaten|installier(?:e|en|t)?)\b|^\s*update\b)",
     re.IGNORECASE,
 )
-_ALL_SITES_PATTERN = re.compile(r"\b(?:alle|allen|aller|all|samtliche|samtlichen|jede|jeden)\b.*\b(?:website|websites|site|sites|domain|domains|kunde|kunden)\b")
+_ALL_SITES_PATTERN = re.compile(
+    r"\b(?:alle|allen|aller|all|samtliche|samtlichen|jede|jeden)\b.*\b(?:website|websites|site|sites|domain|domains|kunde|kunden)\b"
+)
 _FOLLOW_UP_SCOPE_PATTERN = re.compile(r"\b(?:diese|diesen|dieser|darauf|dafur|dafuer)\b")
+_ALL_UPDATES_PATTERN = re.compile(r"\b(?:alle|allen|aller|all|samtliche|samtlichen)\b.*\bupdates?\b")
+_WORDPRESS_PATTERN = re.compile(r"\b(?:wordpress|core)\b")
+_THEME_PATTERN = re.compile(r"\bthemes?\b")
+_PLUGIN_PATTERN = re.compile(r"\bplugins?\b")
+_CUSTOMER_STATUS_PATTERNS = (
+    (re.compile(r"\bkundigung liegt vor\b"), "Kündigung liegt vor"),
+    (re.compile(r"\bgekundigt(?:e|en|er|es)?\b"), "gekündigt"),
+    (re.compile(r"\baktuell(?:e|en|er|es)?\b"), "Aktuell"),
+    (re.compile(r"\bneu(?:e|en|er|es)?\b"), "Neu"),
+)
+_CUSTOMER_INITIAL_PATTERN = re.compile(r"\b(?:buchstabe|buchstaben|letter)\s+([a-z0-9])\b")
 
 
 class AssistantError(ValueError):
@@ -34,15 +47,23 @@ class AssistantUpdateMatch:
     plan_key: str
     site_id: int
     site_domain: str
-    plugin_name: str
+    component_kind: str
+    component_name: str
     current_version: str
     target_version: str
     direct_update_selectable: bool
 
 
 @dataclass(frozen=True)
+class AssistantUpdateTarget:
+    kind: str | None
+    name: str | None
+    label: str
+
+
+@dataclass(frozen=True)
 class AssistantAction:
-    plugin_name: str
+    update_label: str
     selected_keys: tuple[str, ...]
     scope_label: str
     skipped_count: int = 0
@@ -63,11 +84,15 @@ class AssistantAnswer:
         if self.action is None:
             return self
         count = len(self.action.selected_keys)
-        skipped = f" {self.action.skipped_count} weitere gemeldete Updates sind derzeit nicht direkt ausfuehrbar und wurden nicht gestartet." if self.action.skipped_count else ""
+        skipped = (
+            f" {self.action.skipped_count} weitere gemeldete Updates sind derzeit nicht direkt ausfuehrbar und wurden nicht gestartet."
+            if self.action.skipped_count
+            else ""
+        )
         return replace(
             self,
             text=(
-                f"Ich habe {count} direktes Plugin-Update{'s' if count != 1 else ''} fuer {self.action.plugin_name} "
+                f"Ich habe {count} direkte Aktualisierung{'en' if count != 1 else ''} fuer {self.action.update_label} "
                 f"auf {self.action.scope_label} in die geschuetzte Wartungs-Queue eingereiht. "
                 "Jeder Lauf prueft die konkrete Zielversion und danach die Website-Gesundheit."
                 f"{skipped}"
@@ -81,7 +106,7 @@ class AssistantAnswer:
         return replace(
             self,
             text=(
-                f"Die direkten Updates fuer {self.action.plugin_name} konnten nicht eingereiht werden. "
+                f"Die direkten Updates fuer {self.action.update_label} konnten nicht eingereiht werden. "
                 f"{message}"
             ),
             action=replace(self.action, error=message),
@@ -94,14 +119,31 @@ class HubAssistantService:
         self.cipher = cipher
         self.provider_service = AiProviderConfigService(db=db, cipher=cipher)
 
-    def answer(self, question: str, *, previous_site_ids: tuple[int, ...] = ()) -> AssistantAnswer:
+    def answer(
+        self,
+        question: str,
+        *,
+        previous_site_ids: tuple[int, ...] = (),
+        selected_site_ids: set[int] | None = None,
+        selection_is_explicit: bool = False,
+        selection_label: str = "",
+    ) -> AssistantAnswer:
         normalized_question = self._normalize_question(question)
-        context, captured_at, update_entries = self._build_readonly_context()
-        command_answer = self._answer_supported_plugin_command(
+        if selected_site_ids == set() and self._looks_like_update_request(normalized_question):
+            return AssistantAnswer(
+                text="Bitte waehle zuerst mindestens eine Website oder 'Alle' im Seitenpanel aus.",
+                generated_at=datetime.now(UTC),
+                data_captured_at=None,
+            )
+
+        context, captured_at, update_entries = self._build_readonly_context(selected_site_ids=selected_site_ids)
+        command_answer = self._answer_supported_update_command(
             normalized_question,
             update_entries,
             previous_site_ids=previous_site_ids,
             captured_at=captured_at,
+            selection_is_explicit=selection_is_explicit,
+            selection_label=selection_label,
         )
         if command_answer is not None:
             return command_answer
@@ -122,9 +164,15 @@ class HubAssistantService:
         self.provider_service.record_request_success(config)
         return AssistantAnswer(text=answer, generated_at=datetime.now(UTC), data_captured_at=captured_at)
 
-    def _build_readonly_context(self) -> tuple[dict[str, Any], datetime | None, list[Any]]:
+    def _build_readonly_context(
+        self,
+        *,
+        selected_site_ids: set[int] | None,
+    ) -> tuple[dict[str, Any], datetime | None, list[Any]]:
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
         items = inventory.list_items(limit=1000)
+        if selected_site_ids is not None:
+            items = [item for item in items if item.site.id in selected_site_ids]
         update_entries = inventory.build_update_workbench(items)
         plan_service = UpdatePlanService(db=self.db, cipher=self.cipher)
         plans = plan_service.list_plans()[:50]
@@ -177,7 +225,7 @@ class HubAssistantService:
                 "available_updates": update_rows,
                 "update_plans": plan_rows,
                 "limits": {
-                    "mode": "analysis only; direct plugin updates are validated by the Hub outside this model response",
+                    "mode": "analysis only; direct updates are validated by the Hub outside this model response",
                     "updates_included": len(update_rows),
                     "updates_total": len(update_entries),
                 },
@@ -186,47 +234,71 @@ class HubAssistantService:
             update_entries,
         )
 
-    def _answer_supported_plugin_command(
+    def _answer_supported_update_command(
         self,
         question: str,
         update_entries: list[Any],
         *,
         previous_site_ids: tuple[int, ...],
         captured_at: datetime | None,
+        selection_is_explicit: bool,
+        selection_label: str,
     ) -> AssistantAnswer | None:
-        plugin_name = self._find_mentioned_plugin(question, update_entries)
-        if not plugin_name:
+        target = self._find_update_target(question, update_entries)
+        if target is None:
             return None
 
         normalized_question = self._normalize_for_matching(question)
         is_update_action = bool(_UPDATE_ACTION_PATTERN.search(normalized_question))
-        is_update_question = "update" in normalized_question or "aktualis" in normalized_question
+        is_update_question = self._looks_like_update_request(normalized_question)
         if not is_update_action and not is_update_question:
             return None
 
-        plugin_entries = [
+        component_entries = [
             entry
             for entry in update_entries
-            if entry.kind == "plugin" and self._normalize_for_matching(entry.name) == self._normalize_for_matching(plugin_name)
+            if self._matches_update_target(entry, target)
         ]
+        customer_status = self._find_customer_status(normalized_question)
+        customer_name = self._find_mentioned_customer(normalized_question, component_entries)
+        customer_initial = self._find_customer_initial(normalized_question)
+        if customer_status:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_status_for_entry(entry) == customer_status
+            ]
+        if customer_name:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_name_for_entry(entry) == customer_name
+            ]
+        if customer_initial:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_name_for_entry(entry).casefold().startswith(customer_initial)
+            ]
         update_matches = tuple(
             AssistantUpdateMatch(
                 plan_key=entry.plan_key,
                 site_id=entry.site.id,
                 site_domain=entry.site.domain,
-                plugin_name=entry.name,
+                component_kind=entry.kind_label,
+                component_name=entry.name,
                 current_version=entry.current_version,
                 target_version=entry.target_version,
                 direct_update_selectable=entry.direct_update_selectable,
             )
-            for entry in plugin_entries
+            for entry in component_entries
             if entry.update_available
         )[:MAX_ASSISTANT_UPDATE_MATCHES]
 
         if not update_matches:
             return AssistantAnswer(
                 text=(
-                    f"Fuer {plugin_name} ist in den gespeicherten Hub-Daten aktuell kein Update-Angebot vorhanden. "
+                    f"Fuer {target.label} ist in den gespeicherten Hub-Daten aktuell kein Update-Angebot vorhanden. "
                     "Ein aktueller Status kann mit der Update-Workbench-Pruefung nachgeladen werden."
                 ),
                 generated_at=datetime.now(UTC),
@@ -238,21 +310,30 @@ class HubAssistantService:
             normalized_question,
             update_matches,
             previous_site_ids=previous_site_ids,
+            selection_is_explicit=selection_is_explicit,
+            selection_label=selection_label,
         )
         if is_update_action and scope is not None:
             scoped_matches, scope_label = scope
+            customer_filter_label = self._customer_filter_label(
+                customer_status=customer_status,
+                customer_name=customer_name,
+                customer_initial=customer_initial,
+            )
+            if customer_filter_label:
+                scope_label = f"{scope_label} und {customer_filter_label}"
             scoped_direct_matches = tuple(match for match in scoped_matches if match.direct_update_selectable)
             if scoped_direct_matches:
                 return AssistantAnswer(
                     text=(
                         f"Ich habe {len(scoped_matches)} gemeldete Update{'s' if len(scoped_matches) != 1 else ''} fuer "
-                        f"{plugin_name} auf {scope_label} gefunden und starte die direkt ausfuehrbaren jetzt."
+                        f"{target.label} auf {scope_label} gefunden und starte die direkt ausfuehrbaren jetzt."
                     ),
                     generated_at=datetime.now(UTC),
                     data_captured_at=captured_at,
                     update_matches=scoped_matches,
                     action=AssistantAction(
-                        plugin_name=plugin_name,
+                        update_label=target.label,
                         selected_keys=tuple(match.plan_key for match in scoped_direct_matches),
                         scope_label=scope_label,
                         skipped_count=len(scoped_matches) - len(scoped_direct_matches),
@@ -260,7 +341,7 @@ class HubAssistantService:
                 )
             return AssistantAnswer(
                 text=(
-                    f"Fuer {plugin_name} sind auf {scope_label} {len(scoped_matches)} Update{'s' if len(scoped_matches) != 1 else ''} gemeldet, "
+                    f"Fuer {target.label} sind auf {scope_label} {len(scoped_matches)} Update{'s' if len(scoped_matches) != 1 else ''} gemeldet, "
                     "aber keines ist aktuell fuer eine direkte Wartung freigegeben."
                 ),
                 generated_at=datetime.now(UTC),
@@ -269,17 +350,17 @@ class HubAssistantService:
             )
 
         next_step = (
-            " Sage zum Starten zum Beispiel: 'Aktualisiere "
-            f"{plugin_name} auf allen Websites' oder 'Aktualisiere {plugin_name} auf diesen Websites'."
+            " Waehle im Seitenpanel die betroffenen Websites oder Kunden aus und sage dann zum Beispiel: "
+            f"'Aktualisiere {target.label}'."
         )
         if is_update_action:
             next_step = (
-                " Bitte nenne den Umfang eindeutig, etwa 'auf allen Websites', einen Domainnamen, "
+                " Bitte waehle den Umfang im Seitenpanel, nenne 'auf allen Websites', einen Domainnamen, "
                 "oder frage zuerst nach den betroffenen Websites und verwende danach 'auf diesen Websites'."
             )
         return AssistantAnswer(
             text=(
-                f"Fuer {plugin_name} gibt es {len(update_matches)} gemeldete Update{'s' if len(update_matches) != 1 else ''}; "
+                f"Fuer {target.label} gibt es {len(update_matches)} gemeldete Update{'s' if len(update_matches) != 1 else ''}; "
                 f"davon sind {len(direct_matches)} direkt ausfuehrbar.{next_step}"
             ),
             generated_at=datetime.now(UTC),
@@ -288,24 +369,100 @@ class HubAssistantService:
         )
 
     @classmethod
-    def _find_mentioned_plugin(cls, question: str, update_entries: list[Any]) -> str | None:
+    def _find_update_target(cls, question: str, update_entries: list[Any]) -> AssistantUpdateTarget | None:
         normalized_question = cls._normalize_for_matching(question)
         compact_question = normalized_question.replace(" ", "")
+        components = sorted(
+            {
+                (entry.kind, entry.name.strip())
+                for entry in update_entries
+                if entry.kind in {"plugin", "theme"} and entry.name.strip()
+            },
+            key=lambda item: len(cls._normalize_for_matching(item[1]).replace(" ", "")),
+            reverse=True,
+        )
+        for kind, name in components:
+            normalized_name = cls._normalize_for_matching(name)
+            compact_name = normalized_name.replace(" ", "")
+            if len(compact_name) >= 4 and compact_name in compact_question:
+                return AssistantUpdateTarget(kind=kind, name=name, label=name)
+        if _ALL_UPDATES_PATTERN.search(normalized_question):
+            return AssistantUpdateTarget(kind=None, name=None, label="alle verfuegbaren Updates")
+        if _WORDPRESS_PATTERN.search(normalized_question):
+            return AssistantUpdateTarget(kind="wordpress", name=None, label="WordPress Core")
+        if _THEME_PATTERN.search(normalized_question):
+            return AssistantUpdateTarget(kind="theme", name=None, label="alle Themes")
+        if _PLUGIN_PATTERN.search(normalized_question):
+            return AssistantUpdateTarget(kind="plugin", name=None, label="alle Plugins")
+        return None
+
+    @classmethod
+    def _matches_update_target(cls, entry: Any, target: AssistantUpdateTarget) -> bool:
+        if target.kind is not None and entry.kind != target.kind:
+            return False
+        return target.name is None or cls._normalize_for_matching(entry.name) == cls._normalize_for_matching(target.name)
+
+    @staticmethod
+    def _looks_like_update_request(question: str) -> bool:
+        return "update" in question or "aktualis" in question or bool(_UPDATE_ACTION_PATTERN.search(question))
+
+    @staticmethod
+    def _find_customer_status(question: str) -> str | None:
+        for pattern, status in _CUSTOMER_STATUS_PATTERNS:
+            if pattern.search(question):
+                return status
+        return None
+
+    @classmethod
+    def _find_mentioned_customer(cls, question: str, entries: list[Any]) -> str | None:
+        compact_question = question.replace(" ", "")
         names = sorted(
             {
-                entry.name.strip()
-                for entry in update_entries
-                if entry.kind == "plugin" and entry.name.strip()
+                cls._customer_name_for_entry(entry)
+                for entry in entries
+                if cls._customer_name_for_entry(entry)
             },
             key=lambda name: len(cls._normalize_for_matching(name).replace(" ", "")),
             reverse=True,
         )
         for name in names:
-            normalized_name = cls._normalize_for_matching(name)
-            compact_name = normalized_name.replace(" ", "")
+            compact_name = cls._normalize_for_matching(name).replace(" ", "")
             if len(compact_name) >= 4 and compact_name in compact_question:
                 return name
         return None
+
+    @staticmethod
+    def _find_customer_initial(question: str) -> str | None:
+        if "kunde" not in question and "customer" not in question:
+            return None
+        match = _CUSTOMER_INITIAL_PATTERN.search(question)
+        return match.group(1) if match else None
+
+    @classmethod
+    def _customer_status_for_entry(cls, entry: Any) -> str:
+        customer = getattr(entry.site, "customer", None)
+        return str(getattr(customer, "zoho_status", "") or "")
+
+    @classmethod
+    def _customer_name_for_entry(cls, entry: Any) -> str:
+        customer = getattr(entry.site, "customer", None)
+        return str(getattr(customer, "name", "") or "")
+
+    @staticmethod
+    def _customer_filter_label(
+        *,
+        customer_status: str | None,
+        customer_name: str | None,
+        customer_initial: str | None,
+    ) -> str:
+        parts = []
+        if customer_status:
+            parts.append(f"Kundenstatus {customer_status}")
+        if customer_name:
+            parts.append(f"Kunde {customer_name}")
+        if customer_initial:
+            parts.append(f"Kundenname mit {customer_initial.upper()}")
+        return ", ".join(parts)
 
     @classmethod
     def _resolve_requested_scope(
@@ -314,7 +471,11 @@ class HubAssistantService:
         matches: tuple[AssistantUpdateMatch, ...],
         *,
         previous_site_ids: tuple[int, ...],
+        selection_is_explicit: bool,
+        selection_label: str,
     ) -> tuple[tuple[AssistantUpdateMatch, ...], str] | None:
+        if selection_is_explicit:
+            return matches, selection_label or "den im Seitenpanel ausgewaehlten Websites"
         if _ALL_SITES_PATTERN.search(question):
             return matches, "allen passenden Websites"
 

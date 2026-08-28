@@ -25,6 +25,7 @@ from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
+from app.services.site_selection import build_site_selector_context
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -448,7 +449,7 @@ def update_workbench_page(
                 "diagnosis": diagnosis,
             },
             "site_options": site_options,
-            "site_selector": _site_selector_context(
+            "site_selector": build_site_selector_context(
                 action="/updates",
                 form_id="update-site-scope-form",
                 sites=site_options,
@@ -1061,7 +1062,7 @@ def _user_workbench_context(
             "customer_status": customer_status,
         },
         "site_options": site_options,
-        "site_selector": _site_selector_context(
+        "site_selector": build_site_selector_context(
             action="/users",
             form_id="user-site-scope-form",
             sites=site_options,
@@ -1076,43 +1077,6 @@ def _user_workbench_context(
         "outcomes": outcome_rows,
         "action_label": action_label,
         "bulk_limit": SiteUserService.BULK_ACTION_LIMIT,
-    }
-
-
-def _site_selector_context(
-    *,
-    action: str,
-    form_id: str,
-    sites: list,
-    selected_site_ids: set[int] | None,
-    site_scope: str,
-    submit_label: str,
-) -> dict:
-    """Build one reusable domain/customer selector for fleet workbenches."""
-    customers: dict[int, dict] = {}
-    for site in sites:
-        customer = site.customer
-        if customer is None:
-            continue
-        customer_entry = customers.setdefault(
-            customer.id,
-            {
-                "id": customer.id,
-                "name": customer.name,
-                "status": customer.zoho_status or "",
-                "site_ids": [],
-            },
-        )
-        customer_entry["site_ids"].append(site.id)
-
-    return {
-        "action": action,
-        "form_id": form_id,
-        "sites": sites,
-        "customers": sorted(customers.values(), key=lambda entry: entry["name"].casefold()),
-        "selected_site_ids": selected_site_ids or set(),
-        "site_scope": site_scope,
-        "submit_label": submit_label,
     }
 
 

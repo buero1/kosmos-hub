@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Assistant · kosmos-hub{% endblock %}
 {% block content %}
-  <section>
+  <div class="workbench-page-layout">
+    {% include "partials/site_selector.html" %}
+    <section class="workbench-page-main">
     <div class="section-heading">
       <div>
         <p class="eyebrow">AI operations assistant</p>
         <h2>Kosmos Assistant</h2>
-        <p class="subtle">Analyses stored Hub data and can queue clearly scoped, directly executable plugin updates.</p>
+        <p class="subtle">Analyses the selected Hub scope and can queue directly executable WordPress, theme, and plugin updates.</p>
       </div>
       <span class="pill pill-success">Guided actions</span>
     </div>
@@ -23,11 +25,18 @@
     {% else %}
       <form class="assistant-panel" method="post" action="/assistant">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}">
+        {% if site_selector.site_scope == "selected" %}
+          {% for selected_site_id in site_selector.selected_site_ids %}
+            <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+          {% endfor %}
+        {% endif %}
         <label for="assistant-question">What should Kosmos Hub do or analyse?</label>
-        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Show all websites with a Smush update.">{{ question }}</textarea>
-        <p class="subtle">Examples: "Show all websites with a Smush update", "Update Smush on all websites", or "Which sites have no recent update check?"</p>
-        <p class="subtle">A plugin update starts only when the plugin and scope are unambiguous. It always uses the same protected maintenance queue as the Update workbench.</p>
-        <p class="subtle">The required Hub snapshot is sent server-side to OpenAI for the answer. Never enter customer credentials or other secrets here.</p>
+        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Update all themes.">{{ question }}</textarea>
+        <p class="subtle">Scope: {% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}.</p>
+        <p class="subtle">Examples: "Show all websites with a Smush update", "Update all themes", "Update WordPress Core", or "Update all plugins for current customers".</p>
+        <p class="subtle">The panel is the binding scope. A direct update uses the same protected maintenance queue as the Update workbench.</p>
+        <p class="subtle">For open questions, the required Hub snapshot is sent server-side to OpenAI. Direct update commands are resolved and validated inside the Hub. Never enter customer credentials or other secrets here.</p>
         <button class="button" type="submit">Ask Assistant</button>
       </form>
     {% endif %}
@@ -48,7 +57,8 @@
               <thead>
                 <tr>
                   <th>Website</th>
-                  <th>Plugin</th>
+                  <th>Type</th>
+                  <th>Update</th>
                   <th>Installed</th>
                   <th>Target</th>
                   <th>Direct maintenance</th>
@@ -58,7 +68,8 @@
                 {% for match in answer.update_matches %}
                   <tr>
                     <td>{{ match.site_domain }}</td>
-                    <td>{{ match.plugin_name }}</td>
+                    <td><span class="pill pill-{{ match.component_kind | lower }}">{{ match.component_kind }}</span></td>
+                    <td>{{ match.component_name }}</td>
                     <td>{{ match.current_version }}</td>
                     <td>{{ match.target_version }}</td>
                     <td>{% if match.direct_update_selectable %}<span class="pill pill-success">Ready</span>{% else %}<span class="pill pill-unknown">Not ready</span>{% endif %}</td>
@@ -71,5 +82,6 @@
         <p class="subtle">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at | berlin_time }}{% endif %}.</p>
       </section>
     {% endif %}
-  </section>
+    </section>
+  </div>
 {% endblock %}
