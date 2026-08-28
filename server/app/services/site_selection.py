@@ -9,6 +9,8 @@ def build_site_selector_context(
     selected_site_ids: set[int] | None,
     site_scope: str,
     submit_label: str,
+    target_form_id: str = "",
+    hide_submit: bool = False,
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
     customers: dict[int, dict[str, Any]] = {}
@@ -35,4 +37,6 @@ def build_site_selector_context(
         "selected_site_ids": selected_site_ids or set(),
         "site_scope": site_scope,
         "submit_label": submit_label,
+        "target_form_id": target_form_id,
+        "hide_submit": hide_submit,
     }

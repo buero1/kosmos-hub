@@ -23,17 +23,19 @@
         <a class="button" href="/account">Open Account</a>
       </section>
     {% else %}
-      <form class="assistant-panel" method="post" action="/assistant">
+      <form id="assistant-question-form" class="assistant-panel" method="post" action="/assistant">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}">
-        {% if site_selector.site_scope == "selected" %}
-          {% for selected_site_id in site_selector.selected_site_ids %}
-            <input type="hidden" name="site_id" value="{{ selected_site_id }}">
-          {% endfor %}
-        {% endif %}
+        <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
+        <span data-site-selector-target-sites>
+          {% if site_selector.site_scope == "selected" %}
+            {% for selected_site_id in site_selector.selected_site_ids %}
+              <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+            {% endfor %}
+          {% endif %}
+        </span>
         <label for="assistant-question">What should Kosmos Hub do or analyse?</label>
         <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Update all themes.">{{ question }}</textarea>
-        <p class="subtle">Scope: {% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}.</p>
+        <p class="subtle">Scope: <span data-site-selector-target-summary>{% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}</span>. Changes in the side panel apply immediately.</p>
         <p class="subtle">Examples: "Show all websites with a Smush update", "Update all themes", "Update WordPress Core", or "Update all plugins for current customers".</p>
         <p class="subtle">The panel is the binding scope. A direct update uses the same protected maintenance queue as the Update workbench.</p>
         <p class="subtle">For open questions, the required Hub snapshot is sent server-side to OpenAI. Direct update commands are resolved and validated inside the Hub. Never enter customer credentials or other secrets here.</p>

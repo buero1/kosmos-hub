@@ -200,6 +200,8 @@ def _assistant_selection(
             selected_site_ids=selected_site_ids,
             site_scope=site_scope,
             submit_label="Set assistant scope",
+            target_form_id="assistant-question-form",
+            hide_submit=True,
         ),
         "selected_site_ids": selected_site_ids,
         "is_explicit": is_explicit,

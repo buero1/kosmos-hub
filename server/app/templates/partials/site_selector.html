@@ -1,4 +1,4 @@
-<aside class="workbench-site-selector" data-site-selector>
+<aside class="workbench-site-selector" data-site-selector data-site-selector-target-form="{{ site_selector.target_form_id or '' }}">
   <form id="{{ site_selector.form_id }}" method="get" action="{{ site_selector.action }}">
     <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-scope>
 
@@ -47,7 +47,9 @@
       {% endfor %}
     </div>
 
-    <button class="button site-selector-submit" type="submit">{{ site_selector.submit_label }}</button>
+    {% if not site_selector.hide_submit %}
+      <button class="button site-selector-submit" type="submit">{{ site_selector.submit_label }}</button>
+    {% endif %}
   </form>
 </aside>
 
@@ -63,6 +65,12 @@
     var search = selector.querySelector("[data-site-selector-search]");
     var tabs = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-tab]"));
     var panels = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-panel]"));
+    var targetFormId = selector.getAttribute("data-site-selector-target-form");
+
+    function targetForm() {
+      // The Assistant form is rendered after this shared sidebar partial.
+      return targetFormId ? document.getElementById(targetFormId) : null;
+    }
 
     function selectedIds() {
       return siteChecks.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
@@ -81,6 +89,31 @@
     function syncSelection() {
       count.textContent = scope.value === "all" ? "All sites" : selectedIds().length + " selected";
       syncCustomerChecks();
+      syncTargetForm();
+    }
+
+    function syncTargetForm() {
+      var form = targetForm();
+      if (!form) { return; }
+      var targetScope = form.querySelector("[data-site-selector-target-scope]");
+      var targetSites = form.querySelector("[data-site-selector-target-sites]");
+      var targetSummary = form.querySelector("[data-site-selector-target-summary]");
+      if (targetScope) { targetScope.value = scope.value; }
+      if (targetSites) {
+        while (targetSites.firstChild) { targetSites.removeChild(targetSites.firstChild); }
+        if (scope.value !== "all") {
+          selectedIds().forEach(function (siteId) {
+            var input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "site_id";
+            input.value = siteId;
+            targetSites.appendChild(input);
+          });
+        }
+      }
+      if (targetSummary) {
+        targetSummary.textContent = scope.value === "all" ? "all websites" : selectedIds().length + " selected website" + (selectedIds().length === 1 ? "" : "s");
+      }
     }
 
     function applySearch() {
