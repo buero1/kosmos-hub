@@ -75,45 +75,25 @@
       </div>
     </div>
 
-    <div class="workbench-action-grid">
-      <form id="direct-update-form" class="workbench-action-card" method="post" action="/updates/execute-selected-updates">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div>
-          <p class="eyebrow">
-            Run selected updates
-            <button class="info-tooltip" type="button" aria-label="Show information about selected updates">
-              <span aria-hidden="true">i</span>
-              <span class="info-tooltip-content" role="tooltip">Before every update, the Hub refreshes the update evidence and verifies the exact installed version. Active plugins remain active; inactive plugins remain inactive. Afterwards it verifies WordPress again, checks homepage and REST API, and stops the remaining selection if anything fails.</span>
-            </button>
-          </p>
-        </div>
-        <button class="button" type="submit">Run selected updates</button>
-      </form>
-
-      <form id="fleet-refresh-form" class="workbench-action-card" method="post" action="/updates/refresh-official-plugin-versions">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="site_scope" value="{{ filters.site_scope }}" data-site-selector-target-scope>
-        <span data-site-selector-target-sites>
-          {% if filters.site_scope != "all" %}
-            {% for selected_site_id in filters.site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
-          {% endif %}
-        </span>
-        <div>
-          <p class="eyebrow">
-            Version check and diagnosis
-            <button class="info-tooltip" type="button" aria-label="Show information about the version check">
-              <span aria-hidden="true">i</span>
-              <span class="info-tooltip-content" role="tooltip">The normal check reuses site status younger than {{ refresh_settings.site_status_max_age_minutes }} minutes and official provider evidence younger than {{ refresh_settings.official_version_max_age_hours }} hours. It checks up to {{ refresh_settings.max_parallel_site_checks }} sites in parallel and updates this page automatically. Crocoblock is contacted only for stale Jet evidence or Jet mismatches. A full refresh ignores those time limits. Neither option installs or updates a plugin.</span>
-            </button>
-          </p>
-          <p class="subtle">Scope: <span data-site-selector-target-summary>{% if filters.site_scope == "all" %}all websites{% else %}{{ filters.site_ids | length }} selected website{{ "" if filters.site_ids | length == 1 else "s" }}{% endif %}</span>.</p>
-        </div>
-        <div class="filter-actions">
-          <button class="button button-secondary" type="submit" name="mode" value="normal">Refresh stale status and diagnose</button>
-          <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh this scope</button>
-        </div>
-      </form>
-    </div>
+    <form id="workbench-action-form" class="workbench-action-panel" method="post" action="/updates/apply-action">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
+      <span data-site-selector-target-sites>
+        {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
+      </span>
+      <label>
+        <span>Aktion</span>
+        <select name="maintenance_action" required>
+          <option value="" selected disabled>Aktion auswählen</option>
+          <option value="direct-updates">Ausgewählte Updates ausführen</option>
+          <option value="refresh-stale">Ausgewählte Websites aktualisieren und diagnostizieren</option>
+          <option value="refresh-full">Ausgewählte Websites vollständig aktualisieren</option>
+          {% if active_fleet_refresh_run %}<option value="cancel-refresh">Aktiven Refresh abbrechen</option>{% endif %}
+        </select>
+      </label>
+      <p class="subtle">Umfang: <span data-site-selector-target-summary data-site-selector-target-summary-locale="de">{{ site_selector.selected_site_ids | length }} ausgewählte Website{{ "" if site_selector.selected_site_ids | length == 1 else "s" }}</span>.</p>
+      <button class="button" type="submit">Anwenden</button>
+    </form>
 
     {% if direct_update == "started" %}
       <p class="notice-success">{{ message }}</p>
@@ -124,75 +104,6 @@
       <p class="notice-success">{{ message }}</p>
     {% elif official_versions == "error" %}
       <p class="notice-error">{{ message }}</p>
-    {% endif %}
-
-    {% if refresh_run %}
-      {% set progress = refresh_run.result_json or {} %}
-      {% set site_progress = progress.get("sites", {}) %}
-      {% set official_progress = progress.get("official_versions", {}) %}
-      {% set crocoblock_progress = progress.get("crocoblock", {}) %}
-      {% set backup_progress = progress.get("backups", {}) %}
-      {% set phase = progress.get("phase", {}) %}
-      {% set refresh_scope = progress.get("scope", {}) %}
-      {% set refresh_is_active = refresh_run.status in ["queued", "running", "cancelling"] %}
-      {% set completed_sites = site_progress.get("completed", 0) %}
-      {% set total_sites = site_progress.get("total", 0) %}
-      <section class="maintenance-batch">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Current fleet refresh status</p>
-            <h3>{% if refresh_is_active %}Refresh in progress{% else %}Latest all-sites result{% endif %}: {{ refresh_run.status | replace("-", " ") | title }}</h3>
-            <p class="subtle">Scope: {{ refresh_scope.get("label", "All sites") }}.</p>
-            {% if not refresh_is_active %}<p class="subtle">This is the latest completed refresh that represents the full fleet.</p>{% endif %}
-            {% if refresh_run.status == "queued" %}
-              <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
-            {% elif refresh_run.status == "running" %}
-              {% if phase.get("key") == "site-checks" %}
-                <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
-              {% else %}
-                <p class="subtle">Website checks are complete. <strong>{{ phase.get("label", "Finishing the refresh") }}</strong>{% if phase.get("total", 0) %}: {{ phase.get("completed", 0) }} of {{ phase.get("total", 0) }} complete.{% endif %}</p>
-              {% endif %}
-            {% elif refresh_run.status == "cancelling" %}
-              <p class="notice-warning">Cancellation requested. The active site checks will finish safely; no further sites or provider checks will start.</p>
-            {% elif refresh_run.status == "cancelled" %}
-              <p class="notice-warning">This refresh was cancelled after {{ completed_sites }} of {{ total_sites }} connected sites. Already completed checks remain stored.</p>
-            {% elif refresh_run.status == "succeeded" %}
-              <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ backup_progress.get("refreshed", 0) }} backup statuses refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
-            {% else %}
-              <p class="notice-error">{{ refresh_run.error_message or "The refresh could not complete." }}</p>
-            {% endif %}
-          </div>
-          <div class="inventory-totals">
-            <span><strong>{{ site_progress.get("completed", 0) }}/{{ site_progress.get("total", 0) }}</strong> sites</span>
-            <span><strong>{{ official_progress.get("completed", official_progress.get("checked", 0)) }}/{{ official_progress.get("checked", 0) }}</strong> official checks</span>
-            <span><strong>{{ official_progress.get("cached", 0) }}</strong> version cache</span>
-            <span><strong>{{ crocoblock_progress.get("completed", 0) }}/{{ crocoblock_progress.get("eligible", 0) }}</strong> Jet checks</span>
-            <span><strong>{{ backup_progress.get("refreshed", 0) }}</strong> backup checks</span>
-          </div>
-        </div>
-        {% if refresh_run.status in ["queued", "running"] %}
-          <form class="inline-form" method="post" action="/updates/refresh-runs/{{ refresh_run.id }}/cancel">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-danger" type="submit">Cancel refresh</button>
-          </form>
-        {% endif %}
-        {% if refresh_run.status == "running" and phase.get("total", 0) %}
-          <progress class="fleet-refresh-progress" value="{{ phase.get("completed", 0) }}" max="{{ phase.get("total", 0) }}">{{ phase.get("completed", 0) }} of {{ phase.get("total", 0) }}</progress>
-          <div class="fleet-refresh-progress-details">
-            {% if phase.get("key") == "site-checks" %}
-              <span><strong>{{ site_progress.get("refreshed", 0) }}</strong> refreshed</span>
-              <span><strong>{{ site_progress.get("failed", 0) }}</strong> failed</span>
-              <span><strong>{{ site_progress.get("skipped", 0) }}</strong> pending / skipped</span>
-            {% else %}
-              <span><strong>{{ phase.get("completed", 0) }}</strong> completed in this phase</span>
-              <span><strong>{{ phase.get("total", 0) - phase.get("completed", 0) }}</strong> remaining</span>
-            {% endif %}
-          </div>
-        {% endif %}
-        {% if progress.get("errors") %}
-          <p class="notice-error">{{ progress.get("errors") | length }} site check{{ "s" if progress.get("errors") | length != 1 else "" }} reported an issue. The other sites continue independently.</p>
-        {% endif %}
-      </section>
     {% endif %}
 
     <section class="maintenance-batch maintenance-history" aria-labelledby="refresh-history-heading">
@@ -307,7 +218,7 @@
             <tr>
               <td>
                 {% if entry.direct_update_selectable %}
-                  <input class="update-selection" form="direct-update-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
+                  <input class="update-selection" form="workbench-action-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
                   <span class="subtle">Not ready</span>
                 {% endif %}
@@ -389,8 +300,8 @@
     </div>
     </section>
   </div>
-  {% if batch_running or (refresh_run and refresh_run.status in ["queued", "running", "cancelling"]) %}
-    <p class="subtle">This page refreshes automatically while the direct update run is active.</p>
+  {% if batch_running or active_fleet_refresh_run %}
+    <p class="subtle">Diese Seite aktualisiert sich automatisch, solange eine Wartungsaktion läuft.</p>
     <script>
       window.setTimeout(function () {
         window.location.reload();

@@ -22,7 +22,6 @@ from app.services.site_users import SiteUserService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
-from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.site_selection import build_site_selector_context
@@ -433,8 +432,7 @@ def update_workbench_page(
         # Resume a user-started batch if a process restart interrupted polling.
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
-    fleet_refresh_run = fleet_refresh_service.get_current_status_run()
-    refresh_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
+    active_fleet_refresh_run = fleet_refresh_service.get_active_run()
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -454,7 +452,7 @@ def update_workbench_page(
             "site_selector": build_site_selector_context(
                 action="/updates",
                 form_id="update-site-scope-form",
-                target_form_id="fleet-refresh-form",
+                target_form_id="workbench-action-form",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
@@ -468,9 +466,8 @@ def update_workbench_page(
             "batch_running": batch_running,
             "direct_update": direct_update,
             "official_versions": official_versions,
-            "refresh_run": fleet_refresh_run,
+            "active_fleet_refresh_run": active_fleet_refresh_run,
             "refresh_runs": fleet_refresh_service.list_recent_runs(limit=20),
-            "refresh_settings": refresh_settings,
             "message": message,
         },
     )
@@ -599,6 +596,84 @@ def refresh_official_plugin_versions(
         message = "A fleet refresh is already running. This page will show its progress."
     return RedirectResponse(
         url=f"/updates?{urlencode({'message': message})}",
+        status_code=303,
+    )
+
+
+@router.post("/updates/apply-action")
+def apply_update_workbench_action(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    maintenance_action: Annotated[
+        Literal["direct-updates", "refresh-stale", "refresh-full", "cancel-refresh"],
+        Form(),
+    ],
+    selected: Annotated[list[str] | None, Form()] = None,
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    site_id: Annotated[list[int] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
+    scope_query: list[tuple[str, str | int]] = [("site_scope", site_scope)]
+    if selected_site_ids is not None:
+        scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
+
+    if maintenance_action == "direct-updates":
+        try:
+            outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_direct_updates(
+                selected_keys=selected or [],
+                actor=user.username,
+            )
+        except ValueError as exc:
+            return RedirectResponse(
+                url=f"/updates?{urlencode(scope_query + [('direct_update', 'error'), ('message', str(exc))])}",
+                status_code=303,
+            )
+        schedule_pending_direct_updates()
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + [('update_batch', outcome.batch_id), ('direct_update', 'started'), ('message', outcome.message)])}",
+            status_code=303,
+        )
+
+    refresh_service = FleetRefreshService(db=db)
+    if maintenance_action == "cancel-refresh":
+        active_run = refresh_service.get_active_run()
+        if active_run is None:
+            return RedirectResponse(
+                url=f"/updates?{urlencode(scope_query + [('official_versions', 'error'), ('message', 'There is no active fleet refresh to cancel.')])}",
+                status_code=303,
+            )
+        run, cancelled = refresh_service.cancel_run(actor=user, run_id=active_run.id)
+        db.commit()
+        message = "Cancellation was requested. Current site checks will finish, but no further checks will start." if cancelled else "This fleet refresh had already finished."
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + [('message', message)])}",
+            status_code=303,
+        )
+
+    if selected_site_ids is not None and not selected_site_ids:
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + [('official_versions', 'error'), ('message', 'Select at least one site in the side panel before refreshing.')])}",
+            status_code=303,
+        )
+
+    mode = FleetRefreshService.MODE_FULL if maintenance_action == "refresh-full" else FleetRefreshService.MODE_NORMAL
+    run, created = refresh_service.create_run(actor=user, mode=mode, site_ids=selected_site_ids)
+    db.commit()
+    if created:
+        background_tasks.add_task(FleetRefreshService.process_run, run.id)
+        scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
+        message = f"The background refresh for {scope_label} was queued. This page will update automatically."
+    else:
+        message = "A fleet refresh is already running. This page will show its progress in the refresh protocol."
+    return RedirectResponse(
+        url=f"/updates?{urlencode(scope_query + [('official_versions', 'refreshed'), ('message', message)])}",
         status_code=303,
     )
 

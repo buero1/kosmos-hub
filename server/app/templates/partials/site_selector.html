@@ -114,7 +114,12 @@
         }
       }
       if (targetSummary) {
-        targetSummary.textContent = scope.value === "all" ? "all websites" : selectedIds().length + " selected website" + (selectedIds().length === 1 ? "" : "s");
+        var selectedCount = selectedIds().length;
+        if (targetSummary.getAttribute("data-site-selector-target-summary-locale") === "de") {
+          targetSummary.textContent = scope.value === "all" ? "alle auswählbaren Websites" : selectedCount + " ausgewählte Website" + (selectedCount === 1 ? "" : "s");
+        } else {
+          targetSummary.textContent = scope.value === "all" ? "all websites" : selectedCount + " selected website" + (selectedCount === 1 ? "" : "s");
+        }
       }
     }
 

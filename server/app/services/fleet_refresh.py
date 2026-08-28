@@ -81,9 +81,9 @@ class FleetRefreshService:
     def get_latest_run(self) -> FleetRefreshRun | None:
         return self.db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
 
-    def get_current_status_run(self) -> FleetRefreshRun | None:
-        """Return current work, otherwise the latest run representing the whole fleet."""
-        active_run = self.db.scalar(
+    def get_active_run(self) -> FleetRefreshRun | None:
+        """Return the newest refresh that still needs progress polling."""
+        return self.db.scalar(
             select(FleetRefreshRun)
             .where(
                 FleetRefreshRun.status.in_(
@@ -97,13 +97,6 @@ class FleetRefreshService:
             .order_by(FleetRefreshRun.created_at.desc())
             .limit(1)
         )
-        if active_run is not None:
-            return active_run
-
-        for run in self.list_recent_runs(limit=200):
-            if self._target_site_ids(run.result_json) is None:
-                return run
-        return None
 
     def list_recent_runs(self, *, limit: int = 20) -> list[FleetRefreshRun]:
         return list(

@@ -29,7 +29,7 @@
         margin: 0 auto;
       }
       header {
-        padding: 2rem 0 1rem;
+        padding: 0 0 1rem;
       }
       nav a {
         color: var(--ink);
@@ -194,7 +194,7 @@
       }
       .site-selector-list {
         display: grid;
-        max-height: min(52vh, 31rem);
+        max-height: min(39vh, 23.25rem);
         gap: 0.05rem;
         overflow: auto;
         padding-right: 0.2rem;
@@ -276,6 +276,33 @@
         gap: 0.85rem;
         margin: 1.25rem 0;
       }
+      .workbench-action-panel {
+        display: grid;
+        grid-template-columns: minmax(240px, 0.9fr) minmax(180px, 1fr) auto;
+        align-items: end;
+        gap: 0.75rem 1rem;
+        margin: 1rem 0;
+        padding: 0.85rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .workbench-action-panel label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .workbench-action-panel select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 0.7rem 0.8rem;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+      }
+      .workbench-action-panel .subtle { margin: 0 0 0.2rem; }
       .plugin-install-form {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1113,6 +1140,7 @@
         .workbench-action-grid {
           grid-template-columns: 1fr;
         }
+        .workbench-action-panel { grid-template-columns: 1fr; }
         .plugin-install-form { grid-template-columns: 1fr; }
         .plugin-install-submit { align-items: flex-start; flex-direction: column; }
         .user-workbench-create form {
@@ -1125,7 +1153,7 @@
         .workbench-site-selector {
           position: static;
         }
-        .site-selector-list { max-height: 19rem; }
+        .site-selector-list { max-height: 14.25rem; }
         .site-detail-layout {
           grid-template-columns: 1fr;
         }
