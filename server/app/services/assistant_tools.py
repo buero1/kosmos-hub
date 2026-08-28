@@ -88,7 +88,7 @@ class HubAssistantTools:
             ),
             cls._tool(
                 "query_sites",
-                "Find websites by customer status or name prefix, site, plugin/theme installation state, and update state. Returned site IDs can be passed to set_site_selection.",
+                "Find websites by customer status or name prefix, site, plugin/theme installation state, and update state. Use list_components for a complete installed plugin or theme list. Returned site IDs can be passed to set_site_selection.",
                 {
                     "scope": {"type": "string", "enum": ["all", "panel"]},
                     "customer_ids": {"type": "array", "items": {"type": "integer"}},
@@ -105,6 +105,19 @@ class HubAssistantTools:
                     "component_identifier": {"type": "string", "description": "Exact identifier returned by search_components, or an empty string."},
                     "component_state": {"type": "string", "enum": ["any", "installed", "active", "inactive"]},
                     "update_state": {"type": "string", "enum": ["any", "available", "not_available", "not_checked"]},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+            ),
+            cls._tool(
+                "list_components",
+                "List the complete stored plugin or theme inventory for matching websites. Use this for questions about which plugins or themes are installed; this does not refresh, install, activate, or update anything.",
+                {
+                    "scope": {"type": "string", "enum": ["all", "panel"]},
+                    "customer_ids": {"type": "array", "items": {"type": "integer"}},
+                    "site_ids": {"type": "array", "items": {"type": "integer"}},
+                    "kind": {"type": "string", "enum": ["all", "plugin", "theme"]},
+                    "component_identifier": {"type": "string", "description": "Exact identifier returned by search_components, or an empty string."},
+                    "component_state": {"type": "string", "enum": ["any", "active", "inactive"]},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 },
             ),
@@ -171,6 +184,7 @@ class HubAssistantTools:
             "search_customers": self._search_customers,
             "search_components": self._search_components,
             "query_sites": self._query_sites,
+            "list_components": self._list_components,
             "list_updates": self._list_updates,
             "list_backups": self._list_backups,
             "list_wordpress_users": self._list_wordpress_users,
@@ -256,6 +270,7 @@ class HubAssistantTools:
         component_state = self._enum(arguments, "component_state", {"any", "installed", "active", "inactive"})
         update_state = self._enum(arguments, "update_state", {"any", "available", "not_available", "not_checked"})
         limit = self._limit(arguments)
+        has_component_filter = component_identifier or component_kind != "all" or component_state != "any"
 
         rows = []
         for item in items:
@@ -267,15 +282,46 @@ class HubAssistantTools:
                 and self._matches_component_state(component, component_state)
                 and self._matches_update_state(item, component, update_state)
             ]
-            if component_identifier or component_kind != "all" or component_state != "any":
+            if has_component_filter:
                 if not matches:
                     continue
             elif not self._matches_site_update_state(item, update_state):
                 continue
-            rows.append(self._site_row(item, matches))
+            rows.append(self._site_row(item, matches if has_component_filter else []))
 
         self._selection_candidates.update(row["id"] for row in rows)
         return self._limited_rows(rows, limit)
+
+    def _list_components(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        items = self._scoped_items(arguments)
+        kind = self._enum(arguments, "kind", {"all", "plugin", "theme"})
+        component_identifier = self._text(arguments, "component_identifier")
+        component_state = self._enum(arguments, "component_state", {"any", "active", "inactive"})
+        limit = self._limit(arguments)
+        rows = []
+        for item in items:
+            for component in self._components_for_item(item):
+                if kind != "all" and component["kind"] != kind:
+                    continue
+                if component_identifier and component["identifier"] != component_identifier:
+                    continue
+                if not self._matches_component_state(component, component_state):
+                    continue
+                rows.append(
+                    {
+                        "site_id": item.site.id,
+                        "domain": item.site.domain,
+                        "customer": self._customer_ref(item.site.customer),
+                        "kind": component["kind"],
+                        "name": component["name"],
+                        "identifier": component["identifier"],
+                        "version": component["version"],
+                        "active": component["active"],
+                        "state_checked_at": item.snapshot.captured_at.isoformat() if item.snapshot else "",
+                    }
+                )
+        rows.sort(key=lambda row: (row["domain"].casefold(), row["kind"], row["name"].casefold(), row["identifier"]))
+        return self._limited_rows(rows, limit, key="components")
 
     def _list_updates(self, arguments: dict[str, Any]) -> dict[str, Any]:
         items = self._scoped_items(arguments)
@@ -486,6 +532,7 @@ class HubAssistantTools:
             "wordpress_version": item.site.wordpress_version or "",
             "bridge_version": item.site.bridge_version or "",
             "matched_components": components[:10],
+            "matched_component_count": len(components),
             "state_checked_at": item.snapshot.captured_at.isoformat() if item.snapshot else "",
             "updates_checked_at": item.update_snapshot.captured_at.isoformat() if item.update_snapshot else "",
         }

@@ -41,7 +41,16 @@ def test_assistant_tools_resolve_fuzzy_customer_and_component_then_select_matchi
                             "plugin_file": "a3-lazy-load/a3-lazy-load.php",
                             "version": "2.7.0",
                             "active": True,
-                        }
+                        },
+                        *[
+                            {
+                                "name": f"Example Plugin {number}",
+                                "plugin_file": f"example-plugin-{number}/example-plugin-{number}.php",
+                                "version": "1.0.0",
+                                "active": True,
+                            }
+                            for number in range(1, 12)
+                        ],
                     ],
                     themes_json=[
                         {"name": "Hello Elementor", "stylesheet": "hello-elementor", "version": "3.5.0"}
@@ -114,6 +123,18 @@ def test_assistant_tools_resolve_fuzzy_customer_and_component_then_select_matchi
             },
         )
         selection = tools.execute("set_site_selection", {"site_ids": [active_site.id]})
+        installed_plugins = tools.execute(
+            "list_components",
+            {
+                "scope": "all",
+                "customer_ids": [customer.id],
+                "site_ids": [],
+                "kind": "plugin",
+                "component_identifier": "",
+                "component_state": "any",
+                "limit": 100,
+            },
+        )
         current_customer_sites = tools.execute(
             "query_sites",
             {
@@ -143,6 +164,8 @@ def test_assistant_tools_resolve_fuzzy_customer_and_component_then_select_matchi
 
         assert [site["id"] for site in sites["sites"]] == [active_site.id]
         assert selection["selected_site_ids"] == [active_site.id]
+        assert installed_plugins["components_count"] == 13
+        assert installed_plugins["truncated"] is False
         assert {site["id"] for site in current_customer_sites["sites"]} == {active_site.id, inactive_site.id}
         assert updates["updates"][0]["target_version"] == "2.8.0"
 

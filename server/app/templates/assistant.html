@@ -44,7 +44,7 @@
     {% endif %}
 
     {% if answer %}
-      <section class="assistant-answer">
+      <section class="assistant-answer" data-assistant-result>
         <p class="eyebrow">Assistant answer</p>
         <div class="assistant-text">{{ answer.text }}</div>
         {% if answer.selection_site_ids is not none %}
@@ -55,4 +55,35 @@
     {% endif %}
     </section>
   </div>
+  <script>
+    (function () {
+      var key = "kosmos-assistant-result";
+      var form = document.getElementById("assistant-question-form");
+      var navigation = performance.getEntriesByType("navigation")[0];
+      var reloaded = navigation && navigation.type === "reload";
+
+      try {
+        if (reloaded) {
+          sessionStorage.removeItem(key);
+          return;
+        }
+
+        var result = document.querySelector("[data-assistant-result]");
+        if (result) {
+          sessionStorage.setItem(key, result.outerHTML);
+        } else if (form) {
+          var stored = sessionStorage.getItem(key);
+          if (stored) { form.insertAdjacentHTML("afterend", stored); }
+        }
+
+        if (form) {
+          form.addEventListener("submit", function () {
+            sessionStorage.removeItem(key);
+          });
+        }
+      } catch (error) {
+        // Browser storage can be unavailable in strict privacy modes.
+      }
+    }());
+  </script>
 {% endblock %}
