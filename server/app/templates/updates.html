@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Update Workbench · kosmos-hub{% endblock %}
 {% block content %}
-  <section>
+  <div class="workbench-page-layout">
+    {% include "partials/site_selector.html" %}
+    <section class="workbench-page-main">
     <div class="section-heading">
       <div>
         <p class="eyebrow">Direct maintenance</p>
@@ -18,18 +20,12 @@
     </div>
 
     <form class="filter-panel filter-panel-workbench" method="get" action="/updates">
+      {% for selected_site_id in filters.site_ids %}
+        <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+      {% endfor %}
       <label>
         <span>Search</span>
         <input type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
-      </label>
-      <label>
-        <span>Site</span>
-        <select name="site_id">
-          <option value="">All sites</option>
-          {% for site_option in site_options %}
-            <option value="{{ site_option.id }}" {% if filters.site_id == site_option.id %}selected{% endif %}>{{ site_option.domain }}</option>
-          {% endfor %}
-        </select>
       </label>
       <label>
         <span>Plugin</span>
@@ -304,7 +300,8 @@
         </tbody>
       </table>
     </div>
-  </section>
+    </section>
+  </div>
   {% if batch_running or (refresh_run and refresh_run.status in ["queued", "running"]) %}
     <p class="subtle">This page refreshes automatically while the direct update run is active.</p>
     <script>

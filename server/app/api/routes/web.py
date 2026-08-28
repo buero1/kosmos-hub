@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -203,12 +203,12 @@ def users_workbench_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
-    site_id: str = "",
+    site_id: Annotated[list[int] | None, Query()] = None,
     role: str = "all",
     customer_status: str = "all",
 ):
     _require_hub_admin(request)
-    selected_site_id = int(site_id) if site_id.isdigit() else None
+    selected_site_ids = set(site_id or [])
     return templates.TemplateResponse(
         request,
         "users.html",
@@ -216,11 +216,38 @@ def users_workbench_page(
             request,
             db,
             query=q,
-            site_id=selected_site_id,
+            site_ids=selected_site_ids,
             role=role,
             customer_status=customer_status,
         ),
     )
+
+
+@router.post("/users/bulk/create", response_class=HTMLResponse)
+def create_selected_site_users(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[list[int] | None, Form()] = None,
+    username: Annotated[str, Form()] = "",
+    email: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    role: Annotated[str, Form()] = "subscriber",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).create_users_bulk(
+            site_ids=site_id or [],
+            username=username,
+            email=email,
+            password=password,
+            role=role,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _render_user_workbench(request, db, error=str(exc))
+    return _render_user_workbench(request, db, outcomes=outcomes, action_label="User creation")
 
 
 @router.post("/users/bulk/role", response_class=HTMLResponse)
@@ -337,7 +364,7 @@ def update_workbench_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
-    site_id: str = "",
+    site_id: Annotated[list[int] | None, Query()] = None,
     plugin: str = "",
     kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
     activity: Literal["all", "active", "inactive"] = "all",
@@ -364,19 +391,19 @@ def update_workbench_page(
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=1000)
     entries = inventory_service.build_update_workbench(all_items)
-    selected_site_id = int(site_id) if site_id.isdigit() else None
+    selected_site_ids = set(site_id or [])
     filtered_entries = inventory_service.filter_update_workbench(
         entries,
         query=q,
         kind=kind,
         activity=activity,
         diagnosis=diagnosis,
-        site_id=selected_site_id,
+        site_ids=selected_site_ids,
         plugin_identifier=plugin,
     )
     matching_items = inventory_service.filter_items(all_items, query=q) if q.strip() else all_items
-    if selected_site_id is not None:
-        matching_items = [item for item in matching_items if item.site.id == selected_site_id]
+    if selected_site_ids:
+        matching_items = [item for item in matching_items if item.site.id in selected_site_ids]
     if plugin:
         matching_items = [
             item
@@ -410,13 +437,26 @@ def update_workbench_page(
             "summary": inventory_service.summarize_update_workbench(entries),
             "filters": {
                 "q": q,
-                "site_id": selected_site_id,
+                "site_ids": sorted(selected_site_ids),
                 "plugin": plugin,
                 "kind": kind,
                 "activity": activity,
                 "diagnosis": diagnosis,
             },
             "site_options": site_options,
+            "site_selector": _site_selector_context(
+                action="/updates",
+                sites=site_options,
+                selected_site_ids=selected_site_ids,
+                submit_label="Show updates",
+                preserved_filters={
+                    "q": q,
+                    "plugin": plugin,
+                    "kind": kind,
+                    "activity": activity,
+                    "diagnosis": diagnosis,
+                },
+            ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
             "matching_sites": matching_sites,
@@ -965,6 +1005,7 @@ def _user_workbench_context(
     *,
     query: str = "",
     site_id: int | None = None,
+    site_ids: set[int] | None = None,
     role: str = "all",
     customer_status: str = "all",
     error: str = "",
@@ -984,15 +1025,21 @@ def _user_workbench_context(
     )
     if customer_status != "all" and customer_status not in status_options:
         customer_status = "all"
+    selected_site_ids = site_ids or ({site_id} if site_id is not None else set())
     filtered_entries = service.filter_workbench_entries(
         entries,
         query=query,
-        site_id=site_id,
+        site_ids=selected_site_ids,
         role=role,
         customer_status=customer_status,
     )
     site_options = sorted(
-        {entry.site.id: entry.site for entry in entries}.values(),
+        (
+            site
+            for site in service.repository.list_sites(limit=1000)
+            if site.status == "verified"
+            and any(capability.ability_name == SiteUserService.CREATE_ABILITY for capability in site.capabilities)
+        ),
         key=lambda site: site.domain.casefold(),
     )
     outcome_rows = outcomes or []
@@ -1006,11 +1053,22 @@ def _user_workbench_context(
         },
         "filters": {
             "q": query,
-            "site_id": site_id,
+            "site_ids": sorted(selected_site_ids),
             "role": role,
             "customer_status": customer_status,
         },
         "site_options": site_options,
+        "site_selector": _site_selector_context(
+            action="/users",
+            sites=site_options,
+            selected_site_ids=selected_site_ids,
+            submit_label="Show users",
+            preserved_filters={
+                "q": query,
+                "role": role,
+                "customer_status": customer_status,
+            },
+        ),
         "role_options": SiteUserService.ROLE_OPTIONS,
         "customer_status_options": status_options,
         "csrf_token": get_csrf_token(request),
@@ -1018,6 +1076,45 @@ def _user_workbench_context(
         "outcomes": outcome_rows,
         "action_label": action_label,
         "bulk_limit": SiteUserService.BULK_ACTION_LIMIT,
+    }
+
+
+def _site_selector_context(
+    *,
+    action: str,
+    sites: list,
+    selected_site_ids: set[int],
+    submit_label: str,
+    preserved_filters: dict[str, str],
+) -> dict:
+    """Build one reusable domain/customer selector for fleet workbenches."""
+    customers: dict[int, dict] = {}
+    for site in sites:
+        customer = site.customer
+        if customer is None:
+            continue
+        customer_entry = customers.setdefault(
+            customer.id,
+            {
+                "id": customer.id,
+                "name": customer.name,
+                "status": customer.zoho_status or "",
+                "site_ids": [],
+            },
+        )
+        customer_entry["site_ids"].append(site.id)
+
+    return {
+        "action": action,
+        "sites": sites,
+        "customers": sorted(customers.values(), key=lambda entry: entry["name"].casefold()),
+        "selected_site_ids": selected_site_ids,
+        "submit_label": submit_label,
+        "preserved_filters": [
+            {"name": name, "value": value}
+            for name, value in preserved_filters.items()
+            if value not in {"", "all"}
+        ],
     }
 
 

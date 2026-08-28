@@ -114,6 +114,120 @@
       .filter-panel-workbench {
         grid-template-columns: repeat(4, minmax(150px, 1fr));
       }
+      .workbench-page-layout {
+        display: grid;
+        grid-template-columns: 17.5rem minmax(0, 1fr);
+        align-items: start;
+        gap: 1rem;
+        margin: 1.5rem 0 2rem;
+      }
+      .workbench-page-main {
+        min-width: 0;
+      }
+      .workbench-page-main .section-heading {
+        margin-top: 0;
+      }
+      .workbench-site-selector {
+        position: sticky;
+        top: 1rem;
+        padding: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.82);
+      }
+      .workbench-site-selector form {
+        display: grid;
+        gap: 0.8rem;
+      }
+      .site-selector-heading h3 {
+        margin: 0;
+      }
+      .site-selector-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.25rem;
+      }
+      .site-selector-tab {
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: 700 0.78rem "Trebuchet MS", sans-serif;
+        padding: 0.5rem 0.35rem;
+      }
+      .site-selector-tab:hover,
+      .site-selector-tab:focus-visible,
+      .site-selector-tab.is-active {
+        background: var(--accent-soft);
+        color: #075f4e;
+      }
+      .site-selector-search input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: #fffdf8;
+        color: var(--ink);
+        font: inherit;
+        padding: 0.58rem 0.65rem;
+      }
+      .site-selector-selection-tools {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.45rem;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .site-selector-selection-tools button {
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        padding: 0;
+      }
+      .site-selector-selection-tools strong {
+        color: var(--accent);
+        white-space: nowrap;
+      }
+      .site-selector-list {
+        display: grid;
+        max-height: min(52vh, 31rem);
+        gap: 0.05rem;
+        overflow: auto;
+        padding-right: 0.2rem;
+      }
+      .site-selector-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.43rem 0.25rem;
+        border-radius: 8px;
+        color: var(--ink);
+        cursor: pointer;
+        font-size: 0.88rem;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+      .site-selector-row:hover { background: rgba(215, 239, 232, 0.6); }
+      .site-selector-row input { flex: 0 0 auto; margin: 0.14rem 0 0; accent-color: var(--accent); }
+      .site-selector-row small {
+        display: block;
+        margin-top: 0.1rem;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      .site-selector-submit { width: 100%; margin-top: 0.15rem; }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
       .customer-filter-panel {
         grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.75fr) auto;
       }
@@ -178,6 +292,45 @@
       .user-workbench-action-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
+      .user-workbench-create {
+        margin: 1.25rem 0;
+        padding: 0.9rem 1.15rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .user-workbench-create summary {
+        color: #075f4e;
+        cursor: pointer;
+        font-family: "Trebuchet MS", sans-serif;
+        font-weight: 700;
+      }
+      .user-workbench-create form {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem;
+        align-items: end;
+        margin-top: 0.9rem;
+      }
+      .user-workbench-create label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .user-workbench-create input,
+      .user-workbench-create select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 0.7rem 0.8rem;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+      }
+      .user-workbench-create .password-input { padding-right: 5rem; }
+      .user-workbench-create-actions { grid-column: 1 / -1; }
+      .user-workbench-create > .subtle { margin: 0.8rem 0 0; }
       .user-workbench-action-card label {
         display: grid;
         gap: 0.3rem;
@@ -829,6 +982,17 @@
         .workbench-action-grid {
           grid-template-columns: 1fr;
         }
+        .user-workbench-create form {
+          grid-template-columns: 1fr;
+        }
+        .workbench-page-layout {
+          grid-template-columns: 1fr;
+          margin-top: 1rem;
+        }
+        .workbench-site-selector {
+          position: static;
+        }
+        .site-selector-list { max-height: 19rem; }
         .site-detail-layout {
           grid-template-columns: 1fr;
         }

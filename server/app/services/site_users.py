@@ -87,13 +87,15 @@ class SiteUserService:
         *,
         query: str = "",
         site_id: int | None = None,
+        site_ids: set[int] | None = None,
         role: str = "all",
         customer_status: str = "all",
     ) -> list[UserWorkbenchEntry]:
         normalized_query = query.strip().casefold()
+        selected_site_ids = site_ids or ({site_id} if site_id is not None else set())
 
         def matches(entry: UserWorkbenchEntry) -> bool:
-            if site_id is not None and entry.site.id != site_id:
+            if selected_site_ids and entry.site.id not in selected_site_ids:
                 return False
             if role != "all" and role not in entry.user["roles"]:
                 return False
@@ -150,6 +152,7 @@ class SiteUserService:
         role: str,
         display_name: str,
         actor: str,
+        refresh_inventory: bool = True,
     ) -> dict[str, Any]:
         normalized_password = self._validated_password(password)
         payload = self.proxy.execute_ability(
@@ -166,7 +169,8 @@ class SiteUserService:
         )
         user = self._result_user(payload)
         self._write_mutation_audit(site_id, actor, "create-wp-user", f"Created WordPress user {user['username']} (ID {user['id']}).")
-        self.refresh_site_users(site_id, actor=actor)
+        if refresh_inventory:
+            self.refresh_site_users(site_id, actor=actor)
         return user
 
     def update_password(
@@ -270,6 +274,52 @@ class SiteUserService:
             actor=actor,
         )
 
+    def create_users_bulk(
+        self,
+        *,
+        site_ids: list[int],
+        username: str,
+        email: str,
+        password: str,
+        role: str,
+        actor: str,
+    ) -> list[dict[str, str]]:
+        targets = self._selected_sites(site_ids)
+        normalized_username = self._required_text(username, "Username")
+        normalized_email = self._required_text(email, "Email")
+        normalized_password = self._validated_password(password)
+        normalized_role = self._validated_role(role)
+        outcomes: list[dict[str, str]] = []
+        changed_site_ids: set[int] = set()
+
+        for site in targets:
+            try:
+                created = self.create_user(
+                    site_id=site.id,
+                    username=normalized_username,
+                    email=normalized_email,
+                    password=normalized_password,
+                    role=normalized_role,
+                    display_name="",
+                    actor=actor,
+                    refresh_inventory=False,
+                )
+            except (SiteMcpProxyError, ValueError) as exc:
+                outcomes.append(self._bulk_site_outcome(site, normalized_username, "failed", str(exc)))
+            else:
+                changed_site_ids.add(site.id)
+                outcomes.append(
+                    self._bulk_site_outcome(
+                        site,
+                        str(created.get("username") or normalized_username),
+                        "succeeded",
+                        "Created and verified by WordPress.",
+                    )
+                )
+
+        self._refresh_changed_site_users(changed_site_ids, outcomes, actor=actor)
+        return outcomes
+
     def update_roles_bulk(self, *, selected_keys: list[str], role: str, actor: str) -> list[dict[str, str]]:
         normalized_role = self._validated_role(role)
         targets = self._selected_workbench_entries(selected_keys)
@@ -324,6 +374,20 @@ class SiteUserService:
             raise ValueError("One or more selected WordPress users are no longer present in the stored inventory. Refresh the affected site first.")
         return [entries_by_key[key] for key in keys]
 
+    def _selected_sites(self, site_ids: list[int]) -> list:
+        unique_ids = list(dict.fromkeys(site_id for site_id in site_ids if site_id > 0))
+        if not unique_ids:
+            raise ValueError("Select at least one site from the site panel before creating a WordPress user.")
+        if len(unique_ids) > self.BULK_ACTION_LIMIT:
+            raise ValueError(f"Select at most {self.BULK_ACTION_LIMIT} sites per user creation.")
+        sites = []
+        for site_id in unique_ids:
+            site = self.repository.get_site(site_id)
+            if site is None:
+                raise ValueError("One or more selected sites are no longer registered in Kosmos Hub.")
+            sites.append(site)
+        return sites
+
     def _run_bulk_mutation(self, targets: list[UserWorkbenchEntry], operation, *, actor: str) -> list[dict[str, str]]:
         outcomes: list[dict[str, str]] = []
         changed_site_ids: set[int] = set()
@@ -336,6 +400,10 @@ class SiteUserService:
                 changed_site_ids.add(target.site.id)
                 outcomes.append(self._bulk_outcome(target, "succeeded", "Completed and verified by WordPress."))
 
+        self._refresh_changed_site_users(changed_site_ids, outcomes, actor=actor)
+        return outcomes
+
+    def _refresh_changed_site_users(self, changed_site_ids: set[int], outcomes: list[dict[str, str]], *, actor: str) -> None:
         for site_id in changed_site_ids:
             try:
                 self.refresh_site_users(site_id, actor=actor)
@@ -343,7 +411,6 @@ class SiteUserService:
                 for outcome in outcomes:
                     if outcome["site_id"] == str(site_id) and outcome["status"] == "succeeded":
                         outcome["message"] = f"Completed, but the stored inventory could not refresh: {exc.message}"
-        return outcomes
 
     @staticmethod
     def _bulk_outcome(target: UserWorkbenchEntry, status: str, message: str) -> dict[str, str]:
@@ -351,6 +418,16 @@ class SiteUserService:
             "site_id": str(target.site.id),
             "site": target.site.domain,
             "username": target.user["username"],
+            "status": status,
+            "message": message,
+        }
+
+    @staticmethod
+    def _bulk_site_outcome(site, username: str, status: str, message: str) -> dict[str, str]:
+        return {
+            "site_id": str(site.id),
+            "site": site.domain,
+            "username": username,
             "status": status,
             "message": message,
         }

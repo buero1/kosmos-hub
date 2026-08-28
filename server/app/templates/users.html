@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Users · kosmos-hub{% endblock %}
 {% block content %}
-  <section>
+  <div class="workbench-page-layout">
+    {% include "partials/site_selector.html" %}
+    <section class="workbench-page-main">
     <div class="section-heading">
       <div>
         <p class="eyebrow">WordPress access</p>
@@ -19,18 +21,12 @@
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
 
     <form class="filter-panel filter-panel-workbench" method="get" action="/users">
+      {% for selected_site_id in filters.site_ids %}
+        <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+      {% endfor %}
       <label>
         <span>Search</span>
         <input type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
-      </label>
-      <label>
-        <span>Site</span>
-        <select name="site_id">
-          <option value="">All sites</option>
-          {% for site in site_options %}
-            <option value="{{ site.id }}" {% if filters.site_id == site.id %}selected{% endif %}>{{ site.domain }}</option>
-          {% endfor %}
-        </select>
       </label>
       <label>
         <span>Role</span>
@@ -55,6 +51,40 @@
         <a href="/users">Reset</a>
       </div>
     </form>
+
+    <details class="user-workbench-create">
+      <summary>Add WordPress user to selected sites</summary>
+      <form method="post" action="/users/bulk/create">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% for selected_site_id in filters.site_ids %}
+          <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+        {% endfor %}
+        <label>Username<input name="username" required autocomplete="username"></label>
+        <label>Email<input name="email" type="email" required autocomplete="email"></label>
+        <label>Role
+          <select name="role">
+            {% for option in role_options %}
+              <option value="{{ option }}">{{ option | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>New password
+          <span class="password-input-with-copy">
+            <input class="password-input" name="password" type="text" required minlength="12" autocomplete="new-password" spellcheck="false">
+            <button class="generate-password-icon" type="button" data-user-generate-password aria-label="Generate password" title="Generate password">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 8.7 11.3"></path><path d="M19 3v6h-6"></path><path d="m19 9-2.2-2.2"></path></svg>
+            </button>
+            <button class="copy-password-icon" type="button" data-user-copy-password aria-label="Copy password" title="Copy password">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4"></path></svg>
+            </button>
+          </span>
+        </label>
+        <div class="user-workbench-create-actions">
+          <button class="button" type="submit">Create user on selected sites</button>
+        </div>
+      </form>
+      <p class="subtle">Choose up to {{ bulk_limit }} sites in the panel, then apply the site selection before creating the user.</p>
+    </details>
 
     <div class="workbench-action-grid user-workbench-action-grid">
       <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/role" data-user-bulk-form>
@@ -182,7 +212,8 @@
         </tbody>
       </table>
     </div>
-  </section>
+    </section>
+  </div>
   <script>
     (function () {
       function securePassword() {

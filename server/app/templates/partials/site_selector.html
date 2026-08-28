@@ -1,0 +1,128 @@
+<aside class="workbench-site-selector" data-site-selector>
+  <form method="get" action="{{ site_selector.action }}">
+    {% for filter in site_selector.preserved_filters %}
+      <input type="hidden" name="{{ filter.name }}" value="{{ filter.value }}">
+    {% endfor %}
+
+    <div class="site-selector-heading">
+      <p class="eyebrow">Scope</p>
+      <h3>Select sites</h3>
+    </div>
+
+    <div class="site-selector-tabs" role="tablist" aria-label="Select sites by source">
+      <button class="site-selector-tab is-active" type="button" role="tab" aria-selected="true" data-site-selector-tab="sites">Sites</button>
+      <button class="site-selector-tab" type="button" role="tab" aria-selected="false" data-site-selector-tab="customers">Customers</button>
+    </div>
+
+    <label class="site-selector-search">
+      <span class="visually-hidden">Search sites or customers</span>
+      <input type="search" placeholder="Search..." autocomplete="off" data-site-selector-search>
+    </label>
+
+    <div class="site-selector-selection-tools">
+      <span>Select: <button type="button" data-site-selector-all>All</button> · <button type="button" data-site-selector-none>None</button></span>
+      <strong><span data-site-selector-count>0</span> selected</strong>
+    </div>
+
+    <div class="site-selector-list" data-site-selector-panel="sites">
+      {% for site in site_selector.sites %}
+        <label class="site-selector-row" data-site-selector-row data-search-text="{{ site.domain | lower }}">
+          <input type="checkbox" name="site_id" value="{{ site.id }}" {% if site.id in site_selector.selected_site_ids %}checked{% endif %}>
+          <span>{{ site.domain }}</span>
+        </label>
+      {% else %}
+        <p class="subtle">No sites are available yet.</p>
+      {% endfor %}
+    </div>
+
+    <div class="site-selector-list" data-site-selector-panel="customers" hidden>
+      {% for customer in site_selector.customers %}
+        <label class="site-selector-row" data-customer-selector-row data-search-text="{{ customer.name | lower }} {{ customer.status | lower }}">
+          <input type="checkbox" data-customer-selector value="{{ customer.site_ids | join(',') }}">
+          <span>
+            {{ customer.name }}
+            {% if customer.status %}<small>{{ customer.status }}</small>{% endif %}
+          </span>
+        </label>
+      {% else %}
+        <p class="subtle">No linked customers are available for these sites.</p>
+      {% endfor %}
+    </div>
+
+    <button class="button site-selector-submit" type="submit">{{ site_selector.submit_label }}</button>
+  </form>
+</aside>
+
+<script>
+  (function () {
+    var selector = document.querySelector("[data-site-selector]");
+    if (!selector) { return; }
+
+    var siteChecks = Array.prototype.slice.call(selector.querySelectorAll('input[name="site_id"]'));
+    var customerChecks = Array.prototype.slice.call(selector.querySelectorAll("[data-customer-selector]"));
+    var count = selector.querySelector("[data-site-selector-count]");
+    var search = selector.querySelector("[data-site-selector-search]");
+    var tabs = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-tab]"));
+    var panels = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-panel]"));
+
+    function selectedIds() {
+      return siteChecks.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
+    }
+
+    function syncCustomerChecks() {
+      var selected = selectedIds();
+      customerChecks.forEach(function (checkbox) {
+        var ids = checkbox.value ? checkbox.value.split(",") : [];
+        var matches = ids.filter(function (id) { return selected.indexOf(id) !== -1; }).length;
+        checkbox.checked = ids.length > 0 && matches === ids.length;
+        checkbox.indeterminate = matches > 0 && matches < ids.length;
+      });
+    }
+
+    function syncSelection() {
+      count.textContent = selectedIds().length;
+      syncCustomerChecks();
+    }
+
+    function applySearch() {
+      var needle = (search.value || "").trim().toLowerCase();
+      selector.querySelectorAll("[data-search-text]").forEach(function (row) {
+        row.hidden = Boolean(needle) && row.getAttribute("data-search-text").indexOf(needle) === -1;
+      });
+    }
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var target = tab.getAttribute("data-site-selector-tab");
+        tabs.forEach(function (item) {
+          var active = item === tab;
+          item.classList.toggle("is-active", active);
+          item.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        panels.forEach(function (panel) { panel.hidden = panel.getAttribute("data-site-selector-panel") !== target; });
+        applySearch();
+      });
+    });
+
+    siteChecks.forEach(function (checkbox) { checkbox.addEventListener("change", syncSelection); });
+    customerChecks.forEach(function (checkbox) {
+      checkbox.addEventListener("change", function () {
+        var selected = checkbox.value ? checkbox.value.split(",") : [];
+        siteChecks.forEach(function (site) {
+          if (selected.indexOf(site.value) !== -1) { site.checked = checkbox.checked; }
+        });
+        syncSelection();
+      });
+    });
+    selector.querySelector("[data-site-selector-all]").addEventListener("click", function () {
+      siteChecks.forEach(function (checkbox) { checkbox.checked = true; });
+      syncSelection();
+    });
+    selector.querySelector("[data-site-selector-none]").addEventListener("click", function () {
+      siteChecks.forEach(function (checkbox) { checkbox.checked = false; });
+      syncSelection();
+    });
+    search.addEventListener("input", applySearch);
+    syncSelection();
+  }());
+</script>

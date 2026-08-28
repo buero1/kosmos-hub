@@ -173,3 +173,54 @@ def test_role_change_uses_bridge_ability_and_verifies_returned_role(monkeypatch)
         )
         assert changed["roles"] == ["editor"]
         assert calls[0][0] == "kosmos-bridge/update-wp-user-role"
+
+
+def test_bulk_user_creation_targets_selected_sites_and_refreshes_them(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    calls = []
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        calls.append((site_id, ability_name, ability_input))
+        if ability_name == "kosmos-bridge/create-wp-user":
+            return {
+                "result": {
+                    "user": {
+                        "id": site_id + 100,
+                        "username": ability_input["username"],
+                        "display_name": "",
+                        "email": ability_input["email"],
+                        "roles": [ability_input["role"]],
+                        "registered_at": "2026-08-28T10:00:00+00:00",
+                    }
+                }
+            }
+        assert ability_name == "kosmos-bridge/list-wp-users"
+        return {"result": {"available": True, "users": [], "message": "Refreshed."}}
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    with Session(engine) as db:
+        first = _site()
+        second = Site(
+            uuid="bbab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="second-users.example",
+            home_url="https://second-users.example/",
+            site_url="https://second-users.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add_all([first, second])
+        db.commit()
+
+        outcomes = SiteUserService(db=db, cipher=SecretCipher("a" * 32)).create_users_bulk(
+            site_ids=[first.id, second.id],
+            username="new-user",
+            email="new@example.test",
+            password="A-secure-password-123",
+            role="editor",
+            actor="admin",
+        )
+
+        assert [outcome["status"] for outcome in outcomes] == ["succeeded", "succeeded"]
+        create_calls = [call for call in calls if call[1] == "kosmos-bridge/create-wp-user"]
+        assert [call[0] for call in create_calls] == [first.id, second.id]
+        assert all(call[2]["username"] == "new-user" for call in create_calls)
