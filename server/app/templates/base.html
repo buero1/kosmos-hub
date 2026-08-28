@@ -175,6 +175,47 @@
       .workbench-action-card .filter-actions {
         flex-wrap: wrap;
       }
+      .user-workbench-action-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .user-workbench-action-card label {
+        display: grid;
+        gap: 0.3rem;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .user-workbench-action-card input,
+      .user-workbench-action-card select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 0.7rem 0.8rem;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+      }
+      .user-workbench-action-card .password-input {
+        padding-right: 5rem;
+      }
+      .bulk-action-warning {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+      .bulk-action-confirmation {
+        display: flex !important;
+        grid-template-columns: none !important;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+      .bulk-action-confirmation input {
+        width: auto;
+        margin-top: 0.2rem;
+      }
+      .user-workbench-table { min-width: 1160px; }
+      .user-workbench-table td:last-child { min-width: 12rem; }
+      .user-batch-results { margin: 1.25rem 0; }
+      .user-delete-review-table { min-width: 960px; }
       .info-tooltip {
         position: relative;
         display: inline-grid;
@@ -827,6 +868,7 @@
           <a href="/">Dashboard</a>
           <a href="/sites">Sites</a>
           <a href="/customers">Customers</a>
+          <a href="/users">Users</a>
           <a href="/updates">Update workbench</a>
           <a href="/update-plans">Plans</a>
           <a href="/assistant">Assistant</a>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Review user deletion · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <a class="button button-secondary" href="/users">Back to user workbench</a>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Destructive action review</p>
+        <h2>Review selected user deletion</h2>
+        <p class="subtle">Choose a different recipient for each user's content. The selected users are deleted only after the exact confirmation below.</p>
+      </div>
+      <div class="inventory-totals"><span><strong>{{ review_items | length }}</strong> selected users</span></div>
+    </div>
+
+    <form class="plan-panel plan-panel-locked" method="post" action="/users/bulk/delete">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="table-scroll">
+        <table class="user-delete-review-table">
+          <thead><tr><th>Site</th><th>User to delete</th><th>Reassign content to</th></tr></thead>
+          <tbody>
+            {% for review_item in review_items %}
+              {% set target = review_item.target %}
+              <tr>
+                <td>{{ target.site.domain }}</td>
+                <td><strong>{{ target.user.username }}</strong><p class="subtle table-note">{{ target.user.email or "No email" }}</p></td>
+                <td>
+                  <input type="hidden" name="selected" value="{{ target.key }}">
+                  {% if review_item.replacements %}
+                    <select name="reassign_to_user_id" required>
+                      <option value="">Choose a different user</option>
+                      {% for replacement in review_item.replacements %}
+                        <option value="{{ replacement.user.id }}">{{ replacement.user.username }} (ID {{ replacement.user.id }})</option>
+                      {% endfor %}
+                    </select>
+                  {% else %}
+                    <span class="notice-error">No replacement user is stored for this site. Refresh users and create or retain a replacement before deletion.</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <label>
+        <span>Confirmation</span>
+        <input name="confirmation" required autocomplete="off" placeholder="Type DELETE {{ review_items | length }} USERS">
+      </label>
+      {% if deletion_ready %}
+        <button class="button button-danger" type="submit">Delete {{ review_items | length }} selected user{{ "s" if review_items | length != 1 else "" }}</button>
+      {% else %}
+        <p class="notice-error">Deletion is blocked until every selected site has another stored WordPress user for content reassignment.</p>
+      {% endif %}
+    </form>
+  </section>
+{% endblock %}

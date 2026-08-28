@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Users · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">WordPress access</p>
+        <h2>User workbench</h2>
+        <p class="subtle">Manage the WordPress users stored from connected customer sites. Passwords are only sent for the requested change and are never retained by Kosmos Hub.</p>
+      </div>
+      <div class="inventory-totals">
+        <span><strong>{{ summary.users }}</strong> users</span>
+        <span><strong>{{ summary.sites }}</strong> sites</span>
+        <span><strong>{{ summary.administrators }}</strong> administrators</span>
+        <span><strong>{{ summary.role_ready }}</strong> role-ready</span>
+      </div>
+    </div>
+
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+
+    <form class="filter-panel filter-panel-workbench" method="get" action="/users">
+      <label>
+        <span>Search</span>
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
+      </label>
+      <label>
+        <span>Site</span>
+        <select name="site_id">
+          <option value="">All sites</option>
+          {% for site in site_options %}
+            <option value="{{ site.id }}" {% if filters.site_id == site.id %}selected{% endif %}>{{ site.domain }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Role</span>
+        <select name="role">
+          <option value="all" {% if filters.role == "all" %}selected{% endif %}>All roles</option>
+          {% for option in role_options %}
+            <option value="{{ option }}" {% if filters.role == option %}selected{% endif %}>{{ option | title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Customer status</span>
+        <select name="customer_status">
+          <option value="all" {% if filters.customer_status == "all" %}selected{% endif %}>All statuses</option>
+          {% for option in customer_status_options %}
+            <option value="{{ option }}" {% if filters.customer_status == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="filter-actions">
+        <button class="button" type="submit">Apply filters</button>
+        <a href="/users">Reset</a>
+      </div>
+    </form>
+
+    <div class="workbench-action-grid user-workbench-action-grid">
+      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/role" data-user-bulk-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+          <p class="eyebrow">Set role</p>
+          <p class="bulk-action-warning">Applies exactly one selected role to every checked user. Sites require Bridge 0.3.54 or newer.</p>
+        </div>
+        <label>
+          <span>New role</span>
+          <select name="role" required>
+            {% for option in role_options %}
+              <option value="{{ option }}">{{ option | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="button" type="submit">Apply selected role</button>
+      </form>
+
+      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/password" data-user-bulk-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+          <p class="eyebrow">Set password</p>
+          <p class="bulk-action-warning">The same password is set on every selected user. Copy and store it before submitting; it is never displayed again.</p>
+        </div>
+        <label>
+          <span>New shared password</span>
+          <span class="password-input-with-copy">
+            <input class="password-input" name="password" type="text" required minlength="12" autocomplete="new-password" spellcheck="false">
+            <button class="generate-password-icon" type="button" data-user-generate-password aria-label="Generate password" title="Generate password">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 8.7 11.3"></path><path d="M19 3v6h-6"></path><path d="m19 9-2.2-2.2"></path></svg>
+            </button>
+            <button class="copy-password-icon" type="button" data-user-copy-password aria-label="Copy password" title="Copy password">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4"></path></svg>
+            </button>
+          </span>
+        </label>
+        <label class="bulk-action-confirmation">
+          <input type="checkbox" name="confirm_shared_password" value="true" required>
+          <span>I understand that every selected user receives this same password.</span>
+        </label>
+        <button class="button" type="submit">Set selected passwords</button>
+      </form>
+
+      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/delete/review" data-user-bulk-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+          <p class="eyebrow">Delete users</p>
+          <p class="bulk-action-warning">A review screen requires an individual content reassignment for every user. WordPress blocks removal of the last administrator.</p>
+        </div>
+        <button class="button button-danger" type="submit">Review selected deletion</button>
+      </form>
+    </div>
+
+    {% if outcomes %}
+      {% set succeeded = outcomes | selectattr("status", "equalto", "succeeded") | list | length %}
+      <section class="user-batch-results">
+        <p class="notice-success">{{ action_label }} completed for {{ succeeded }} of {{ outcomes | length }} selected WordPress user{{ "s" if outcomes | length != 1 else "" }}.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Site</th><th>User</th><th>Result</th><th>Details</th></tr></thead>
+            <tbody>
+              {% for outcome in outcomes %}
+                <tr>
+                  <td><a href="/sites/{{ outcome.site_id }}#users">{{ outcome.site }}</a></td>
+                  <td>{{ outcome.username }}</td>
+                  <td><span class="pill {% if outcome.status == "succeeded" %}pill-active{% else %}pill-missing{% endif %}">{{ outcome.status }}</span></td>
+                  <td>{{ outcome.message }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    <p class="result-count">{{ entries | length }} stored WordPress users shown. Select up to {{ bulk_limit }} users for one operation.</p>
+    <div class="table-scroll">
+      <table class="user-workbench-table">
+        <thead>
+          <tr>
+            <th>
+              <label class="select-all-control">
+                <input id="select-all-filtered-users" type="checkbox" aria-label="Select all users in the current filtered list">
+                <span>Select all</span>
+              </label>
+            </th>
+            <th>Site</th>
+            <th>Customer</th>
+            <th>User</th>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Registered</th>
+            <th>Stored</th>
+            <th>Action support</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td><input class="user-selection" type="checkbox" value="{{ entry.key }}" aria-label="Select {{ entry.user.username }} on {{ entry.site.domain }}"></td>
+              <td><a href="/sites/{{ entry.site.id }}#users">{{ entry.site.domain }}</a></td>
+              <td>
+                {% if entry.site.customer %}
+                  <a href="/customers/{{ entry.site.customer.id }}">{{ entry.site.customer.name }}</a>
+                  {% if entry.site.customer.zoho_status %}<p class="subtle table-note">{{ entry.site.customer.zoho_status }}</p>{% endif %}
+                {% else %}
+                  <span class="subtle">No linked customer</span>
+                {% endif %}
+              </td>
+              <td><strong>{{ entry.user.username }}</strong>{% if entry.user.display_name and entry.user.display_name != entry.user.username %}<p class="subtle table-note">{{ entry.user.display_name }}</p>{% endif %}</td>
+              <td>{{ entry.user.email or "-" }}</td>
+              <td>{{ entry.user.roles | join(", ") or "-" }}</td>
+              <td>{{ entry.user.registered_at | berlin_time if entry.user.registered_at else "-" }}</td>
+              <td>{{ entry.snapshot.captured_at | berlin_time }}</td>
+              <td>
+                <p><span class="pill {% if entry.supports_password_change %}pill-active{% else %}pill-missing{% endif %}">Password</span></p>
+                <p><span class="pill {% if entry.supports_role_change %}pill-active{% else %}pill-unknown{% endif %}">Role</span></p>
+                <p><span class="pill {% if entry.supports_delete %}pill-active{% else %}pill-missing{% endif %}">Delete</span></p>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="9">No stored WordPress users match these filters. Refresh a site's user inventory first if it is missing.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  <script>
+    (function () {
+      function securePassword() {
+        var alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*-_";
+        var bytes = new Uint32Array(20);
+        window.crypto.getRandomValues(bytes);
+        return Array.prototype.map.call(bytes, function (value) {
+          return alphabet.charAt(value % alphabet.length);
+        }).join("");
+      }
+
+      var selections = Array.prototype.slice.call(document.querySelectorAll(".user-selection"));
+      var selectAll = document.getElementById("select-all-filtered-users");
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          selections.forEach(function (checkbox) { checkbox.checked = selectAll.checked; });
+        });
+      }
+
+      document.querySelectorAll("[data-user-bulk-form]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+          form.querySelectorAll("[data-user-selected]").forEach(function (input) { input.remove(); });
+          var selected = selections.filter(function (checkbox) { return checkbox.checked; });
+          if (!selected.length) {
+            event.preventDefault();
+            window.alert("Select at least one WordPress user first.");
+            return;
+          }
+          selected.forEach(function (checkbox) {
+            var input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "selected";
+            input.value = checkbox.value;
+            input.setAttribute("data-user-selected", "true");
+            form.appendChild(input);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-user-generate-password]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          button.closest(".password-input-with-copy").querySelector(".password-input").value = securePassword();
+        });
+      });
+
+      document.querySelectorAll("[data-user-copy-password]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var input = button.closest(".password-input-with-copy").querySelector(".password-input");
+          if (!input.value || !navigator.clipboard) { return; }
+          navigator.clipboard.writeText(input.value).then(function () {
+            button.classList.add("is-copied");
+            window.setTimeout(function () { button.classList.remove("is-copied"); }, 1600);
+          });
+        });
+      });
+    }());
+  </script>
+{% endblock %}

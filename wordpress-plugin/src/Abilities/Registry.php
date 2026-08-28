@@ -300,6 +300,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/update-wp-user-role',
+			array(
+				'label'               => __( 'Update WordPress User Role', 'kosmos-bridge' ),
+				'description'         => __( 'Changes the primary role of one existing WordPress user and verifies the resulting role.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::wp_user_role_input_schema(),
+				'output_schema'       => self::wp_user_mutation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_update_wp_user_role' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/delete-wp-user',
 			array(
 				'label'               => __( 'Delete WordPress User', 'kosmos-bridge' ),
@@ -1187,6 +1201,35 @@ class Registry {
 		return array(
 			'password_updated' => true,
 			'user'             => self::wp_user_response( $updated ),
+		);
+	}
+
+	/**
+	 * @param mixed $input User identifier and exactly one requested WordPress role.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_update_wp_user_role( $input = array() ) {
+		$user_id = self::get_input_positive_int( $input, 'user_id' );
+		$role    = self::get_input_string( $input, 'role' );
+		if ( $user_id <= 0 || '' === $role ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_role_input', 'A valid user and role are required.', 400 );
+		}
+		if ( ! self::is_valid_wp_role( $role ) ) {
+			return self::wp_user_error( 'kosmos_bridge_invalid_user_role', 'The requested WordPress role does not exist on this site.', 400 );
+		}
+		$user = get_user_by( 'id', $user_id );
+		if ( ! $user instanceof \WP_User ) {
+			return self::wp_user_error( 'kosmos_bridge_user_not_found', 'The requested WordPress user no longer exists.', 404 );
+		}
+
+		$user->set_role( $role );
+		$updated = get_user_by( 'id', $user_id );
+		if ( ! $updated instanceof \WP_User || ! in_array( $role, (array) $updated->roles, true ) ) {
+			return self::wp_user_error( 'kosmos_bridge_user_role_unverified', 'WordPress did not confirm the requested user role.', 500 );
+		}
+		return array(
+			'role_updated' => true,
+			'user'         => self::wp_user_response( $updated ),
 		);
 	}
 
@@ -2180,6 +2223,15 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/update-wp-user-role',
+				'label'         => __( 'Update WordPress User Role', 'kosmos-bridge' ),
+				'description'   => __( 'Changes and verifies the role of one existing WordPress user.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::wp_user_role_input_schema(),
+				'output_schema' => self::wp_user_mutation_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/delete-wp-user',
 				'label'         => __( 'Delete WordPress User', 'kosmos-bridge' ),
 				'description'   => __( 'Deletes one WordPress user and reassigns content to another existing user.', 'kosmos-bridge' ),
@@ -2240,6 +2292,9 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/update-wp-user-password' === $ability_name ) {
 			return self::execute_update_wp_user_password( $input );
+		}
+		if ( 'kosmos-bridge/update-wp-user-role' === $ability_name ) {
+			return self::execute_update_wp_user_role( $input );
 		}
 		if ( 'kosmos-bridge/delete-wp-user' === $ability_name ) {
 			return self::execute_delete_wp_user( $input );
@@ -2447,6 +2502,20 @@ class Registry {
 	/**
 	 * @return array
 	 */
+	private static function wp_user_role_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'user_id' => array( 'type' => 'integer' ),
+				'role'    => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'user_id', 'role' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
 	private static function wp_user_delete_input_schema() {
 		return array(
 			'type'       => 'object',
@@ -2467,6 +2536,7 @@ class Registry {
 			'properties' => array(
 				'created'          => array( 'type' => 'boolean' ),
 				'password_updated' => array( 'type' => 'boolean' ),
+				'role_updated'     => array( 'type' => 'boolean' ),
 				'user'             => self::wp_user_output_schema(),
 			),
 			'required'   => array( 'user' ),

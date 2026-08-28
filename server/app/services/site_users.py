@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.models.site import Site
 from app.models.site_user_snapshot import SiteUserSnapshot
 from app.repositories.site_repository import SiteRepository
 from app.services.audit import write_audit_log
@@ -18,14 +19,33 @@ class SiteUserInventory:
     users: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class UserWorkbenchEntry:
+    """One stored WordPress user, enriched with its managed site context."""
+
+    site: Site
+    snapshot: SiteUserSnapshot
+    user: dict[str, Any]
+    supports_password_change: bool
+    supports_role_change: bool
+    supports_delete: bool
+
+    @property
+    def key(self) -> str:
+        return f"{self.site.id}:{self.user['id']}"
+
+
 class SiteUserService:
     """Reads and changes WordPress users without retaining credentials in the Hub."""
 
     LIST_ABILITY = "kosmos-bridge/list-wp-users"
     CREATE_ABILITY = "kosmos-bridge/create-wp-user"
     PASSWORD_ABILITY = "kosmos-bridge/update-wp-user-password"
+    ROLE_ABILITY = "kosmos-bridge/update-wp-user-role"
     DELETE_ABILITY = "kosmos-bridge/delete-wp-user"
     MIN_PASSWORD_LENGTH = 12
+    BULK_ACTION_LIMIT = 10
+    ROLE_OPTIONS = ("subscriber", "contributor", "author", "editor", "administrator")
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -38,6 +58,62 @@ class SiteUserService:
         if snapshot is None:
             return None
         return SiteUserInventory(snapshot=snapshot, users=self._decrypt_users(snapshot.encrypted_users_json))
+
+    def list_workbench_entries(self) -> list[UserWorkbenchEntry]:
+        sites = self.repository.list_sites(limit=1000)
+        snapshots = self.repository.get_latest_user_snapshots_by_site_ids([site.id for site in sites])
+        entries: list[UserWorkbenchEntry] = []
+        for site in sites:
+            snapshot = snapshots.get(site.id)
+            if snapshot is None or not snapshot.available:
+                continue
+            ability_names = {capability.ability_name for capability in site.capabilities}
+            for wp_user in self._decrypt_users(snapshot.encrypted_users_json):
+                entries.append(
+                    UserWorkbenchEntry(
+                        site=site,
+                        snapshot=snapshot,
+                        user=wp_user,
+                        supports_password_change=self.PASSWORD_ABILITY in ability_names,
+                        supports_role_change=self.ROLE_ABILITY in ability_names,
+                        supports_delete=self.DELETE_ABILITY in ability_names,
+                    )
+                )
+        return sorted(entries, key=lambda entry: (entry.site.domain.casefold(), entry.user["username"].casefold(), entry.user["id"]))
+
+    @staticmethod
+    def filter_workbench_entries(
+        entries: list[UserWorkbenchEntry],
+        *,
+        query: str = "",
+        site_id: int | None = None,
+        role: str = "all",
+        customer_status: str = "all",
+    ) -> list[UserWorkbenchEntry]:
+        normalized_query = query.strip().casefold()
+
+        def matches(entry: UserWorkbenchEntry) -> bool:
+            if site_id is not None and entry.site.id != site_id:
+                return False
+            if role != "all" and role not in entry.user["roles"]:
+                return False
+            customer = entry.site.customer
+            if customer_status != "all" and (customer is None or customer.zoho_status != customer_status):
+                return False
+            if not normalized_query:
+                return True
+            values = (
+                entry.site.domain,
+                customer.name if customer is not None else "",
+                customer.zoho_status if customer is not None and customer.zoho_status else "",
+                entry.user["username"],
+                entry.user["display_name"],
+                entry.user["email"],
+                " ".join(entry.user["roles"]),
+            )
+            return normalized_query in " ".join(values).casefold()
+
+        return [entry for entry in entries if matches(entry)]
 
     def refresh_site_users(self, site_id: int, *, actor: str = "kosmos-hub") -> SiteUserInventory:
         site = self._site_or_raise(site_id)
@@ -93,7 +169,15 @@ class SiteUserService:
         self.refresh_site_users(site_id, actor=actor)
         return user
 
-    def update_password(self, *, site_id: int, user_id: int, password: str, actor: str) -> dict[str, Any]:
+    def update_password(
+        self,
+        *,
+        site_id: int,
+        user_id: int,
+        password: str,
+        actor: str,
+        refresh_inventory: bool = True,
+    ) -> dict[str, Any]:
         payload = self.proxy.execute_ability(
             site_id,
             self.PASSWORD_ABILITY,
@@ -102,7 +186,32 @@ class SiteUserService:
         )
         user = self._result_user(payload)
         self._write_mutation_audit(site_id, actor, "update-wp-user-password", f"Changed the password for WordPress user {user['username']} (ID {user['id']}).")
-        self.refresh_site_users(site_id, actor=actor)
+        if refresh_inventory:
+            self.refresh_site_users(site_id, actor=actor)
+        return user
+
+    def update_role(
+        self,
+        *,
+        site_id: int,
+        user_id: int,
+        role: str,
+        actor: str,
+        refresh_inventory: bool = True,
+    ) -> dict[str, Any]:
+        normalized_role = self._validated_role(role)
+        payload = self.proxy.execute_ability(
+            site_id,
+            self.ROLE_ABILITY,
+            {"user_id": self._positive_id(user_id, "User"), "role": normalized_role},
+            timeout_seconds=30,
+        )
+        user = self._result_user(payload)
+        if normalized_role not in user["roles"]:
+            raise SiteMcpProxyError("WP_USER_ROLE_UNVERIFIED", "WordPress did not return the requested user role.", status_code=502)
+        self._write_mutation_audit(site_id, actor, "update-wp-user-role", f"Changed the role for WordPress user {user['username']} (ID {user['id']}) to {normalized_role}.")
+        if refresh_inventory:
+            self.refresh_site_users(site_id, actor=actor)
         return user
 
     def delete_user(
@@ -113,6 +222,7 @@ class SiteUserService:
         reassign_to_user_id: int,
         confirmed_username: str,
         actor: str,
+        refresh_inventory: bool = True,
     ) -> dict[str, Any]:
         inventory = self.get_latest_inventory(site_id)
         target = next((item for item in (inventory.users if inventory else []) if item.get("id") == user_id), None)
@@ -141,8 +251,109 @@ class SiteUserService:
             "delete-wp-user",
             f"Deleted WordPress user {target['username']} (ID {target_id}) and reassigned content to user ID {reassign_id}.",
         )
-        self.refresh_site_users(site_id, actor=actor)
+        if refresh_inventory:
+            self.refresh_site_users(site_id, actor=actor)
         return result
+
+    def update_passwords_bulk(self, *, selected_keys: list[str], password: str, actor: str) -> list[dict[str, str]]:
+        normalized_password = self._validated_password(password)
+        targets = self._selected_workbench_entries(selected_keys)
+        return self._run_bulk_mutation(
+            targets,
+            lambda target: self.update_password(
+                site_id=target.site.id,
+                user_id=target.user["id"],
+                password=normalized_password,
+                actor=actor,
+                refresh_inventory=False,
+            ),
+            actor=actor,
+        )
+
+    def update_roles_bulk(self, *, selected_keys: list[str], role: str, actor: str) -> list[dict[str, str]]:
+        normalized_role = self._validated_role(role)
+        targets = self._selected_workbench_entries(selected_keys)
+        return self._run_bulk_mutation(
+            targets,
+            lambda target: self.update_role(
+                site_id=target.site.id,
+                user_id=target.user["id"],
+                role=normalized_role,
+                actor=actor,
+                refresh_inventory=False,
+            ),
+            actor=actor,
+        )
+
+    def delete_users_bulk(
+        self,
+        *,
+        selected_keys: list[str],
+        reassign_to_user_ids: list[int],
+        actor: str,
+    ) -> list[dict[str, str]]:
+        targets = self._selected_workbench_entries(selected_keys)
+        if len(targets) != len(reassign_to_user_ids):
+            raise ValueError("Choose a content reassignment user for every selected WordPress user.")
+        replacements = dict(zip((target.key for target in targets), reassign_to_user_ids, strict=True))
+        return self._run_bulk_mutation(
+            targets,
+            lambda target: self.delete_user(
+                site_id=target.site.id,
+                user_id=target.user["id"],
+                reassign_to_user_id=replacements[target.key],
+                confirmed_username=target.user["username"],
+                actor=actor,
+                refresh_inventory=False,
+            ),
+            actor=actor,
+        )
+
+    def selected_workbench_entries(self, selected_keys: list[str]) -> list[UserWorkbenchEntry]:
+        return self._selected_workbench_entries(selected_keys)
+
+    def _selected_workbench_entries(self, selected_keys: list[str]) -> list[UserWorkbenchEntry]:
+        keys = list(dict.fromkeys(key.strip() for key in selected_keys if key and key.strip()))
+        if not keys:
+            raise ValueError("Select at least one WordPress user.")
+        if len(keys) > self.BULK_ACTION_LIMIT:
+            raise ValueError(f"Select at most {self.BULK_ACTION_LIMIT} WordPress users per bulk action.")
+        entries_by_key = {entry.key: entry for entry in self.list_workbench_entries()}
+        missing = [key for key in keys if key not in entries_by_key]
+        if missing:
+            raise ValueError("One or more selected WordPress users are no longer present in the stored inventory. Refresh the affected site first.")
+        return [entries_by_key[key] for key in keys]
+
+    def _run_bulk_mutation(self, targets: list[UserWorkbenchEntry], operation, *, actor: str) -> list[dict[str, str]]:
+        outcomes: list[dict[str, str]] = []
+        changed_site_ids: set[int] = set()
+        for target in targets:
+            try:
+                operation(target)
+            except (SiteMcpProxyError, ValueError) as exc:
+                outcomes.append(self._bulk_outcome(target, "failed", str(exc)))
+            else:
+                changed_site_ids.add(target.site.id)
+                outcomes.append(self._bulk_outcome(target, "succeeded", "Completed and verified by WordPress."))
+
+        for site_id in changed_site_ids:
+            try:
+                self.refresh_site_users(site_id, actor=actor)
+            except SiteMcpProxyError as exc:
+                for outcome in outcomes:
+                    if outcome["site_id"] == str(site_id) and outcome["status"] == "succeeded":
+                        outcome["message"] = f"Completed, but the stored inventory could not refresh: {exc.message}"
+        return outcomes
+
+    @staticmethod
+    def _bulk_outcome(target: UserWorkbenchEntry, status: str, message: str) -> dict[str, str]:
+        return {
+            "site_id": str(target.site.id),
+            "site": target.site.domain,
+            "username": target.user["username"],
+            "status": status,
+            "message": message,
+        }
 
     def _store_inventory(
         self,
@@ -236,6 +447,12 @@ class SiteUserService:
         if len(password) < self.MIN_PASSWORD_LENGTH:
             raise ValueError(f"The password must contain at least {self.MIN_PASSWORD_LENGTH} characters.")
         return password
+
+    def _validated_role(self, role: str) -> str:
+        normalized_role = role.strip()
+        if normalized_role not in self.ROLE_OPTIONS:
+            raise ValueError("Choose a supported WordPress role.")
+        return normalized_role
 
     @staticmethod
     def _required_text(value: str, label: str) -> str:

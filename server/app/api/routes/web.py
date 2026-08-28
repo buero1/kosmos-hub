@@ -198,6 +198,140 @@ def link_customer_site(
     )
 
 
+@router.get("/users", response_class=HTMLResponse)
+def users_workbench_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    q: str = "",
+    site_id: str = "",
+    role: str = "all",
+    customer_status: str = "all",
+):
+    _require_hub_admin(request)
+    selected_site_id = int(site_id) if site_id.isdigit() else None
+    return templates.TemplateResponse(
+        request,
+        "users.html",
+        _user_workbench_context(
+            request,
+            db,
+            query=q,
+            site_id=selected_site_id,
+            role=role,
+            customer_status=customer_status,
+        ),
+    )
+
+
+@router.post("/users/bulk/role", response_class=HTMLResponse)
+def update_selected_user_roles(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    selected: Annotated[list[str] | None, Form()] = None,
+    role: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).update_roles_bulk(
+            selected_keys=selected or [],
+            role=role,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _render_user_workbench(request, db, error=str(exc))
+    return _render_user_workbench(request, db, outcomes=outcomes, action_label="Role update")
+
+
+@router.post("/users/bulk/password", response_class=HTMLResponse)
+def update_selected_user_passwords(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    selected: Annotated[list[str] | None, Form()] = None,
+    password: Annotated[str, Form()] = "",
+    confirm_shared_password: Annotated[bool, Form()] = False,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    if not confirm_shared_password:
+        return _render_user_workbench(request, db, error="Confirm that the same password should be applied to every selected WordPress user.")
+    try:
+        outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).update_passwords_bulk(
+            selected_keys=selected or [],
+            password=password,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _render_user_workbench(request, db, error=str(exc))
+    return _render_user_workbench(request, db, outcomes=outcomes, action_label="Password update")
+
+
+@router.post("/users/bulk/delete/review", response_class=HTMLResponse)
+def review_selected_user_deletions(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    selected: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    _require_hub_admin(request)
+    service = SiteUserService(db=db, cipher=get_secret_cipher())
+    try:
+        targets = service.selected_workbench_entries(selected or [])
+    except ValueError as exc:
+        return _render_user_workbench(request, db, error=str(exc))
+
+    entries_by_site: dict[int, list] = {}
+    for entry in service.list_workbench_entries():
+        entries_by_site.setdefault(entry.site.id, []).append(entry)
+    review_items = [
+        {
+            "target": target,
+            "replacements": [
+                entry for entry in entries_by_site.get(target.site.id, []) if entry.user["id"] != target.user["id"]
+            ],
+        }
+        for target in targets
+    ]
+    return templates.TemplateResponse(
+        request,
+        "user_delete_review.html",
+        {
+            "review_items": review_items,
+            "deletion_ready": all(item["replacements"] for item in review_items),
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/users/bulk/delete", response_class=HTMLResponse)
+def delete_selected_users(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    selected: Annotated[list[str] | None, Form()] = None,
+    reassign_to_user_id: Annotated[list[int] | None, Form()] = None,
+    confirmation: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    selection = selected or []
+    expected_confirmation = f"DELETE {len(selection)} USERS"
+    if confirmation.strip() != expected_confirmation:
+        return _render_user_workbench(request, db, error=f'Enter "{expected_confirmation}" to confirm the selected deletion.')
+    try:
+        outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).delete_users_bulk(
+            selected_keys=selection,
+            reassign_to_user_ids=reassign_to_user_id or [],
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return _render_user_workbench(request, db, error=str(exc))
+    return _render_user_workbench(request, db, outcomes=outcomes, action_label="User deletion")
+
+
 @router.get("/updates", response_class=HTMLResponse)
 def update_workbench_page(
     request: Request,
@@ -802,6 +936,89 @@ def _is_removable_empty_test_registration(site) -> bool:
         and not site.capabilities
         and not site.update_plan_items
     )
+
+
+def _render_user_workbench(
+    request: Request,
+    db: Session,
+    *,
+    error: str = "",
+    outcomes: list[dict[str, str]] | None = None,
+    action_label: str = "",
+):
+    return templates.TemplateResponse(
+        request,
+        "users.html",
+        _user_workbench_context(
+            request,
+            db,
+            error=error,
+            outcomes=outcomes or [],
+            action_label=action_label,
+        ),
+    )
+
+
+def _user_workbench_context(
+    request: Request,
+    db: Session,
+    *,
+    query: str = "",
+    site_id: int | None = None,
+    role: str = "all",
+    customer_status: str = "all",
+    error: str = "",
+    outcomes: list[dict[str, str]] | None = None,
+    action_label: str = "",
+) -> dict:
+    service = SiteUserService(db=db, cipher=get_secret_cipher())
+    entries = service.list_workbench_entries()
+    if role != "all" and role not in SiteUserService.ROLE_OPTIONS:
+        role = "all"
+    status_options = sorted(
+        {
+            entry.site.customer.zoho_status
+            for entry in entries
+            if entry.site.customer is not None and entry.site.customer.zoho_status
+        }
+    )
+    if customer_status != "all" and customer_status not in status_options:
+        customer_status = "all"
+    filtered_entries = service.filter_workbench_entries(
+        entries,
+        query=query,
+        site_id=site_id,
+        role=role,
+        customer_status=customer_status,
+    )
+    site_options = sorted(
+        {entry.site.id: entry.site for entry in entries}.values(),
+        key=lambda site: site.domain.casefold(),
+    )
+    outcome_rows = outcomes or []
+    return {
+        "entries": filtered_entries,
+        "summary": {
+            "users": len(entries),
+            "sites": len({entry.site.id for entry in entries}),
+            "administrators": sum("administrator" in entry.user["roles"] for entry in entries),
+            "role_ready": sum(entry.supports_role_change for entry in entries),
+        },
+        "filters": {
+            "q": query,
+            "site_id": site_id,
+            "role": role,
+            "customer_status": customer_status,
+        },
+        "site_options": site_options,
+        "role_options": SiteUserService.ROLE_OPTIONS,
+        "customer_status_options": status_options,
+        "csrf_token": get_csrf_token(request),
+        "error": error,
+        "outcomes": outcome_rows,
+        "action_label": action_label,
+        "bulk_limit": SiteUserService.BULK_ACTION_LIMIT,
+    }
 
 
 def _site_users_redirect(site_id: int, result: str, message: str) -> RedirectResponse:
