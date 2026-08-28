@@ -414,6 +414,12 @@
               <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
               <div class="site-user-form-actions">
                 <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
+                <output class="generated-password" data-generated-password-output aria-live="polite" hidden>
+                  <span>One-time password:</span>
+                  <code data-generated-password-value></code>
+                  <button class="button button-secondary" type="button" data-copy-generated-password>Copy</button>
+                  <button class="button button-secondary" type="button" data-hide-generated-password>Hide</button>
+                </output>
                 <button class="button" type="submit">Create user</button>
               </div>
             </form>
@@ -448,6 +454,12 @@
                           <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
                           <div class="site-user-form-actions">
                             <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
+                            <output class="generated-password" data-generated-password-output aria-live="polite" hidden>
+                              <span>One-time password:</span>
+                              <code data-generated-password-value></code>
+                              <button class="button button-secondary" type="button" data-copy-generated-password>Copy</button>
+                              <button class="button button-secondary" type="button" data-hide-generated-password>Hide</button>
+                            </output>
                             <button class="button" type="submit">Save password</button>
                           </div>
                         </form>
@@ -598,6 +610,42 @@
           form.querySelectorAll(".password-input, .password-confirmation").forEach(function (input) {
             input.value = password;
           });
+          var output = form.querySelector("[data-generated-password-output]");
+          output.querySelector("[data-generated-password-value]").textContent = password;
+          output.hidden = false;
+        });
+      });
+
+      document.querySelectorAll("[data-copy-generated-password]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var output = button.closest("[data-generated-password-output]");
+          var password = output.querySelector("[data-generated-password-value]").textContent;
+          if (!password || !navigator.clipboard) {
+            return;
+          }
+          navigator.clipboard.writeText(password).then(function () {
+            button.textContent = "Copied";
+            window.setTimeout(function () {
+              button.textContent = "Copy";
+            }, 1600);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-hide-generated-password]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var output = button.closest("[data-generated-password-output]");
+          output.querySelector("[data-generated-password-value]").textContent = "";
+          output.hidden = true;
+        });
+      });
+
+      document.querySelectorAll(".site-user-form").forEach(function (form) {
+        form.addEventListener("submit", function () {
+          var output = form.querySelector("[data-generated-password-output]");
+          if (output) {
+            output.querySelector("[data-generated-password-value]").textContent = "";
+          }
         });
       });
     }());
