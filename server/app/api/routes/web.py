@@ -441,7 +441,7 @@ def update_workbench_page(
         "updates.html",
         {
             "entries": filtered_entries,
-            "summary": inventory_service.summarize_update_workbench(entries),
+            "summary": inventory_service.summarize_update_workbench(filtered_entries),
             "filters": {
                 "q": q,
                 "site_ids": sorted(selected_site_ids or []),

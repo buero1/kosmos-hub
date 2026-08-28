@@ -8,6 +8,9 @@
       <div>
         <p class="eyebrow">Direct maintenance</p>
         <h2>Update workbench</h2>
+        {% if filters.site_ids %}
+          <p class="subtle">Showing the stored inventory for {{ filters.site_ids | length }} selected website{{ "" if filters.site_ids | length == 1 else "s" }}.</p>
+        {% endif %}
       </div>
       <div class="inventory-totals">
         <span><strong>{{ summary.available_updates }}</strong> updates</span>
