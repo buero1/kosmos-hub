@@ -66,6 +66,7 @@
     var tabs = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-tab]"));
     var panels = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-panel]"));
     var targetFormId = selector.getAttribute("data-site-selector-target-form");
+    var lastSiteCheck = null;
 
     function targetForm() {
       // The Assistant form is rendered after this shared sidebar partial.
@@ -87,7 +88,8 @@
     }
 
     function syncSelection() {
-      count.textContent = scope.value === "all" ? "All sites" : selectedIds().length + " selected";
+      var selectedCount = selectedIds().length;
+      count.textContent = selectedCount && selectedCount === siteChecks.length ? "All selectable sites" : selectedCount + " selected";
       syncCustomerChecks();
       syncTargetForm();
     }
@@ -137,7 +139,20 @@
     });
 
     siteChecks.forEach(function (checkbox) {
-      checkbox.addEventListener("change", function () {
+      checkbox.addEventListener("change", function (event) {
+        if (event.shiftKey && lastSiteCheck) {
+          var start = siteChecks.indexOf(lastSiteCheck);
+          var end = siteChecks.indexOf(checkbox);
+          var from = Math.min(start, end);
+          var to = Math.max(start, end);
+          for (var index = from; index <= to; index += 1) {
+            var rangeCheckbox = siteChecks[index];
+            if (!rangeCheckbox.closest("[data-site-selector-row]").hidden) {
+              rangeCheckbox.checked = checkbox.checked;
+            }
+          }
+        }
+        lastSiteCheck = checkbox;
         scope.value = "selected";
         syncSelection();
       });
@@ -154,7 +169,7 @@
     });
     selector.querySelector("[data-site-selector-all]").addEventListener("click", function () {
       siteChecks.forEach(function (checkbox) { checkbox.checked = true; });
-      scope.value = "all";
+      scope.value = "selected";
       syncSelection();
     });
     selector.querySelector("[data-site-selector-none]").addEventListener("click", function () {

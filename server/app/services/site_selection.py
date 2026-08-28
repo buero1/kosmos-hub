@@ -1,6 +1,9 @@
 from typing import Any
 
 
+SELECTABLE_CUSTOMER_STATUSES = frozenset({"Aktuell", "Neu", "Kündigung liegt vor"})
+
+
 def build_site_selector_context(
     *,
     action: str,
@@ -13,8 +16,21 @@ def build_site_selector_context(
     hide_submit: bool = False,
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
+    selectable_sites = [
+        site
+        for site in sites
+        if site.customer is not None and site.customer.zoho_status in SELECTABLE_CUSTOMER_STATUSES
+    ]
+    selectable_site_ids = {site.id for site in selectable_sites}
+    # "All" in an operational selector means all currently selectable websites,
+    # not every historical or unlinked site stored in the Hub.
+    effective_selected_site_ids = (
+        selectable_site_ids
+        if site_scope == "all"
+        else (selected_site_ids or set()) & selectable_site_ids
+    )
     customers: dict[int, dict[str, Any]] = {}
-    for site in sites:
+    for site in selectable_sites:
         customer = site.customer
         if customer is None:
             continue
@@ -32,10 +48,10 @@ def build_site_selector_context(
     return {
         "action": action,
         "form_id": form_id,
-        "sites": sites,
+        "sites": selectable_sites,
         "customers": sorted(customers.values(), key=lambda entry: entry["name"].casefold()),
-        "selected_site_ids": selected_site_ids or set(),
-        "site_scope": site_scope,
+        "selected_site_ids": effective_selected_site_ids,
+        "site_scope": "selected",
         "submit_label": submit_label,
         "target_form_id": target_form_id,
         "hide_submit": hide_submit,
