@@ -390,6 +390,7 @@ def update_workbench_page(
     direct_update: str = "",
     official_versions: str = "",
     message: str = "",
+    view: Literal["updates", "refresh-protocol"] = "updates",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=1000)
@@ -467,6 +468,7 @@ def update_workbench_page(
             "direct_update": direct_update,
             "official_versions": official_versions,
             "active_fleet_refresh_run": active_fleet_refresh_run,
+            "show_refresh_protocol": view == "refresh-protocol",
             "refresh_runs": fleet_refresh_service.list_recent_runs(limit=20),
             "message": message,
         },
@@ -606,7 +608,7 @@ def apply_update_workbench_action(
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     maintenance_action: Annotated[
-        Literal["direct-updates", "refresh-stale", "refresh-full", "cancel-refresh"],
+        Literal["direct-updates", "refresh-stale", "refresh-full", "cancel-refresh", "refresh-protocol"],
         Form(),
     ],
     selected: Annotated[list[str] | None, Form()] = None,
@@ -623,6 +625,12 @@ def apply_update_workbench_action(
     scope_query: list[tuple[str, str | int]] = [("site_scope", site_scope)]
     if selected_site_ids is not None:
         scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
+
+    if maintenance_action == "refresh-protocol":
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + [('view', 'refresh-protocol')])}",
+            status_code=303,
+        )
 
     if maintenance_action == "direct-updates":
         try:

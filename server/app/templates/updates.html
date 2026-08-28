@@ -88,6 +88,7 @@
           <option value="direct-updates">Ausgewählte Updates ausführen</option>
           <option value="refresh-stale">Ausgewählte Websites aktualisieren und diagnostizieren</option>
           <option value="refresh-full">Ausgewählte Websites vollständig aktualisieren</option>
+          <option value="refresh-protocol">Aktualisierungsprotokoll anzeigen</option>
           {% if active_fleet_refresh_run %}<option value="cancel-refresh">Aktiven Refresh abbrechen</option>{% endif %}
         </select>
       </label>
@@ -106,6 +107,7 @@
       <p class="notice-error">{{ message }}</p>
     {% endif %}
 
+    {% if show_refresh_protocol %}
     <section class="maintenance-batch maintenance-history" aria-labelledby="refresh-history-heading">
       <div class="section-heading">
         <div>
@@ -160,6 +162,7 @@
         </table>
       </div>
     </section>
+    {% endif %}
 
     {% if batch_runs %}
       <section class="maintenance-batch">
@@ -190,6 +193,7 @@
       </section>
     {% endif %}
 
+    {% if not show_refresh_protocol %}
     <p class="result-count">{{ entries | length }} WordPress, theme, and plugin inventory items. Available WordPress, theme, and active or inactive plugin updates can be selected and started from this page.</p>
     <div class="table-scroll">
       <table class="update-workbench-table">
@@ -298,6 +302,7 @@
         </tbody>
       </table>
     </div>
+    {% endif %}
     </section>
   </div>
   {% if batch_running or active_fleet_refresh_run %}
