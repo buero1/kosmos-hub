@@ -56,6 +56,27 @@ def test_assistant_queues_only_directly_ready_plugin_updates_for_explicit_all_si
     assert answer.action.skipped_count == 1
 
 
+def test_assistant_does_not_treat_an_installed_plugin_question_as_an_update_action():
+    answer = _assistant_service()._answer_supported_update_command(
+        "Prüfe, welche Websites 13 Lazy Load installiert haben",
+        [
+            _update_entry(
+                site_id=7,
+                domain="active.example",
+                checked_at=datetime.now(UTC),
+                name="13 Lazy Load",
+                identifier="13-lazy-load/13-lazy-load.php",
+            )
+        ],
+        previous_site_ids=(),
+        captured_at=datetime.now(UTC),
+        selection_is_explicit=True,
+        selection_label="allen Websites im Seitenpanel",
+    )
+
+    assert answer is None
+
+
 def test_assistant_reuses_the_previous_result_for_this_websites_scope():
     answer = _assistant_service()._answer_supported_update_command(
         "Aktualisiere Smush auf diesen Websites",

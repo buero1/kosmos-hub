@@ -18,7 +18,7 @@ MAX_QUESTION_LENGTH = 2_000
 MAX_CONTEXT_UPDATES = 150
 MAX_ASSISTANT_UPDATE_MATCHES = 100
 _UPDATE_ACTION_PATTERN = re.compile(
-    r"(?:\b(?:aktualisier(?:e|en|t)?|updaten|installier(?:e|en|t)?)\b|^\s*update\b)",
+    r"(?:\b(?:aktualisier(?:e|en|t)?|updaten)\b|^\s*update\b)",
     re.IGNORECASE,
 )
 _ALL_SITES_PATTERN = re.compile(
