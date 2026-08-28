@@ -410,16 +410,16 @@
                   <option value="administrator">Administrator</option>
                 </select>
               </label>
-              <label>New password<input class="password-input" name="password" type="password" required minlength="12" autocomplete="new-password"></label>
-              <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
+              <label>New password
+                <span class="password-input-with-copy">
+                  <input class="password-input" name="password" type="text" required minlength="12" autocomplete="new-password" spellcheck="false">
+                  <button class="copy-password-icon" type="button" data-copy-password aria-label="Copy password" title="Copy password">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4"></path></svg>
+                  </button>
+                </span>
+              </label>
               <div class="site-user-form-actions">
                 <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
-                <output class="generated-password" data-generated-password-output aria-live="polite" hidden>
-                  <span>One-time password:</span>
-                  <code data-generated-password-value></code>
-                  <button class="button button-secondary" type="button" data-copy-generated-password>Copy</button>
-                  <button class="button button-secondary" type="button" data-hide-generated-password>Hide</button>
-                </output>
                 <button class="button" type="submit">Create user</button>
               </div>
             </form>
@@ -446,20 +446,19 @@
                     <td>{{ wp_user.roles | join(", ") or "-" }}</td>
                     <td>{{ wp_user.registered_at | berlin_time if wp_user.registered_at else "-" }}</td>
                     <td class="site-user-actions">
-                      <details>
+                      <details data-auto-generate-password>
                         <summary>Change password</summary>
                         <form class="site-user-form compact" method="post" action="/sites/{{ site.id }}/users/{{ wp_user.id }}/password">
                           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                          <label>New password<input class="password-input" name="password" type="password" required minlength="12" autocomplete="new-password"></label>
-                          <label>Confirm password<input class="password-confirmation" name="password_confirmation" type="password" required minlength="12" autocomplete="new-password"></label>
+                          <label>New password
+                            <span class="password-input-with-copy">
+                              <input class="password-input" name="password" type="text" required minlength="12" autocomplete="new-password" spellcheck="false">
+                              <button class="copy-password-icon" type="button" data-copy-password aria-label="Copy password" title="Copy password">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4"></path></svg>
+                              </button>
+                            </span>
+                          </label>
                           <div class="site-user-form-actions">
-                            <button class="button button-secondary" type="button" data-generate-password>Generate password</button>
-                            <output class="generated-password" data-generated-password-output aria-live="polite" hidden>
-                              <span>One-time password:</span>
-                              <code data-generated-password-value></code>
-                              <button class="button button-secondary" type="button" data-copy-generated-password>Copy</button>
-                              <button class="button button-secondary" type="button" data-hide-generated-password>Hide</button>
-                            </output>
                             <button class="button" type="submit">Save password</button>
                           </div>
                         </form>
@@ -603,49 +602,39 @@
         }).join("");
       }
 
+      function setGeneratedPassword(form) {
+        var input = form.querySelector(".password-input");
+        if (input) {
+          input.value = securePassword();
+        }
+      }
+
       document.querySelectorAll("[data-generate-password]").forEach(function (button) {
         button.addEventListener("click", function () {
-          var form = button.closest("form");
-          var password = securePassword();
-          form.querySelectorAll(".password-input, .password-confirmation").forEach(function (input) {
-            input.value = password;
-          });
-          var output = form.querySelector("[data-generated-password-output]");
-          output.querySelector("[data-generated-password-value]").textContent = password;
-          output.hidden = false;
+          setGeneratedPassword(button.closest("form"));
         });
       });
 
-      document.querySelectorAll("[data-copy-generated-password]").forEach(function (button) {
+      document.querySelectorAll("[data-auto-generate-password]").forEach(function (details) {
+        details.addEventListener("toggle", function () {
+          if (details.open) {
+            setGeneratedPassword(details.querySelector("form"));
+          }
+        });
+      });
+
+      document.querySelectorAll("[data-copy-password]").forEach(function (button) {
         button.addEventListener("click", function () {
-          var output = button.closest("[data-generated-password-output]");
-          var password = output.querySelector("[data-generated-password-value]").textContent;
-          if (!password || !navigator.clipboard) {
+          var input = button.closest(".password-input-with-copy").querySelector(".password-input");
+          if (!input.value || !navigator.clipboard) {
             return;
           }
-          navigator.clipboard.writeText(password).then(function () {
-            button.textContent = "Copied";
+          navigator.clipboard.writeText(input.value).then(function () {
+            button.classList.add("is-copied");
             window.setTimeout(function () {
-              button.textContent = "Copy";
+              button.classList.remove("is-copied");
             }, 1600);
           });
-        });
-      });
-
-      document.querySelectorAll("[data-hide-generated-password]").forEach(function (button) {
-        button.addEventListener("click", function () {
-          var output = button.closest("[data-generated-password-output]");
-          output.querySelector("[data-generated-password-value]").textContent = "";
-          output.hidden = true;
-        });
-      });
-
-      document.querySelectorAll(".site-user-form").forEach(function (form) {
-        form.addEventListener("submit", function () {
-          var output = form.querySelector("[data-generated-password-output]");
-          if (output) {
-            output.querySelector("[data-generated-password-value]").textContent = "";
-          }
         });
       });
     }());

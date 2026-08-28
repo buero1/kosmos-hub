@@ -666,12 +666,9 @@ def create_site_user_from_detail(
     display_name: Annotated[str, Form()] = "",
     role: Annotated[str, Form()] = "subscriber",
     password: Annotated[str, Form()] = "",
-    password_confirmation: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
-    if password != password_confirmation:
-        return _site_users_redirect(site_id, "error", "Password confirmation does not match.")
     try:
         created = SiteUserService(db=db, cipher=get_secret_cipher()).create_user(
             site_id=site_id,
@@ -695,12 +692,9 @@ def update_site_user_password_from_detail(
     db: Annotated[Session, Depends(get_db)],
     csrf_token: Annotated[str, Form()] = "",
     password: Annotated[str, Form()] = "",
-    password_confirmation: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
-    if password != password_confirmation:
-        return _site_users_redirect(site_id, "error", "Password confirmation does not match.")
     try:
         changed = SiteUserService(db=db, cipher=get_secret_cipher()).update_password(
             site_id=site_id,

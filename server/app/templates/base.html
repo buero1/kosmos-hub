@@ -469,28 +469,40 @@
         gap: 0.55rem;
         grid-column: 1 / -1;
       }
-      .generated-password {
-        display: inline-flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0.45rem;
-        margin: 0;
-        padding: 0.45rem 0.6rem;
-        border: 1px solid #8dbdae;
-        border-radius: 10px;
-        background: rgba(215, 239, 232, 0.48);
-        color: var(--ink);
+      .password-input-with-copy {
+        position: relative;
+        display: block;
       }
-      .generated-password code {
-        padding: 0.2rem 0.35rem;
-        border-radius: 5px;
-        background: rgba(255, 255, 255, 0.68);
-        font-size: 0.85rem;
-        overflow-wrap: anywhere;
+      .password-input-with-copy .password-input {
+        padding-right: 2.8rem;
       }
-      .generated-password .button {
-        padding: 0.35rem 0.65rem;
-        font-size: 0.85rem;
+      .copy-password-icon {
+        position: absolute;
+        top: 50%;
+        right: 0.35rem;
+        display: inline-grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        padding: 0;
+        transform: translateY(-50%);
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: #076c58;
+        cursor: pointer;
+      }
+      .copy-password-icon:hover,
+      .copy-password-icon:focus-visible,
+      .copy-password-icon.is-copied {
+        background: rgba(215, 239, 232, 0.78);
+      }
+      .copy-password-icon svg {
+        width: 1rem;
+        height: 1rem;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
       }
       .site-user-form.compact {
         grid-template-columns: 1fr;
