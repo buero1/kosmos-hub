@@ -26,3 +26,11 @@ def test_site_inventory_can_filter_by_linked_customer_status():
 
     assert current_customers == [items[0]]
     assert unlinked_sites == [items[1]]
+
+
+def test_update_workbench_distinguishes_all_sites_from_an_explicit_empty_selection():
+    service = FleetInventoryService(db=None, cipher=None)
+    entry = SimpleNamespace(site=SimpleNamespace(id=7))
+
+    assert service.filter_update_workbench([entry], site_ids=None) == [entry]
+    assert service.filter_update_workbench([entry], site_ids=set()) == []
