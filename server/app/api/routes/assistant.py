@@ -96,6 +96,15 @@ def ask_assistant(
         request.session["assistant_previous_site_ids"] = list(
             dict.fromkeys(match.site_id for match in answer.update_matches)
         )
+    if answer.selection_site_ids is not None:
+        selection = _assistant_selection(
+            db,
+            site_ids=list(answer.selection_site_ids),
+            site_scope="selected",
+        )
+        context["site_selector"] = selection["site_selector"]
+        context["assistant_selection"] = selection
+        request.session["assistant_previous_site_ids"] = list(answer.selection_site_ids)
 
     if answer.action is not None:
         try:

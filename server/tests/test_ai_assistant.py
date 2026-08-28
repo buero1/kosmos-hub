@@ -179,6 +179,29 @@ def test_assistant_filters_updates_by_customer_initial_in_addition_to_status():
     assert answer.action.selected_keys == ("7|plugin|wp-smushit/wp-smush.php",)
 
 
+def test_assistant_selects_sites_without_a_named_plugin_update():
+    checked_at = datetime.now(UTC)
+    answer = _assistant_service()._answer_site_selection_command(
+        "Wähle alle Websites ohne Smush Update",
+        [
+            _update_entry(site_id=7, domain="up-to-date.example", checked_at=checked_at, update_available=False),
+            _update_entry(site_id=8, domain="needs-update.example", checked_at=checked_at),
+            _update_entry(
+                site_id=9,
+                domain="not-checked.example",
+                checked_at=checked_at,
+                update_available=False,
+                update_checked=False,
+            ),
+        ],
+        captured_at=checked_at,
+    )
+
+    assert answer.selection_site_ids == (7,)
+    assert "1 Website ausgewaehlt" in answer.text
+    assert "nicht beruecksichtigt" in answer.text
+
+
 def _assistant_service() -> HubAssistantService:
     return object.__new__(HubAssistantService)
 
@@ -203,6 +226,8 @@ def _update_entry(
     identifier: str = "wp-smushit/wp-smush.php",
     customer_name: str = "",
     customer_status: str = "",
+    update_available: bool = True,
+    update_checked: bool = True,
 ) -> UpdateWorkbenchEntry:
     site = SimpleNamespace(
         id=site_id,
@@ -215,10 +240,10 @@ def _update_entry(
         name=name,
         identifier=identifier,
         current_version="4.3.0",
-        target_version="4.3.2",
+        target_version="4.3.2" if update_available else "",
         is_active=True if kind == "plugin" else None,
-        update_available=True,
-        update_checked=True,
+        update_available=update_available,
+        update_checked=update_checked,
         execution_ready=direct_ready,
         execution_note="Provider package is unavailable." if not direct_ready else "",
         captured_at=checked_at,

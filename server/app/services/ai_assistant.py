@@ -36,6 +36,11 @@ _CUSTOMER_STATUS_PATTERNS = (
     (re.compile(r"\bneu(?:e|en|er|es)?\b"), "Neu"),
 )
 _CUSTOMER_INITIAL_PATTERN = re.compile(r"\b(?:buchstabe|buchstaben|letter)\s+([a-z0-9])\b")
+_SITE_SELECTION_COMMAND_PATTERN = re.compile(
+    r"^\s*(?:bitte\s+)?(?:wahle|wahlen|selektiere|selektieren|markiere|markieren)\b"
+)
+_WITHOUT_UPDATE_PATTERN = re.compile(r"\b(?:ohne|kein(?:e|en|em|er|es)?)\b.*\bupdates?\b")
+_WITH_UPDATE_PATTERN = re.compile(r"\b(?:mit|nur)\b.*\bupdates?\b")
 
 
 class AssistantError(ValueError):
@@ -79,6 +84,7 @@ class AssistantAnswer:
     data_captured_at: datetime | None
     update_matches: tuple[AssistantUpdateMatch, ...] = ()
     action: AssistantAction | None = None
+    selection_site_ids: tuple[int, ...] | None = None
 
     def with_queued_action(self, *, batch_id: str, message: str) -> "AssistantAnswer":
         if self.action is None:
@@ -129,6 +135,17 @@ class HubAssistantService:
         selection_label: str = "",
     ) -> AssistantAnswer:
         normalized_question = self._normalize_question(question)
+        selection_command = self._is_site_selection_command(normalized_question)
+        context, captured_at, update_entries = self._build_readonly_context(
+            selected_site_ids=None if selection_command else selected_site_ids
+        )
+        if selection_command:
+            return self._answer_site_selection_command(
+                normalized_question,
+                update_entries,
+                captured_at=captured_at,
+            )
+
         if selected_site_ids == set() and self._looks_like_update_request(normalized_question):
             return AssistantAnswer(
                 text="Bitte waehle zuerst mindestens eine Website oder 'Alle' im Seitenpanel aus.",
@@ -136,7 +153,6 @@ class HubAssistantService:
                 data_captured_at=None,
             )
 
-        context, captured_at, update_entries = self._build_readonly_context(selected_site_ids=selected_site_ids)
         command_answer = self._answer_supported_update_command(
             normalized_question,
             update_entries,
@@ -163,6 +179,97 @@ class HubAssistantService:
 
         self.provider_service.record_request_success(config)
         return AssistantAnswer(text=answer, generated_at=datetime.now(UTC), data_captured_at=captured_at)
+
+    def _answer_site_selection_command(
+        self,
+        question: str,
+        update_entries: list[Any],
+        *,
+        captured_at: datetime | None,
+    ) -> AssistantAnswer:
+        target = self._find_update_target(question, update_entries)
+        matching_question = self._normalize_for_matching(question)
+        if target is None or not (_WITHOUT_UPDATE_PATTERN.search(matching_question) or _WITH_UPDATE_PATTERN.search(matching_question)):
+            return AssistantAnswer(
+                text=(
+                    "Ich kann im Seitenpanel Websites mit oder ohne ein bestimmtes Plugin-Update auswaehlen. "
+                    "Beispiel: 'Wähle alle Websites ohne Elementor Update'."
+                ),
+                generated_at=datetime.now(UTC),
+                data_captured_at=captured_at,
+            )
+
+        component_entries = [
+            entry
+            for entry in update_entries
+            if self._matches_update_target(entry, target)
+        ]
+        customer_status = self._find_customer_status(matching_question)
+        customer_name = self._find_mentioned_customer(matching_question, component_entries)
+        customer_initial = self._find_customer_initial(matching_question)
+        if customer_status:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_status_for_entry(entry) == customer_status
+            ]
+        if customer_name:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_name_for_entry(entry) == customer_name
+            ]
+        if customer_initial:
+            component_entries = [
+                entry
+                for entry in component_entries
+                if self._customer_name_for_entry(entry).casefold().startswith(customer_initial)
+            ]
+
+        wants_without_update = bool(_WITHOUT_UPDATE_PATTERN.search(matching_question))
+        if wants_without_update:
+            selected_site_ids = tuple(sorted({
+                entry.site.id
+                for entry in component_entries
+                if entry.update_checked and not entry.update_available
+            }))
+            unknown_site_count = len({
+                entry.site.id
+                for entry in component_entries
+                if not entry.update_checked
+            })
+            selection_description = f"auf denen {target.label} installiert ist und kein Update gemeldet wird"
+        else:
+            selected_site_ids = tuple(sorted({
+                entry.site.id
+                for entry in component_entries
+                if entry.update_available
+            }))
+            unknown_site_count = 0
+            selection_description = f"auf denen ein Update fuer {target.label} gemeldet wird"
+
+        filter_label = self._customer_filter_label(
+            customer_status=customer_status,
+            customer_name=customer_name,
+            customer_initial=customer_initial,
+        )
+        suffix = f" unter {filter_label}" if filter_label else ""
+        unchecked_note = (
+            f" {unknown_site_count} Website{'s' if unknown_site_count != 1 else ''} mit {target.label} wurden nicht beruecksichtigt, "
+            "weil noch keine Update-Pruefung vorliegt."
+            if unknown_site_count
+            else ""
+        )
+        return AssistantAnswer(
+            text=(
+                f"Ich habe {len(selected_site_ids)} Website{'s' if len(selected_site_ids) != 1 else ''} ausgewaehlt, "
+                f"{selection_description}{suffix}. Die Auswahl ist jetzt im Seitenpanel gesetzt."
+                f"{unchecked_note}"
+            ),
+            generated_at=datetime.now(UTC),
+            data_captured_at=captured_at,
+            selection_site_ids=selected_site_ids,
+        )
 
     def _build_readonly_context(
         self,
@@ -405,6 +512,10 @@ class HubAssistantService:
     @staticmethod
     def _looks_like_update_request(question: str) -> bool:
         return "update" in question or "aktualis" in question or bool(_UPDATE_ACTION_PATTERN.search(question))
+
+    @staticmethod
+    def _is_site_selection_command(question: str) -> bool:
+        return bool(_SITE_SELECTION_COMMAND_PATTERN.search(HubAssistantService._normalize_for_matching(question)))
 
     @staticmethod
     def _find_customer_status(question: str) -> str | None:
