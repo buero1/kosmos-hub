@@ -204,11 +204,12 @@ def users_workbench_page(
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
     site_id: Annotated[list[int] | None, Query()] = None,
+    site_scope: Literal["all", "selected"] = "all",
     role: str = "all",
     customer_status: str = "all",
 ):
     _require_hub_admin(request)
-    selected_site_ids = set(site_id or [])
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
     return templates.TemplateResponse(
         request,
         "users.html",
@@ -217,6 +218,7 @@ def users_workbench_page(
             db,
             query=q,
             site_ids=selected_site_ids,
+            site_scope=site_scope,
             role=role,
             customer_status=customer_status,
         ),
@@ -365,6 +367,7 @@ def update_workbench_page(
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
     site_id: Annotated[list[int] | None, Query()] = None,
+    site_scope: Literal["all", "selected"] = "all",
     plugin: str = "",
     kind: Literal["all", "wordpress", "plugin", "theme"] = "all",
     activity: Literal["all", "active", "inactive"] = "all",
@@ -391,7 +394,7 @@ def update_workbench_page(
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=1000)
     entries = inventory_service.build_update_workbench(all_items)
-    selected_site_ids = set(site_id or [])
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
     filtered_entries = inventory_service.filter_update_workbench(
         entries,
         query=q,
@@ -402,7 +405,7 @@ def update_workbench_page(
         plugin_identifier=plugin,
     )
     matching_items = inventory_service.filter_items(all_items, query=q) if q.strip() else all_items
-    if selected_site_ids:
+    if selected_site_ids is not None:
         matching_items = [item for item in matching_items if item.site.id in selected_site_ids]
     if plugin:
         matching_items = [
@@ -437,7 +440,8 @@ def update_workbench_page(
             "summary": inventory_service.summarize_update_workbench(entries),
             "filters": {
                 "q": q,
-                "site_ids": sorted(selected_site_ids),
+                "site_ids": sorted(selected_site_ids or []),
+                "site_scope": site_scope,
                 "plugin": plugin,
                 "kind": kind,
                 "activity": activity,
@@ -448,6 +452,7 @@ def update_workbench_page(
                 action="/updates",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
+                site_scope=site_scope,
                 submit_label="Show updates",
                 preserved_filters={
                     "q": q,
@@ -1006,6 +1011,7 @@ def _user_workbench_context(
     query: str = "",
     site_id: int | None = None,
     site_ids: set[int] | None = None,
+    site_scope: str = "all",
     role: str = "all",
     customer_status: str = "all",
     error: str = "",
@@ -1025,7 +1031,9 @@ def _user_workbench_context(
     )
     if customer_status != "all" and customer_status not in status_options:
         customer_status = "all"
-    selected_site_ids = site_ids or ({site_id} if site_id is not None else set())
+    selected_site_ids = site_ids if site_scope == "selected" else None
+    if selected_site_ids is None and site_id is not None:
+        selected_site_ids = {site_id}
     filtered_entries = service.filter_workbench_entries(
         entries,
         query=query,
@@ -1053,7 +1061,8 @@ def _user_workbench_context(
         },
         "filters": {
             "q": query,
-            "site_ids": sorted(selected_site_ids),
+            "site_ids": sorted(selected_site_ids or []),
+            "site_scope": site_scope,
             "role": role,
             "customer_status": customer_status,
         },
@@ -1062,6 +1071,7 @@ def _user_workbench_context(
             action="/users",
             sites=site_options,
             selected_site_ids=selected_site_ids,
+            site_scope=site_scope,
             submit_label="Show users",
             preserved_filters={
                 "q": query,
@@ -1083,7 +1093,8 @@ def _site_selector_context(
     *,
     action: str,
     sites: list,
-    selected_site_ids: set[int],
+    selected_site_ids: set[int] | None,
+    site_scope: str,
     submit_label: str,
     preserved_filters: dict[str, str],
 ) -> dict:
@@ -1108,7 +1119,8 @@ def _site_selector_context(
         "action": action,
         "sites": sites,
         "customers": sorted(customers.values(), key=lambda entry: entry["name"].casefold()),
-        "selected_site_ids": selected_site_ids,
+        "selected_site_ids": selected_site_ids or set(),
+        "site_scope": site_scope,
         "submit_label": submit_label,
         "preserved_filters": [
             {"name": name, "value": value}

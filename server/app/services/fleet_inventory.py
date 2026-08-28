@@ -368,10 +368,10 @@ class FleetInventoryService:
     ) -> list[UpdateWorkbenchEntry]:
         normalized_query = query.strip().casefold()
         normalized_plugin_identifier = plugin_identifier.strip()
-        selected_site_ids = site_ids or ({site_id} if site_id is not None else set())
+        selected_site_ids = site_ids if site_ids is not None else ({site_id} if site_id is not None else None)
 
         def matches(entry: UpdateWorkbenchEntry) -> bool:
-            if selected_site_ids and entry.site.id not in selected_site_ids:
+            if selected_site_ids is not None and entry.site.id not in selected_site_ids:
                 return False
             if normalized_plugin_identifier and entry.identifier != normalized_plugin_identifier:
                 return False

@@ -1,5 +1,6 @@
 <aside class="workbench-site-selector" data-site-selector>
   <form method="get" action="{{ site_selector.action }}">
+    <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-scope>
     {% for filter in site_selector.preserved_filters %}
       <input type="hidden" name="{{ filter.name }}" value="{{ filter.value }}">
     {% endfor %}
@@ -21,13 +22,13 @@
 
     <div class="site-selector-selection-tools">
       <span>Select: <button type="button" data-site-selector-all>All</button> · <button type="button" data-site-selector-none>None</button></span>
-      <strong><span data-site-selector-count>0</span> selected</strong>
+      <strong data-site-selector-count>All sites</strong>
     </div>
 
     <div class="site-selector-list" data-site-selector-panel="sites">
       {% for site in site_selector.sites %}
         <label class="site-selector-row" data-site-selector-row data-search-text="{{ site.domain | lower }}">
-          <input type="checkbox" name="site_id" value="{{ site.id }}" {% if site.id in site_selector.selected_site_ids %}checked{% endif %}>
+          <input type="checkbox" name="site_id" value="{{ site.id }}" {% if site_selector.site_scope == "all" or site.id in site_selector.selected_site_ids %}checked{% endif %}>
           <span>{{ site.domain }}</span>
         </label>
       {% else %}
@@ -61,6 +62,7 @@
     var siteChecks = Array.prototype.slice.call(selector.querySelectorAll('input[name="site_id"]'));
     var customerChecks = Array.prototype.slice.call(selector.querySelectorAll("[data-customer-selector]"));
     var count = selector.querySelector("[data-site-selector-count]");
+    var scope = selector.querySelector("[data-site-selector-scope]");
     var search = selector.querySelector("[data-site-selector-search]");
     var tabs = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-tab]"));
     var panels = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-panel]"));
@@ -80,7 +82,7 @@
     }
 
     function syncSelection() {
-      count.textContent = selectedIds().length;
+      count.textContent = scope.value === "all" ? "All sites" : selectedIds().length + " selected";
       syncCustomerChecks();
     }
 
@@ -104,22 +106,30 @@
       });
     });
 
-    siteChecks.forEach(function (checkbox) { checkbox.addEventListener("change", syncSelection); });
+    siteChecks.forEach(function (checkbox) {
+      checkbox.addEventListener("change", function () {
+        scope.value = "selected";
+        syncSelection();
+      });
+    });
     customerChecks.forEach(function (checkbox) {
       checkbox.addEventListener("change", function () {
         var selected = checkbox.value ? checkbox.value.split(",") : [];
         siteChecks.forEach(function (site) {
           if (selected.indexOf(site.value) !== -1) { site.checked = checkbox.checked; }
         });
+        scope.value = "selected";
         syncSelection();
       });
     });
     selector.querySelector("[data-site-selector-all]").addEventListener("click", function () {
       siteChecks.forEach(function (checkbox) { checkbox.checked = true; });
+      scope.value = "all";
       syncSelection();
     });
     selector.querySelector("[data-site-selector-none]").addEventListener("click", function () {
       siteChecks.forEach(function (checkbox) { checkbox.checked = false; });
+      scope.value = "selected";
       syncSelection();
     });
     search.addEventListener("input", applySearch);

@@ -21,6 +21,7 @@
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
 
     <form class="filter-panel filter-panel-workbench" method="get" action="/users">
+      <input type="hidden" name="site_scope" value="{{ filters.site_scope }}">
       {% for selected_site_id in filters.site_ids %}
         <input type="hidden" name="site_id" value="{{ selected_site_id }}">
       {% endfor %}
