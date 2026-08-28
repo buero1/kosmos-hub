@@ -6,9 +6,9 @@
       <div>
         <p class="eyebrow">AI operations assistant</p>
         <h2>Kosmos Assistant</h2>
-        <p class="subtle">Answers from the stored Hub inventory, update state and plans. This first version is read-only.</p>
+        <p class="subtle">Analyses stored Hub data and can queue clearly scoped, directly executable plugin updates.</p>
       </div>
-      <span class="pill pill-unknown">Read-only pilot</span>
+      <span class="pill pill-success">Guided actions</span>
     </div>
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
@@ -23,11 +23,12 @@
     {% else %}
       <form class="assistant-panel" method="post" action="/assistant">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label for="assistant-question">What should Kosmos Hub analyse?</label>
-        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Which websites have the most pending updates, and what should I review first?">{{ question }}</textarea>
-        <p class="subtle">Examples: “Which sites have no recent update check?” or “Summarise the open update plans.”</p>
+        <label for="assistant-question">What should Kosmos Hub do or analyse?</label>
+        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Show all websites with a Smush update.">{{ question }}</textarea>
+        <p class="subtle">Examples: "Show all websites with a Smush update", "Update Smush on all websites", or "Which sites have no recent update check?"</p>
+        <p class="subtle">A plugin update starts only when the plugin and scope are unambiguous. It always uses the same protected maintenance queue as the Update workbench.</p>
         <p class="subtle">The required Hub snapshot is sent server-side to OpenAI for the answer. Never enter customer credentials or other secrets here.</p>
-        <button class="button" type="submit">Analyse Hub data</button>
+        <button class="button" type="submit">Ask Assistant</button>
       </form>
     {% endif %}
 
@@ -35,6 +36,38 @@
       <section class="assistant-answer">
         <p class="eyebrow">Assistant answer</p>
         <div class="assistant-text">{{ answer.text }}</div>
+        {% if answer.action and answer.action.batch_id %}
+          <p class="notice-success">{{ answer.action.message }}</p>
+          <a class="button button-secondary" href="/updates?update_batch={{ answer.action.batch_id }}">Open direct update run</a>
+        {% elif answer.action and answer.action.error %}
+          <p class="notice-error">{{ answer.action.error }}</p>
+        {% endif %}
+        {% if answer.update_matches %}
+          <div class="table-scroll assistant-update-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Website</th>
+                  <th>Plugin</th>
+                  <th>Installed</th>
+                  <th>Target</th>
+                  <th>Direct maintenance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for match in answer.update_matches %}
+                  <tr>
+                    <td>{{ match.site_domain }}</td>
+                    <td>{{ match.plugin_name }}</td>
+                    <td>{{ match.current_version }}</td>
+                    <td>{{ match.target_version }}</td>
+                    <td>{% if match.direct_update_selectable %}<span class="pill pill-success">Ready</span>{% else %}<span class="pill pill-unknown">Not ready</span>{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
         <p class="subtle">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at | berlin_time }}{% endif %}.</p>
       </section>
     {% endif %}
