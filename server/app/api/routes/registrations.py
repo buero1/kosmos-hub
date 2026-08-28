@@ -2,6 +2,7 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,7 @@ from app.core.security import SecretCipher, get_secret_cipher
 from app.db.session import get_db
 from app.schemas.registration import RegistrationHeaders, RegistrationRequest, RegistrationResponse
 from app.services.site_registration import SiteRegistrationService
+from app.services.plugin_installation_packages import PluginInstallationPackageService
 
 router = APIRouter(prefix="/api/v1", tags=["registrations"])
 
@@ -30,3 +32,26 @@ async def register_site(
     headers = RegistrationHeaders.from_request(request.headers)
     service = SiteRegistrationService(db=db, settings=settings, cipher=cipher)
     return service.register(payload=payload, headers=headers, raw_body=raw_body)
+
+
+@router.get("/plugin-packages/{package_id}/download")
+def download_plugin_package(
+    package_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    cipher: Annotated[SecretCipher, Depends(get_secret_cipher)],
+) -> Response:
+    package = PluginInstallationPackageService(db=db).authorize_site_download(
+        request=request,
+        package_id=package_id,
+        cipher=cipher,
+    )
+    return Response(
+        content=package.package_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{package.original_filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

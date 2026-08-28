@@ -15,6 +15,7 @@ from app.core.security import get_secret_cipher
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.site_user_snapshot import SiteUserSnapshot
+from app.models.plugin_installation_package import PluginInstallationPackage
 from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
@@ -32,6 +33,19 @@ def _ensure_phase_one_schema() -> None:
     if "site_user_snapshots" not in table_names:
         SiteUserSnapshot.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created site_user_snapshots table.")
+
+    if "plugin_installation_packages" not in table_names:
+        PluginInstallationPackage.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created plugin_installation_packages table.")
+
+    if "maintenance_runs" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("maintenance_runs")}
+        if "plugin_installation_package_id" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE maintenance_runs ADD COLUMN plugin_installation_package_id INT NULL")
+                )
+            logger.info("Added maintenance_runs.plugin_installation_package_id column.")
 
     if "fleet_refresh_settings" in table_names:
         columns = {column["name"] for column in inspector.get_columns("fleet_refresh_settings")}
@@ -224,6 +238,7 @@ def create_app() -> FastAPI:
             or request.url.path.startswith("/account")
             or request.url.path.startswith("/sites")
             or request.url.path == "/updates"
+            or request.url.path.startswith("/plugin-installations")
             or request.url.path.startswith("/update-plans")
             or request.url.path.startswith("/assistant")
         ):
@@ -258,7 +273,7 @@ app = create_app()
 
 
 def _is_public_hub_path(path: str) -> bool:
-    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"}
+    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith("/api/v1/plugin-packages/")
 
 
 def _is_mcp_path(path: str) -> bool:

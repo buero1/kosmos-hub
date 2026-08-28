@@ -15,6 +15,7 @@ from app.models.maintenance_run import (
     MaintenanceRunStep,
     MaintenanceRunStepStatus,
 )
+from app.models.plugin_installation_package import PluginInstallationPackage
 from app.models.site import Site, SiteStatus
 from app.repositories.site_repository import SiteRepository
 from app.services.audit import write_audit_log
@@ -45,12 +46,14 @@ class MaintenanceRunService:
 
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
+    PLUGIN_INSTALLATION_KIND = "plugin-installation"
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
     PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
+    PLUGIN_INSTALLATION_ABILITY = "kosmos-bridge/install-plugin"
     THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
     WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
     SITE_HEALTH_ABILITY = "kosmos-bridge/check-site-health"
@@ -319,6 +322,127 @@ class MaintenanceRunService:
         """Backward-compatible name for starting updates from the global workbench."""
         return self.start_direct_updates(selected_keys=selected_keys, actor=actor)
 
+    def start_plugin_installations(
+        self,
+        *,
+        site_ids: list[int],
+        package: PluginInstallationPackage,
+        activate: bool,
+        replace_existing: bool,
+        actor: str,
+    ) -> PluginUpdateBatchOutcome:
+        """Queue one Hub-inspected plugin package for verified customer sites."""
+        requested_site_ids = list(dict.fromkeys(site_id for site_id in site_ids if isinstance(site_id, int)))
+        if not requested_site_ids:
+            raise ValueError("Select at least one website before installing a plugin.")
+        if not self._is_plugin_file(package.plugin_file) or not package.plugin_version or not re.fullmatch(r"[a-f0-9]{64}", package.sha256):
+            raise ValueError("The checked plugin package has invalid installation metadata.")
+
+        sites: list[Site] = []
+        for site_id in requested_site_ids:
+            site = self.repository.get_site(site_id)
+            if site is None:
+                raise ValueError("One or more selected websites no longer exist.")
+            if site.status != SiteStatus.verified.value:
+                raise ValueError(f"{site.domain} is not verified for plugin installation.")
+            ability_names = {capability.ability_name for capability in site.capabilities}
+            if self.PLUGIN_INSTALLATION_ABILITY not in ability_names:
+                raise ValueError(
+                    f"{site.domain} does not yet support plugin installation. Update Kosmos Bridge to version 0.3.55 or newer first."
+                )
+            sites.append(site)
+
+        active_runs = list(
+            self.db.scalars(
+                select(MaintenanceRun).where(
+                    MaintenanceRun.kind.in_((self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND)),
+                    MaintenanceRun.status == MaintenanceRunStatus.running.value,
+                    MaintenanceRun.site_id.in_(requested_site_ids),
+                )
+            )
+        )
+        if active_runs:
+            raise ValueError("An update or plugin installation is already queued or running for one of the selected websites.")
+
+        batch_id = uuid4().hex
+        now = datetime.now(UTC)
+        runs: list[MaintenanceRun] = []
+        for position, site in enumerate(sites, start=1):
+            run = MaintenanceRun(
+                site=site,
+                kind=self.PLUGIN_INSTALLATION_KIND,
+                status=MaintenanceRunStatus.running.value,
+                requested_by=actor,
+                started_at=now,
+                plugin_installation_package_id=package.id,
+                result_json={
+                    "batch_id": batch_id,
+                    "batch_position": position,
+                    "batch_size": len(sites),
+                    "package_source": package.source,
+                    "plugin_name": package.plugin_name,
+                    "plugin_file": package.plugin_file,
+                    "target_version": package.plugin_version,
+                    "package_sha256": package.sha256,
+                    "activate": activate,
+                    "replace_existing": replace_existing,
+                    "stage": "queued",
+                    "stage_message": "Queued after package and target-site preflight checks.",
+                },
+            )
+            run.steps.extend(
+                (
+                    MaintenanceRunStep(
+                        step_key="preflight",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting to check the current plugin state on this website.",
+                        result_json={},
+                    ),
+                    MaintenanceRunStep(
+                        step_key="install-plugin",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting for the package and target-site checks to pass.",
+                        result_json={},
+                    ),
+                    MaintenanceRunStep(
+                        step_key="postflight-health",
+                        status=MaintenanceRunStepStatus.waiting.value,
+                        started_at=now,
+                        detail="Waiting for the plugin installation to complete.",
+                        result_json={},
+                    ),
+                )
+            )
+            self.db.add(run)
+            runs.append(run)
+
+        self.db.flush()
+        for run in runs:
+            write_audit_log(
+                self.db,
+                site=run.site,
+                actor=actor,
+                source="hub-web",
+                action="start-plugin-installation-run",
+                result="queued",
+                detail=(
+                    f"Queued plugin installation run {run.id} in batch {batch_id[:12]} for "
+                    f"{package.plugin_name} {package.plugin_version}; activate={activate}, replace_existing={replace_existing}."
+                ),
+                request_id=batch_id,
+            )
+        self.db.commit()
+        return PluginUpdateBatchOutcome(
+            batch_id=batch_id,
+            run_count=len(runs),
+            message=(
+                f"Queued {len(runs)} plugin installation{'s' if len(runs) != 1 else ''} for {package.plugin_name} {package.plugin_version}. "
+                "Each target is prechecked, then verified with a health check afterwards."
+            ),
+        )
+
     def start_site_updates(
         self,
         *,
@@ -340,6 +464,21 @@ class MaintenanceRunService:
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND)
+            .order_by(MaintenanceRun.id.asc())
+        )
+        return [
+            run
+            for run in self.db.scalars(statement)
+            if isinstance(run.result_json, dict) and run.result_json.get("batch_id") == batch_id
+        ]
+
+    def list_plugin_installation_batch(self, batch_id: str) -> list[MaintenanceRun]:
+        if not re.fullmatch(r"[a-f0-9]{32}", batch_id):
+            return []
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(MaintenanceRun.kind == self.PLUGIN_INSTALLATION_KIND)
             .order_by(MaintenanceRun.id.asc())
         )
         return [
@@ -381,7 +520,7 @@ class MaintenanceRunService:
         return summary
 
     def next_parallel_direct_update_run_ids(self, *, limit: int) -> list[int]:
-        """Return one queued update per site, with stale in-progress runs recoverable."""
+        """Return one queued direct maintenance task per site, with stale runs recoverable."""
         if limit < 1:
             return []
 
@@ -389,7 +528,7 @@ class MaintenanceRunService:
         statement = (
             select(MaintenanceRun)
             .where(
-                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.kind.in_((self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND)),
                 MaintenanceRun.status == MaintenanceRunStatus.running.value,
             )
             .order_by(MaintenanceRun.started_at.asc(), MaintenanceRun.id.asc())
@@ -414,14 +553,18 @@ class MaintenanceRunService:
         return selected_ids
 
     def poll_direct_update_run(self, run_id: int) -> str:
-        """Run one queued update in its own database session."""
+        """Backward-compatible entry point for the shared direct-maintenance worker."""
+        return self.poll_direct_maintenance_run(run_id)
+
+    def poll_direct_maintenance_run(self, run_id: int) -> str:
+        """Run one queued update or plugin installation in its own database session."""
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(MaintenanceRun.id == run_id)
         )
         run = self.db.scalar(statement)
-        if run is None or run.kind != self.PLUGIN_UPDATE_KIND:
+        if run is None or run.kind not in {self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND}:
             return "skipped"
         if run.status != MaintenanceRunStatus.running.value:
             return "skipped"
@@ -429,27 +572,43 @@ class MaintenanceRunService:
         run.result_json = {
             **(run.result_json or {}),
             "stage": "processing",
-            "stage_message": "Preparing this update in a dedicated worker.",
+            "stage_message": "Preparing this maintenance task in a dedicated worker.",
         }
         run.last_checked_at = datetime.now(UTC)
         self.db.commit()
-        return self._poll_plugin_update(run)
+        outcome = self._poll_plugin_update(run) if run.kind == self.PLUGIN_UPDATE_KIND else self._poll_plugin_installation(run)
+        if outcome == "failed":
+            batch_id = self._plugin_update_batch_id(run)
+            if batch_id:
+                self._skip_queued_maintenance_runs(
+                    batch_id,
+                    kind=run.kind,
+                    failed_run_id=run.id,
+                    message=(
+                        f"Skipped because maintenance run {run.id} failed. "
+                        "The batch stops at the first error."
+                    ),
+                )
+        return outcome
 
     def fail_direct_update_worker_run(self, run_id: int) -> None:
         """Persist an unexpected worker failure instead of leaving a run stuck."""
+        self.fail_direct_maintenance_worker_run(run_id)
+
+    def fail_direct_maintenance_worker_run(self, run_id: int) -> None:
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(MaintenanceRun.id == run_id)
         )
         run = self.db.scalar(statement)
-        if run is None or run.kind != self.PLUGIN_UPDATE_KIND:
+        if run is None or run.kind not in {self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND}:
             return
         if run.status != MaintenanceRunStatus.running.value:
             return
         self._fail_plugin_update_run(
             run,
-            "The Hub update worker stopped unexpectedly. The website was not marked as successfully updated.",
+            "The Hub maintenance worker stopped unexpectedly. The website was not marked as successfully changed.",
         )
 
     def _poll_plugin_update(self, run: MaintenanceRun) -> str:
@@ -573,6 +732,143 @@ class MaintenanceRunService:
             detail=(
                 f"Direct update run {run.id} updated {details['update_name']} "
                 f"{details['current_version']} -> {details['target_version']}. {health_detail}{refresh_note}"
+            ),
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
+        return "succeeded"
+
+    def _poll_plugin_installation(self, run: MaintenanceRun) -> str:
+        details = self._plugin_installation_details(run)
+        site = self.repository.get_site(run.site_id)
+        if site is None or site.status != SiteStatus.verified.value:
+            self._fail_plugin_update_run(run, "The site is no longer verified for plugin installation.")
+            return "failed"
+        if details is None:
+            self._fail_plugin_update_run(run, "The plugin installation run has invalid package metadata.")
+            return "failed"
+        if self.PLUGIN_INSTALLATION_ABILITY not in {capability.ability_name for capability in site.capabilities}:
+            self._fail_plugin_update_run(run, "This site no longer reports the Kosmos Bridge plugin-installation ability.")
+            return "failed"
+
+        preflight_step = self._find_step(run, "preflight")
+        self._start_plugin_update_step(run, preflight_step, "Reading the current installed plugin state from the website.")
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                run.site_id,
+                "kosmos-bridge/list-installed-plugins",
+                {},
+                timeout_seconds=45,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(run, f"Plugin installation preflight failed: {exc.message}")
+            return "failed"
+
+        current_plugins = self._result_from_payload(payload).get("plugins", [])
+        installed = next(
+            (
+                plugin
+                for plugin in current_plugins
+                if isinstance(plugin, dict) and plugin.get("plugin_file") == details["plugin_file"]
+            ),
+            None,
+        )
+        if installed is not None and not details["replace_existing"]:
+            self._fail_plugin_update_run(
+                run,
+                f"{details['plugin_name']} is already installed on this website. Enable replacement to install this checked package over it.",
+            )
+            return "failed"
+        previous_version = str(installed.get("version", "")) if isinstance(installed, dict) else ""
+        self._complete_plugin_update_step(
+            run,
+            preflight_step,
+            (
+                f"Target-site preflight passed. "
+                f"{'Replacing installed version ' + previous_version if previous_version else 'The plugin is not installed yet'}."
+            ),
+            {"previous_version": previous_version, "already_installed": installed is not None},
+        )
+
+        install_step = self._find_step(run, "install-plugin")
+        self._start_plugin_update_step(
+            run,
+            install_step,
+            f"Installing checked package {details['plugin_name']} {details['target_version']}.",
+        )
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.PLUGIN_INSTALLATION_ABILITY,
+                {
+                    "package_id": details["package_id"],
+                    "plugin_file": details["plugin_file"],
+                    "expected_version": details["target_version"],
+                    "package_sha256": details["package_sha256"],
+                    "activate": details["activate"],
+                    "replace_existing": details["replace_existing"],
+                },
+                timeout_seconds=300,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(run, f"Plugin installation request failed: {exc.message}")
+            return "failed"
+
+        result = self._result_from_payload(payload)
+        installation_error = self._plugin_installation_result_error(details, result)
+        if installation_error:
+            self._fail_plugin_update_run(run, installation_error)
+            return "failed"
+        self._complete_plugin_update_step(
+            run,
+            install_step,
+            (
+                f"Bridge verified {details['plugin_name']} {details['target_version']} "
+                f"{'active' if result.get('active') else 'inactive'} after installation."
+            ),
+            result,
+        )
+
+        health_step = self._find_step(run, "postflight-health")
+        self._start_plugin_update_step(run, health_step, "Checking the public homepage and WordPress REST API.")
+        health_error, health_detail, health_result = self._run_direct_update_postflight_health(run, health_step)
+        if health_error:
+            self._fail_plugin_update_run(
+                run,
+                f"{details['plugin_name']} was installed and verified, but {health_error}. No automatic rollback was performed.",
+                health_step=health_step,
+            )
+            return "failed"
+        self._complete_plugin_update_step(run, health_step, health_detail, health_result)
+
+        refresh_note = ""
+        try:
+            SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+        except SiteMcpProxyError as exc:
+            refresh_note = f" The follow-up inventory scan failed: {exc.message}"
+
+        completed_at = datetime.now(UTC)
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "completed",
+            "stage_message": f"{details['plugin_name']} was installed and verified.{refresh_note}",
+            "installed_version": details["target_version"],
+            "active": result.get("active") is True,
+        }
+        write_audit_log(
+            self.db,
+            site=site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-plugin-installation-run",
+            result="succeeded",
+            detail=(
+                f"Plugin installation run {run.id} installed {details['plugin_name']} "
+                f"{details['target_version']}. {health_detail}{refresh_note}"
             ),
             request_id=self._plugin_update_batch_id(run),
         )
@@ -798,6 +1094,18 @@ class MaintenanceRunService:
         return None
 
     @staticmethod
+    def _plugin_installation_result_error(details: dict[str, Any], result: dict[str, Any]) -> str | None:
+        if result.get("installed") is not True:
+            return f"{details['plugin_name']} was not confirmed as installed by WordPress."
+        if result.get("plugin_file") != details["plugin_file"]:
+            return f"{details['plugin_name']} was installed under an unexpected plugin file."
+        if result.get("installed_version") != details["target_version"]:
+            return f"{details['plugin_name']} did not return the checked package version."
+        if details["activate"] and result.get("active") is not True:
+            return f"{details['plugin_name']} was installed, but WordPress did not confirm activation."
+        return None
+
+    @staticmethod
     def _direct_update_verification_detail(details: dict[str, Any]) -> str:
         if details["update_kind"] == "plugin":
             return (
@@ -909,24 +1217,34 @@ class MaintenanceRunService:
                 step.status = MaintenanceRunStepStatus.skipped.value
                 step.completed_at = completed_at
                 step.detail = "Not run because this direct update failed."
+        action = "plugin-installation-run" if run.kind == self.PLUGIN_INSTALLATION_KIND else "direct-plugin-update-run"
+        label = "plugin installation" if run.kind == self.PLUGIN_INSTALLATION_KIND else "direct update"
         write_audit_log(
             self.db,
             site=run.site,
             actor="kosmos-hub",
             source="hub-worker",
-            action="direct-plugin-update-run",
+            action=action,
             result="failed",
-            detail=f"Direct update run {run.id} failed: {message}",
+            detail=f"{label.title()} run {run.id} failed: {message}",
             request_id=self._plugin_update_batch_id(run),
         )
         self.db.commit()
 
     def _skip_queued_plugin_updates(self, batch_id: str, *, failed_run_id: int, message: str) -> int:
+        return self._skip_queued_maintenance_runs(
+            batch_id,
+            kind=self.PLUGIN_UPDATE_KIND,
+            failed_run_id=failed_run_id,
+            message=message,
+        )
+
+    def _skip_queued_maintenance_runs(self, batch_id: str, *, kind: str, failed_run_id: int, message: str) -> int:
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(
-                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.kind == kind,
                 MaintenanceRun.status == MaintenanceRunStatus.running.value,
             )
             .order_by(MaintenanceRun.id.asc())
@@ -952,12 +1270,13 @@ class MaintenanceRunService:
                     step.status = MaintenanceRunStepStatus.skipped.value
                     step.completed_at = completed_at
                     step.detail = message
+            action = "plugin-installation-run" if kind == self.PLUGIN_INSTALLATION_KIND else "direct-plugin-update-run"
             write_audit_log(
                 self.db,
                 site=run.site,
                 actor="kosmos-hub",
                 source="hub-worker",
-                action="direct-plugin-update-run",
+                action=action,
                 result="skipped",
                 detail=f"Direct update run {run.id} skipped: {message}",
                 request_id=batch_id,
@@ -1002,6 +1321,38 @@ class MaintenanceRunService:
             **{key: value.strip() for key, value in details.items()},
             "update_kind": update_kind,
             "expected_active": expected_active,
+        }
+
+    def _plugin_installation_details(self, run: MaintenanceRun) -> dict[str, Any] | None:
+        values = run.result_json or {}
+        if not isinstance(values, dict) or not isinstance(run.plugin_installation_package_id, int):
+            return None
+        package = self.db.get(PluginInstallationPackage, run.plugin_installation_package_id)
+        if package is None:
+            return None
+        if package.expires_at is not None and package.expires_at < datetime.now(UTC):
+            return None
+        if (
+            not self._is_plugin_file(package.plugin_file)
+            or not package.plugin_name
+            or not package.plugin_version
+            or re.fullmatch(r"[a-f0-9]{64}", package.sha256) is None
+            or values.get("plugin_file") != package.plugin_file
+            or values.get("target_version") != package.plugin_version
+        ):
+            return None
+        activate = values.get("activate")
+        replace_existing = values.get("replace_existing")
+        if not isinstance(activate, bool) or not isinstance(replace_existing, bool):
+            return None
+        return {
+            "package_id": package.id,
+            "plugin_name": package.plugin_name,
+            "plugin_file": package.plugin_file,
+            "target_version": package.plugin_version,
+            "package_sha256": package.sha256,
+            "activate": activate,
+            "replace_existing": replace_existing,
         }
 
     @staticmethod

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Plugin installation · kosmos-hub{% endblock %}
+{% block content %}
+  <div class="workbench-page-layout">
+    {% include "partials/site_selector.html" %}
+    <section class="workbench-page-main">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Direct maintenance</p>
+          <h2>Plugin installation</h2>
+          <p class="subtle">Install a checked WordPress.org package or a checked ZIP on the selected websites.</p>
+        </div>
+        <div class="inventory-totals">
+          <span><strong>{{ selected_site_count }}</strong> selected sites</span>
+          <span><strong>20 MB</strong> ZIP limit</span>
+        </div>
+      </div>
+
+      <form id="plugin-install-form" class="plugin-install-form" method="post" action="/plugin-installations/queue" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
+        <span data-site-selector-target-sites></span>
+
+        <fieldset class="plugin-source-options">
+          <legend>Plugin source</legend>
+          <label><input type="radio" name="source" value="wordpress-org" checked data-plugin-source="wordpress-org"> WordPress.org</label>
+          <label><input type="radio" name="source" value="zip-upload" data-plugin-source="zip-upload"> Upload ZIP</label>
+        </fieldset>
+
+        <label data-plugin-source-panel="wordpress-org">
+          <span>WordPress.org plugin slug</span>
+          <input type="text" name="wordpress_org_slug" placeholder="e.g. wordpress-seo" autocomplete="off">
+          <small>The Hub downloads and inspects the current official ZIP before it is queued.</small>
+        </label>
+
+        <label data-plugin-source-panel="zip-upload" hidden>
+          <span>Plugin ZIP</span>
+          <input type="file" name="package_zip" accept=".zip,application/zip,application/x-zip-compressed">
+          <small>The Hub checks archive paths, the WordPress plugin header, version, and SHA-256 before any website receives it.</small>
+        </label>
+
+        <fieldset class="plugin-install-options">
+          <legend>Installation options</legend>
+          <label><input type="checkbox" name="activate" value="true" checked> Activate after installation</label>
+          <label><input type="checkbox" name="replace_existing" value="true"> Replace the same installed plugin</label>
+          <small>Without replacement approval, a site that already has the checked plugin stops before changes are made. An already active plugin remains active when it is replaced.</small>
+        </fieldset>
+
+        <div class="plugin-install-submit">
+          <p class="subtle">Target: <strong data-site-selector-target-summary>{{ selected_site_count }} selected sites</strong>. Every site is checked again immediately before installation; the batch stops if one target fails.</p>
+          <button class="button" type="submit">Check and install plugin</button>
+        </div>
+      </form>
+
+      {% if plugin_install == "started" %}
+        <p class="notice-success">{{ message }}</p>
+      {% elif plugin_install == "error" %}
+        <p class="notice-error">Plugin installation could not start: {{ message }}</p>
+      {% endif %}
+
+      {% if batch_runs %}
+        <section class="maintenance-batch">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Plugin installation run</p>
+              <h3>{{ batch_runs | length }} selected website{{ "s" if batch_runs | length != 1 else "" }}</h3>
+              <p class="subtle">Batch {{ install_batch[:12] }}. It stops at the first error; no automatic rollback is performed.</p>
+            </div>
+          </div>
+          <div class="detail-list maintenance-run-list">
+            {% for run in batch_runs %}
+              <article class="card maintenance-run-card">
+                <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
+                <p><strong>Site:</strong> <a href="/sites/{{ run.site.id }}">{{ run.site.domain }}</a></p>
+                <p><strong>Plugin:</strong> {{ run.result_json.plugin_name }}</p>
+                <p><strong>Version:</strong> {{ run.result_json.target_version }}</p>
+                <p><strong>Activation:</strong> {{ "requested" if run.result_json.activate else "not requested" }}</p>
+                <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
+                {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
+                {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
+                {% for step in run.steps %}
+                  <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}</p>
+                  {% if step.detail %}<p class="subtle">{{ step.detail }}</p>{% endif %}
+                {% endfor %}
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      var controls = document.querySelectorAll("[data-plugin-source]");
+      var panels = document.querySelectorAll("[data-plugin-source-panel]");
+      function syncSource() {
+        var source = document.querySelector("[data-plugin-source]:checked");
+        var selected = source ? source.value : "wordpress-org";
+        panels.forEach(function (panel) {
+          panel.hidden = panel.getAttribute("data-plugin-source-panel") !== selected;
+          panel.querySelectorAll("input").forEach(function (input) { input.disabled = panel.hidden; });
+        });
+      }
+      controls.forEach(function (control) { control.addEventListener("change", syncSource); });
+      syncSource();
+    }());
+  </script>
+{% endblock %}

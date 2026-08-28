@@ -48,13 +48,13 @@ def _process_direct_update_run(run_id: int) -> str:
     try:
         with SessionLocal() as db:
             service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
-            return service.poll_direct_update_run(run_id)
+            return service.poll_direct_maintenance_run(run_id)
     except Exception:
         logger.exception("Direct update worker failed for maintenance run %s.", run_id)
         try:
             with SessionLocal() as db:
                 service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
-                service.fail_direct_update_worker_run(run_id)
+                service.fail_direct_maintenance_worker_run(run_id)
         except Exception:
             logger.exception("Could not persist the direct update worker failure for maintenance run %s.", run_id)
         return "failed"

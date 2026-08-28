@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -31,6 +31,7 @@ class MaintenanceRun(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), index=True)
     requested_by: Mapped[str] = mapped_column(String(128))
     bridge_backup_nonce: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    plugin_installation_package_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

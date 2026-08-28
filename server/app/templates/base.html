@@ -276,6 +276,44 @@
         gap: 0.85rem;
         margin: 1.25rem 0;
       }
+      .plugin-install-form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+        margin: 1rem 0 1.25rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .plugin-install-form > label,
+      .plugin-install-form fieldset {
+        display: grid;
+        gap: 0.45rem;
+        margin: 0;
+        border: 0;
+        padding: 0;
+      }
+      .plugin-install-form legend,
+      .plugin-install-form > label > span {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .plugin-install-form small { color: var(--muted); line-height: 1.35; }
+      .plugin-source-options,
+      .plugin-install-options { align-content: start; }
+      .plugin-source-options label,
+      .plugin-install-options label { color: var(--ink); }
+      .plugin-install-submit {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
+      }
+      .plugin-install-submit p { margin: 0; }
       .workbench-action-card {
         display: flex;
         flex-direction: column;
@@ -1069,6 +1107,8 @@
         .workbench-action-grid {
           grid-template-columns: 1fr;
         }
+        .plugin-install-form { grid-template-columns: 1fr; }
+        .plugin-install-submit { align-items: flex-start; flex-direction: column; }
         .user-workbench-create form {
           grid-template-columns: 1fr;
         }
@@ -1121,6 +1161,7 @@
           <a href="/customers">Customers</a>
           <a href="/users">Users</a>
           <a href="/updates">Update workbench</a>
+          <a href="/plugin-installations">Plugin installation</a>
           <a href="/update-plans">Plans</a>
           <a href="/assistant">Assistant</a>
           <a href="/account">Account</a>

@@ -202,6 +202,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/install-plugin',
+			array(
+				'label'               => __( 'Install Checked Plugin', 'kosmos-bridge' ),
+				'description'         => __( 'Installs one Hub-inspected WordPress plugin package after a target-site preflight. The package is downloaded only from the authenticated Kosmos Hub and may replace the matching installed plugin only when explicitly approved.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::plugin_installation_input_schema(),
+				'output_schema'       => self::plugin_installation_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_install_plugin' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/update-theme',
 			array(
 				'label'               => __( 'Update Theme', 'kosmos-bridge' ),
@@ -1100,6 +1114,135 @@ class Registry {
 			'previous_version' => $current_version,
 			'installed_version' => $installed_after,
 			'active'           => $active_after,
+		);
+	}
+
+	/**
+	 * Install one package which the Hub inspected before creating this exact run.
+	 * It never accepts arbitrary package URLs: the Bridge signs its package fetch
+	 * back to the Hub, and both sides bind it to the active target-site run.
+	 *
+	 * @param mixed $input Checked package and plugin metadata from the Hub.
+	 * @return array|\WP_Error
+	 */
+	public static function execute_install_plugin( $input = array() ) {
+		$package_id       = is_array( $input ) && isset( $input['package_id'] ) ? (int) $input['package_id'] : 0;
+		$plugin_file      = self::get_input_string( $input, 'plugin_file' );
+		$expected_version = self::get_input_string( $input, 'expected_version' );
+		$package_sha256   = strtolower( self::get_input_string( $input, 'package_sha256' ) );
+		$activate         = is_array( $input ) && isset( $input['activate'] ) ? $input['activate'] : false;
+		$replace_existing = is_array( $input ) && isset( $input['replace_existing'] ) ? $input['replace_existing'] : false;
+
+		if (
+			$package_id < 1 ||
+			! self::is_valid_plugin_file( $plugin_file ) ||
+			'' === $expected_version ||
+			! preg_match( '/^[a-f0-9]{64}$/', $package_sha256 ) ||
+			! is_bool( $activate ) ||
+			! is_bool( $replace_existing )
+		) {
+			return new \WP_Error(
+				'kosmos_bridge_invalid_install_input',
+				'Package ID, plugin file, checked version and hash, and boolean installation options are required.',
+				array( 'status' => 400 )
+			);
+		}
+
+		if ( ! function_exists( 'get_plugins' ) || ! function_exists( 'is_plugin_active' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$plugins          = get_plugins();
+		$already_installed = isset( $plugins[ $plugin_file ] );
+		if ( $already_installed && ! $replace_existing ) {
+			return new \WP_Error(
+				'kosmos_bridge_plugin_already_installed',
+				'The checked plugin is already installed. Explicit replacement approval is required.',
+				array( 'status' => 409 )
+			);
+		}
+		$previous_version = $already_installed && isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
+
+		$package = \KosmosBridge\Http\HubPackageClient::download( $package_id );
+		if ( is_wp_error( $package ) ) {
+			return $package;
+		}
+		if ( ! hash_equals( $package_sha256, hash( 'sha256', $package ) ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_package_hash_mismatch',
+				'The downloaded Hub package does not match its checked SHA-256 hash.',
+				array( 'status' => 409 )
+			);
+		}
+
+		self::load_plugin_upgrader();
+		if ( ! class_exists( '\\Plugin_Upgrader' ) || ! class_exists( '\\Automatic_Upgrader_Skin' ) || ! function_exists( 'wp_tempnam' ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_upgrader_unavailable',
+				'WordPress could not load its plugin installer.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$temp_file = wp_tempnam( 'kosmos-plugin.zip' );
+		if ( ! is_string( $temp_file ) || '' === $temp_file || false === file_put_contents( $temp_file, $package ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_package_write_failed',
+				'WordPress could not prepare the checked plugin package for installation.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$upgrader = new \Plugin_Upgrader( new \Automatic_Upgrader_Skin() );
+		$result   = $upgrader->install(
+			$temp_file,
+			array(
+				'clear_update_cache' => true,
+				'overwrite_package'  => $replace_existing,
+			)
+		);
+		if ( file_exists( $temp_file ) ) {
+			wp_delete_file( $temp_file );
+		}
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( true !== $result ) {
+			return new \WP_Error(
+				'kosmos_bridge_plugin_installation_failed',
+				'WordPress did not confirm the checked plugin installation.',
+				array( 'status' => 500 )
+			);
+		}
+
+		if ( function_exists( 'wp_clean_plugins_cache' ) ) {
+			wp_clean_plugins_cache( true );
+		}
+		$plugins         = get_plugins();
+		$installed_after = isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
+		if ( $installed_after !== $expected_version ) {
+			return new \WP_Error(
+				'kosmos_bridge_plugin_installation_verification_failed',
+				'WordPress completed the installation but the checked plugin file and version could not be verified.',
+				array( 'status' => 500 )
+			);
+		}
+
+		$active_after = self::is_plugin_active( $plugin_file );
+		if ( $activate ) {
+			$activation = self::activate_plugin_and_verify( $plugin_file );
+			if ( is_wp_error( $activation ) ) {
+				return $activation;
+			}
+			$active_after = self::is_plugin_active( $plugin_file );
+		}
+
+		return array(
+			'installed'          => true,
+			'plugin_file'        => $plugin_file,
+			'previous_version'   => $previous_version,
+			'installed_version'  => $installed_after,
+			'active'             => $active_after,
+			'replaced_existing'  => $already_installed,
 		);
 	}
 
@@ -2160,6 +2303,15 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/install-plugin',
+				'label'         => __( 'Install Checked Plugin', 'kosmos-bridge' ),
+				'description'   => __( 'Installs one Hub-inspected plugin package after a target-site preflight. It can replace only the matching installed plugin when explicitly approved.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::plugin_installation_input_schema(),
+				'output_schema' => self::plugin_installation_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/update-theme',
 				'label'         => __( 'Update Theme', 'kosmos-bridge' ),
 				'description'   => __( 'Updates one installed WordPress theme after an exact version preflight.', 'kosmos-bridge' ),
@@ -2274,6 +2426,9 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/update-plugin' === $ability_name ) {
 			return self::execute_update_plugin( $input );
+		}
+		if ( 'kosmos-bridge/install-plugin' === $ability_name ) {
+			return self::execute_install_plugin( $input );
 		}
 		if ( 'kosmos-bridge/update-theme' === $ability_name ) {
 			return self::execute_update_theme( $input );
@@ -2428,6 +2583,24 @@ class Registry {
 	/**
 	 * @return array
 	 */
+	private static function plugin_installation_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'package_id'       => array( 'type' => 'integer' ),
+				'plugin_file'      => array( 'type' => 'string' ),
+				'expected_version' => array( 'type' => 'string' ),
+				'package_sha256'   => array( 'type' => 'string' ),
+				'activate'         => array( 'type' => 'boolean' ),
+				'replace_existing' => array( 'type' => 'boolean' ),
+			),
+			'required'   => array( 'package_id', 'plugin_file', 'expected_version', 'package_sha256', 'activate', 'replace_existing' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
 	private static function empty_object_input_schema() {
 		return array(
 			'type'       => 'object',
@@ -2572,6 +2745,24 @@ class Registry {
 				'active'            => array( 'type' => 'boolean' ),
 			),
 			'required'   => array( 'updated', 'plugin_file', 'previous_version', 'installed_version', 'active' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function plugin_installation_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'installed'         => array( 'type' => 'boolean' ),
+				'plugin_file'       => array( 'type' => 'string' ),
+				'previous_version'  => array( 'type' => 'string' ),
+				'installed_version' => array( 'type' => 'string' ),
+				'active'            => array( 'type' => 'boolean' ),
+				'replaced_existing' => array( 'type' => 'boolean' ),
+			),
+			'required'   => array( 'installed', 'plugin_file', 'previous_version', 'installed_version', 'active', 'replaced_existing' ),
 		);
 	}
 

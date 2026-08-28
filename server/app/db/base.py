@@ -9,6 +9,7 @@ from app.models.hub_user import HubUser
 from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
 from app.models.provider_credential import ProviderCredential
 from app.models.plugin_official_version import PluginOfficialVersion
+from app.models.plugin_installation_package import PluginInstallationPackage
 from app.models.request_nonce import RequestNonce
 from app.models.site import Site
 from app.models.site_backup_snapshot import SiteBackupSnapshot
@@ -33,6 +34,7 @@ __all__ = [
     "MaintenanceRunStep",
     "ProviderCredential",
     "PluginOfficialVersion",
+    "PluginInstallationPackage",
     "RequestNonce",
     "Site",
     "SiteBackupSnapshot",

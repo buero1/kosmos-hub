@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from app.services.fleet_refresh_settings import FleetRefreshSettingsService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.site_selection import build_site_selector_context
+from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -405,6 +406,8 @@ def update_workbench_page(
         site_ids=selected_site_ids,
         plugin_identifier=plugin,
     )
+
+
     matching_items = inventory_service.filter_items(all_items, query=q) if q.strip() else all_items
     if selected_site_ids is not None:
         matching_items = [item for item in matching_items if item.site.id in selected_site_ids]
@@ -469,6 +472,96 @@ def update_workbench_page(
             "refresh_settings": refresh_settings,
             "message": message,
         },
+    )
+
+
+@router.get("/plugin-installations", response_class=HTMLResponse)
+def plugin_installations_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[list[int] | None, Query()] = None,
+    site_scope: Literal["all", "selected"] = "selected",
+    install_batch: str = "",
+    plugin_install: str = "",
+    message: str = "",
+):
+    site_options = sorted(SiteRepository(db).list_sites(limit=1000), key=lambda site: site.domain.casefold())
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
+    maintenance_service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    batch_runs = maintenance_service.list_plugin_installation_batch(install_batch)
+    if any(run.status == "running" for run in batch_runs):
+        schedule_pending_direct_updates()
+    return templates.TemplateResponse(
+        request,
+        "plugin_installations.html",
+        {
+            "site_selector": build_site_selector_context(
+                action="/plugin-installations",
+                form_id="plugin-install-site-scope-form",
+                target_form_id="plugin-install-form",
+                sites=site_options,
+                selected_site_ids=selected_site_ids,
+                site_scope=site_scope,
+                submit_label="Show selected sites",
+            ),
+            "selected_site_count": len(site_options) if site_scope == "all" else len(selected_site_ids or set()),
+            "install_batch": install_batch if batch_runs else "",
+            "batch_runs": batch_runs,
+            "plugin_install": plugin_install,
+            "message": message,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/plugin-installations/queue")
+async def queue_plugin_installation(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    source: Annotated[Literal["wordpress-org", "zip-upload"], Form()] = "wordpress-org",
+    wordpress_org_slug: Annotated[str, Form()] = "",
+    package_zip: Annotated[UploadFile | None, File()] = None,
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    site_id: Annotated[list[int] | None, Form()] = None,
+    activate: Annotated[bool, Form()] = False,
+    replace_existing: Annotated[bool, Form()] = False,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    selected_site_ids = site_id or []
+    if site_scope == "all":
+        selected_site_ids = [site.id for site in SiteRepository(db).list_sites(limit=1000)]
+
+    packages = PluginInstallationPackageService(db=db)
+    try:
+        if source == "wordpress-org":
+            package = packages.prepare_wordpress_org_plugin(slug=wordpress_org_slug)
+        else:
+            if package_zip is None or not package_zip.filename:
+                raise PluginPackageError("Choose a ZIP file before queueing the installation.")
+            package = packages.prepare_uploaded_zip(filename=package_zip.filename, source=package_zip.file)
+        outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_plugin_installations(
+            site_ids=selected_site_ids,
+            package=package,
+            activate=activate,
+            replace_existing=replace_existing,
+            actor=user.username,
+        )
+    except (PluginPackageError, ValueError) as exc:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/plugin-installations?{urlencode({'plugin_install': 'error', 'message': str(exc)})}",
+            status_code=303,
+        )
+    finally:
+        if package_zip is not None:
+            await package_zip.close()
+
+    schedule_pending_direct_updates()
+    return RedirectResponse(
+        url=f"/plugin-installations?{urlencode({'install_batch': outcome.batch_id, 'plugin_install': 'started', 'message': outcome.message})}",
+        status_code=303,
     )
 
 

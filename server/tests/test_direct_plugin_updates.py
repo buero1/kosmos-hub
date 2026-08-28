@@ -413,6 +413,43 @@ def test_direct_updates_require_healthy_homepage_and_rest_api():
     ) == "the public homepage health check did not pass (HTTP 503)"
 
 
+def test_plugin_installation_requires_the_checked_file_version_and_requested_activation():
+    details = {
+        "plugin_name": "Sample Plugin",
+        "plugin_file": "sample-plugin/sample-plugin.php",
+        "target_version": "1.2.3",
+        "activate": True,
+    }
+
+    assert MaintenanceRunService._plugin_installation_result_error(
+        details,
+        {
+            "installed": True,
+            "plugin_file": "sample-plugin/sample-plugin.php",
+            "installed_version": "1.2.3",
+            "active": True,
+        },
+    ) is None
+    assert "did not return the checked package version" in MaintenanceRunService._plugin_installation_result_error(
+        details,
+        {
+            "installed": True,
+            "plugin_file": "sample-plugin/sample-plugin.php",
+            "installed_version": "1.2.2",
+            "active": True,
+        },
+    )
+    assert "did not confirm activation" in MaintenanceRunService._plugin_installation_result_error(
+        details,
+        {
+            "installed": True,
+            "plugin_file": "sample-plugin/sample-plugin.php",
+            "installed_version": "1.2.3",
+            "active": False,
+        },
+    )
+
+
 def test_direct_update_health_check_retries_a_transient_bridge_error():
     class Proxy:
         def __init__(self):
