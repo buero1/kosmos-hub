@@ -8,7 +8,7 @@
       <div>
         <p class="eyebrow">AI operations assistant</p>
         <h2>Kosmos Assistant</h2>
-        <p class="subtle">Understands natural-language requests and uses controlled Hub data tools to inspect and select websites.</p>
+        <p class="subtle">Ask in your own words. Kosmos checks the controlled Hub data for you.</p>
       </div>
       <span class="pill pill-success">Controlled tools</span>
     </div>
@@ -16,69 +16,156 @@
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
 
     {% if not provider_configured %}
-      <section class="assistant-answer">
+      <section class="assistant-message">
         <p class="eyebrow">OpenAI connection required</p>
         <h3>Connect your API key first</h3>
         <p class="subtle">The key is encrypted on the Hub server and is never shown again. It is not stored in this browser or in Git.</p>
         <a class="button" href="/account">Open Account</a>
       </section>
     {% else %}
-      <form id="assistant-question-form" class="assistant-panel" method="post" action="/assistant">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
-        <span data-site-selector-target-sites>
-          {% if site_selector.site_scope == "selected" %}
-            {% for selected_site_id in site_selector.selected_site_ids %}
-              <input type="hidden" name="site_id" value="{{ selected_site_id }}">
-            {% endfor %}
+      <div class="assistant-chat-shell">
+        <section class="assistant-chat" data-assistant-chat aria-live="polite">
+          {% if answer %}
+            <article class="assistant-message" data-assistant-server-answer data-answer-text="{{ answer.text }}" data-answer-meta="Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data: {{ answer.data_captured_at | berlin_time }}{% endif %}." data-answer-selection="{{ 'true' if answer.selection_site_ids is not none else 'false' }}">
+              <span class="assistant-message-label">Kosmos</span>
+              <div class="assistant-message-text">{{ answer.text }}</div>
+              {% if answer.selection_site_ids is not none %}
+                <p class="notice-success">The matching website selection has been applied to the side panel.</p>
+              {% endif %}
+              <span class="assistant-message-meta">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data: {{ answer.data_captured_at | berlin_time }}{% endif %}.</span>
+            </article>
+          {% else %}
+            <div class="assistant-chat-empty" data-assistant-empty>
+              <p class="eyebrow">Ready when you are</p>
+              <h3>What should I check?</h3>
+              <p class="subtle">For example: “Which updates are open for Hotel Bichlhof?” or “Select all sites with A3 Lazy Load active.”</p>
+            </div>
           {% endif %}
-        </span>
-        <label for="assistant-question">What should Kosmos Hub do or analyse?</label>
-        <textarea id="assistant-question" name="question" rows="5" maxlength="2000" required placeholder="Update all themes.">{{ question }}</textarea>
-        <p class="subtle">Scope: <span data-site-selector-target-summary>{% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}</span>. Changes in the side panel apply immediately.</p>
-        <p class="subtle">Examples: "Welche Updates von Lackiererei Aschenbrunner sind offen?", "Prüfe, welche Websites A3 Lazy Load installiert haben", or "Wähle alle Websites mit einem Elementor Update".</p>
-        <p class="subtle">The panel is the binding scope when you refer to selected websites. The assistant can select matching sites, but does not execute maintenance changes.</p>
-        <p class="subtle">OpenAI receives only the request and small local tool results it asks for, never a complete database, credentials, passwords, license keys, or private customer profile fields.</p>
-        <button class="button" type="submit">Ask Assistant</button>
-      </form>
-    {% endif %}
+        </section>
 
-    {% if answer %}
-      <section class="assistant-answer" data-assistant-result>
-        <p class="eyebrow">Assistant answer</p>
-        <div class="assistant-text">{{ answer.text }}</div>
-        {% if answer.selection_site_ids is not none %}
-          <p class="notice-success">The matching website selection has been applied to the side panel.</p>
-        {% endif %}
-        <p class="subtle">Generated {{ answer.generated_at | berlin_time }}{% if answer.data_captured_at %}. Latest update data in this answer: {{ answer.data_captured_at | berlin_time }}{% endif %}.</p>
-      </section>
+        <form id="assistant-question-form" class="assistant-composer" method="post" action="/assistant">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
+          <span data-site-selector-target-sites>
+            {% if site_selector.site_scope == "selected" %}
+              {% for selected_site_id in site_selector.selected_site_ids %}
+                <input type="hidden" name="site_id" value="{{ selected_site_id }}">
+              {% endfor %}
+            {% endif %}
+          </span>
+          <label class="visually-hidden" for="assistant-question">Ask Kosmos Assistant</label>
+          <div class="assistant-composer-field">
+            <textarea id="assistant-question" name="question" rows="3" maxlength="2000" required placeholder="Ask Kosmos Assistant...">{{ question }}</textarea>
+            <button class="assistant-send" type="submit" aria-label="Send" title="Send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"></path><path d="m6 11 6-6 6 6"></path></svg>
+            </button>
+          </div>
+          <div class="assistant-composer-meta">
+            <span>Scope: <span data-site-selector-target-summary>{% if site_selector.site_scope == "all" %}all websites{% elif site_selector.selected_site_ids %}{{ site_selector.selected_site_ids | length }} selected website{{ "s" if site_selector.selected_site_ids | length != 1 else "" }}{% else %}no websites selected{% endif %}</span></span>
+            <span>Enter sends a message; Shift + Enter adds a line.</span>
+          </div>
+        </form>
+      </div>
     {% endif %}
     </section>
   </div>
   <script>
     (function () {
-      var key = "kosmos-assistant-result";
+      var key = "kosmos-assistant-chat-history";
       var form = document.getElementById("assistant-question-form");
+      var chat = document.querySelector("[data-assistant-chat]");
+      var question = document.getElementById("assistant-question");
       var navigation = performance.getEntriesByType("navigation")[0];
       var reloaded = navigation && navigation.type === "reload";
+
+      function readHistory() {
+        var stored = sessionStorage.getItem(key);
+        if (!stored) { return []; }
+        var parsed = JSON.parse(stored);
+        return Array.isArray(parsed) ? parsed.slice(-30) : [];
+      }
+
+      function writeHistory(history) {
+        sessionStorage.setItem(key, JSON.stringify(history.slice(-30)));
+      }
+
+      function messageElement(message) {
+        var article = document.createElement("article");
+        article.className = "assistant-message assistant-message-" + message.role;
+
+        var label = document.createElement("span");
+        label.className = "assistant-message-label";
+        label.textContent = message.role === "user" ? "You" : "Kosmos";
+        article.appendChild(label);
+
+        var text = document.createElement("div");
+        text.className = "assistant-message-text";
+        text.textContent = message.text;
+        article.appendChild(text);
+
+        if (message.selection) {
+          var notice = document.createElement("p");
+          notice.className = "notice-success";
+          notice.textContent = "The matching website selection has been applied to the side panel.";
+          article.appendChild(notice);
+        }
+        if (message.meta) {
+          var meta = document.createElement("span");
+          meta.className = "assistant-message-meta";
+          meta.textContent = message.meta;
+          article.appendChild(meta);
+        }
+        return article;
+      }
+
+      function render(history) {
+        if (!chat) { return; }
+        while (chat.firstChild) { chat.removeChild(chat.firstChild); }
+        if (!history.length) {
+          var empty = document.createElement("div");
+          empty.className = "assistant-chat-empty";
+          empty.innerHTML = '<p class="eyebrow">Ready when you are</p><h3>What should I check?</h3><p class="subtle">Ask about customers, websites, plugins, updates, backups, or WordPress users.</p>';
+          chat.appendChild(empty);
+          return;
+        }
+        history.forEach(function (message) { chat.appendChild(messageElement(message)); });
+      }
 
       try {
         if (reloaded) {
           sessionStorage.removeItem(key);
+          render([]);
           return;
         }
 
-        var result = document.querySelector("[data-assistant-result]");
-        if (result) {
-          sessionStorage.setItem(key, result.outerHTML);
-        } else if (form) {
-          var stored = sessionStorage.getItem(key);
-          if (stored) { form.insertAdjacentHTML("afterend", stored); }
+        var history = readHistory();
+        var serverAnswer = document.querySelector("[data-assistant-server-answer]");
+        if (serverAnswer) {
+          history.push({
+            role: "assistant",
+            text: serverAnswer.getAttribute("data-answer-text") || "",
+            meta: serverAnswer.getAttribute("data-answer-meta") || "",
+            selection: serverAnswer.getAttribute("data-answer-selection") === "true"
+          });
+          writeHistory(history);
         }
+        render(history);
 
         if (form) {
           form.addEventListener("submit", function () {
-            sessionStorage.removeItem(key);
+            var text = question.value.trim();
+            if (!text) { return; }
+            history.push({role: "user", text: text});
+            writeHistory(history);
+            render(history);
+          });
+        }
+        if (question) {
+          question.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              form.requestSubmit();
+            }
           });
         }
       } catch (error) {

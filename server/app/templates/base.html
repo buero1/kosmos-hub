@@ -438,49 +438,125 @@
         font: inherit;
         padding: 0.58rem 0.65rem;
       }
-      .assistant-panel,
-      .assistant-answer {
-        max-width: 70rem;
-        margin: 1.25rem 0;
-        padding: 1.25rem;
-        border: 1px solid var(--border);
+      .assistant-chat-shell {
+        display: flex;
+        flex-direction: column;
+        min-height: min(68vh, 48rem);
+        margin: 1rem 0 2rem;
+      }
+      .assistant-chat {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 0.9rem;
+        min-height: 18rem;
+        padding: 0.5rem 0 1.25rem;
+      }
+      .assistant-chat-empty {
+        max-width: 36rem;
+        margin: auto;
+        padding: 1.5rem;
+        border: 1px dashed #b9c9c1;
         border-radius: 18px;
-        background: rgba(255, 250, 242, 0.82);
+        background: rgba(255, 250, 242, 0.5);
       }
-      .assistant-panel {
+      .assistant-chat-empty h3 { margin: 0.2rem 0 0.45rem; }
+      .assistant-chat-empty p:last-child { margin-bottom: 0; }
+      .assistant-message {
         display: grid;
-        gap: 0.75rem;
-      }
-      .assistant-panel label {
-        color: var(--muted);
-        font-size: 0.9rem;
-      }
-      .assistant-panel textarea {
-        width: 100%;
-        resize: vertical;
+        gap: 0.35rem;
+        align-self: flex-start;
+        width: fit-content;
+        max-width: min(48rem, 92%);
+        padding: 0.85rem 1rem;
         border: 1px solid var(--border);
-        border-radius: 12px;
-        background: #fffdf8;
-        color: var(--ink);
-        font: inherit;
-        line-height: 1.45;
-        padding: 0.75rem;
+        border-radius: 18px 18px 18px 5px;
+        background: rgba(255, 250, 242, 0.88);
+        box-shadow: 0 8px 18px rgba(40, 45, 44, 0.04);
       }
-      .assistant-panel p,
-      .assistant-answer p { margin: 0.25rem 0; }
-      .assistant-text {
+      .assistant-message-user {
+        align-self: flex-end;
+        border-color: var(--accent);
+        border-radius: 18px 18px 5px 18px;
+        background: var(--accent);
+        color: #fffdf8;
+      }
+      .assistant-message-label {
+        font: 700 0.7rem "Trebuchet MS", sans-serif;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .assistant-message-user .assistant-message-label { color: #d7efe8; }
+      .assistant-message-text {
         white-space: pre-wrap;
         line-height: 1.55;
       }
-      .assistant-update-table {
-        margin-top: 1rem;
+      .assistant-message-meta {
+        color: var(--muted);
+        font-size: 0.78rem;
       }
-      .assistant-update-table table {
-        min-width: 44rem;
+      .assistant-message .notice-success,
+      .assistant-message .notice-error { margin: 0.4rem 0 0; }
+      .assistant-composer {
+        position: sticky;
+        bottom: 0.75rem;
+        display: grid;
+        gap: 0.45rem;
+        padding: 0.55rem;
+        border: 1px solid #a9c7ba;
+        border-radius: 20px;
+        background: rgba(255, 253, 248, 0.96);
+        box-shadow: 0 16px 34px rgba(40, 45, 44, 0.13);
       }
-      .assistant-answer .notice-success,
-      .assistant-answer .notice-error {
-        margin-top: 0.9rem;
+      .assistant-composer-field { position: relative; }
+      .assistant-composer textarea {
+        display: block;
+        width: 100%;
+        min-height: 5.4rem;
+        resize: vertical;
+        border: 0;
+        border-radius: 15px;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        line-height: 1.45;
+        padding: 0.65rem 3.7rem 0.65rem 0.75rem;
+      }
+      .assistant-composer textarea:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+      .assistant-send {
+        position: absolute;
+        right: 0.5rem;
+        bottom: 0.5rem;
+        display: inline-grid;
+        width: 2.55rem;
+        height: 2.55rem;
+        place-items: center;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fffdf8;
+        cursor: pointer;
+      }
+      .assistant-send:hover,
+      .assistant-send:focus-visible { background: #075f4e; }
+      .assistant-send svg {
+        width: 1.2rem;
+        height: 1.2rem;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2.2;
+      }
+      .assistant-composer-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0 0.35rem 0.1rem;
+        color: var(--muted);
+        font-size: 0.78rem;
       }
       .account-panel form {
         display: grid;

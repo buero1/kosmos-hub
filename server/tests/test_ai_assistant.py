@@ -74,12 +74,16 @@ def test_assistant_rejects_invalid_tool_arguments():
         raise AssertionError("Invalid model arguments must not reach a Hub tool.")
 
 
-def test_assistant_template_marks_only_the_actual_answer_for_browser_persistence():
+def test_assistant_template_renders_chat_messages_and_a_compact_composer():
     template = (Path(__file__).parents[1] / "app" / "templates" / "assistant.html").read_text(encoding="utf-8")
 
-    assert '<section class="assistant-answer" data-assistant-result>\n        <p class="eyebrow">Assistant answer</p>' in template
+    assert 'data-assistant-server-answer' in template
+    assert 'class="assistant-composer"' in template
+    assert 'rows="3"' in template
+    assert 'class="assistant-send"' in template
+    assert 'kosmos-assistant-chat-history' in template
     assert '<p class="eyebrow">OpenAI connection required</p>' in template
-    assert 'data-assistant-result>\n        <p class="eyebrow">OpenAI connection required</p>' not in template
+    assert 'data-assistant-server-answer>\n        <p class="eyebrow">OpenAI connection required</p>' not in template
 
 
 class _FakeTools:
