@@ -450,17 +450,11 @@ def update_workbench_page(
             "site_options": site_options,
             "site_selector": _site_selector_context(
                 action="/updates",
+                form_id="update-site-scope-form",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
                 submit_label="Show updates",
-                preserved_filters={
-                    "q": q,
-                    "plugin": plugin,
-                    "kind": kind,
-                    "activity": activity,
-                    "diagnosis": diagnosis,
-                },
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
@@ -1069,15 +1063,11 @@ def _user_workbench_context(
         "site_options": site_options,
         "site_selector": _site_selector_context(
             action="/users",
+            form_id="user-site-scope-form",
             sites=site_options,
             selected_site_ids=selected_site_ids,
             site_scope=site_scope,
             submit_label="Show users",
-            preserved_filters={
-                "q": query,
-                "role": role,
-                "customer_status": customer_status,
-            },
         ),
         "role_options": SiteUserService.ROLE_OPTIONS,
         "customer_status_options": status_options,
@@ -1092,11 +1082,11 @@ def _user_workbench_context(
 def _site_selector_context(
     *,
     action: str,
+    form_id: str,
     sites: list,
     selected_site_ids: set[int] | None,
     site_scope: str,
     submit_label: str,
-    preserved_filters: dict[str, str],
 ) -> dict:
     """Build one reusable domain/customer selector for fleet workbenches."""
     customers: dict[int, dict] = {}
@@ -1117,16 +1107,12 @@ def _site_selector_context(
 
     return {
         "action": action,
+        "form_id": form_id,
         "sites": sites,
         "customers": sorted(customers.values(), key=lambda entry: entry["name"].casefold()),
         "selected_site_ids": selected_site_ids or set(),
         "site_scope": site_scope,
         "submit_label": submit_label,
-        "preserved_filters": [
-            {"name": name, "value": value}
-            for name, value in preserved_filters.items()
-            if value not in {"", "all"}
-        ],
     }
 
 

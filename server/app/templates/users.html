@@ -20,18 +20,14 @@
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
 
-    <form class="filter-panel filter-panel-workbench" method="get" action="/users">
-      <input type="hidden" name="site_scope" value="{{ filters.site_scope }}">
-      {% for selected_site_id in filters.site_ids %}
-        <input type="hidden" name="site_id" value="{{ selected_site_id }}">
-      {% endfor %}
+    <div class="filter-panel filter-panel-workbench">
       <label>
         <span>Search</span>
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
+        <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
       </label>
       <label>
         <span>Role</span>
-        <select name="role">
+        <select form="{{ site_selector.form_id }}" name="role">
           <option value="all" {% if filters.role == "all" %}selected{% endif %}>All roles</option>
           {% for option in role_options %}
             <option value="{{ option }}" {% if filters.role == option %}selected{% endif %}>{{ option | title }}</option>
@@ -40,7 +36,7 @@
       </label>
       <label>
         <span>Customer status</span>
-        <select name="customer_status">
+        <select form="{{ site_selector.form_id }}" name="customer_status">
           <option value="all" {% if filters.customer_status == "all" %}selected{% endif %}>All statuses</option>
           {% for option in customer_status_options %}
             <option value="{{ option }}" {% if filters.customer_status == option %}selected{% endif %}>{{ option }}</option>
@@ -48,10 +44,9 @@
         </select>
       </label>
       <div class="filter-actions">
-        <button class="button" type="submit">Apply filters</button>
         <a href="/users">Reset</a>
       </div>
-    </form>
+    </div>
 
     <details class="user-workbench-create">
       <summary>Add WordPress user to selected sites</summary>

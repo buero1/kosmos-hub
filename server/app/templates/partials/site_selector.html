@@ -1,9 +1,6 @@
 <aside class="workbench-site-selector" data-site-selector>
-  <form method="get" action="{{ site_selector.action }}">
+  <form id="{{ site_selector.form_id }}" method="get" action="{{ site_selector.action }}">
     <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-scope>
-    {% for filter in site_selector.preserved_filters %}
-      <input type="hidden" name="{{ filter.name }}" value="{{ filter.value }}">
-    {% endfor %}
 
     <div class="site-selector-heading">
       <p class="eyebrow">Scope</p>

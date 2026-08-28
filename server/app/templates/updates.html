@@ -19,18 +19,14 @@
       </div>
     </div>
 
-    <form class="filter-panel filter-panel-workbench" method="get" action="/updates">
-      <input type="hidden" name="site_scope" value="{{ filters.site_scope }}">
-      {% for selected_site_id in filters.site_ids %}
-        <input type="hidden" name="site_id" value="{{ selected_site_id }}">
-      {% endfor %}
+    <div class="filter-panel filter-panel-workbench">
       <label>
         <span>Search</span>
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
+        <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
       </label>
       <label>
         <span>Plugin</span>
-        <select name="plugin">
+        <select form="{{ site_selector.form_id }}" name="plugin">
           <option value="">All plugins</option>
           {% for plugin_identifier, plugin_name in plugin_options %}
             <option value="{{ plugin_identifier }}" {% if filters.plugin == plugin_identifier %}selected{% endif %}>{{ plugin_name }}</option>
@@ -39,7 +35,7 @@
       </label>
       <label>
         <span>Type</span>
-        <select name="kind">
+        <select form="{{ site_selector.form_id }}" name="kind">
           <option value="all" {% if filters.kind == "all" %}selected{% endif %}>All updates</option>
           <option value="wordpress" {% if filters.kind == "wordpress" %}selected{% endif %}>WordPress</option>
           <option value="plugin" {% if filters.kind == "plugin" %}selected{% endif %}>Plugins</option>
@@ -48,7 +44,7 @@
       </label>
       <label>
         <span>Plugin state</span>
-        <select name="activity">
+        <select form="{{ site_selector.form_id }}" name="activity">
           <option value="all" {% if filters.activity == "all" %}selected{% endif %}>All states</option>
           <option value="active" {% if filters.activity == "active" %}selected{% endif %}>Active plugins</option>
           <option value="inactive" {% if filters.activity == "inactive" %}selected{% endif %}>Inactive plugins</option>
@@ -56,7 +52,7 @@
       </label>
       <label>
         <span>Diagnosis</span>
-        <select name="diagnosis">
+        <select form="{{ site_selector.form_id }}" name="diagnosis">
           <option value="all" {% if filters.diagnosis == "all" %}selected{% endif %}>All diagnoses</option>
           <option value="attention" {% if filters.diagnosis == "attention" %}selected{% endif %}>Needs attention</option>
           <option value="update-ready" {% if filters.diagnosis == "update-ready" %}selected{% endif %}>Verified update ready</option>
@@ -72,10 +68,9 @@
         </select>
       </label>
       <div class="filter-actions">
-        <button class="button" type="submit">Apply filters</button>
         <a href="/updates">Reset</a>
       </div>
-    </form>
+    </div>
 
     <div class="workbench-action-grid">
       <form id="direct-update-form" class="workbench-action-card" method="post" action="/updates/execute-selected-updates">
