@@ -474,9 +474,10 @@
         display: block;
       }
       .password-input-with-copy .password-input {
-        padding-right: 2.8rem;
+        padding-right: 5rem;
       }
-      .copy-password-icon {
+      .copy-password-icon,
+      .generate-password-icon {
         position: absolute;
         top: 50%;
         right: 0.35rem;
@@ -492,12 +493,18 @@
         color: #076c58;
         cursor: pointer;
       }
+      .generate-password-icon {
+        right: 2.65rem;
+      }
       .copy-password-icon:hover,
       .copy-password-icon:focus-visible,
-      .copy-password-icon.is-copied {
+      .copy-password-icon.is-copied,
+      .generate-password-icon:hover,
+      .generate-password-icon:focus-visible {
         background: rgba(215, 239, 232, 0.78);
       }
-      .copy-password-icon svg {
+      .copy-password-icon svg,
+      .generate-password-icon svg {
         width: 1rem;
         height: 1rem;
         fill: none;
@@ -507,8 +514,16 @@
       .site-user-form.compact {
         grid-template-columns: 1fr;
       }
+      .site-users-table th:nth-child(5),
+      .site-users-table td:nth-child(5) {
+        width: 8.5rem;
+      }
+      .site-users-table th:last-child,
+      .site-users-table td:last-child {
+        width: 23rem;
+      }
       .site-user-actions {
-        min-width: 240px;
+        min-width: 23rem;
       }
       .site-user-actions details {
         margin: 0 0 0.5rem;
