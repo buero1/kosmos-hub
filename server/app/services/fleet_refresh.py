@@ -36,7 +36,13 @@ class FleetRefreshService:
     def __init__(self, *, db: Session):
         self.db = db
 
-    def create_run(self, *, actor: HubUser, mode: str) -> tuple[FleetRefreshRun, bool]:
+    def create_run(
+        self,
+        *,
+        actor: HubUser,
+        mode: str,
+        site_ids: set[int] | None = None,
+    ) -> tuple[FleetRefreshRun, bool]:
         if actor.role != "admin":
             raise ValueError("Only Hub administrators can start a fleet refresh.")
         self._validate_mode(mode)
@@ -63,7 +69,7 @@ class FleetRefreshService:
             status=FleetRefreshRunStatus.queued.value,
             requested_by=actor.username,
             allow_provider_activation=True,
-            result_json=self._initial_result(mode),
+            result_json=self._initial_result(mode, target_site_ids=site_ids),
         )
         self.db.add(run)
         self.db.flush()
@@ -74,6 +80,13 @@ class FleetRefreshService:
 
     def get_latest_run(self) -> FleetRefreshRun | None:
         return self.db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
+
+    def list_recent_runs(self, *, limit: int = 20) -> list[FleetRefreshRun]:
+        return list(
+            self.db.scalars(
+                select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(limit)
+            ).all()
+        )
 
     def cancel_run(self, *, actor: HubUser, run_id: int) -> tuple[FleetRefreshRun, bool]:
         """Request a safe stop without interrupting an active WordPress request."""
@@ -249,6 +262,7 @@ class FleetRefreshService:
                 "mode": run.mode,
                 "requested_by": run.requested_by,
                 "allow_provider_activation": run.allow_provider_activation,
+                "target_site_ids": cls._target_site_ids(run.result_json),
             }
 
     @classmethod
@@ -259,13 +273,22 @@ class FleetRefreshService:
         mode: str,
         requested_by: str,
         allow_provider_activation: bool,
+        target_site_ids: set[int] | None,
     ) -> dict[str, Any]:
         cls._validate_mode(mode)
         force = mode == cls.MODE_FULL
         with SessionLocal() as db:
             runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
-        result = cls._initial_result(mode, runtime_settings=runtime_settings)
-        targets, cached_count, skipped_count = cls._site_targets(force=force, runtime_settings=runtime_settings)
+        result = cls._initial_result(
+            mode,
+            runtime_settings=runtime_settings,
+            target_site_ids=target_site_ids,
+        )
+        targets, cached_count, skipped_count = cls._site_targets(
+            force=force,
+            runtime_settings=runtime_settings,
+            target_site_ids=target_site_ids,
+        )
         result["sites"].update(
             {
                 "total": len(targets) + cached_count,
@@ -334,6 +357,7 @@ class FleetRefreshService:
             requested_by=requested_by,
             allow_provider_activation=allow_provider_activation,
             runtime_settings=runtime_settings,
+            target_site_ids=target_site_ids,
         )
         return result
 
@@ -343,10 +367,13 @@ class FleetRefreshService:
         *,
         force: bool,
         runtime_settings: FleetRefreshRuntimeSettings,
+        target_site_ids: set[int] | None,
     ) -> tuple[list[dict[str, Any]], int, int]:
         with SessionLocal() as db:
             repository = SiteRepository(db)
             sites = repository.list_sites(limit=1000)
+            if target_site_ids is not None:
+                sites = [site for site in sites if site.id in target_site_ids]
             snapshots = repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
             update_snapshots = repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])
             backup_snapshots = repository.get_latest_backup_snapshots_by_site_ids([site.id for site in sites])
@@ -449,12 +476,15 @@ class FleetRefreshService:
         requested_by: str,
         allow_provider_activation: bool,
         runtime_settings: FleetRefreshRuntimeSettings,
+        target_site_ids: set[int] | None,
     ) -> None:
         if cls._is_cancellation_requested(run_id):
             return
         with SessionLocal() as db:
             inventory = FleetInventoryService(db=db, cipher=get_secret_cipher())
             items = inventory.list_items(limit=1000)
+            if target_site_ids is not None:
+                items = [item for item in items if item.site.id in target_site_ids]
             entries = inventory.build_update_workbench(items)
             version_service = OfficialPluginVersionService(db=db)
             jet_site_ids = cls._jet_sites_requiring_provider(
@@ -493,6 +523,8 @@ class FleetRefreshService:
                     }
                 )
                 items = inventory.list_items(limit=1000)
+                if target_site_ids is not None:
+                    items = [item for item in items if item.site.id in target_site_ids]
             elif jet_site_ids:
                 result["crocoblock"]["cached"] = len(jet_site_ids)
 
@@ -531,7 +563,10 @@ class FleetRefreshService:
                 "completed": 0,
                 "total": 1,
             }
-            refreshed_entries = inventory.build_update_workbench(inventory.list_items(limit=1000))
+            refreshed_items = inventory.list_items(limit=1000)
+            if target_site_ids is not None:
+                refreshed_items = [item for item in refreshed_items if item.site.id in target_site_ids]
+            refreshed_entries = inventory.build_update_workbench(refreshed_items)
             result["mismatches"] = sum(1 for entry in refreshed_entries if entry.official_mismatch)
             result["phase"]["completed"] = 1
             write_audit_log(
@@ -542,7 +577,7 @@ class FleetRefreshService:
                 action="fleet-refresh",
                 result="success",
                 detail=(
-                    f"Mode={result['mode']}; refreshed {result['state']['refreshed']} site states and "
+                    f"Mode={result['mode']}; scope={result['scope']['label']}; refreshed {result['state']['refreshed']} site states and "
                     f"{result['updates']['refreshed']} update offers; diagnosed {result['mismatches']} mismatches."
                 ),
             )
@@ -620,10 +655,18 @@ class FleetRefreshService:
         mode: str,
         *,
         runtime_settings: FleetRefreshRuntimeSettings | None = None,
+        target_site_ids: set[int] | None = None,
     ) -> dict[str, Any]:
         runtime_settings = runtime_settings or FleetRefreshRuntimeSettings()
+        selected_site_ids = sorted(target_site_ids or [])
         return {
             "mode": mode,
+            "scope": {
+                "kind": "all" if target_site_ids is None else "selected",
+                "site_ids": selected_site_ids,
+                "count": len(selected_site_ids),
+                "label": "All sites" if target_site_ids is None else f"{len(selected_site_ids)} selected site(s)",
+            },
             "settings": {
                 "site_status_max_age_minutes": runtime_settings.site_status_max_age_minutes,
                 "official_version_max_age_hours": runtime_settings.official_version_max_age_hours,
@@ -653,6 +696,17 @@ class FleetRefreshService:
     @staticmethod
     def _as_utc(value: datetime) -> datetime:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _target_site_ids(result: dict[str, Any] | None) -> set[int] | None:
+        scope = (result or {}).get("scope", {})
+        if scope.get("kind") != "selected":
+            return None
+        return {
+            int(site_id)
+            for site_id in scope.get("site_ids", [])
+            if str(site_id).strip().isdigit()
+        }
 
     @classmethod
     def _run_timestamp_utc(cls, run: FleetRefreshRun) -> datetime:

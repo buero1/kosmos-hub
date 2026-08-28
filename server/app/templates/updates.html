@@ -87,8 +87,14 @@
         <button class="button" type="submit">Run selected updates</button>
       </form>
 
-      <form class="workbench-action-card" method="post" action="/updates/refresh-official-plugin-versions">
+      <form id="fleet-refresh-form" class="workbench-action-card" method="post" action="/updates/refresh-official-plugin-versions">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="site_scope" value="{{ filters.site_scope }}" data-site-selector-target-scope>
+        <span data-site-selector-target-sites>
+          {% if filters.site_scope != "all" %}
+            {% for selected_site_id in filters.site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
+          {% endif %}
+        </span>
         <div>
           <p class="eyebrow">
             Version check and diagnosis
@@ -97,10 +103,11 @@
               <span class="info-tooltip-content" role="tooltip">The normal check reuses site status younger than {{ refresh_settings.site_status_max_age_minutes }} minutes and official provider evidence younger than {{ refresh_settings.official_version_max_age_hours }} hours. It checks up to {{ refresh_settings.max_parallel_site_checks }} sites in parallel and updates this page automatically. Crocoblock is contacted only for stale Jet evidence or Jet mismatches. A full refresh ignores those time limits. Neither option installs or updates a plugin.</span>
             </button>
           </p>
+          <p class="subtle">Scope: <span data-site-selector-target-summary>{% if filters.site_scope == "all" %}all websites{% else %}{{ filters.site_ids | length }} selected website{{ "" if filters.site_ids | length == 1 else "s" }}{% endif %}</span>.</p>
         </div>
         <div class="filter-actions">
           <button class="button button-secondary" type="submit" name="mode" value="normal">Refresh stale status and diagnose</button>
-          <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh all sites</button>
+          <button class="button button-secondary" type="submit" name="mode" value="full">Fully refresh this scope</button>
         </div>
       </form>
     </div>
@@ -112,6 +119,8 @@
     {% endif %}
     {% if official_versions == "refreshed" %}
       <p class="notice-success">{{ message }}</p>
+    {% elif official_versions == "error" %}
+      <p class="notice-error">{{ message }}</p>
     {% endif %}
 
     {% if refresh_run %}
@@ -121,6 +130,7 @@
       {% set crocoblock_progress = progress.get("crocoblock", {}) %}
       {% set backup_progress = progress.get("backups", {}) %}
       {% set phase = progress.get("phase", {}) %}
+      {% set refresh_scope = progress.get("scope", {}) %}
       {% set completed_sites = site_progress.get("completed", 0) %}
       {% set total_sites = site_progress.get("total", 0) %}
       <section class="maintenance-batch">
@@ -128,6 +138,7 @@
           <div>
             <p class="eyebrow">Fleet refresh run #{{ refresh_run.id }}</p>
             <h3>{{ refresh_run.status | replace("-", " ") | title }}</h3>
+            <p class="subtle">Scope: {{ refresh_scope.get("label", "All sites") }}.</p>
             {% if refresh_run.status == "queued" %}
               <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
             {% elif refresh_run.status == "running" %}
@@ -178,6 +189,61 @@
         {% endif %}
       </section>
     {% endif %}
+
+    <section class="maintenance-batch maintenance-history" aria-labelledby="refresh-history-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Refresh record</p>
+          <h3 id="refresh-history-heading">Refresh protocol</h3>
+          <p class="subtle">The last 20 normal, full, and automatic refresh runs are retained here.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Trigger</th>
+              <th>Scope</th>
+              <th>Mode</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Sites</th>
+              <th>Catalogues</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in refresh_runs %}
+              {% set run_progress = run.result_json or {} %}
+              {% set run_scope = run_progress.get("scope", {}) %}
+              {% set run_sites = run_progress.get("sites", {}) %}
+              {% set run_official = run_progress.get("official_versions", {}) %}
+              {% set run_jet = run_progress.get("crocoblock", {}) %}
+              <tr>
+                <td><a href="/updates?refresh_run={{ run.id }}">#{{ run.id }}</a></td>
+                <td>{{ "Automatic" if run.requested_by in ["kosmos-scheduler", "kosmos-hub"] else "Manual" }}</td>
+                <td>{{ run_scope.get("label", "All sites") }}</td>
+                <td>{{ run.mode | title }}</td>
+                <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
+                <td>{% if run.started_at %}{{ run.started_at | berlin_time }}{% else %}Waiting{% endif %}</td>
+                <td>{{ run_sites.get("completed", 0) }}/{{ run_sites.get("total", 0) }} completed</td>
+                <td>Jet {{ run_jet.get("completed", run_jet.get("refreshed", 0)) }}/{{ run_jet.get("eligible", 0) }} · Official {{ run_official.get("completed", run_official.get("checked", 0)) }}/{{ run_official.get("checked", 0) }}</td>
+                <td>
+                  {% if run.status == "succeeded" %}
+                    {{ run_sites.get("refreshed", 0) }} refreshed · {{ run_sites.get("cached", 0) }} cached · {{ run_progress.get("mismatches", 0) }} mismatches
+                  {% else %}
+                    {{ run.error_message or run_progress.get("phase", {}).get("label", "Waiting") }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="9">No refresh runs are documented yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     {% if batch_runs %}
       <section class="maintenance-batch">

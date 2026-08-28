@@ -157,3 +157,29 @@ def test_cancel_running_fleet_refresh_keeps_it_exclusive_until_worker_stops():
 
         assert created is False
         assert existing_run.id == run.id
+
+
+def test_selected_refresh_scope_is_persisted_for_the_background_worker():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(user)
+        db.commit()
+
+        run, created = FleetRefreshService(db=db).create_run(
+            actor=user,
+            mode=FleetRefreshService.MODE_NORMAL,
+            site_ids={19, 7, 11},
+        )
+
+        assert created is True
+        assert run.result_json["scope"] == {
+            "kind": "selected",
+            "site_ids": [7, 11, 19],
+            "count": 3,
+            "label": "3 selected site(s)",
+        }
+        assert FleetRefreshService._target_site_ids(run.result_json) == {7, 11, 19}
+        assert FleetRefreshService._target_site_ids(FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL)) is None

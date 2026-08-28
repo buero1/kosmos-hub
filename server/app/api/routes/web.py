@@ -455,6 +455,7 @@ def update_workbench_page(
             "site_selector": build_site_selector_context(
                 action="/updates",
                 form_id="update-site-scope-form",
+                target_form_id="fleet-refresh-form",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
@@ -469,6 +470,7 @@ def update_workbench_page(
             "direct_update": direct_update,
             "official_versions": official_versions,
             "refresh_run": fleet_refresh_run,
+            "refresh_runs": fleet_refresh_service.list_recent_runs(limit=20),
             "refresh_settings": refresh_settings,
             "message": message,
         },
@@ -571,6 +573,8 @@ def refresh_official_plugin_versions(
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     mode: Annotated[Literal["normal", "full"], Form()] = "normal",
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    site_id: Annotated[list[int] | None, Form()] = None,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -578,12 +582,20 @@ def refresh_official_plugin_versions(
     if user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
+    if selected_site_ids is not None and not selected_site_ids:
+        return RedirectResponse(
+            url=f"/updates?{urlencode({'official_versions': 'error', 'message': 'Select at least one site in the side panel, or choose All.'})}",
+            status_code=303,
+        )
+
     fleet_refresh_service = FleetRefreshService(db=db)
-    run, created = fleet_refresh_service.create_run(actor=user, mode=mode)
+    run, created = fleet_refresh_service.create_run(actor=user, mode=mode, site_ids=selected_site_ids)
     db.commit()
     if created:
         background_tasks.add_task(FleetRefreshService.process_run, run.id)
-        message = "The background refresh was queued. This page will update automatically."
+        scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
+        message = f"The background refresh for {scope_label} was queued. This page will update automatically."
     else:
         message = "A fleet refresh is already running. This page will show its progress."
     return RedirectResponse(
