@@ -134,14 +134,16 @@
       {% set backup_progress = progress.get("backups", {}) %}
       {% set phase = progress.get("phase", {}) %}
       {% set refresh_scope = progress.get("scope", {}) %}
+      {% set refresh_is_active = refresh_run.status in ["queued", "running", "cancelling"] %}
       {% set completed_sites = site_progress.get("completed", 0) %}
       {% set total_sites = site_progress.get("total", 0) %}
       <section class="maintenance-batch">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Fleet refresh run #{{ refresh_run.id }}</p>
-            <h3>{{ refresh_run.status | replace("-", " ") | title }}</h3>
+            <p class="eyebrow">Current fleet refresh status</p>
+            <h3>{% if refresh_is_active %}Refresh in progress{% else %}Latest all-sites result{% endif %}: {{ refresh_run.status | replace("-", " ") | title }}</h3>
             <p class="subtle">Scope: {{ refresh_scope.get("label", "All sites") }}.</p>
+            {% if not refresh_is_active %}<p class="subtle">This is the latest completed refresh that represents the full fleet.</p>{% endif %}
             {% if refresh_run.status == "queued" %}
               <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
             {% elif refresh_run.status == "running" %}
@@ -224,7 +226,7 @@
               {% set run_official = run_progress.get("official_versions", {}) %}
               {% set run_jet = run_progress.get("crocoblock", {}) %}
               <tr>
-                <td><a href="/updates?refresh_run={{ run.id }}">#{{ run.id }}</a></td>
+                <td>#{{ run.id }}</td>
                 <td>{{ "Automatic" if run.requested_by in ["kosmos-scheduler", "kosmos-hub"] else "Manual" }}</td>
                 <td>{{ run_scope.get("label", "All sites") }}</td>
                 <td>{{ run.mode | title }}</td>

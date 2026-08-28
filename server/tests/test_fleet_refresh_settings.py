@@ -183,3 +183,34 @@ def test_selected_refresh_scope_is_persisted_for_the_background_worker():
         }
         assert FleetRefreshService._target_site_ids(run.result_json) == {7, 11, 19}
         assert FleetRefreshService._target_site_ids(FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL)) is None
+
+
+def test_current_status_prefers_active_work_then_the_latest_all_sites_run():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        global_run = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.succeeded.value,
+            requested_by="operator",
+            result_json=FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL),
+        )
+        selected_run = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.succeeded.value,
+            requested_by="operator",
+            result_json=FleetRefreshService._initial_result(
+                FleetRefreshService.MODE_NORMAL,
+                target_site_ids={7, 11},
+            ),
+        )
+        db.add_all((global_run, selected_run))
+        db.flush()
+
+        service = FleetRefreshService(db=db)
+        assert service.get_current_status_run().id == global_run.id
+
+        selected_run.status = FleetRefreshRunStatus.running.value
+        db.flush()
+        assert service.get_current_status_run().id == selected_run.id

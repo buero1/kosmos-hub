@@ -390,7 +390,6 @@ def update_workbench_page(
     update_batch: str = "",
     direct_update: str = "",
     official_versions: str = "",
-    refresh_run: int | None = None,
     message: str = "",
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
@@ -434,7 +433,7 @@ def update_workbench_page(
         # Resume a user-started batch if a process restart interrupted polling.
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
-    fleet_refresh_run = fleet_refresh_service.get_run(refresh_run) if refresh_run else fleet_refresh_service.get_latest_run()
+    fleet_refresh_run = fleet_refresh_service.get_current_status_run()
     refresh_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
     return templates.TemplateResponse(
         request,
@@ -599,7 +598,7 @@ def refresh_official_plugin_versions(
     else:
         message = "A fleet refresh is already running. This page will show its progress."
     return RedirectResponse(
-        url=f"/updates?{urlencode({'refresh_run': run.id, 'message': message})}",
+        url=f"/updates?{urlencode({'message': message})}",
         status_code=303,
     )
 
@@ -620,7 +619,7 @@ def cancel_fleet_refresh_run(
     except ValueError as exc:
         db.rollback()
         return RedirectResponse(
-            url=f"/updates?{urlencode({'refresh_run': run_id, 'message': str(exc)})}",
+            url=f"/updates?{urlencode({'message': str(exc)})}",
             status_code=303,
         )
 
@@ -632,7 +631,7 @@ def cancel_fleet_refresh_run(
         else "This fleet refresh had already finished."
     )
     return RedirectResponse(
-        url=f"/updates?{urlencode({'refresh_run': run.id, 'message': message})}",
+        url=f"/updates?{urlencode({'message': message})}",
         status_code=303,
     )
 
