@@ -42,7 +42,15 @@ class FleetRefreshService:
 
         active_run = self.db.scalar(
             select(FleetRefreshRun)
-            .where(FleetRefreshRun.status.in_((FleetRefreshRunStatus.queued.value, FleetRefreshRunStatus.running.value)))
+            .where(
+                FleetRefreshRun.status.in_(
+                    (
+                        FleetRefreshRunStatus.queued.value,
+                        FleetRefreshRunStatus.running.value,
+                        FleetRefreshRunStatus.cancelling.value,
+                    )
+                )
+            )
             .order_by(FleetRefreshRun.created_at.asc())
             .limit(1)
         )
@@ -66,6 +74,41 @@ class FleetRefreshService:
     def get_latest_run(self) -> FleetRefreshRun | None:
         return self.db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
 
+    def cancel_run(self, *, actor: HubUser, run_id: int) -> tuple[FleetRefreshRun, bool]:
+        """Request a safe stop without interrupting an active WordPress request."""
+        if actor.role != "admin":
+            raise ValueError("Only Hub administrators can stop a fleet refresh.")
+
+        run = self.db.get(FleetRefreshRun, run_id)
+        if run is None:
+            raise ValueError("The fleet refresh run no longer exists.")
+        if run.status not in (FleetRefreshRunStatus.queued.value, FleetRefreshRunStatus.running.value):
+            return run, False
+
+        now = datetime.now(UTC)
+        result = copy.deepcopy(run.result_json or {})
+        result["cancellation"] = {
+            "requested_at": now.isoformat(),
+            "requested_by": actor.username,
+        }
+        run.result_json = result
+        if run.status == FleetRefreshRunStatus.queued.value:
+            run.status = FleetRefreshRunStatus.cancelled.value
+            run.completed_at = now
+        else:
+            run.status = FleetRefreshRunStatus.cancelling.value
+        write_audit_log(
+            self.db,
+            site=None,
+            actor=actor.username,
+            source="hub",
+            action="fleet-refresh-cancel",
+            result="requested",
+            detail=f"Requested safe cancellation for fleet refresh run {run.id}.",
+        )
+        self.db.flush()
+        return run, True
+
     @classmethod
     def queue_scheduled_run(cls) -> int | None:
         with SessionLocal() as db:
@@ -75,7 +118,15 @@ class FleetRefreshService:
 
             active_run = db.scalar(
                 select(FleetRefreshRun)
-                .where(FleetRefreshRun.status.in_((FleetRefreshRunStatus.queued.value, FleetRefreshRunStatus.running.value)))
+                .where(
+                    FleetRefreshRun.status.in_(
+                        (
+                            FleetRefreshRunStatus.queued.value,
+                            FleetRefreshRunStatus.running.value,
+                            FleetRefreshRunStatus.cancelling.value,
+                        )
+                    )
+                )
                 .order_by(FleetRefreshRun.created_at.asc())
                 .limit(1)
             )
@@ -145,6 +196,11 @@ class FleetRefreshService:
     @classmethod
     def recover_interrupted_runs(cls) -> int:
         with SessionLocal() as db:
+            db.execute(
+                update(FleetRefreshRun)
+                .where(FleetRefreshRun.status == FleetRefreshRunStatus.cancelling.value)
+                .values(status=FleetRefreshRunStatus.cancelled.value, completed_at=datetime.now(UTC))
+            )
             result = db.execute(
                 update(FleetRefreshRun)
                 .where(FleetRefreshRun.status == FleetRefreshRunStatus.running.value)
@@ -162,9 +218,15 @@ class FleetRefreshService:
         try:
             result = cls._perform_run(**run_data)
         except Exception as exc:
+            if cls._is_cancellation_requested(run_id):
+                cls._finish_run(run_id, status=FleetRefreshRunStatus.cancelled.value, result=None, error_message=None)
+                return
             cls._finish_run(run_id, status=FleetRefreshRunStatus.failed.value, result=None, error_message=str(exc))
             return
 
+        if cls._is_cancellation_requested(run_id):
+            cls._finish_run(run_id, status=FleetRefreshRunStatus.cancelled.value, result=result, error_message=None)
+            return
         cls._finish_run(run_id, status=FleetRefreshRunStatus.succeeded.value, result=result, error_message=None)
 
     @classmethod
@@ -216,12 +278,22 @@ class FleetRefreshService:
         result["users"].update({"cached": cached_count, "skipped": skipped_count})
         cls._store_progress(run_id, result)
 
-        if targets:
+        if targets and not cls._is_cancellation_requested(run_id):
             max_workers = min(runtime_settings.max_parallel_site_checks, len(targets))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(cls._refresh_one_site, target): target for target in targets}
-                for future in as_completed(futures):
-                    target = futures[future]
+                targets_iter = iter(targets)
+                futures: dict[Any, dict[str, Any]] = {}
+                for _ in range(max_workers):
+                    try:
+                        target = next(targets_iter)
+                    except StopIteration:
+                        break
+                    futures[executor.submit(cls._refresh_one_site, target)] = target
+
+                cancellation_requested = False
+                while futures:
+                    future = next(as_completed(futures))
+                    target = futures.pop(future)
                     try:
                         outcome = future.result()
                     except Exception as exc:
@@ -237,6 +309,17 @@ class FleetRefreshService:
                     cls._record_site_outcome(result, outcome)
                     cls._store_progress(run_id, result)
 
+                    cancellation_requested = cancellation_requested or cls._is_cancellation_requested(run_id)
+                    if cancellation_requested:
+                        continue
+                    try:
+                        next_target = next(targets_iter)
+                    except StopIteration:
+                        continue
+                    futures[executor.submit(cls._refresh_one_site, next_target)] = next_target
+
+        if cls._is_cancellation_requested(run_id):
+            return result
         cls._refresh_provider_evidence(
             run_id=run_id,
             result=result,
@@ -360,6 +443,8 @@ class FleetRefreshService:
         allow_provider_activation: bool,
         runtime_settings: FleetRefreshRuntimeSettings,
     ) -> None:
+        if cls._is_cancellation_requested(run_id):
+            return
         with SessionLocal() as db:
             inventory = FleetInventoryService(db=db, cipher=get_secret_cipher())
             items = inventory.list_items(limit=1000)
@@ -389,6 +474,8 @@ class FleetRefreshService:
             elif jet_site_ids:
                 result["crocoblock"]["cached"] = len(jet_site_ids)
 
+            if cls._is_cancellation_requested(run_id):
+                return
             official = version_service.refresh_for_inventory(
                 items,
                 force=force,
@@ -445,9 +532,22 @@ class FleetRefreshService:
     def _store_progress(cls, run_id: int, result: dict[str, Any]) -> None:
         with SessionLocal() as db:
             run = db.get(FleetRefreshRun, run_id)
-            if run is not None and run.status == FleetRefreshRunStatus.running.value:
-                run.result_json = copy.deepcopy(result)
+            if run is not None and run.status in (
+                FleetRefreshRunStatus.running.value,
+                FleetRefreshRunStatus.cancelling.value,
+            ):
+                stored_result = copy.deepcopy(result)
+                cancellation = (run.result_json or {}).get("cancellation")
+                if cancellation:
+                    stored_result["cancellation"] = cancellation
+                run.result_json = stored_result
                 db.commit()
+
+    @classmethod
+    def _is_cancellation_requested(cls, run_id: int) -> bool:
+        with SessionLocal() as db:
+            status = db.scalar(select(FleetRefreshRun.status).where(FleetRefreshRun.id == run_id))
+            return status == FleetRefreshRunStatus.cancelling.value
 
     @classmethod
     def _finish_run(

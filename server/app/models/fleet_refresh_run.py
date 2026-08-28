@@ -10,6 +10,8 @@ from app.models.base import Base, TimestampMixin
 class FleetRefreshRunStatus(StrEnum):
     queued = "queued"
     running = "running"
+    cancelling = "cancelling"
+    cancelled = "cancelled"
     succeeded = "succeeded"
     failed = "failed"
 

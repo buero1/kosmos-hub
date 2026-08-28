@@ -131,6 +131,10 @@
               <p class="subtle">Waiting for a background worker. The page checks again automatically.</p>
             {% elif refresh_run.status == "running" %}
               <p class="subtle"><strong>{{ completed_sites }} of {{ total_sites }}</strong> connected sites processed. {% if site_progress.get("skipped", 0) %}{{ site_progress.get("skipped", 0) }} pending sites are not contacted yet.{% endif %} {% if progress.get("last_site") %}Last completed: {{ progress.get("last_site") }}.{% endif %}</p>
+            {% elif refresh_run.status == "cancelling" %}
+              <p class="notice-warning">Cancellation requested. The active site checks will finish safely; no further sites or provider checks will start.</p>
+            {% elif refresh_run.status == "cancelled" %}
+              <p class="notice-warning">This refresh was cancelled after {{ completed_sites }} of {{ total_sites }} connected sites. Already completed checks remain stored.</p>
             {% elif refresh_run.status == "succeeded" %}
               <p class="notice-success">{{ site_progress.get("refreshed", 0) }} site states refreshed, {{ backup_progress.get("refreshed", 0) }} backup statuses refreshed, {{ site_progress.get("cached", 0) }} reused from the recent cache, and {{ progress.get("mismatches", 0) }} version mismatches diagnosed.</p>
             {% else %}
@@ -145,6 +149,12 @@
             <span><strong>{{ backup_progress.get("refreshed", 0) }}</strong> backup checks</span>
           </div>
         </div>
+        {% if refresh_run.status in ["queued", "running"] %}
+          <form class="inline-form" method="post" action="/updates/refresh-runs/{{ refresh_run.id }}/cancel">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">Cancel refresh</button>
+          </form>
+        {% endif %}
         {% if refresh_run.status == "running" and total_sites %}
           <progress class="fleet-refresh-progress" value="{{ completed_sites }}" max="{{ total_sites }}">{{ completed_sites }} of {{ total_sites }}</progress>
           <div class="fleet-refresh-progress-details">
@@ -298,7 +308,7 @@
     </div>
     </section>
   </div>
-  {% if batch_running or (refresh_run and refresh_run.status in ["queued", "running"]) %}
+  {% if batch_running or (refresh_run and refresh_run.status in ["queued", "running", "cancelling"]) %}
     <p class="subtle">This page refreshes automatically while the direct update run is active.</p>
     <script>
       window.setTimeout(function () {

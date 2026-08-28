@@ -592,6 +592,39 @@ def refresh_official_plugin_versions(
     )
 
 
+@router.post("/updates/refresh-runs/{run_id}/cancel")
+def cancel_fleet_refresh_run(
+    run_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    service = FleetRefreshService(db=db)
+    try:
+        run, cancelled = service.cancel_run(actor=user, run_id=run_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/updates?{urlencode({'refresh_run': run_id, 'message': str(exc)})}",
+            status_code=303,
+        )
+
+    message = (
+        "Cancellation was requested. Current site checks will finish, but no further sites or provider checks will start."
+        if cancelled and run.status == "cancelling"
+        else "The queued refresh was cancelled."
+        if cancelled
+        else "This fleet refresh had already finished."
+    )
+    return RedirectResponse(
+        url=f"/updates?{urlencode({'refresh_run': run.id, 'message': message})}",
+        status_code=303,
+    )
+
+
 @router.post("/updates/execute-selected-plugins")
 @router.post("/updates/execute-selected-updates")
 def execute_selected_plugin_updates(

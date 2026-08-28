@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
+from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus
 from app.models.hub_user import HubUser
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import (
@@ -74,3 +75,54 @@ def test_automatic_schedule_uses_berlin_calendar_days():
 def test_berlin_time_format_handles_summer_winter_and_naive_database_values():
     assert format_berlin_time(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)) == "27.08.2026 14:00:00 CEST"
     assert format_berlin_time(datetime(2026, 1, 15, 12, 0)) == "15.01.2026 13:00:00 CET"
+
+
+def test_cancel_queued_fleet_refresh_finishes_without_worker_starting():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        run = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.queued.value,
+            requested_by=user.username,
+            result_json=FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL),
+        )
+        db.add_all((user, run))
+        db.commit()
+
+        stopped_run, stopped = FleetRefreshService(db=db).cancel_run(actor=user, run_id=run.id)
+        db.commit()
+
+        assert stopped is True
+        assert stopped_run.status == FleetRefreshRunStatus.cancelled.value
+        assert stopped_run.completed_at is not None
+        assert stopped_run.result_json["cancellation"]["requested_by"] == "operator"
+
+
+def test_cancel_running_fleet_refresh_keeps_it_exclusive_until_worker_stops():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        run = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.running.value,
+            requested_by=user.username,
+            result_json=FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL),
+        )
+        db.add_all((user, run))
+        db.commit()
+
+        service = FleetRefreshService(db=db)
+        stopped_run, stopped = service.cancel_run(actor=user, run_id=run.id)
+        db.commit()
+
+        assert stopped is True
+        assert stopped_run.status == FleetRefreshRunStatus.cancelling.value
+        existing_run, created = service.create_run(actor=user, mode=FleetRefreshService.MODE_FULL)
+
+        assert created is False
+        assert existing_run.id == run.id
