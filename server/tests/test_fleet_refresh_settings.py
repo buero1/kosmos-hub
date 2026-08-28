@@ -72,6 +72,37 @@ def test_automatic_schedule_uses_berlin_calendar_days():
     ) is False
 
 
+def test_automatic_schedule_keeps_its_fixed_time_after_a_manual_refresh():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        scheduled = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.succeeded.value,
+            requested_by=FleetRefreshService.LEGACY_SCHEDULED_REQUESTED_BY,
+            started_at=datetime(2026, 8, 27, 0, 0, tzinfo=UTC),
+            completed_at=datetime(2026, 8, 27, 0, 5, tzinfo=UTC),
+            result_json={},
+        )
+        manual = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.succeeded.value,
+            requested_by="operator",
+            started_at=datetime(2026, 8, 28, 21, 30, tzinfo=UTC),
+            completed_at=datetime(2026, 8, 28, 21, 35, tzinfo=UTC),
+            result_json={},
+        )
+        db.add_all((scheduled, manual))
+        db.commit()
+
+        assert FleetRefreshService._is_scheduled_run_due(
+            db=db,
+            runtime_settings=FleetRefreshRuntimeSettings(auto_refresh_time="00:00"),
+            now=datetime(2026, 8, 28, 22, 5, tzinfo=UTC),
+        ) is True
+
+
 def test_berlin_time_format_handles_summer_winter_and_naive_database_values():
     assert format_berlin_time(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)) == "27.08.2026 14:00:00 CEST"
     assert format_berlin_time(datetime(2026, 1, 15, 12, 0)) == "15.01.2026 13:00:00 CET"

@@ -31,6 +31,7 @@ class FleetRefreshService:
     MODE_NORMAL = "normal"
     MODE_FULL = "full"
     SCHEDULED_REQUESTED_BY = "kosmos-scheduler"
+    LEGACY_SCHEDULED_REQUESTED_BY = "kosmos-hub"
     BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
     def __init__(self, *, db: Session):
         self.db = db
@@ -163,19 +164,18 @@ class FleetRefreshService:
 
         latest_scheduled = db.scalar(
             select(FleetRefreshRun)
-            .where(FleetRefreshRun.requested_by == cls.SCHEDULED_REQUESTED_BY)
+            .where(
+                FleetRefreshRun.requested_by.in_(
+                    (cls.SCHEDULED_REQUESTED_BY, cls.LEGACY_SCHEDULED_REQUESTED_BY)
+                )
+            )
             .order_by(FleetRefreshRun.created_at.desc())
             .limit(1)
         )
         if latest_scheduled is not None:
-            last_scheduled_day = cls._as_utc(latest_scheduled.created_at).astimezone(cls.BERLIN_TIMEZONE).date()
+            last_scheduled_day = cls._run_timestamp_utc(latest_scheduled).astimezone(cls.BERLIN_TIMEZONE).date()
             interval_days = runtime_settings.auto_refresh_interval_hours // 24
             return (berlin_now.date() - last_scheduled_day).days >= interval_days
-
-        # Do not add an unnecessary automatic run immediately after a manual full refresh.
-        latest_any_run = db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
-        if latest_any_run is not None and now - cls._as_utc(latest_any_run.created_at) < timedelta(hours=24):
-            return False
         return True
 
     @classmethod
@@ -653,6 +653,17 @@ class FleetRefreshService:
     @staticmethod
     def _as_utc(value: datetime) -> datetime:
         return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    @classmethod
+    def _run_timestamp_utc(cls, run: FleetRefreshRun) -> datetime:
+        """Use application-written UTC timestamps before falling back to a DB-local creation time."""
+        for value in (run.completed_at, run.started_at):
+            if value is not None:
+                return cls._as_utc(value)
+        created_at = run.created_at
+        if created_at.tzinfo is not None:
+            return created_at.astimezone(UTC)
+        return created_at.replace(tzinfo=cls.BERLIN_TIMEZONE).astimezone(UTC)
 
     @staticmethod
     def _bridge_supports_updates(version: str | None) -> bool:
