@@ -17,6 +17,7 @@ def build_site_selector_context(
     method: str = "get",
     csrf_token: str = "",
     secondary_submit_action: str = "",
+    secondary_primary_label: str = "",
     secondary_submit_label: str = "",
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
@@ -62,5 +63,6 @@ def build_site_selector_context(
         "method": method,
         "csrf_token": csrf_token,
         "secondary_submit_action": secondary_submit_action,
+        "secondary_primary_label": secondary_primary_label,
         "secondary_submit_label": secondary_submit_label,
     }

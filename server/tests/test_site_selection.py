@@ -48,7 +48,7 @@ def test_site_selector_all_means_all_selectable_sites():
     assert context["selected_site_ids"] == {1}
 
 
-def test_site_selector_can_expose_an_explicit_secondary_action():
+def test_site_selector_can_expose_update_display_modes():
     context = build_site_selector_context(
         action="/updates",
         form_id="site-scope",
@@ -58,8 +58,10 @@ def test_site_selector_can_expose_an_explicit_secondary_action():
         submit_label="Show updates",
         csrf_token="csrf-token",
         secondary_submit_action="/updates/fresh-show",
+        secondary_primary_label="Show stored updates",
         secondary_submit_label="Show fresh updates",
     )
 
     assert context["secondary_submit_action"] == "/updates/fresh-show"
+    assert context["secondary_primary_label"] == "Show stored updates"
     assert context["secondary_submit_label"] == "Show fresh updates"

@@ -221,47 +221,26 @@
         font-size: 0.75rem;
       }
       .site-selector-submit-actions {
-        display: flex;
-        align-items: stretch;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.5rem;
         margin-top: 0.15rem;
       }
       .site-selector-submit {
-        flex: 1 1 auto;
         width: auto;
         margin: 0;
-        border-radius: 0 999px 999px 0;
+        min-width: 5.25rem;
       }
-      .site-selector-submit-options { position: relative; flex: 0 0 auto; }
-      .site-selector-submit-options summary {
-        display: grid;
-        width: 2.75rem;
-        height: 100%;
-        place-items: center;
-        border: 1px solid var(--accent);
-        border-right: 0;
-        border-radius: 999px 0 0 999px;
-        background: var(--accent);
-        color: #fff;
-        cursor: pointer;
-        font: 700 1rem/1 "Trebuchet MS", sans-serif;
-        list-style: none;
-      }
-      .site-selector-submit-options summary::-webkit-details-marker { display: none; }
-      .site-selector-submit-options[open] summary { background: #076e5e; }
-      .site-selector-submit-menu {
-        position: absolute;
-        z-index: 5;
-        top: calc(100% + 0.4rem);
-        left: 0;
-        display: grid;
-        min-width: 13rem;
-        padding: 0.7rem;
+      .site-selector-submit-actions select {
+        width: 100%;
+        min-width: 0;
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: 9px;
         background: #fffdf8;
-        box-shadow: 0 10px 24px rgba(29, 51, 48, 0.16);
+        color: var(--ink);
+        font: inherit;
+        padding: 0.58rem 0.65rem;
       }
-      .site-selector-submit-menu .button { width: 100%; padding: 0.55rem 0.65rem; font-size: 0.8rem; }
       .visually-hidden {
         position: absolute;
         width: 1px;
@@ -389,6 +368,12 @@
         padding-right: 0;
         background: transparent;
       }
+      .fleet-refresh-cancel-form {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.85rem;
+      }
+      .fleet-refresh-cancel-form .button { min-width: 7rem; }
       .direct-update-status-card {
         margin: 1rem 0;
         padding: 1rem;

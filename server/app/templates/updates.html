@@ -148,6 +148,12 @@
         </div>
         <p class="subtle" hidden data-refresh-summary></p>
         <p class="notice-success" hidden data-refresh-complete></p>
+        {% if progress_refresh_run.status in ["queued", "running"] %}
+          <form class="fleet-refresh-cancel-form" method="post" action="/updates/refresh-runs/{{ progress_refresh_run.id }}/cancel" data-refresh-cancel-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">Abbrechen</button>
+          </form>
+        {% endif %}
       </section>
       <script>
         (function () {
@@ -196,6 +202,7 @@
             var statusElement = value("[data-refresh-status]");
             var summary = value("[data-refresh-summary]");
             var completion = value("[data-refresh-complete]");
+            var cancelForm = value("[data-refresh-cancel-form]");
 
             if (statusElement) {
               statusElement.textContent = statusLabels[status] || status;
@@ -213,6 +220,7 @@
             setText("[data-refresh-phase-count]", phaseTotal > 0 ? phaseCompleted + "/" + phaseTotal : "Wartet");
             setText("[data-refresh-site-count]", "Websites: " + siteCompleted + "/" + siteTotal);
             if (summary) { summary.hidden = status === "running" || status === "succeeded"; }
+            if (cancelForm) { cancelForm.hidden = terminalStatuses.indexOf(status) >= 0 || status === "cancelling"; }
 
             if (status === "succeeded") {
               if (completion) {

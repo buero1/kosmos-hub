@@ -51,18 +51,16 @@
     {% if not site_selector.hide_submit %}
       <div class="site-selector-submit-actions">
         {% if site_selector.secondary_submit_action %}
-          <details class="site-selector-submit-options">
-            <summary aria-label="Weitere Anzeigeoptionen" title="Weitere Anzeigeoptionen">&#9662;</summary>
-            <div class="site-selector-submit-menu">
-              <button
-                class="button button-secondary"
-                type="submit"
-                formmethod="post"
-                formaction="{{ site_selector.secondary_submit_action }}"
-                data-site-selector-secondary-submit
-              >{{ site_selector.secondary_submit_label }}</button>
-            </div>
-          </details>
+          <label class="visually-hidden" for="{{ site_selector.form_id }}-display-mode">Anzeigeart</label>
+          <select
+            id="{{ site_selector.form_id }}-display-mode"
+            data-site-selector-display-mode
+            data-site-selector-default-action="{{ site_selector.action }}"
+            data-site-selector-fresh-action="{{ site_selector.secondary_submit_action }}"
+          >
+            <option value="stored">{{ site_selector.secondary_primary_label or "Gespeicherte Updates anzeigen" }}</option>
+            <option value="fresh">{{ site_selector.secondary_submit_label }}</option>
+          </select>
         {% endif %}
         <button class="button site-selector-submit" type="submit">{{ site_selector.submit_label }}</button>
       </div>
@@ -83,7 +81,8 @@
     var tabs = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-tab]"));
     var panels = Array.prototype.slice.call(selector.querySelectorAll("[data-site-selector-panel]"));
     var targetFormId = selector.getAttribute("data-site-selector-target-form");
-    var secondarySubmit = selector.querySelector("[data-site-selector-secondary-submit]");
+    var selectorForm = selector.querySelector("form");
+    var displayMode = selector.querySelector("[data-site-selector-display-mode]");
     var lastSiteCheck = null;
 
     function targetForm() {
@@ -108,9 +107,6 @@
     function syncSelection() {
       var selectedCount = selectedIds().length;
       count.textContent = selectedCount && selectedCount === siteChecks.length ? "All selectable sites" : selectedCount + " selected";
-      if (secondarySubmit) {
-        secondarySubmit.disabled = selectedCount === 0;
-      }
       syncCustomerChecks();
       syncTargetForm();
     }
@@ -183,6 +179,16 @@
         syncSelection();
       });
     });
+
+    if (selectorForm && displayMode) {
+      selectorForm.addEventListener("submit", function () {
+        var isFreshCheck = displayMode.value === "fresh";
+        selectorForm.method = isFreshCheck ? "post" : "get";
+        selectorForm.action = isFreshCheck
+          ? displayMode.getAttribute("data-site-selector-fresh-action")
+          : displayMode.getAttribute("data-site-selector-default-action");
+      });
+    }
     customerChecks.forEach(function (checkbox) {
       checkbox.addEventListener("change", function () {
         var selected = checkbox.value ? checkbox.value.split(",") : [];
