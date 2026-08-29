@@ -187,6 +187,7 @@
             var progressTrack = value("[data-refresh-progress-track]");
             var progressFill = value("[data-refresh-progress-fill]");
             var statusElement = value("[data-refresh-status]");
+            var summary = value("[data-refresh-summary]");
             var completion = value("[data-refresh-complete]");
 
             if (statusElement) {
@@ -205,9 +206,10 @@
             setText("[data-refresh-phase-count]", phaseTotal > 0 ? phaseCompleted + "/" + phaseTotal : "Wartet");
             setText("[data-refresh-site-count]", "Websites: " + siteCompleted + "/" + siteTotal);
             setText("[data-refresh-last-site]", result.last_site ? "Zuletzt: " + result.last_site : "");
+            if (summary) { summary.hidden = false; }
 
             if (status === "succeeded") {
-              setText("[data-refresh-summary]", "Alle Prüfphasen sind beendet.");
+              if (summary) { summary.hidden = true; }
               if (completion) {
                 completion.hidden = false;
                 completion.textContent = "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert und " + number(sites.cached) + " aus dem Cache übernommen.";
