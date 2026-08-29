@@ -137,6 +137,42 @@ def test_direct_update_preflight_stops_when_the_installed_version_changed():
     assert note == ""
 
 
+def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():
+    details = {
+        "update_name": "Kosmos Bridge",
+        "target_version": "0.3.55",
+    }
+
+    resolution = MaintenanceRunService._direct_plugin_live_preflight_resolution(
+        details,
+        {"plugin_file": "kosmos-bridge/kosmos-bridge.php", "version": "0.3.56", "active": True},
+        "Kosmos Bridge does not report both the installed and target version.",
+    )
+
+    assert resolution["outcome"] == "succeeded"
+    assert resolution["stage"] == "already-updated"
+    assert resolution["installed_version"] == "0.3.56"
+    assert "No update was required" in resolution["message"]
+
+
+def test_live_plugin_preflight_skips_an_unavailable_update_with_the_observed_version():
+    details = {
+        "update_name": "Kosmos Bridge",
+        "target_version": "0.3.56",
+    }
+
+    resolution = MaintenanceRunService._direct_plugin_live_preflight_resolution(
+        details,
+        {"plugin_file": "kosmos-bridge/kosmos-bridge.php", "version": "0.3.52", "active": True},
+        "Kosmos Bridge does not report both the installed and target version.",
+    )
+
+    assert resolution["outcome"] == "skipped"
+    assert resolution["stage"] == "update-not-available"
+    assert resolution["installed_version"] == "0.3.52"
+    assert "cannot be performed" in resolution["message"]
+
+
 def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():
     theme = plugin_entry(
         kind="theme",

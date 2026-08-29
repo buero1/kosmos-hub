@@ -52,6 +52,7 @@ class MaintenanceRunService:
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
     DELETE_BACKUP_ABILITY = "kosmos-bridge/delete-updraftplus-backup"
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
+    LIST_INSTALLED_PLUGINS_ABILITY = "kosmos-bridge/list-installed-plugins"
     PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
     PLUGIN_INSTALLATION_ABILITY = "kosmos-bridge/install-plugin"
     THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
@@ -636,6 +637,14 @@ class MaintenanceRunService:
 
         preflight_error, preflight_note = self._direct_plugin_update_preflight(run, details)
         if preflight_error:
+            reconciled_outcome = self._reconcile_direct_plugin_preflight_mismatch(
+                run,
+                details,
+                preflight_step,
+                preflight_error,
+            )
+            if reconciled_outcome is not None:
+                return reconciled_outcome
             self._fail_plugin_update_run(run, preflight_error)
             return "failed"
         self._complete_plugin_update_step(
@@ -756,7 +765,7 @@ class MaintenanceRunService:
         try:
             payload = self.proxy.execute_readonly_ability(
                 run.site_id,
-                "kosmos-bridge/list-installed-plugins",
+                self.LIST_INSTALLED_PLUGINS_ABILITY,
                 {},
                 timeout_seconds=45,
             )
@@ -969,6 +978,179 @@ class MaintenanceRunService:
             None,
             f" The current offer changed from {selected_target_version} to {current_entry.target_version}; the newer available version will be installed.",
         )
+
+    def _reconcile_direct_plugin_preflight_mismatch(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        preflight_step: MaintenanceRunStep | None,
+        preflight_error: str,
+    ) -> str | None:
+        """Read the live plugin state when the fresh offer no longer matches the selection."""
+        if details["update_kind"] != "plugin":
+            return None
+
+        self._start_plugin_update_step(
+            run,
+            preflight_step,
+            "The selected update no longer matches the fresh offer. Reading the installed plugin version directly from WordPress.",
+        )
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                run.site_id,
+                self.LIST_INSTALLED_PLUGINS_ABILITY,
+                {},
+                timeout_seconds=45,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_plugin_update_run(
+                run,
+                f"{preflight_error} The installed plugin version could not be read: {exc.message}",
+            )
+            return "failed"
+
+        current_plugins = self._result_from_payload(payload).get("plugins", [])
+        plugins = current_plugins if isinstance(current_plugins, list) else []
+        installed = next(
+            (
+                plugin
+                for plugin in plugins
+                if isinstance(plugin, dict) and plugin.get("plugin_file") == details["update_identifier"]
+            ),
+            None,
+        )
+        resolution = self._direct_plugin_live_preflight_resolution(details, installed, preflight_error)
+        self._finish_direct_plugin_preflight_resolution(run, preflight_step, details, resolution)
+        return str(resolution["outcome"])
+
+    @classmethod
+    def _direct_plugin_live_preflight_resolution(
+        cls,
+        details: dict[str, Any],
+        installed: dict[str, Any] | None,
+        preflight_error: str,
+    ) -> dict[str, Any]:
+        """Classify a stale selection from the live installed plugin state."""
+        update_name = details["update_name"]
+        target_version = details["target_version"]
+        if installed is None:
+            return {
+                "outcome": MaintenanceRunStatus.skipped.value,
+                "stage": "plugin-not-installed",
+                "message": f"{update_name} is no longer installed on this website. No update was performed.",
+                "installed_version": "",
+                "installed_active": None,
+                "preflight_error": preflight_error,
+            }
+
+        installed_version = str(installed.get("version", "")).strip()
+        installed_active = installed.get("active") if isinstance(installed.get("active"), bool) else None
+        if not installed_version:
+            return {
+                "outcome": MaintenanceRunStatus.skipped.value,
+                "stage": "plugin-version-unavailable",
+                "message": f"{update_name} is installed, but WordPress did not report its version. No update was performed.",
+                "installed_version": "",
+                "installed_active": installed_active,
+                "preflight_error": preflight_error,
+            }
+        if cls._installed_version_meets_target(installed_version, target_version):
+            return {
+                "outcome": MaintenanceRunStatus.succeeded.value,
+                "stage": "already-updated",
+                "message": (
+                    f"{update_name} is already installed in version {installed_version}, which meets the selected target "
+                    f"{target_version}. No update was required."
+                ),
+                "installed_version": installed_version,
+                "installed_active": installed_active,
+                "preflight_error": preflight_error,
+            }
+        return {
+            "outcome": MaintenanceRunStatus.skipped.value,
+            "stage": "update-not-available",
+            "message": (
+                f"{update_name} is currently installed in version {installed_version}, but the selected update cannot be "
+                f"performed: {preflight_error}"
+            ),
+            "installed_version": installed_version,
+            "installed_active": installed_active,
+            "preflight_error": preflight_error,
+        }
+
+    @staticmethod
+    def _installed_version_meets_target(installed_version: str, target_version: str) -> bool:
+        """Compare plain numeric WordPress versions without treating pre-releases as newer."""
+        installed = installed_version.strip()
+        target = target_version.strip()
+        if installed == target:
+            return True
+        numeric_version = re.compile(r"\d+(?:\.\d+)*")
+        if not numeric_version.fullmatch(installed) or not numeric_version.fullmatch(target):
+            return False
+        installed_parts = [int(part) for part in installed.split(".")]
+        target_parts = [int(part) for part in target.split(".")]
+        length = max(len(installed_parts), len(target_parts))
+        installed_parts.extend([0] * (length - len(installed_parts)))
+        target_parts.extend([0] * (length - len(target_parts)))
+        return tuple(installed_parts) >= tuple(target_parts)
+
+    def _finish_direct_plugin_preflight_resolution(
+        self,
+        run: MaintenanceRun,
+        preflight_step: MaintenanceRunStep | None,
+        details: dict[str, Any],
+        resolution: dict[str, Any],
+    ) -> None:
+        """Persist a safe terminal result when no plugin update request is needed or possible."""
+        message = str(resolution["message"])
+        observed_version = str(resolution.get("installed_version", "")).strip()
+        inventory_note = ""
+        if observed_version and observed_version != details["current_version"]:
+            try:
+                SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
+            except SiteMcpProxyError as exc:
+                inventory_note = f" The follow-up inventory scan failed: {exc.message}"
+
+        completed_at = datetime.now(UTC)
+        final_message = message + inventory_note
+        run.status = str(resolution["outcome"])
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.error_message = None
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": resolution["stage"],
+            "stage_message": final_message,
+            "installed_version": observed_version,
+            "installed_active": resolution.get("installed_active"),
+            "preflight_error": resolution["preflight_error"],
+            "update_request_skipped": True,
+        }
+        for step in run.steps:
+            if step is preflight_step:
+                step.status = MaintenanceRunStepStatus.succeeded.value
+                step.completed_at = completed_at
+                step.detail = final_message
+                step.result_json = {
+                    "installed_version": observed_version,
+                    "installed_active": resolution.get("installed_active"),
+                }
+            elif step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}:
+                step.status = MaintenanceRunStepStatus.skipped.value
+                step.completed_at = completed_at
+                step.detail = "Not run because the live plugin check resolved this selected update."
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-direct-update-run",
+            result=run.status,
+            detail=f"Direct update run {run.id}: {final_message}",
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
 
     def _activate_crocoblock_license_if_required(
         self,

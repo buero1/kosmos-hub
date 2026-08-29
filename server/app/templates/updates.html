@@ -438,6 +438,10 @@
           }
 
           function statusPresentation(run) {
+            if (run.stage === "already-updated") { return { icon: "is-succeeded", label: "Bereits aktualisiert", detail: run.stage_message || "" }; }
+            if (run.stage === "update-not-available") { return { icon: "is-skipped", label: "Kein Update verfügbar", detail: run.stage_message || "" }; }
+            if (run.stage === "plugin-not-installed") { return { icon: "is-skipped", label: "Nicht installiert", detail: run.stage_message || "" }; }
+            if (run.stage === "plugin-version-unavailable") { return { icon: "is-skipped", label: "Version unbekannt", detail: run.stage_message || "" }; }
             if (run.status === "succeeded") { return { icon: "is-succeeded", label: "Erfolgreich", detail: "" }; }
             if (run.status === "failed") { return { icon: "is-failed", label: "Fehlgeschlagen", detail: run.error_message || run.stage_message || "" }; }
             if (run.status === "skipped") { return { icon: "is-skipped", label: "Übersprungen", detail: run.stage_message || "" }; }
