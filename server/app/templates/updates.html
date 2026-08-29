@@ -140,7 +140,7 @@
           <span data-refresh-site-count>Websites: {{ refresh_sites.get("completed", 0) }}/{{ refresh_sites.get("total", 0) }}</span>
           <span data-refresh-last-site>{% if refresh_progress.get("last_site") %}Zuletzt: {{ refresh_progress.get("last_site") }}{% endif %}</span>
         </div>
-        <p class="subtle" data-refresh-summary>Der aktuelle Stand wird alle zwei Sekunden aktualisiert.</p>
+        <p class="subtle" hidden data-refresh-summary></p>
         <p class="notice-success" hidden data-refresh-complete></p>
       </section>
       <script>
@@ -206,10 +206,9 @@
             setText("[data-refresh-phase-count]", phaseTotal > 0 ? phaseCompleted + "/" + phaseTotal : "Wartet");
             setText("[data-refresh-site-count]", "Websites: " + siteCompleted + "/" + siteTotal);
             setText("[data-refresh-last-site]", result.last_site ? "Zuletzt: " + result.last_site : "");
-            if (summary) { summary.hidden = false; }
+            if (summary) { summary.hidden = status === "running" || status === "succeeded"; }
 
             if (status === "succeeded") {
-              if (summary) { summary.hidden = true; }
               if (completion) {
                 completion.hidden = false;
                 completion.textContent = "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert und " + number(sites.cached) + " aus dem Cache übernommen.";
@@ -232,8 +231,6 @@
               setText("[data-refresh-summary]", "Der Abbruch ist vorgemerkt. Laufende Prüfungen dürfen noch sauber enden.");
             } else if (status === "queued") {
               setText("[data-refresh-summary]", "Der Refresh wartet auf den Hintergrunddienst und startet automatisch.");
-            } else {
-              setText("[data-refresh-summary]", "Der Refresh läuft im Hintergrund. Diese Anzeige aktualisiert sich alle zwei Sekunden.");
             }
 
             if (terminalStatuses.indexOf(status) >= 0 && timer) {
