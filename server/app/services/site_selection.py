@@ -14,6 +14,8 @@ def build_site_selector_context(
     submit_label: str,
     target_form_id: str = "",
     hide_submit: bool = False,
+    method: str = "get",
+    csrf_token: str = "",
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
     selectable_sites = [
@@ -55,4 +57,6 @@ def build_site_selector_context(
         "submit_label": submit_label,
         "target_form_id": target_form_id,
         "hide_submit": hide_submit,
+        "method": method,
+        "csrf_token": csrf_token,
     }

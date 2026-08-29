@@ -261,6 +261,11 @@
     {% elif direct_update == "error" %}
       <p class="notice-error">Direct update could not start: {{ message }}</p>
     {% endif %}
+    {% if fresh_updates == "ok" %}
+      <p class="notice-success">{{ message }}</p>
+    {% elif fresh_updates == "error" %}
+      <p class="notice-error">{{ message }}</p>
+    {% endif %}
     {% if official_versions == "refreshed" and not progress_refresh_run %}
       <p class="notice-success">{{ message }}</p>
     {% elif official_versions == "error" %}

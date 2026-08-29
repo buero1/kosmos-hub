@@ -1,5 +1,6 @@
 <aside class="workbench-site-selector" data-site-selector data-site-selector-target-form="{{ site_selector.target_form_id or '' }}">
-  <form id="{{ site_selector.form_id }}" method="get" action="{{ site_selector.action }}">
+  <form id="{{ site_selector.form_id }}" method="{{ site_selector.method }}" action="{{ site_selector.action }}">
+    {% if site_selector.csrf_token %}<input type="hidden" name="csrf_token" value="{{ site_selector.csrf_token }}">{% endif %}
     <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-scope>
 
     <div class="site-selector-heading">
