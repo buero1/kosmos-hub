@@ -309,7 +309,7 @@ class MaintenanceRunService:
             run_count=len(runs),
             message=(
                 f"Queued {len(runs)} direct update{'s' if len(runs) != 1 else ''}. "
-                "Each update will verify the selected version and run a health check afterwards."
+                "Each update will recheck the current available version and run a health check afterwards."
             ),
         )
 
@@ -634,14 +634,14 @@ class MaintenanceRunService:
             self._fail_plugin_update_run(run, crocoblock_error)
             return "failed"
 
-        preflight_error = self._direct_plugin_update_preflight_error(run, details)
+        preflight_error, preflight_note = self._direct_plugin_update_preflight(run, details)
         if preflight_error:
             self._fail_plugin_update_run(run, preflight_error)
             return "failed"
         self._complete_plugin_update_step(
             run,
             preflight_step,
-            "Fresh selected update checks passed.",
+            f"Fresh selected update checks passed.{preflight_note}",
         )
 
         update_step = self._find_step(run, self._update_step_key(details["update_kind"]))
@@ -925,23 +925,50 @@ class MaintenanceRunService:
             last_result,
         )
 
-    def _direct_plugin_update_preflight_error(self, run: MaintenanceRun, details: dict[str, Any]) -> str | None:
+    def _direct_plugin_update_preflight(self, run: MaintenanceRun, details: dict[str, Any]) -> tuple[str | None, str]:
+        """Keep the original installed state strict, but use the freshly offered target.
+
+        Providers can publish a newer version between selecting a row and the
+        worker's preflight.  In that case the Bridge is authoritative for the
+        target version.  A changed installed version or activation state still
+        stops the run because it could indicate a competing site change.
+        """
         current_entry = self._current_plugin_update_entry(run, details)
         if current_entry is None:
-            return f"{details['update_name']} is no longer listed as an available {details['update_kind']} update."
-        if (
-            current_entry.current_version != details["current_version"]
-            or current_entry.target_version != details["target_version"]
-        ):
-            return f"{details['update_name']} changed since it was selected. Refresh the workbench and start a new run."
+            return (
+                f"{details['update_name']} is no longer listed as an available {details['update_kind']} update.",
+                "",
+            )
+        if current_entry.current_version != details["current_version"]:
+            return (
+                f"{details['update_name']} changed installed version since it was selected. Refresh the workbench and start a new run.",
+                "",
+            )
         if details["update_kind"] == "plugin" and current_entry.is_active is not details["expected_active"]:
-            return f"{details['update_name']} changed activation state since it was selected. Refresh the workbench and start a new run."
+            return (
+                f"{details['update_name']} changed activation state since it was selected. Refresh the workbench and start a new run.",
+                "",
+            )
 
         scope_error = self._direct_plugin_update_scope_error(current_entry)
         if scope_error:
-            return scope_error
+            return scope_error, ""
 
-        return None
+        if current_entry.target_version == details["target_version"]:
+            return None, ""
+
+        selected_target_version = details["target_version"]
+        details["target_version"] = current_entry.target_version
+        run.result_json = {
+            **(run.result_json or {}),
+            "selected_target_version": selected_target_version,
+            "target_version": current_entry.target_version,
+            "target_version_refreshed": True,
+        }
+        return (
+            None,
+            f" The current offer changed from {selected_target_version} to {current_entry.target_version}; the newer available version will be installed.",
+        )
 
     def _activate_crocoblock_license_if_required(
         self,

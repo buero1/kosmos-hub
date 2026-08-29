@@ -1,7 +1,8 @@
-"""Temporary alternate data path for the Update Workbench's Show updates action.
+"""Detached experimental alternative to the stored-inventory Update Workbench.
 
-This service intentionally refreshes only the data required for the update table.
-It can be removed as one unit when the experiment is no longer needed.
+This service intentionally has no web route.  It remains here so that a future
+version can revive the bounded, fresh-on-demand comparison without mixing that
+behaviour into the normal ``Show updates`` workflow.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed

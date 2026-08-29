@@ -22,7 +22,6 @@ from app.services.site_users import SiteUserService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
-from app.services.fresh_update_workbench import FreshUpdateWorkbenchService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.site_selection import build_site_selector_context
@@ -390,7 +389,6 @@ def update_workbench_page(
     update_batch: str = "",
     direct_update: str = "",
     official_versions: str = "",
-    fresh_updates: str = "",
     message: str = "",
     view: Literal["updates", "refresh-protocol"] = "updates",
     refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
@@ -467,15 +465,13 @@ def update_workbench_page(
             },
             "site_options": site_options,
             "site_selector": build_site_selector_context(
-                action="/updates/fresh-show",
+                action="/updates",
                 form_id="update-site-scope-form",
                 target_form_id="workbench-action-form",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
                 submit_label="Show updates",
-                method="post",
-                csrf_token=get_csrf_token(request),
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
@@ -485,7 +481,6 @@ def update_workbench_page(
             "batch_running": batch_running,
             "direct_update": direct_update,
             "official_versions": official_versions,
-            "fresh_updates": fresh_updates,
             "active_fleet_refresh_run": active_fleet_refresh_run,
             "progress_refresh_run": progress_refresh_run,
             "show_refresh_protocol": view == "refresh-protocol",
@@ -494,55 +489,6 @@ def update_workbench_page(
             "refresh_site_results": refresh_site_results,
             "message": message,
         },
-    )
-
-
-@router.post("/updates/fresh-show")
-def show_fresh_updates(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    q: Annotated[str, Form()] = "",
-    site_id: Annotated[list[int] | None, Form()] = None,
-    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
-    plugin: Annotated[str, Form()] = "",
-    kind: Annotated[Literal["all", "wordpress", "plugin", "theme"], Form()] = "all",
-    activity: Annotated[Literal["all", "active", "inactive"], Form()] = "all",
-    diagnosis: Annotated[
-        Literal[
-            "all",
-            "attention",
-            "update-ready",
-            "aligned",
-            "provider-conflict",
-            "provider-package-unavailable",
-            "site-offer-missing",
-            "crocoblock-license-step",
-            "crocoblock-offer-missing",
-            "site-newer-than-reference",
-            "official-unavailable",
-            "not-checked",
-        ],
-        Form(),
-    ] = "all",
-    csrf_token: Annotated[str, Form()] = "",
-):
-    """Temporary alternative for Show updates that never reads backup or user data."""
-    require_csrf(request, csrf_token)
-    _require_hub_admin(request)
-    selected_site_ids = set(site_id or []) if site_scope == "selected" else set()
-    scope_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
-    scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
-    filter_query = [("q", q), ("plugin", plugin), ("kind", kind), ("activity", activity), ("diagnosis", diagnosis)]
-    try:
-        outcome = FreshUpdateWorkbenchService(db=db, cipher=get_secret_cipher()).refresh_selected_sites(selected_site_ids)
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'error'), ('message', str(exc))])}",
-            status_code=303,
-        )
-    return RedirectResponse(
-        url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'ok'), ('message', outcome.message)])}",
-        status_code=303,
     )
 
 

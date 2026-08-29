@@ -86,6 +86,57 @@ def test_direct_update_details_accept_theme_and_wordpress_core_scopes():
     assert core["update_identifier"] == "wordpress-core"
 
 
+def test_direct_update_preflight_adopts_a_newer_target_version_without_losing_the_original_selection():
+    run = SimpleNamespace(result_json={"target_version": "0.3.55"})
+    details = {
+        "update_name": "Kosmos Bridge",
+        "update_kind": "plugin",
+        "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+        "current_version": "0.3.52",
+        "target_version": "0.3.55",
+        "expected_active": True,
+    }
+    service = object.__new__(MaintenanceRunService)
+    service._current_plugin_update_entry = lambda _run, _details: plugin_entry(
+        name="Kosmos Bridge",
+        identifier="kosmos-bridge/kosmos-bridge.php",
+        current_version="0.3.52",
+        target_version="0.3.56",
+    )
+
+    error, note = service._direct_plugin_update_preflight(run, details)
+
+    assert error is None
+    assert "0.3.55 to 0.3.56" in note
+    assert details["target_version"] == "0.3.56"
+    assert run.result_json["selected_target_version"] == "0.3.55"
+    assert run.result_json["target_version"] == "0.3.56"
+
+
+def test_direct_update_preflight_stops_when_the_installed_version_changed():
+    run = SimpleNamespace(result_json={})
+    details = {
+        "update_name": "Kosmos Bridge",
+        "update_kind": "plugin",
+        "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+        "current_version": "0.3.52",
+        "target_version": "0.3.55",
+        "expected_active": True,
+    }
+    service = object.__new__(MaintenanceRunService)
+    service._current_plugin_update_entry = lambda _run, _details: plugin_entry(
+        name="Kosmos Bridge",
+        identifier="kosmos-bridge/kosmos-bridge.php",
+        current_version="0.3.56",
+        target_version="0.3.57",
+    )
+
+    error, note = service._direct_plugin_update_preflight(run, details)
+
+    assert error == "Kosmos Bridge changed installed version since it was selected. Refresh the workbench and start a new run."
+    assert note == ""
+
+
 def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():
     theme = plugin_entry(
         kind="theme",
