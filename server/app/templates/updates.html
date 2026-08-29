@@ -256,7 +256,7 @@
       </script>
     {% endif %}
 
-    {% if direct_update == "started" %}
+    {% if direct_update == "started" and not batch_runs %}
       <p class="notice-success">{{ message }}</p>
     {% elif direct_update == "error" %}
       <p class="notice-error">Direct update could not start: {{ message }}</p>
@@ -386,32 +386,174 @@
     {% endif %}
 
     {% if batch_runs %}
-      <section class="maintenance-batch">
+      <section
+        class="maintenance-batch direct-update-status-card"
+        data-direct-update-progress
+        data-status-url="/updates/direct-update-batches/{{ update_batch }}/status"
+        aria-labelledby="direct-update-progress-heading"
+      >
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Direct update run</p>
-            <h3>{{ batch_runs | length }} selected update{{ "s" if batch_runs | length != 1 else "" }}</h3>
-            <p class="subtle">Batch {{ update_batch[:12] }}. The batch stops at the first error; no automatic rollback is performed.</p>
+            <p class="eyebrow">Ausgewählte Updates</p>
+            <h3 id="direct-update-progress-heading"><span data-direct-batch-title>{{ batch_runs | length }} Update{{ "s" if batch_runs | length != 1 else "" }}</span></h3>
+            <p class="subtle" data-direct-batch-summary>{{ batch_runs | selectattr("status", "in", ["succeeded", "failed", "skipped"]) | list | length }}/{{ batch_runs | length }} abgeschlossen</p>
           </div>
         </div>
-        <div class="detail-list maintenance-run-list">
-          {% for run in batch_runs %}
-            <article class="card maintenance-run-card">
-              <p><span class="pill pill-{{ run.status }}">{{ run.status }}</span></p>
-              <p><strong>Site:</strong> <a href="/sites/{{ run.site.id }}">{{ run.site.domain }}</a></p>
-              <p><strong>{{ run.result_json.update_kind | default("plugin", true) | title }}:</strong> {{ run.result_json.update_name or run.result_json.plugin_name }}</p>
-              <p><strong>Versions:</strong> {{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
-              <p><strong>Stage:</strong> {{ run.result_json.stage | replace("-", " ") | title }}</p>
-              {% if run.result_json.stage_message %}<p class="subtle">{{ run.result_json.stage_message }}</p>{% endif %}
-              {% if run.error_message %}<p class="notice-error">{{ run.error_message }}</p>{% endif %}
-              {% for step in run.steps %}
-                <p><strong>{{ step.step_key | replace("-", " ") | title }}:</strong> {{ step.status }}</p>
-                {% if step.detail %}<p class="subtle">{{ step.detail }}</p>{% endif %}
+        <div class="direct-update-progress-track" role="progressbar" aria-label="Fortschritt der ausgewählten Updates" aria-valuemin="0" aria-valuemax="{{ batch_runs | length }}" aria-valuenow="0" data-direct-update-progress-track>
+          <span class="direct-update-progress-fill" data-direct-update-progress-fill></span>
+        </div>
+        <div class="table-scroll">
+          <table class="direct-update-run-table">
+            <thead>
+              <tr>
+                <th>Website</th>
+                <th>Update</th>
+                <th>Version</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody data-direct-update-rows>
+              {% for run in batch_runs %}
+                {% set result = run.result_json or {} %}
+                <tr data-direct-update-run-id="{{ run.id }}">
+                  <td><a href="/sites/{{ run.site.id }}">{{ run.site.domain }}</a></td>
+                  <td><strong>{{ result.update_name or result.plugin_name or "Unknown update" }}</strong><span class="pill pill-{{ result.update_kind | default("plugin", true) }}">{{ result.update_kind | default("plugin", true) | title }}</span></td>
+                  <td>{{ result.current_version or "-" }} → {{ result.target_version or "-" }}</td>
+                  <td>
+                    {% if run.status == "succeeded" %}
+                      <span class="direct-update-status"><span class="direct-update-status-icon is-succeeded" aria-hidden="true"></span><span>Erfolgreich</span></span>
+                    {% elif run.status == "failed" %}
+                      <span class="direct-update-status"><span class="direct-update-status-icon is-failed" aria-hidden="true"></span><span>Fehlgeschlagen</span></span>
+                    {% elif run.status == "skipped" %}
+                      <span class="direct-update-status"><span class="direct-update-status-icon is-skipped" aria-hidden="true"></span><span>Übersprungen</span></span>
+                    {% elif result.stage == "processing" %}
+                      <span class="direct-update-status"><span class="direct-update-status-icon is-processing" aria-hidden="true"></span><span>Wird aktualisiert</span></span>
+                    {% else %}
+                      <span class="direct-update-status"><span class="direct-update-status-icon is-queued" aria-hidden="true"></span><span>Wartet</span></span>
+                    {% endif %}
+                  </td>
+                </tr>
               {% endfor %}
-            </article>
-          {% endfor %}
+            </tbody>
+          </table>
         </div>
       </section>
+      <script>
+        (function () {
+          var container = document.querySelector("[data-direct-update-progress]");
+          if (!container || !container.dataset.statusUrl) { return; }
+
+          var timer;
+
+          function value(selector) {
+            return container.querySelector(selector);
+          }
+
+          function statusPresentation(run) {
+            if (run.status === "succeeded") { return { icon: "is-succeeded", label: "Erfolgreich", detail: "" }; }
+            if (run.status === "failed") { return { icon: "is-failed", label: "Fehlgeschlagen", detail: run.error_message || run.stage_message || "" }; }
+            if (run.status === "skipped") { return { icon: "is-skipped", label: "Übersprungen", detail: run.stage_message || "" }; }
+            if (run.stage === "processing") { return { icon: "is-processing", label: "Wird aktualisiert", detail: run.stage_message || "" }; }
+            return { icon: "is-queued", label: "Wartet", detail: run.stage_message || "" };
+          }
+
+          function cell(text, className) {
+            var element = document.createElement("td");
+            if (className) { element.className = className; }
+            element.textContent = text;
+            return element;
+          }
+
+          function renderRows(runs) {
+            var body = value("[data-direct-update-rows]");
+            if (!body) { return; }
+            body.textContent = "";
+            runs.forEach(function (run) {
+              var row = document.createElement("tr");
+              row.dataset.directUpdateRunId = String(run.id);
+
+              var siteCell = document.createElement("td");
+              var siteLink = document.createElement("a");
+              siteLink.href = "/sites/" + run.site_id;
+              siteLink.textContent = run.site_domain;
+              siteCell.appendChild(siteLink);
+              row.appendChild(siteCell);
+
+              var updateCell = document.createElement("td");
+              var updateName = document.createElement("strong");
+              updateName.textContent = run.update_name;
+              var updateKind = document.createElement("span");
+              updateKind.className = "pill pill-" + run.update_kind;
+              updateKind.textContent = run.update_kind.charAt(0).toUpperCase() + run.update_kind.slice(1);
+              updateCell.appendChild(updateName);
+              updateCell.appendChild(updateKind);
+              row.appendChild(updateCell);
+
+              row.appendChild(cell(run.current_version + " -> " + run.target_version));
+
+              var presentation = statusPresentation(run);
+              var statusCell = document.createElement("td");
+              var status = document.createElement("span");
+              status.className = "direct-update-status";
+              if (presentation.detail) { status.title = presentation.detail; }
+              var icon = document.createElement("span");
+              icon.className = "direct-update-status-icon " + presentation.icon;
+              icon.setAttribute("aria-hidden", "true");
+              var label = document.createElement("span");
+              label.textContent = presentation.label;
+              status.appendChild(icon);
+              status.appendChild(label);
+              statusCell.appendChild(status);
+              row.appendChild(statusCell);
+
+              body.appendChild(row);
+            });
+          }
+
+          function render(payload) {
+            var total = Number(payload.total) || 0;
+            var completed = Number(payload.completed) || 0;
+            var percentage = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+            var progressTrack = value("[data-direct-update-progress-track]");
+            var progressFill = value("[data-direct-update-progress-fill]");
+            var title = value("[data-direct-batch-title]");
+            var summary = value("[data-direct-batch-summary]");
+
+            if (progressTrack) {
+              progressTrack.setAttribute("aria-valuemax", String(Math.max(total, 1)));
+              progressTrack.setAttribute("aria-valuenow", String(Math.min(completed, Math.max(total, 1))));
+              progressTrack.setAttribute("aria-valuetext", completed + " von " + total + " Updates abgeschlossen");
+            }
+            if (progressFill) { progressFill.style.width = percentage + "%"; }
+            if (title) { title.textContent = total + " Update" + (total === 1 ? "" : "s"); }
+            if (summary) {
+              if (completed === total) {
+                summary.textContent = "Abgeschlossen: " + payload.succeeded + " erfolgreich, " + payload.failed + " fehlgeschlagen, " + payload.skipped + " übersprungen.";
+              } else {
+                summary.textContent = completed + "/" + total + " abgeschlossen";
+              }
+            }
+            renderRows(payload.runs || []);
+
+            if (completed === total && timer) {
+              window.clearInterval(timer);
+              timer = undefined;
+            }
+          }
+
+          function poll() {
+            window.fetch(container.dataset.statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
+              .then(function (response) {
+                if (!response.ok) { throw new Error("Direct update status could not be loaded."); }
+                return response.json();
+              })
+              .then(render);
+          }
+
+          poll();
+          timer = window.setInterval(poll, 2000);
+        }());
+      </script>
     {% endif %}
 
     {% if not show_refresh_protocol %}
@@ -525,14 +667,6 @@
     {% endif %}
     </section>
   </div>
-  {% if batch_running %}
-    <p class="subtle">Diese Seite aktualisiert sich automatisch, solange eine Wartungsaktion läuft.</p>
-    <script>
-      window.setTimeout(function () {
-        window.location.reload();
-      }, 4000);
-    </script>
-  {% endif %}
   <script>
     (function () {
       var selectAll = document.getElementById("select-all-filtered-updates");

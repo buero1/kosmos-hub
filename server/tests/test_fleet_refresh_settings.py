@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.services.fleet_refresh as fleet_refresh_module
-from app.api.routes.web import _fleet_refresh_status_payload
+from app.api.routes.web import _direct_update_batch_status_payload, _fleet_refresh_status_payload
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
@@ -41,6 +42,67 @@ def test_refresh_status_payload_exposes_live_phase_and_site_progress():
     assert payload["result"]["sites"] == {"completed": 2, "total": 4, "refreshed": 2, "cached": 0}
     assert payload["result"]["phase"]["completed"] == 2
     assert payload["result"]["last_site"] == "example.test"
+
+
+def test_direct_update_batch_status_payload_exposes_compact_live_rows():
+    runs = [
+        SimpleNamespace(
+            id=18,
+            status="succeeded",
+            error_message=None,
+            site=SimpleNamespace(id=8, domain="first.example"),
+            result_json={
+                "batch_position": 2,
+                "update_kind": "plugin",
+                "update_name": "Elementor",
+                "current_version": "3.0.0",
+                "target_version": "3.1.0",
+                "stage": "complete",
+            },
+        ),
+        SimpleNamespace(
+            id=17,
+            status="running",
+            error_message=None,
+            site=SimpleNamespace(id=7, domain="second.example"),
+            result_json={
+                "batch_position": 1,
+                "update_kind": "theme",
+                "update_name": "Hello Elementor",
+                "current_version": "3.4.0",
+                "target_version": "3.4.1",
+                "stage": "processing",
+                "stage_message": "Updating the selected version.",
+            },
+        ),
+        SimpleNamespace(
+            id=19,
+            status="failed",
+            error_message="The site did not confirm the update.",
+            site=SimpleNamespace(id=9, domain="third.example"),
+            result_json={"batch_position": 3, "update_name": "JetEngine"},
+        ),
+        SimpleNamespace(
+            id=20,
+            status="skipped",
+            error_message=None,
+            site=SimpleNamespace(id=10, domain="fourth.example"),
+            result_json={"batch_position": 4, "plugin_name": "JetFormBuilder"},
+        ),
+    ]
+
+    payload = _direct_update_batch_status_payload("a" * 32, runs)
+
+    assert payload["batch_id"] == "a" * 32
+    assert payload["total"] == 4
+    assert payload["completed"] == 3
+    assert payload["succeeded"] == 1
+    assert payload["failed"] == 1
+    assert payload["skipped"] == 1
+    assert [row["id"] for row in payload["runs"]] == [17, 18, 19, 20]
+    assert payload["runs"][0]["stage"] == "processing"
+    assert payload["runs"][2]["error_message"] == "The site did not confirm the update."
+    assert payload["runs"][3]["update_name"] == "JetFormBuilder"
 
 
 def test_refresh_settings_store_berlin_schedule():

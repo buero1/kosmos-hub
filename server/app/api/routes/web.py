@@ -506,6 +506,19 @@ def fleet_refresh_run_status(
     return _fleet_refresh_status_payload(run)
 
 
+@router.get("/updates/direct-update-batches/{batch_id}/status", response_class=JSONResponse)
+def direct_update_batch_status(
+    batch_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    runs = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_plugin_update_batch(batch_id)
+    if not runs:
+        raise HTTPException(status_code=404, detail="The direct update batch no longer exists.")
+    return _direct_update_batch_status_payload(batch_id, runs)
+
+
 @router.get("/plugin-installations", response_class=HTMLResponse)
 def plugin_installations_page(
     request: Request,
@@ -1358,6 +1371,47 @@ def _fleet_refresh_status_payload(run) -> dict:
             "last_site": result.get("last_site", ""),
             "errors": result.get("errors", []),
         },
+    }
+
+
+def _direct_update_batch_status_payload(batch_id: str, runs: list) -> dict:
+    """Expose the small, live status view needed by the direct-update workbench."""
+    terminal_statuses = {"succeeded", "failed", "skipped"}
+
+    def batch_position(run) -> int:
+        position = (run.result_json or {}).get("batch_position")
+        return position if isinstance(position, int) else run.id
+
+    ordered_runs = sorted(
+        runs,
+        key=lambda run: (batch_position(run), run.id),
+    )
+    rows = []
+    for run in ordered_runs:
+        result = run.result_json or {}
+        rows.append(
+            {
+                "id": run.id,
+                "site_id": run.site.id,
+                "site_domain": run.site.domain,
+                "update_kind": result.get("update_kind") or "plugin",
+                "update_name": result.get("update_name") or result.get("plugin_name") or "Unknown update",
+                "current_version": result.get("current_version") or "-",
+                "target_version": result.get("target_version") or "-",
+                "status": run.status,
+                "stage": result.get("stage") or "queued",
+                "stage_message": result.get("stage_message", ""),
+                "error_message": run.error_message or "",
+            }
+        )
+    return {
+        "batch_id": batch_id,
+        "total": len(rows),
+        "completed": sum(row["status"] in terminal_statuses for row in rows),
+        "succeeded": sum(row["status"] == "succeeded" for row in rows),
+        "failed": sum(row["status"] == "failed" for row in rows),
+        "skipped": sum(row["status"] == "skipped" for row in rows),
+        "runs": rows,
     }
 
 
