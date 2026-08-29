@@ -79,41 +79,6 @@
       </div>
     </div>
 
-    <form id="workbench-action-form" class="workbench-action-panel" method="post" action="/updates/apply-action">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
-      <span data-site-selector-target-sites>
-        {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
-      </span>
-      <label>
-        <span>Aktion</span>
-        <select name="maintenance_action" required data-workbench-action-select>
-          <option value="" selected disabled>Aktion auswählen</option>
-          <option value="direct-updates">Ausgewählte Updates ausführen</option>
-          <option value="refresh-protocol">Aktualisierungsprotokoll anzeigen</option>
-        </select>
-      </label>
-      <p class="subtle">Umfang: <span data-site-selector-target-summary data-site-selector-target-summary-locale="de">{{ site_selector.selected_site_ids | length }} ausgewählte Website{{ "" if site_selector.selected_site_ids | length == 1 else "s" }}</span>.</p>
-      <button class="button" type="submit" disabled data-workbench-action-submit>Anwenden</button>
-    </form>
-
-    <script>
-      (function () {
-        var form = document.getElementById("workbench-action-form");
-        if (!form) { return; }
-        var actionSelect = form.querySelector("[data-workbench-action-select]");
-        var submitButton = form.querySelector("[data-workbench-action-submit]");
-        if (!actionSelect || !submitButton) { return; }
-
-        function syncSubmitState() {
-          submitButton.disabled = !actionSelect.value;
-        }
-
-        actionSelect.addEventListener("change", syncSubmitState);
-        syncSubmitState();
-      }());
-    </script>
-
     {% if progress_refresh_run %}
       {% set refresh_progress = progress_refresh_run.result_json or {} %}
       {% set refresh_phase = refresh_progress.get("phase", {}) %}
@@ -580,8 +545,17 @@
     {% endif %}
 
     {% if not show_refresh_protocol %}
-    <div class="table-scroll">
-      <table class="update-workbench-table update-workbench-table-updates">
+    <form id="direct-update-form" method="post" action="/updates/apply-action" data-direct-update-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="maintenance_action" value="direct-updates">
+      <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}">
+      {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
+      <div class="direct-update-controls">
+        <p class="subtle" data-direct-update-selection-summary>Keine Updates ausgewählt.</p>
+        <button class="button" type="submit" disabled data-direct-update-submit>Ausgewählte Updates ausführen</button>
+      </div>
+      <div class="table-scroll">
+        <table class="update-workbench-table update-workbench-table-updates">
         <thead>
           <tr>
             <th>
@@ -607,7 +581,7 @@
             <tr>
               <td>
                 {% if entry.direct_update_selectable %}
-                  <input class="update-selection" form="workbench-action-form" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
+                  <input class="update-selection" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
                   <span class="subtle">Not ready</span>
                 {% endif %}
@@ -685,14 +659,31 @@
             </tr>
           {% endfor %}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+    </form>
+    <dialog class="update-confirmation-dialog" data-direct-update-confirmation aria-labelledby="direct-update-confirmation-heading">
+      <form method="dialog">
+        <h3 id="direct-update-confirmation-heading">Updates durchführen?</h3>
+        <p data-direct-update-confirmation-text>Die ausgewählten Updates werden nacheinander installiert und anschließend geprüft.</p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" value="cancel">Abbrechen</button>
+          <button class="button" value="confirm" data-direct-update-confirm>Updates ausführen</button>
+        </div>
+      </form>
+    </dialog>
     {% endif %}
     </section>
   </div>
   <script>
     (function () {
       var selectAll = document.getElementById("select-all-filtered-updates");
+      var directUpdateForm = document.querySelector("[data-direct-update-form]");
+      var directUpdateSubmit = document.querySelector("[data-direct-update-submit]");
+      var selectionSummary = document.querySelector("[data-direct-update-selection-summary]");
+      var confirmationDialog = document.querySelector("[data-direct-update-confirmation]");
+      var confirmationText = document.querySelector("[data-direct-update-confirmation-text]");
+      var confirmationButton = document.querySelector("[data-direct-update-confirm]");
       if (!selectAll) {
         return;
       }
@@ -709,6 +700,12 @@
         selectAll.disabled = selectable.length === 0;
         selectAll.checked = selectable.length > 0 && selected === selectable.length;
         selectAll.indeterminate = selected > 0 && selected < selectable.length;
+        if (directUpdateSubmit) { directUpdateSubmit.disabled = selected === 0; }
+        if (selectionSummary) {
+          selectionSummary.textContent = selected === 0
+            ? "Keine Updates ausgewählt."
+            : selected + " Update" + (selected === 1 ? "" : "s") + " ausgewählt.";
+        }
       }
 
       selectAll.addEventListener("change", function () {
@@ -720,6 +717,29 @@
       selections().forEach(function (selection) {
         selection.addEventListener("change", syncSelectAll);
       });
+      if (directUpdateForm && confirmationDialog && confirmationButton) {
+        directUpdateForm.addEventListener("submit", function (event) {
+          if (directUpdateForm.dataset.confirmed === "true") {
+            delete directUpdateForm.dataset.confirmed;
+            return;
+          }
+          event.preventDefault();
+          var selected = selections().filter(function (selection) { return selection.checked; }).length;
+          if (!selected) { return; }
+          if (confirmationText) {
+            confirmationText.textContent = selected === 1
+              ? "1 ausgewähltes Update wird nacheinander installiert und anschließend geprüft."
+              : selected + " ausgewählte Updates werden nacheinander installiert und anschließend geprüft.";
+          }
+          confirmationDialog.showModal();
+        });
+        confirmationButton.addEventListener("click", function (event) {
+          event.preventDefault();
+          directUpdateForm.dataset.confirmed = "true";
+          confirmationDialog.close();
+          directUpdateForm.requestSubmit();
+        });
+      }
       syncSelectAll();
     }());
   </script>

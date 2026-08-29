@@ -605,7 +605,6 @@ def update_workbench_page(
             "site_selector": build_site_selector_context(
                 action="/updates",
                 form_id="update-site-scope-form",
-                target_form_id="workbench-action-form",
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
@@ -614,6 +613,8 @@ def update_workbench_page(
                 secondary_submit_action="/updates/fresh-show",
                 secondary_primary_label="Gespeicherte Updates anzeigen",
                 secondary_submit_label="Frische Updates prüfen",
+                protocol_submit_label="Aktualisierungsprotokoll anzeigen",
+                selected_display_mode="protocol" if view == "refresh-protocol" else "stored",
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),

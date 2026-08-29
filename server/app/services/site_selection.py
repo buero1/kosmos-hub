@@ -19,6 +19,8 @@ def build_site_selector_context(
     secondary_submit_action: str = "",
     secondary_primary_label: str = "",
     secondary_submit_label: str = "",
+    protocol_submit_label: str = "",
+    selected_display_mode: str = "stored",
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
     selectable_sites = [
@@ -65,4 +67,6 @@ def build_site_selector_context(
         "secondary_submit_action": secondary_submit_action,
         "secondary_primary_label": secondary_primary_label,
         "secondary_submit_label": secondary_submit_label,
+        "protocol_submit_label": protocol_submit_label,
+        "selected_display_mode": selected_display_mode,
     }

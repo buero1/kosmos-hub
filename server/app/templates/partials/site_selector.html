@@ -58,8 +58,9 @@
             data-site-selector-default-action="{{ site_selector.action }}"
             data-site-selector-fresh-action="{{ site_selector.secondary_submit_action }}"
           >
-            <option value="stored">{{ site_selector.secondary_primary_label or "Gespeicherte Updates anzeigen" }}</option>
-            <option value="fresh">{{ site_selector.secondary_submit_label }}</option>
+            <option value="stored" {% if site_selector.selected_display_mode == "stored" %}selected{% endif %}>{{ site_selector.secondary_primary_label or "Gespeicherte Updates anzeigen" }}</option>
+            <option value="fresh" {% if site_selector.selected_display_mode == "fresh" %}selected{% endif %}>{{ site_selector.secondary_submit_label }}</option>
+            {% if site_selector.protocol_submit_label %}<option value="protocol" {% if site_selector.selected_display_mode == "protocol" %}selected{% endif %}>{{ site_selector.protocol_submit_label }}</option>{% endif %}
           </select>
         {% endif %}
         <button class="button site-selector-submit" type="submit">{{ site_selector.submit_label }}</button>
@@ -183,10 +184,23 @@
     if (selectorForm && displayMode) {
       selectorForm.addEventListener("submit", function () {
         var isFreshCheck = displayMode.value === "fresh";
+        var isProtocolView = displayMode.value === "protocol";
+        var csrfInput = selectorForm.querySelector('input[name="csrf_token"]');
+        var viewInput = selectorForm.querySelector("[data-site-selector-view]");
+        if (viewInput) { viewInput.remove(); }
+        if (csrfInput) { csrfInput.disabled = !isFreshCheck; }
         selectorForm.method = isFreshCheck ? "post" : "get";
         selectorForm.action = isFreshCheck
           ? displayMode.getAttribute("data-site-selector-fresh-action")
           : displayMode.getAttribute("data-site-selector-default-action");
+        if (isProtocolView) {
+          viewInput = document.createElement("input");
+          viewInput.type = "hidden";
+          viewInput.name = "view";
+          viewInput.value = "refresh-protocol";
+          viewInput.setAttribute("data-site-selector-view", "true");
+          selectorForm.appendChild(viewInput);
+        }
       });
     }
     customerChecks.forEach(function (checkbox) {

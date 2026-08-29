@@ -60,8 +60,12 @@ def test_site_selector_can_expose_update_display_modes():
         secondary_submit_action="/updates/fresh-show",
         secondary_primary_label="Show stored updates",
         secondary_submit_label="Show fresh updates",
+        protocol_submit_label="Show refresh protocol",
+        selected_display_mode="protocol",
     )
 
     assert context["secondary_submit_action"] == "/updates/fresh-show"
     assert context["secondary_primary_label"] == "Show stored updates"
     assert context["secondary_submit_label"] == "Show fresh updates"
+    assert context["protocol_submit_label"] == "Show refresh protocol"
+    assert context["selected_display_mode"] == "protocol"

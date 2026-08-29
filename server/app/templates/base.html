@@ -329,6 +329,31 @@
         cursor: not-allowed;
         opacity: 0.5;
       }
+      .direct-update-controls {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 1rem;
+        margin: 1rem 0 0.65rem;
+      }
+      .direct-update-controls .subtle { margin: 0; }
+      .direct-update-controls .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .update-confirmation-dialog {
+        width: min(31rem, calc(100vw - 2rem));
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1.25rem;
+        color: var(--ink);
+        background: var(--panel);
+        box-shadow: 0 24px 70px rgba(29, 42, 47, 0.2);
+      }
+      .update-confirmation-dialog::backdrop { background: rgba(29, 42, 47, 0.32); }
+      .update-confirmation-dialog h3 { margin: 0; }
+      .update-confirmation-dialog p { margin: 0.75rem 0 1.15rem; }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 0.65rem; }
       .fleet-refresh-status-card {
         margin: 1rem 0;
         padding: 1rem;
@@ -1305,6 +1330,7 @@
           grid-template-columns: 1fr;
         }
         .workbench-action-panel { grid-template-columns: 1fr; }
+        .direct-update-controls { align-items: stretch; flex-direction: column; }
         .plugin-install-form { grid-template-columns: 1fr; }
         .plugin-install-submit { align-items: flex-start; flex-direction: column; }
         .user-workbench-create form {
