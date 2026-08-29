@@ -353,6 +353,27 @@
       .update-confirmation-dialog::backdrop { background: rgba(29, 42, 47, 0.32); }
       .update-confirmation-dialog h3 { margin: 0; }
       .update-confirmation-dialog p { margin: 0.75rem 0 1.15rem; }
+      .update-confirmation-dialog .dialog-selection-heading {
+        margin: 0 0 0.35rem;
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 700;
+      }
+      .update-confirmation-list {
+        max-height: 13rem;
+        margin: 0 0 1.15rem;
+        padding: 0;
+        overflow-y: auto;
+        border-top: 1px solid var(--border);
+        list-style: none;
+      }
+      .update-confirmation-list li {
+        display: grid;
+        gap: 0.15rem;
+        padding: 0.6rem 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .update-confirmation-list span { color: var(--muted); font-size: 0.9rem; }
       .dialog-actions { display: flex; justify-content: flex-end; gap: 0.65rem; }
       .fleet-refresh-status-card {
         margin: 1rem 0;

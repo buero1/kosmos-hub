@@ -581,7 +581,7 @@
             <tr>
               <td>
                 {% if entry.direct_update_selectable %}
-                  <input class="update-selection" type="checkbox" name="selected" value="{{ entry.plan_key }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
+                  <input class="update-selection" type="checkbox" name="selected" value="{{ entry.plan_key }}" data-update-site="{{ entry.site.domain }}" data-update-name="{{ entry.name }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
                   <span class="subtle">Not ready</span>
                 {% endif %}
@@ -666,6 +666,8 @@
       <form method="dialog">
         <h3 id="direct-update-confirmation-heading">Updates durchführen?</h3>
         <p data-direct-update-confirmation-text>Die ausgewählten Updates werden nacheinander installiert und anschließend geprüft.</p>
+        <p class="dialog-selection-heading">Ausgewählte Websites und Updates</p>
+        <ul class="update-confirmation-list" data-direct-update-confirmation-list></ul>
         <div class="dialog-actions">
           <button class="button button-secondary" value="cancel">Abbrechen</button>
           <button class="button" value="confirm" data-direct-update-confirm>Updates ausführen</button>
@@ -683,6 +685,7 @@
       var selectionSummary = document.querySelector("[data-direct-update-selection-summary]");
       var confirmationDialog = document.querySelector("[data-direct-update-confirmation]");
       var confirmationText = document.querySelector("[data-direct-update-confirmation-text]");
+      var confirmationList = document.querySelector("[data-direct-update-confirmation-list]");
       var confirmationButton = document.querySelector("[data-direct-update-confirm]");
       if (!selectAll) {
         return;
@@ -708,6 +711,29 @@
         }
       }
 
+      function fillConfirmationList() {
+        if (!confirmationList) { return; }
+        var updatesBySite = {};
+        selections().forEach(function (selection) {
+          if (!selection.checked) { return; }
+          var site = selection.getAttribute("data-update-site") || "Website";
+          var update = selection.getAttribute("data-update-name") || "Update";
+          if (!updatesBySite[site]) { updatesBySite[site] = []; }
+          updatesBySite[site].push(update);
+        });
+        confirmationList.textContent = "";
+        Object.keys(updatesBySite).forEach(function (site) {
+          var item = document.createElement("li");
+          var siteName = document.createElement("strong");
+          var updateNames = document.createElement("span");
+          siteName.textContent = site;
+          updateNames.textContent = updatesBySite[site].join(", ");
+          item.appendChild(siteName);
+          item.appendChild(updateNames);
+          confirmationList.appendChild(item);
+        });
+      }
+
       selectAll.addEventListener("change", function () {
         selections().forEach(function (selection) {
           selection.checked = selectAll.checked;
@@ -731,6 +757,7 @@
               ? "1 ausgewähltes Update wird nacheinander installiert und anschließend geprüft."
               : selected + " ausgewählte Updates werden nacheinander installiert und anschließend geprüft.";
           }
+          fillConfirmationList();
           confirmationDialog.showModal();
         });
         confirmationButton.addEventListener("click", function (event) {
