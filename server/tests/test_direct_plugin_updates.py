@@ -6,7 +6,7 @@ from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryServi
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.official_plugin_versions import OfficialPluginVersionService
+from app.services.official_plugin_versions import OfficialPluginVersionService, OfficialVersionCandidate
 from app.services.provider_credentials import ProviderCredentialService
 from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.site_mcp_proxy import SiteMcpProxyError
@@ -378,6 +378,60 @@ def test_official_version_lookup_uses_the_documented_wordpress_org_query_shape()
     url = OfficialPluginVersionService.WORDPRESS_ORG_API.format(slug="wordpress-seo")
 
     assert url == "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request[slug]=wordpress-seo"
+
+
+def test_elementor_pro_changelog_parser_returns_the_newest_version_heading():
+    changelog = """
+        <h4>4.2.2 - 2026-08-19</h4>
+        <h4>4.2.1 - 2026-07-28</h4>
+    """
+
+    assert OfficialPluginVersionService._parse_elementor_pro_version(changelog) == "4.2.2"
+
+
+def test_elementor_pro_changelog_parser_rejects_unversioned_headings():
+    assert OfficialPluginVersionService._parse_elementor_pro_version("<h4>Latest updates</h4>") is None
+
+
+def test_official_version_refresh_uses_elementor_pro_changelog_once_per_catalogue_check():
+    records = []
+    service = object.__new__(OfficialPluginVersionService)
+    service.db = SimpleNamespace(add=records.append, flush=lambda: None)
+    service._collect_candidates = lambda _items: {
+        "elementor-pro/elementor-pro.php": SimpleNamespace(plugin_file="elementor-pro/elementor-pro.php"),
+        "wordpress-seo/wp-seo.php": SimpleNamespace(plugin_file="wordpress-seo/wp-seo.php"),
+    }
+    service.get_cached = lambda _candidates: {}
+    wordpress_org_requests = []
+    service._fetch_wordpress_org_version = lambda plugin_file: (wordpress_org_requests.append(plugin_file) or ("25.1", None))
+    service._fetch_elementor_pro_version = lambda: ("4.2.2", None)
+
+    summary = service.refresh_for_inventory([])
+
+    assert summary["checked"] == 2
+    assert summary["completed"] == 2
+    assert summary["elementor_pro"] == 1
+    assert wordpress_org_requests == ["wordpress-seo/wp-seo.php"]
+    elementor_record = next(record for record in records if record.plugin_file == "elementor-pro/elementor-pro.php")
+    assert elementor_record.official_version == "4.2.2"
+    assert elementor_record.source == "Elementor Pro Changelog"
+
+
+def test_elementor_pro_replaces_legacy_unavailable_catalog_entries_without_waiting_for_the_cache():
+    now = datetime.now(UTC)
+    legacy_record = SimpleNamespace(
+        official_version=None,
+        source="No public or provider catalog available",
+        checked_at=now,
+    )
+
+    assert OfficialPluginVersionService._needs_catalog_refresh(
+        candidate=OfficialVersionCandidate(plugin_file="elementor-pro/elementor-pro.php"),
+        record=legacy_record,
+        force=False,
+        now=now,
+        max_age=timedelta(hours=24),
+    ) is True
 
 
 def test_provider_license_normalization_keeps_elementor_in_one_row():

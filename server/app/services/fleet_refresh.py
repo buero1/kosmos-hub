@@ -695,7 +695,7 @@ class FleetRefreshService:
             "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "users": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0, "unsupported": 0},
             "crocoblock": {"eligible": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "catalog_versions": 0},
-            "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
+            "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "elementor_pro": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
             "phase": {"key": "queued", "label": "Waiting for a background worker", "completed": 0, "total": 0},
             "mismatches": 0,
             "last_site": "",

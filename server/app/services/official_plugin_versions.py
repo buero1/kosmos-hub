@@ -23,6 +23,10 @@ class OfficialPluginVersionService:
     """Keeps inspectable version evidence separate from update execution."""
 
     WORDPRESS_ORG_API = "https://api.wordpress.org/plugins/info/1.2/?action=plugin_information&request[slug]={slug}"
+    ELEMENTOR_PRO_PLUGIN_FILE = "elementor-pro/elementor-pro.php"
+    ELEMENTOR_PRO_CHANGELOG_URL = "https://elementor.com/pro/changelog/"
+    ELEMENTOR_PRO_SOURCE = "Elementor Pro Changelog"
+    PROVIDER_CATALOG_SOURCES = frozenset({"Crocoblock Jet Dashboard", ELEMENTOR_PRO_SOURCE})
     REQUEST_TIMEOUT_SECONDS = 8
     MAX_CONCURRENT_REQUESTS = 6
 
@@ -55,6 +59,7 @@ class OfficialPluginVersionService:
                 "completed": 0,
                 "cached": 0,
                 "wordpress_org": 0,
+                "elementor_pro": 0,
                 "provider_offer": 0,
                 "unavailable": 0,
                 "failed": 0,
@@ -65,7 +70,13 @@ class OfficialPluginVersionService:
         stale_candidates = {
             plugin_file: candidate
             for plugin_file, candidate in candidates.items()
-            if force or not self._is_fresh(existing.get(plugin_file), now=now, max_age=max_age)
+            if self._needs_catalog_refresh(
+                candidate=candidate,
+                record=existing.get(plugin_file),
+                force=force,
+                now=now,
+                max_age=max_age,
+            )
         }
 
         summary = {
@@ -74,6 +85,7 @@ class OfficialPluginVersionService:
             "completed": 0,
             "cached": len(candidates) - len(stale_candidates),
             "wordpress_org": 0,
+            "elementor_pro": 0,
             "provider_offer": 0,
             "unavailable": 0,
             "failed": 0,
@@ -81,10 +93,36 @@ class OfficialPluginVersionService:
         if progress_callback is not None:
             progress_callback(summary.copy())
 
-        wordpress_org_results: dict[str, tuple[str | None, str | None]] = {}
+        catalog_results: dict[str, tuple[str | None, str | None]] = {}
+        elementor_candidates = [
+            candidate
+            for candidate in stale_candidates.values()
+            if self._is_elementor_pro_plugin(candidate.plugin_file)
+        ]
         cancellation_requested = bool(should_cancel and should_cancel())
+        if elementor_candidates and not cancellation_requested:
+            version, error = self._fetch_elementor_pro_version()
+            for candidate in elementor_candidates:
+                catalog_results[candidate.plugin_file] = (version, error)
+                summary["completed"] += 1
+                if version:
+                    summary["elementor_pro"] += 1
+                elif self._has_provider_catalog(existing.get(candidate.plugin_file)):
+                    summary["provider_offer"] += 1
+                else:
+                    summary["unavailable"] += 1
+                    if error and error != "elementor_pro_version_missing":
+                        summary["failed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
+
+        wordpress_org_candidates = [
+            candidate
+            for candidate in stale_candidates.values()
+            if not self._is_elementor_pro_plugin(candidate.plugin_file)
+        ]
         with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
-            candidates_iter = iter(stale_candidates.values())
+            candidates_iter = iter(wordpress_org_candidates)
             futures: dict[Any, str] = {}
             if not cancellation_requested:
                 for _ in range(self.MAX_CONCURRENT_REQUESTS):
@@ -97,14 +135,14 @@ class OfficialPluginVersionService:
                 future = next(as_completed(futures))
                 plugin_file = futures.pop(future)
                 try:
-                    wordpress_org_results[plugin_file] = future.result()
+                    catalog_results[plugin_file] = future.result()
                 except Exception:
-                    wordpress_org_results[plugin_file] = (None, "wordpress_org_request_failed")
+                    catalog_results[plugin_file] = (None, "wordpress_org_request_failed")
                 summary["completed"] += 1
-                version, error = wordpress_org_results[plugin_file]
+                version, error = catalog_results[plugin_file]
                 if version:
                     summary["wordpress_org"] += 1
-                elif (record := existing.get(plugin_file)) is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
+                elif self._has_provider_catalog(existing.get(plugin_file)):
                     summary["provider_offer"] += 1
                 else:
                     summary["unavailable"] += 1
@@ -123,17 +161,15 @@ class OfficialPluginVersionService:
                 futures[executor.submit(self._fetch_wordpress_org_version, candidate.plugin_file)] = candidate.plugin_file
 
         checked_at = now
-        for plugin_file in wordpress_org_results:
-            version, error = wordpress_org_results.get(plugin_file, (None, "wordpress_org_request_failed"))
+        for plugin_file, (version, error) in catalog_results.items():
             if version:
                 official_version = version
-                source = "WordPress.org"
+                source = self.ELEMENTOR_PRO_SOURCE if self._is_elementor_pro_plugin(plugin_file) else "WordPress.org"
                 last_error = None
             else:
                 record = existing.get(plugin_file)
-                if record is not None and record.official_version and record.source == "Crocoblock Jet Dashboard":
-                    # Jet Dashboard may temporarily omit an offer, but its last verified catalog
-                    # version remains better evidence than replacing it with an unknown value.
+                if self._has_provider_catalog(record):
+                    # A temporary provider error must not replace the last verified catalog value.
                     continue
                 official_version = None
                 source = "No public or provider catalog available"
@@ -171,6 +207,26 @@ class OfficialPluginVersionService:
             return False
         checked_at = record.checked_at if record.checked_at.tzinfo is not None else record.checked_at.replace(tzinfo=UTC)
         return now - checked_at <= max_age
+
+    @classmethod
+    def _needs_catalog_refresh(
+        cls,
+        *,
+        candidate: OfficialVersionCandidate,
+        record: PluginOfficialVersion | None,
+        force: bool,
+        now: datetime,
+        max_age: timedelta | None,
+    ) -> bool:
+        if force:
+            return True
+        if cls._is_elementor_pro_plugin(candidate.plugin_file) and (record is None or record.source != cls.ELEMENTOR_PRO_SOURCE):
+            return True
+        return not cls._is_fresh(record, now=now, max_age=max_age)
+
+    @classmethod
+    def _has_provider_catalog(cls, record: PluginOfficialVersion | None) -> bool:
+        return bool(record and record.official_version and record.source in cls.PROVIDER_CATALOG_SOURCES)
 
     def record_provider_versions(self, versions: Iterable[Any], *, source: str) -> int:
         """Persist the newest verified provider catalog version for each plugin."""
@@ -335,6 +391,35 @@ class OfficialPluginVersionService:
 
         version = str(payload.get("version", "")).strip() if isinstance(payload, dict) else ""
         return (version, None) if version else (None, "wordpress_org_version_missing")
+
+    def _fetch_elementor_pro_version(self) -> tuple[str | None, str | None]:
+        request = Request(
+            self.ELEMENTOR_PRO_CHANGELOG_URL,
+            headers={"User-Agent": "Kosmos-Hub/0.1 (+https://kosmos-hub.31-70-92-95.sslip.io)"},
+        )
+        try:
+            with urlopen(request, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310: fixed official Elementor endpoint.
+                changelog = response.read().decode("utf-8")
+        except HTTPError as exc:
+            return None, f"elementor_pro_http_{exc.code}"
+        except (URLError, TimeoutError, UnicodeDecodeError):
+            return None, "elementor_pro_request_failed"
+
+        version = self._parse_elementor_pro_version(changelog)
+        return (version, None) if version else (None, "elementor_pro_version_missing")
+
+    @staticmethod
+    def _parse_elementor_pro_version(changelog: str) -> str | None:
+        for heading in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", changelog, flags=re.IGNORECASE | re.DOTALL):
+            normalized = re.sub(r"<[^>]+>", " ", heading)
+            match = re.search(r"\b(\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.-]+)?)\s*[-–—]\s*\d{4}-\d{2}-\d{2}\b", normalized)
+            if match:
+                return match.group(1)
+        return None
+
+    @classmethod
+    def _is_elementor_pro_plugin(cls, plugin_file: str) -> bool:
+        return plugin_file.strip().replace("\\", "/").casefold() == cls.ELEMENTOR_PRO_PLUGIN_FILE
 
     @staticmethod
     def _wordpress_org_slug(plugin_file: str) -> str:
