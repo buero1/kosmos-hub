@@ -19,6 +19,10 @@ from app.services.fleet_refresh_settings import (
     FleetRefreshSettingsService,
 )
 
+def test_fresh_update_mode_is_valid_for_background_runs():
+    FleetRefreshService._validate_mode(FleetRefreshService.MODE_FRESH_UPDATES)
+
+
 
 def test_refresh_status_payload_exposes_live_phase_and_site_progress():
     run = FleetRefreshRun(

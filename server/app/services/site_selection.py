@@ -18,7 +18,6 @@ def build_site_selector_context(
     csrf_token: str = "",
     secondary_submit_action: str = "",
     secondary_submit_label: str = "",
-    secondary_submit_limit: int | None = None,
 ) -> dict[str, Any]:
     """Build one reusable domain/customer selector for fleet-facing pages."""
     selectable_sites = [
@@ -64,5 +63,4 @@ def build_site_selector_context(
         "csrf_token": csrf_token,
         "secondary_submit_action": secondary_submit_action,
         "secondary_submit_label": secondary_submit_label,
-        "secondary_submit_limit": secondary_submit_limit,
     }

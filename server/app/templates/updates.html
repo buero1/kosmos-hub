@@ -126,6 +126,8 @@
         class="maintenance-batch fleet-refresh-status-card"
         data-fleet-refresh-progress
         data-status-url="/updates/refresh-runs/{{ progress_refresh_run.id }}/status"
+        data-refresh-mode="{{ progress_refresh_run.mode }}"
+        data-refresh-completion-url="{{ fresh_completion_url }}"
         aria-labelledby="fleet-refresh-progress-heading"
       >
         <div class="section-heading">
@@ -162,6 +164,7 @@
             failed: "Fehlgeschlagen"
           };
           var timer;
+          var redirectScheduled = false;
 
           function value(selector) {
             return container.querySelector(selector);
@@ -214,7 +217,13 @@
             if (status === "succeeded") {
               if (completion) {
                 completion.hidden = false;
-                completion.textContent = "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert und " + number(sites.cached) + " aus dem Cache übernommen.";
+                completion.textContent = container.dataset.refreshMode === "fresh-updates"
+                  ? "Frischprüfung abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft."
+                  : "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert und " + number(sites.cached) + " aus dem Cache übernommen.";
+              }
+              if (container.dataset.refreshCompletionUrl && !redirectScheduled) {
+                redirectScheduled = true;
+                window.setTimeout(function () { window.location.assign(container.dataset.refreshCompletionUrl); }, 650);
               }
             } else if (status === "failed") {
               setText("[data-refresh-summary]", payload.error_message || "Der Refresh ist fehlgeschlagen.");

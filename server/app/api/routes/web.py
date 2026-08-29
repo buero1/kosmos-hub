@@ -22,7 +22,6 @@ from app.services.site_users import SiteUserService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
-from app.services.fresh_update_workbench import FreshUpdateWorkbenchService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.site_selection import build_site_selector_context
@@ -443,6 +442,24 @@ def update_workbench_page(
         if active_refresh_run_id is not None
         else active_fleet_refresh_run
     )
+    fresh_completion_url = ""
+    if (
+        fresh_updates == "running"
+        and progress_refresh_run is not None
+        and progress_refresh_run.mode == FleetRefreshService.MODE_FRESH_UPDATES
+    ):
+        completion_scope_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
+        completion_scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids or []))
+        completion_filter_query = [
+            ("q", q),
+            ("plugin", plugin),
+            ("kind", kind),
+            ("activity", activity),
+            ("diagnosis", diagnosis),
+            ("fresh_updates", "ok"),
+            ("message", "Fresh update checks completed. The table now shows the current results."),
+        ]
+        fresh_completion_url = f"/updates?{urlencode(completion_scope_query + completion_filter_query)}"
     refresh_runs = fleet_refresh_service.list_recent_runs(limit=20)
     selected_refresh_run = next((run for run in refresh_runs if run.id == refresh_run_id), None)
     refresh_site_results = (
@@ -477,7 +494,6 @@ def update_workbench_page(
                 csrf_token=get_csrf_token(request),
                 secondary_submit_action="/updates/fresh-show",
                 secondary_submit_label="Show fresh updates",
-                secondary_submit_limit=FreshUpdateWorkbenchService.MAX_SITES_PER_REQUEST,
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
@@ -490,6 +506,7 @@ def update_workbench_page(
             "fresh_updates": fresh_updates,
             "active_fleet_refresh_run": active_fleet_refresh_run,
             "progress_refresh_run": progress_refresh_run,
+            "fresh_completion_url": fresh_completion_url,
             "show_refresh_protocol": view == "refresh-protocol",
             "refresh_runs": refresh_runs,
             "selected_refresh_run": selected_refresh_run,
@@ -502,6 +519,7 @@ def update_workbench_page(
 @router.post("/updates/fresh-show")
 def show_fresh_updates(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     q: Annotated[str, Form()] = "",
     site_id: Annotated[list[int] | None, Form()] = None,
@@ -528,22 +546,29 @@ def show_fresh_updates(
     ] = "all",
     csrf_token: Annotated[str, Form()] = "",
 ):
-    """Run the bounded, explicit fresh-data alternative for Show updates."""
+    """Queue the explicit fresh-data alternative for Show updates."""
     require_csrf(request, csrf_token)
-    _require_hub_admin(request)
+    user = _require_hub_admin(request)
     selected_site_ids = set(site_id or []) if site_scope == "selected" else set()
     scope_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
     scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
     filter_query = [("q", q), ("plugin", plugin), ("kind", kind), ("activity", activity), ("diagnosis", diagnosis)]
-    try:
-        outcome = FreshUpdateWorkbenchService(db=db, cipher=get_secret_cipher()).refresh_selected_sites(selected_site_ids)
-    except ValueError as exc:
+    if not selected_site_ids:
         return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'error'), ('message', str(exc))])}",
+            url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'error'), ('message', 'Select at least one site before loading fresh updates.')])}",
             status_code=303,
         )
+    refresh_service = FleetRefreshService(db=db)
+    run, created = refresh_service.create_run(
+        actor=user,
+        mode=FleetRefreshService.MODE_FRESH_UPDATES,
+        site_ids=selected_site_ids,
+    )
+    db.commit()
+    if created:
+        background_tasks.add_task(FleetRefreshService.process_run, run.id)
     return RedirectResponse(
-        url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'ok'), ('message', outcome.message)])}",
+        url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'running'), ('active_refresh_run_id', run.id)])}",
         status_code=303,
     )
 

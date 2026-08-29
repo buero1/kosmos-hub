@@ -41,7 +41,11 @@ class FreshUpdateWorkbenchOutcome:
 
 
 class FreshUpdateWorkbenchService:
-    """Refresh the minimum current evidence needed to render the update workbench."""
+    """Retained synchronous prototype for a future, narrowly scoped fresh-data flow.
+
+    The Update Workbench uses FleetRefreshService.MODE_FRESH_UPDATES instead,
+    so arbitrary selected-site sets run in the persisted background worker.
+    """
 
     MAX_SITES_PER_REQUEST = 12
     MAX_PARALLEL_SITE_CHECKS = 3

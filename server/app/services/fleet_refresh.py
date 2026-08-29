@@ -30,6 +30,7 @@ class FleetRefreshService:
 
     MODE_NORMAL = "normal"
     MODE_FULL = "full"
+    MODE_FRESH_UPDATES = "fresh-updates"
     SCHEDULED_REQUESTED_BY = "kosmos-scheduler"
     LEGACY_SCHEDULED_REQUESTED_BY = "kosmos-hub"
     BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
@@ -303,7 +304,8 @@ class FleetRefreshService:
         target_site_ids: set[int] | None,
     ) -> dict[str, Any]:
         cls._validate_mode(mode)
-        force = mode == cls.MODE_FULL
+        force = mode in (cls.MODE_FULL, cls.MODE_FRESH_UPDATES)
+        updates_only = mode == cls.MODE_FRESH_UPDATES
         with SessionLocal() as db:
             runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
         result = cls._initial_result(
@@ -348,7 +350,7 @@ class FleetRefreshService:
                         target = next(targets_iter)
                     except StopIteration:
                         break
-                    futures[executor.submit(cls._refresh_one_site, target)] = target
+                    futures[executor.submit(cls._refresh_one_site, target, updates_only=updates_only)] = target
 
                 cancellation_requested = False
                 while futures:
@@ -378,7 +380,7 @@ class FleetRefreshService:
                         next_target = next(targets_iter)
                     except StopIteration:
                         continue
-                    futures[executor.submit(cls._refresh_one_site, next_target)] = next_target
+                    futures[executor.submit(cls._refresh_one_site, next_target, updates_only=updates_only)] = next_target
 
         if cls._is_cancellation_requested(run_id):
             return result
@@ -442,7 +444,7 @@ class FleetRefreshService:
             return targets, cached_targets, skipped_targets
 
     @classmethod
-    def _refresh_one_site(cls, target: dict[str, Any]) -> dict[str, Any]:
+    def _refresh_one_site(cls, target: dict[str, Any], *, updates_only: bool = False) -> dict[str, Any]:
         site_id = int(target["site_id"])
         with SessionLocal() as db:
             repository = SiteRepository(db)
@@ -456,6 +458,41 @@ class FleetRefreshService:
                 return {"site_id": site_id, "domain": site.domain, "state": "failed", "updates": "skipped", "backups": "skipped", "users": "skipped", "errors": [exc.message]}
 
             errors: list[str] = []
+            if updates_only:
+                if not cls._bridge_supports_updates(site.bridge_version):
+                    errors.append("Bridge update support is unavailable.")
+                    return {
+                        "site_id": site_id,
+                        "domain": site.domain,
+                        "state": "refreshed",
+                        "updates": "skipped",
+                        "backups": "skipped",
+                        "users": "skipped",
+                        "errors": errors,
+                    }
+                try:
+                    SiteUpdateService(db=db, cipher=get_secret_cipher()).refresh_site_updates(site_id)
+                except SiteMcpProxyError as exc:
+                    errors.append(exc.message)
+                    return {
+                        "site_id": site_id,
+                        "domain": site.domain,
+                        "state": "refreshed",
+                        "updates": "failed",
+                        "backups": "skipped",
+                        "users": "skipped",
+                        "errors": errors,
+                    }
+                return {
+                    "site_id": site_id,
+                    "domain": site.domain,
+                    "state": "refreshed",
+                    "updates": "refreshed",
+                    "backups": "skipped",
+                    "users": "skipped",
+                    "errors": errors,
+                }
+
             try:
                 SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)
                 backup_status = "refreshed"
@@ -941,5 +978,5 @@ class FleetRefreshService:
 
     @classmethod
     def _validate_mode(cls, mode: str) -> None:
-        if mode not in (cls.MODE_NORMAL, cls.MODE_FULL):
-            raise ValueError("Refresh mode must be normal or full.")
+        if mode not in (cls.MODE_NORMAL, cls.MODE_FULL, cls.MODE_FRESH_UPDATES):
+            raise ValueError("Refresh mode must be normal, full, or fresh-updates.")

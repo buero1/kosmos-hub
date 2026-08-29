@@ -54,16 +54,13 @@
           <details class="site-selector-submit-options">
             <summary aria-label="Weitere Anzeigeoptionen" title="Weitere Anzeigeoptionen">&#9662;</summary>
             <div class="site-selector-submit-menu">
-              <p>Read selected sites directly from WordPress.</p>
               <button
                 class="button button-secondary"
                 type="submit"
                 formmethod="post"
                 formaction="{{ site_selector.secondary_submit_action }}"
                 data-site-selector-secondary-submit
-                {% if site_selector.secondary_submit_limit %}data-site-selector-secondary-limit="{{ site_selector.secondary_submit_limit }}"{% endif %}
               >{{ site_selector.secondary_submit_label }}</button>
-              {% if site_selector.secondary_submit_limit %}<small>Up to {{ site_selector.secondary_submit_limit }} selected websites.</small>{% endif %}
             </div>
           </details>
         {% endif %}
@@ -112,8 +109,7 @@
       var selectedCount = selectedIds().length;
       count.textContent = selectedCount && selectedCount === siteChecks.length ? "All selectable sites" : selectedCount + " selected";
       if (secondarySubmit) {
-        var limit = Number(secondarySubmit.getAttribute("data-site-selector-secondary-limit") || 0);
-        secondarySubmit.disabled = selectedCount === 0 || (limit > 0 && selectedCount > limit);
+        secondarySubmit.disabled = selectedCount === 0;
       }
       syncCustomerChecks();
       syncTargetForm();
