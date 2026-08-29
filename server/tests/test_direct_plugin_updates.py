@@ -2,6 +2,15 @@ from datetime import UTC, datetime, timedelta
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from app.models.audit_log import AuditLog
+from app.models.customer import Customer
+from app.models.site_backup_snapshot import SiteBackupSnapshot
+from app.models.site_capability import SiteCapability
+from app.models.site_connection import SiteConnection
+from app.models.site_snapshot import SiteSnapshot
+from app.models.site_update_snapshot import SiteUpdateSnapshot
+from app.models.site_user_snapshot import SiteUserSnapshot
+from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService, UpdateWorkbenchEntry
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings
@@ -171,6 +180,48 @@ def test_live_plugin_preflight_skips_an_unavailable_update_with_the_observed_ver
     assert resolution["stage"] == "update-not-available"
     assert resolution["installed_version"] == "0.3.52"
     assert "cannot be performed" in resolution["message"]
+
+
+def test_live_plugin_preflight_reads_installed_plugins_without_an_input_payload():
+    class Proxy:
+        def __init__(self):
+            self.input_payload = "not-called"
+
+        def execute_readonly_ability(self, _site_id, _ability_name, input_payload, *, timeout_seconds):
+            self.input_payload = input_payload
+            assert timeout_seconds == 45
+            return {
+                "result": {
+                    "plugins": [
+                        {
+                            "plugin_file": "kosmos-bridge/kosmos-bridge.php",
+                            "version": "0.3.56",
+                            "active": True,
+                        }
+                    ]
+                }
+            }
+
+    service = object.__new__(MaintenanceRunService)
+    service.proxy = Proxy()
+    service._start_plugin_update_step = lambda *_args: None
+    captured = {}
+    service._finish_direct_plugin_preflight_resolution = lambda _run, _step, _details, resolution: captured.update(resolution)
+    outcome = service._reconcile_direct_plugin_preflight_mismatch(
+        SimpleNamespace(site_id=17),
+        {
+            "update_kind": "plugin",
+            "update_name": "Kosmos Bridge",
+            "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+            "target_version": "0.3.55",
+        },
+        None,
+        "Kosmos Bridge does not report both the installed and target version.",
+    )
+
+    assert service.proxy.input_payload is None
+    assert outcome == "succeeded"
+    assert captured["stage"] == "already-updated"
 
 
 def test_direct_updates_accept_themes_and_wordpress_core_with_exact_versions():

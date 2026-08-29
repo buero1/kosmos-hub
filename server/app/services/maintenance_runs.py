@@ -766,7 +766,7 @@ class MaintenanceRunService:
             payload = self.proxy.execute_readonly_ability(
                 run.site_id,
                 self.LIST_INSTALLED_PLUGINS_ABILITY,
-                {},
+                None,
                 timeout_seconds=45,
             )
         except SiteMcpProxyError as exc:
@@ -999,7 +999,7 @@ class MaintenanceRunService:
             payload = self.proxy.execute_readonly_ability(
                 run.site_id,
                 self.LIST_INSTALLED_PLUGINS_ABILITY,
-                {},
+                None,
                 timeout_seconds=45,
             )
         except SiteMcpProxyError as exc:
