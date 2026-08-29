@@ -393,6 +393,79 @@ def test_elementor_pro_changelog_parser_rejects_unversioned_headings():
     assert OfficialPluginVersionService._parse_elementor_pro_version("<h4>Latest updates</h4>") is None
 
 
+def test_crocoblock_changelog_lookup_maps_latest_versions_and_plugin_aliases(monkeypatch):
+    class Response:
+        def read(self):
+            return (
+                b'[{"name":"JetElements 2.9.2","slug":"jet-elements"},'
+                b'{"name":"JetCompareWishlist 1.5.13","slug":"jet-cw"}]'
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("app.services.official_plugin_versions.urlopen", lambda *_args, **_kwargs: Response())
+
+    lookup = OfficialPluginVersionService.fetch_crocoblock_changelog_versions(
+        (
+            "jet-elements/jet-elements.php",
+            "jet-compare-wishlist/jet-compare-wishlist.php",
+            "elementor-pro/elementor-pro.php",
+        )
+    )
+
+    assert lookup.requested == 2
+    assert lookup.error is None
+    assert lookup.versions == {
+        "jet-elements/jet-elements.php": "2.9.2",
+        "jet-compare-wishlist/jet-compare-wishlist.php": "1.5.13",
+    }
+
+
+def test_crocoblock_changelog_parser_rejects_entries_without_a_version():
+    assert OfficialPluginVersionService._parse_crocoblock_changelog_version("JetElements current") is None
+
+
+def test_automatic_crocoblock_activation_candidates_require_a_conflicting_update_offer():
+    entries = [
+        SimpleNamespace(
+            kind="plugin",
+            identifier="jet-elements/jet-elements.php",
+            update_available=True,
+            target_version="2.9.2",
+            site=SimpleNamespace(id=1),
+        ),
+        SimpleNamespace(
+            kind="plugin",
+            identifier="jet-engine/jet-engine.php",
+            update_available=True,
+            target_version="3.8.13",
+            site=SimpleNamespace(id=2),
+        ),
+        SimpleNamespace(
+            kind="plugin",
+            identifier="jet-tabs/jet-tabs.php",
+            update_available=False,
+            target_version="2.3.2",
+            site=SimpleNamespace(id=3),
+        ),
+    ]
+
+    selected = FleetRefreshService._jet_sites_requiring_provider(
+        entries=entries,
+        changelog_versions={
+            "jet-elements/jet-elements.php": "2.9.2",
+            "jet-engine/jet-engine.php": "3.8.14.3",
+            "jet-tabs/jet-tabs.php": "2.3.3",
+        },
+    )
+
+    assert selected == {2}
+
+
 def test_official_version_refresh_uses_elementor_pro_changelog_once_per_catalogue_check():
     records = []
     service = object.__new__(OfficialPluginVersionService)

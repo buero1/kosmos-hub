@@ -68,7 +68,8 @@ class FleetRefreshService:
             mode=mode,
             status=FleetRefreshRunStatus.queued.value,
             requested_by=actor.username,
-            allow_provider_activation=True,
+            # Manual refreshes only read data; a Jet license is touched during a direct update.
+            allow_provider_activation=False,
             result_json=self._initial_result(mode, target_site_ids=site_ids),
         )
         self.db.add(run)
@@ -172,7 +173,7 @@ class FleetRefreshService:
                 mode=cls.MODE_NORMAL,
                 status=FleetRefreshRunStatus.queued.value,
                 requested_by=cls.SCHEDULED_REQUESTED_BY,
-                allow_provider_activation=False,
+                allow_provider_activation=True,
                 result_json=cls._initial_result(cls.MODE_NORMAL),
             )
             db.add(run)
@@ -504,13 +505,32 @@ class FleetRefreshService:
                 items = [item for item in items if item.site.id in target_site_ids]
             entries = inventory.build_update_workbench(items)
             version_service = OfficialPluginVersionService(db=db)
-            jet_site_ids = cls._jet_sites_requiring_provider(
-                items=items,
-                entries=entries,
-                version_service=version_service,
-                force=force,
-                provider_max_age=timedelta(hours=runtime_settings.official_version_max_age_hours),
-            )
+            jet_site_ids: set[int] = set()
+            if allow_provider_activation:
+                changelog = OfficialPluginVersionService.fetch_crocoblock_changelog_versions(
+                    entry.identifier for entry in entries if entry.kind == "plugin"
+                )
+                result["crocoblock"].update(
+                    {
+                        "changelog_checked": changelog.requested,
+                        "changelog_versions": len(changelog.versions),
+                        "changelog_unavailable": changelog.requested - len(changelog.versions),
+                        "changelog_error": changelog.error,
+                    }
+                )
+                if changelog.versions:
+                    result["crocoblock"]["changelog_catalog_versions"] = version_service.record_provider_versions(
+                        (
+                            {"plugin_file": plugin_file, "version": version}
+                            for plugin_file, version in changelog.versions.items()
+                        ),
+                        source=OfficialPluginVersionService.CROCOBLOCK_CHANGELOG_SOURCE,
+                    )
+                jet_site_ids = cls._jet_sites_requiring_provider(
+                    entries=entries,
+                    changelog_versions=changelog.versions,
+                )
+
             result["crocoblock"]["eligible"] = len(jet_site_ids)
             result["phase"] = {
                 "key": "jet-catalogue",
@@ -542,9 +562,6 @@ class FleetRefreshService:
                 items = inventory.list_items(limit=1000)
                 if target_site_ids is not None:
                     items = [item for item in items if item.site.id in target_site_ids]
-            elif jet_site_ids:
-                result["crocoblock"]["cached"] = len(jet_site_ids)
-
             if cls._is_cancellation_requested(run_id):
                 return
             result["phase"] = {
@@ -605,23 +622,17 @@ class FleetRefreshService:
     def _jet_sites_requiring_provider(
         cls,
         *,
-        items: list[Any],
         entries: list[Any],
-        version_service: OfficialPluginVersionService,
-        force: bool,
-        provider_max_age: timedelta,
+        changelog_versions: dict[str, str],
     ) -> set[int]:
-        jet_entries = [entry for entry in entries if entry.kind == "plugin" and entry.identifier.startswith("jet-")]
-        cached_versions = version_service.get_cached([entry.identifier for entry in jet_entries])
-        now = datetime.now(UTC)
         required_site_ids: set[int] = set()
-        for entry in jet_entries:
-            reference = cached_versions.get(entry.identifier)
-            if force or entry.official_mismatch or not OfficialPluginVersionService._is_fresh(
-                reference,
-                now=now,
-                max_age=provider_max_age,
-            ):
+        for entry in entries:
+            if entry.kind != "plugin" or not entry.identifier.startswith("jet-") or not entry.update_available:
+                continue
+            official_version = changelog_versions.get(entry.identifier)
+            if not official_version or not entry.target_version:
+                continue
+            if OfficialPluginVersionService._version_key(entry.target_version) != OfficialPluginVersionService._version_key(official_version):
                 required_site_ids.add(entry.site.id)
         return required_site_ids
 
@@ -694,7 +705,19 @@ class FleetRefreshService:
             "updates": {"refreshed": 0, "failed": 0, "skipped": 0},
             "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "users": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0, "unsupported": 0},
-            "crocoblock": {"eligible": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "catalog_versions": 0},
+            "crocoblock": {
+                "eligible": 0,
+                "completed": 0,
+                "refreshed": 0,
+                "cached": 0,
+                "failed": 0,
+                "catalog_versions": 0,
+                "changelog_checked": 0,
+                "changelog_versions": 0,
+                "changelog_catalog_versions": 0,
+                "changelog_unavailable": 0,
+                "changelog_error": None,
+            },
             "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "elementor_pro": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
             "phase": {"key": "queued", "label": "Waiting for a background worker", "completed": 0, "total": 0},
             "mismatches": 0,

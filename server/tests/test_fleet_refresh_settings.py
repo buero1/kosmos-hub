@@ -2,8 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+import app.services.fleet_refresh as fleet_refresh_module
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus
@@ -103,6 +104,35 @@ def test_automatic_schedule_keeps_its_fixed_time_after_a_manual_refresh():
         ) is True
 
 
+def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(fleet_refresh_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(user)
+        db.commit()
+        FleetRefreshSettingsService(db=db).configure(
+            actor=user,
+            site_status_max_age_minutes=15,
+            official_version_max_age_hours=24,
+            max_parallel_site_checks=5,
+            max_parallel_direct_updates=5,
+            auto_refresh_enabled=True,
+            auto_refresh_interval_hours=24,
+            auto_refresh_time="00:00",
+        )
+        db.commit()
+
+    run_id = FleetRefreshService.queue_scheduled_run()
+
+    with Session(engine) as db:
+        run = db.get(FleetRefreshRun, run_id)
+        assert run is not None
+        assert run.allow_provider_activation is True
+
+
 def test_berlin_time_format_handles_summer_winter_and_naive_database_values():
     assert format_berlin_time(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)) == "27.08.2026 14:00:00 CEST"
     assert format_berlin_time(datetime(2026, 1, 15, 12, 0)) == "15.01.2026 13:00:00 CET"
@@ -175,6 +205,7 @@ def test_selected_refresh_scope_is_persisted_for_the_background_worker():
         )
 
         assert created is True
+        assert run.allow_provider_activation is False
         assert run.result_json["scope"] == {
             "kind": "selected",
             "site_ids": [7, 11, 19],

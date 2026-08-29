@@ -19,6 +19,15 @@ class OfficialVersionCandidate:
     plugin_file: str
 
 
+@dataclass(frozen=True)
+class CrocoblockChangelogLookup:
+    """Latest Jet versions published by Crocoblock's public changelog."""
+
+    versions: dict[str, str]
+    requested: int
+    error: str | None = None
+
+
 class OfficialPluginVersionService:
     """Keeps inspectable version evidence separate from update execution."""
 
@@ -26,7 +35,16 @@ class OfficialPluginVersionService:
     ELEMENTOR_PRO_PLUGIN_FILE = "elementor-pro/elementor-pro.php"
     ELEMENTOR_PRO_CHANGELOG_URL = "https://elementor.com/pro/changelog/"
     ELEMENTOR_PRO_SOURCE = "Elementor Pro Changelog"
-    PROVIDER_CATALOG_SOURCES = frozenset({"Crocoblock Jet Dashboard", ELEMENTOR_PRO_SOURCE})
+    CROCOBLOCK_CHANGELOG_URL = "https://crocoblock.com/wp-content/uploads/jet-changelog/last-updates.json"
+    CROCOBLOCK_CHANGELOG_SOURCE = "Crocoblock Changelog"
+    CROCOBLOCK_CHANGELOG_SLUGS = {
+        "jet-appointment": "jet-appointments-booking",
+        "jet-compare-wishlist": "jet-cw",
+        "jet-style-manager": "jet-styles-manager",
+    }
+    PROVIDER_CATALOG_SOURCES = frozenset(
+        {"Crocoblock Jet Dashboard", CROCOBLOCK_CHANGELOG_SOURCE, ELEMENTOR_PRO_SOURCE}
+    )
     REQUEST_TIMEOUT_SECONDS = 8
     MAX_CONCURRENT_REQUESTS = 6
 
@@ -266,6 +284,46 @@ class OfficialPluginVersionService:
         self.db.flush()
         return len(grouped)
 
+    @classmethod
+    def fetch_crocoblock_changelog_versions(cls, plugin_files: Iterable[str]) -> CrocoblockChangelogLookup:
+        """Fetch the public Crocoblock changelog once and map it to installed Jet plugins."""
+        requested = {
+            normalized
+            for plugin_file in plugin_files
+            if (normalized := plugin_file.strip().replace("\\", "/")) and cls._crocoblock_changelog_slug(normalized)
+        }
+        if not requested:
+            return CrocoblockChangelogLookup(versions={}, requested=0)
+
+        request = Request(
+            cls.CROCOBLOCK_CHANGELOG_URL,
+            headers={"User-Agent": "Kosmos-Hub/0.1 (+https://kosmos-hub.31-70-92-95.sslip.io)"},
+        )
+        try:
+            with urlopen(request, timeout=cls.REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310: fixed official Crocoblock endpoint.
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            return CrocoblockChangelogLookup(versions={}, requested=len(requested), error=f"crocoblock_changelog_http_{exc.code}")
+        except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+            return CrocoblockChangelogLookup(versions={}, requested=len(requested), error="crocoblock_changelog_request_failed")
+
+        published_versions: dict[str, str] = {}
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                slug = str(entry.get("slug", "")).strip()
+                version = cls._parse_crocoblock_changelog_version(str(entry.get("name", "")))
+                if slug and version:
+                    published_versions[slug] = version
+
+        versions = {
+            plugin_file: published_versions[slug]
+            for plugin_file in requested
+            if (slug := cls._crocoblock_changelog_slug(plugin_file)) in published_versions
+        }
+        return CrocoblockChangelogLookup(versions=versions, requested=len(requested))
+
     @staticmethod
     def comparison(*, current_version: str, reported_version: str, official_version: str | None) -> tuple[bool, str]:
         if not official_version:
@@ -416,6 +474,18 @@ class OfficialPluginVersionService:
             if match:
                 return match.group(1)
         return None
+
+    @staticmethod
+    def _parse_crocoblock_changelog_version(name: str) -> str | None:
+        match = re.search(r"\b(\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.-]+)?)\s*$", name.strip())
+        return match.group(1) if match else None
+
+    @classmethod
+    def _crocoblock_changelog_slug(cls, plugin_file: str) -> str:
+        directory = plugin_file.partition("/")[0].casefold()
+        if not directory.startswith("jet-"):
+            return ""
+        return cls.CROCOBLOCK_CHANGELOG_SLUGS.get(directory, directory)
 
     @classmethod
     def _is_elementor_pro_plugin(cls, plugin_file: str) -> bool:
