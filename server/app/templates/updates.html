@@ -83,7 +83,7 @@
       </span>
       <label>
         <span>Aktion</span>
-        <select name="maintenance_action" required>
+        <select name="maintenance_action" required data-workbench-action-select>
           <option value="" selected disabled>Aktion auswählen</option>
           <option value="direct-updates">Ausgewählte Updates ausführen</option>
           <option value="refresh-stale">Ausgewählte Websites aktualisieren und diagnostizieren</option>
@@ -93,8 +93,25 @@
         </select>
       </label>
       <p class="subtle">Umfang: <span data-site-selector-target-summary data-site-selector-target-summary-locale="de">{{ site_selector.selected_site_ids | length }} ausgewählte Website{{ "" if site_selector.selected_site_ids | length == 1 else "s" }}</span>.</p>
-      <button class="button" type="submit">Anwenden</button>
+      <button class="button" type="submit" disabled data-workbench-action-submit>Anwenden</button>
     </form>
+
+    <script>
+      (function () {
+        var form = document.getElementById("workbench-action-form");
+        if (!form) { return; }
+        var actionSelect = form.querySelector("[data-workbench-action-select]");
+        var submitButton = form.querySelector("[data-workbench-action-submit]");
+        if (!actionSelect || !submitButton) { return; }
+
+        function syncSubmitState() {
+          submitButton.disabled = !actionSelect.value;
+        }
+
+        actionSelect.addEventListener("change", syncSubmitState);
+        syncSubmitState();
+      }());
+    </script>
 
     {% if direct_update == "started" %}
       <p class="notice-success">{{ message }}</p>
