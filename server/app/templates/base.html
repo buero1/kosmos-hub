@@ -308,15 +308,15 @@
         cursor: not-allowed;
         opacity: 0.5;
       }
-      .fleet-refresh-progress {
+      .fleet-refresh-status-card {
         margin: 1rem 0;
         padding: 1rem;
         border: 1px solid #8dbdae;
         border-radius: 16px;
         background: linear-gradient(135deg, rgba(232, 246, 240, 0.88), rgba(255, 250, 242, 0.9));
       }
-      .fleet-refresh-progress .section-heading { margin-bottom: 0.75rem; }
-      .fleet-refresh-progress h3 { display: flex; align-items: center; gap: 0.55rem; }
+      .fleet-refresh-status-card .section-heading { margin-bottom: 0.75rem; }
+      .fleet-refresh-status-card h3 { display: flex; align-items: center; gap: 0.55rem; }
       .fleet-refresh-progress-track {
         height: 0.72rem;
         overflow: hidden;
@@ -341,8 +341,8 @@
         font-size: 0.9rem;
       }
       .fleet-refresh-progress-meta strong { color: var(--ink); }
-      .fleet-refresh-progress [data-refresh-summary] { margin: 0.75rem 0 0; }
-      .fleet-refresh-progress [data-refresh-complete] { margin: 0.75rem 0 0; }
+      .fleet-refresh-status-card [data-refresh-summary] { margin: 0.75rem 0 0; }
+      .fleet-refresh-status-card [data-refresh-complete] { margin: 0.75rem 0 0; }
       .plugin-install-form {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));

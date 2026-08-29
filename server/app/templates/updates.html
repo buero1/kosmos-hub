@@ -119,7 +119,7 @@
       {% set refresh_scope = refresh_progress.get("scope", {}) %}
       {% set refresh_sites = refresh_progress.get("sites", {}) %}
       <section
-        class="maintenance-batch fleet-refresh-progress"
+        class="maintenance-batch fleet-refresh-status-card"
         data-fleet-refresh-progress
         data-status-url="/updates/refresh-runs/{{ progress_refresh_run.id }}/status"
         aria-labelledby="fleet-refresh-progress-heading"
