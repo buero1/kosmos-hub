@@ -138,7 +138,7 @@
         <div class="fleet-refresh-progress-meta">
           <strong data-refresh-phase-count>{{ refresh_phase.get("completed", 0) }}/{{ refresh_phase.get("total", 0) }}</strong>
           <span data-refresh-site-count>Websites: {{ refresh_sites.get("completed", 0) }}/{{ refresh_sites.get("total", 0) }}</span>
-          <span data-refresh-last-site>{% if refresh_progress.get("last_site") %}Zuletzt: {{ refresh_progress.get("last_site") }}{% endif %}</span>
+          <span>{{ entries | length }} Items</span>
         </div>
         <p class="subtle" hidden data-refresh-summary></p>
         <p class="notice-success" hidden data-refresh-complete></p>
@@ -205,7 +205,6 @@
             setText("[data-refresh-scope]", scope.label || "Ausgewählte Websites");
             setText("[data-refresh-phase-count]", phaseTotal > 0 ? phaseCompleted + "/" + phaseTotal : "Wartet");
             setText("[data-refresh-site-count]", "Websites: " + siteCompleted + "/" + siteTotal);
-            setText("[data-refresh-last-site]", result.last_site ? "Zuletzt: " + result.last_site : "");
             if (summary) { summary.hidden = status === "running" || status === "succeeded"; }
 
             if (status === "succeeded") {
@@ -416,7 +415,6 @@
     {% endif %}
 
     {% if not show_refresh_protocol %}
-    <p class="result-count">{{ entries | length }} WordPress, theme, and plugin inventory items. Available WordPress, theme, and active or inactive plugin updates can be selected and started from this page.</p>
     <div class="table-scroll">
       <table class="update-workbench-table">
         <thead>
