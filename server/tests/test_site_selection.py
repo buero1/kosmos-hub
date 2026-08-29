@@ -46,3 +46,22 @@ def test_site_selector_all_means_all_selectable_sites():
 
     assert context["site_scope"] == "selected"
     assert context["selected_site_ids"] == {1}
+
+
+def test_site_selector_can_expose_an_explicit_bounded_secondary_action():
+    context = build_site_selector_context(
+        action="/updates",
+        form_id="site-scope",
+        sites=[_site(1, "Aktuell")],
+        selected_site_ids={1},
+        site_scope="selected",
+        submit_label="Show updates",
+        csrf_token="csrf-token",
+        secondary_submit_action="/updates/fresh-show",
+        secondary_submit_label="Show fresh updates",
+        secondary_submit_limit=12,
+    )
+
+    assert context["secondary_submit_action"] == "/updates/fresh-show"
+    assert context["secondary_submit_label"] == "Show fresh updates"
+    assert context["secondary_submit_limit"] == 12

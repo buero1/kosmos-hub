@@ -1,8 +1,8 @@
-"""Detached experimental alternative to the stored-inventory Update Workbench.
+"""Optional experimental alternative to the stored-inventory Update Workbench.
 
-This service intentionally has no web route.  It remains here so that a future
-version can revive the bounded, fresh-on-demand comparison without mixing that
-behaviour into the normal ``Show updates`` workflow.
+The normal ``Show updates`` workflow does not call this service. It is exposed
+only through the explicit fresh-update option in the site-selector menu, so a
+future version can remove or expand this bounded experiment as one unit.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
