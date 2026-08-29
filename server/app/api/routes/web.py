@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.api.routes.accounts import get_csrf_token, require_csrf
@@ -392,6 +392,7 @@ def update_workbench_page(
     message: str = "",
     view: Literal["updates", "refresh-protocol"] = "updates",
     refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
+    active_refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=1000)
@@ -435,6 +436,11 @@ def update_workbench_page(
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
     active_fleet_refresh_run = fleet_refresh_service.get_active_run()
+    progress_refresh_run = (
+        fleet_refresh_service.get_run(active_refresh_run_id)
+        if active_refresh_run_id is not None
+        else active_fleet_refresh_run
+    )
     refresh_runs = fleet_refresh_service.list_recent_runs(limit=20)
     selected_refresh_run = next((run for run in refresh_runs if run.id == refresh_run_id), None)
     refresh_site_results = (
@@ -476,6 +482,7 @@ def update_workbench_page(
             "direct_update": direct_update,
             "official_versions": official_versions,
             "active_fleet_refresh_run": active_fleet_refresh_run,
+            "progress_refresh_run": progress_refresh_run,
             "show_refresh_protocol": view == "refresh-protocol",
             "refresh_runs": refresh_runs,
             "selected_refresh_run": selected_refresh_run,
@@ -483,6 +490,20 @@ def update_workbench_page(
             "message": message,
         },
     )
+
+
+@router.get("/updates/refresh-runs/{run_id}/status", response_class=JSONResponse)
+def fleet_refresh_run_status(
+    run_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Return the persisted live progress for one refresh without reloading the workbench."""
+    _require_hub_admin(request)
+    run = FleetRefreshService(db=db).get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="The fleet refresh run no longer exists.")
+    return _fleet_refresh_status_payload(run)
 
 
 @router.get("/plugin-installations", response_class=HTMLResponse)
@@ -603,11 +624,11 @@ def refresh_official_plugin_versions(
     if created:
         background_tasks.add_task(FleetRefreshService.process_run, run.id)
         scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
-        message = f"The background refresh for {scope_label} was queued. This page will update automatically."
+        message = f"The background refresh for {scope_label} was queued. Live progress is shown below."
     else:
-        message = "A fleet refresh is already running. This page will show its progress."
+        message = "A fleet refresh is already running. Its live progress is shown below."
     return RedirectResponse(
-        url=f"/updates?{urlencode({'message': message})}",
+        url=f"/updates?{urlencode({'active_refresh_run_id': run.id, 'message': message})}",
         status_code=303,
     )
 
@@ -671,7 +692,7 @@ def apply_update_workbench_action(
         db.commit()
         message = "Cancellation was requested. Current site checks will finish, but no further checks will start." if cancelled else "This fleet refresh had already finished."
         return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + [('message', message)])}",
+            url=f"/updates?{urlencode(scope_query + [('active_refresh_run_id', run.id), ('message', message)])}",
             status_code=303,
         )
 
@@ -687,11 +708,11 @@ def apply_update_workbench_action(
     if created:
         background_tasks.add_task(FleetRefreshService.process_run, run.id)
         scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
-        message = f"The background refresh for {scope_label} was queued. This page will update automatically."
+        message = f"The background refresh for {scope_label} was queued. Live progress is shown below."
     else:
-        message = "A fleet refresh is already running. This page will show its progress in the refresh protocol."
+        message = "A fleet refresh is already running. Its live progress is shown below."
     return RedirectResponse(
-        url=f"/updates?{urlencode(scope_query + [('official_versions', 'refreshed'), ('message', message)])}",
+        url=f"/updates?{urlencode(scope_query + [('active_refresh_run_id', run.id), ('official_versions', 'refreshed'), ('message', message)])}",
         status_code=303,
     )
 
@@ -724,7 +745,7 @@ def cancel_fleet_refresh_run(
         else "This fleet refresh had already finished."
     )
     return RedirectResponse(
-        url=f"/updates?{urlencode({'message': message})}",
+        url=f"/updates?{urlencode({'active_refresh_run_id': run.id, 'message': message})}",
         status_code=303,
     )
 
@@ -1315,6 +1336,29 @@ def _site_users_redirect(site_id: int, result: str, message: str) -> RedirectRes
         url=f"/sites/{site_id}?{urlencode({'users': result, 'message': message})}#users",
         status_code=303,
     )
+
+
+def _fleet_refresh_status_payload(run) -> dict:
+    """Keep the browser payload small while exposing every live progress counter."""
+    result = run.result_json or {}
+    return {
+        "id": run.id,
+        "status": run.status,
+        "mode": run.mode,
+        "error_message": run.error_message,
+        "result": {
+            "scope": result.get("scope", {}),
+            "sites": result.get("sites", {}),
+            "updates": result.get("updates", {}),
+            "backups": result.get("backups", {}),
+            "users": result.get("users", {}),
+            "crocoblock": result.get("crocoblock", {}),
+            "official_versions": result.get("official_versions", {}),
+            "phase": result.get("phase", {}),
+            "last_site": result.get("last_site", ""),
+            "errors": result.get("errors", []),
+        },
+    }
 
 
 def _require_hub_admin(request: Request):

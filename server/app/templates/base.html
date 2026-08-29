@@ -308,6 +308,41 @@
         cursor: not-allowed;
         opacity: 0.5;
       }
+      .fleet-refresh-progress {
+        margin: 1rem 0;
+        padding: 1rem;
+        border: 1px solid #8dbdae;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(232, 246, 240, 0.88), rgba(255, 250, 242, 0.9));
+      }
+      .fleet-refresh-progress .section-heading { margin-bottom: 0.75rem; }
+      .fleet-refresh-progress h3 { display: flex; align-items: center; gap: 0.55rem; }
+      .fleet-refresh-progress-track {
+        height: 0.72rem;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #dbe7e1;
+        box-shadow: inset 0 1px 2px rgba(7, 95, 78, 0.16);
+      }
+      .fleet-refresh-progress-fill {
+        display: block;
+        width: 0;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #087f6b, #33a88d);
+        transition: width 260ms ease;
+      }
+      .fleet-refresh-progress-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 1rem;
+        margin-top: 0.7rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .fleet-refresh-progress-meta strong { color: var(--ink); }
+      .fleet-refresh-progress [data-refresh-summary] { margin: 0.75rem 0 0; }
+      .fleet-refresh-progress [data-refresh-complete] { margin: 0.75rem 0 0; }
       .plugin-install-form {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1043,6 +1078,8 @@
         color: #71341f;
       }
       .pill-running,
+      .pill-queued,
+      .pill-cancelling,
       .pill-waiting {
         background: #f3e3c3;
         color: #8b5a12;
@@ -1054,6 +1091,10 @@
       .pill-failed {
         background: #f7e5db;
         color: #71341f;
+      }
+      .pill-cancelled {
+        background: #e7e8e6;
+        color: #566057;
       }
       .postflight-card .notice-success,
       .postflight-card .notice-error {

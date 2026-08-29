@@ -5,6 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.services.fleet_refresh as fleet_refresh_module
+from app.api.routes.web import _fleet_refresh_status_payload
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
@@ -16,6 +17,30 @@ from app.services.fleet_refresh_settings import (
     FleetRefreshSettingsError,
     FleetRefreshSettingsService,
 )
+
+
+def test_refresh_status_payload_exposes_live_phase_and_site_progress():
+    run = FleetRefreshRun(
+        id=42,
+        mode=FleetRefreshService.MODE_NORMAL,
+        status=FleetRefreshRunStatus.running.value,
+        requested_by="operator",
+        result_json={
+            "scope": {"label": "4 selected site(s)"},
+            "sites": {"completed": 2, "total": 4, "refreshed": 2, "cached": 0},
+            "phase": {"key": "site-checks", "label": "Checking website status", "completed": 2, "total": 4},
+            "last_site": "example.test",
+        },
+    )
+
+    payload = _fleet_refresh_status_payload(run)
+
+    assert payload["id"] == 42
+    assert payload["status"] == "running"
+    assert payload["result"]["scope"]["label"] == "4 selected site(s)"
+    assert payload["result"]["sites"] == {"completed": 2, "total": 4, "refreshed": 2, "cached": 0}
+    assert payload["result"]["phase"]["completed"] == 2
+    assert payload["result"]["last_site"] == "example.test"
 
 
 def test_refresh_settings_store_berlin_schedule():
