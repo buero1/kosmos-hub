@@ -109,7 +109,7 @@ async def _fleet_update_refresh_loop(initial_delay_seconds: int) -> None:
         try:
             run_id = await asyncio.to_thread(_queue_scheduled_fleet_refresh)
             if run_id is not None:
-                logger.info("Scheduled fleet status refresh run %s.", run_id)
+                logger.info("Scheduled fleet data refresh cycle started with run %s.", run_id)
         except Exception:
             logger.exception("Fleet update refresh scheduling failed unexpectedly.")
         await asyncio.sleep(60)
@@ -121,7 +121,7 @@ async def _fleet_refresh_worker_loop(initial_delay_seconds: int, interval_second
         try:
             run_id = await asyncio.to_thread(FleetRefreshService.process_next_queued_run)
             if run_id is not None:
-                logger.info("Fleet status refresh run %s completed in the background.", run_id)
+                logger.info("Fleet data refresh run %s completed in the background.", run_id)
         except Exception:
             logger.exception("Fleet refresh worker failed unexpectedly.")
         await asyncio.sleep(interval_seconds)

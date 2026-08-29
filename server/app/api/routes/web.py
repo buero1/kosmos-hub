@@ -24,7 +24,7 @@ from app.services.maintenance_worker import schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
-from app.services.site_selection import build_site_selector_context
+from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
@@ -208,6 +208,9 @@ def users_workbench_page(
     site_scope: Literal["all", "selected"] = "selected",
     role: str = "all",
     customer_status: str = "all",
+    fresh_users: str = "",
+    active_refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
+    message: str = "",
 ):
     _require_hub_admin(request)
     selected_site_ids = set(site_id or []) if site_scope == "selected" else None
@@ -222,7 +225,121 @@ def users_workbench_page(
             site_scope=site_scope,
             role=role,
             customer_status=customer_status,
+            fresh_users=fresh_users,
+            active_refresh_run_id=active_refresh_run_id,
+            message=message,
         ),
+    )
+
+
+@router.post("/users/fresh-show")
+def show_fresh_users(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    q: Annotated[str, Form()] = "",
+    site_id: Annotated[list[int] | None, Form()] = None,
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    role: Annotated[str, Form()] = "all",
+    customer_status: Annotated[str, Form()] = "all",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Refresh only the WordPress user inventory for the selected sites."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else set()
+    scope_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
+    scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
+    filter_query = [("q", q), ("role", role), ("customer_status", customer_status)]
+    if not selected_site_ids:
+        return RedirectResponse(
+            url=f"/users?{urlencode(scope_query + filter_query + [('fresh_users', 'error'), ('message', 'Select at least one site before refreshing users.')])}",
+            status_code=303,
+        )
+    refresh_service = FleetRefreshService(db=db)
+    run, created = refresh_service.create_run(
+        actor=user,
+        mode=FleetRefreshService.MODE_FRESH_USERS,
+        site_ids=selected_site_ids,
+    )
+    db.commit()
+    if created:
+        background_tasks.add_task(FleetRefreshService.process_run, run.id)
+    elif run.mode not in FleetRefreshService.user_modes():
+        return RedirectResponse(
+            url=f"/users?{urlencode(scope_query + filter_query + [('fresh_users', 'error'), ('message', 'Another refresh is already running. Please wait until it finishes.')])}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/users?{urlencode(scope_query + filter_query + [('fresh_users', 'running'), ('active_refresh_run_id', run.id)])}",
+        status_code=303,
+    )
+
+
+@router.get("/backups", response_class=HTMLResponse)
+def backup_workbench_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[list[int] | None, Query()] = None,
+    site_scope: Literal["all", "selected"] = "selected",
+    fresh_backups: str = "",
+    active_refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
+    message: str = "",
+):
+    _require_hub_admin(request)
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
+    return templates.TemplateResponse(
+        request,
+        "backups.html",
+        _backup_workbench_context(
+            request,
+            db,
+            site_ids=selected_site_ids,
+            site_scope=site_scope,
+            fresh_backups=fresh_backups,
+            active_refresh_run_id=active_refresh_run_id,
+            message=message,
+        ),
+    )
+
+
+@router.post("/backups/fresh-show")
+def show_fresh_backups(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[list[int] | None, Form()] = None,
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Refresh only the read-only backup status for the selected sites."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    selected_site_ids = set(site_id or []) if site_scope == "selected" else set()
+    scope_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
+    scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
+    if not selected_site_ids:
+        return RedirectResponse(
+            url=f"/backups?{urlencode(scope_query + [('fresh_backups', 'error'), ('message', 'Select at least one site before refreshing backup status.')])}",
+            status_code=303,
+        )
+    refresh_service = FleetRefreshService(db=db)
+    run, created = refresh_service.create_run(
+        actor=user,
+        mode=FleetRefreshService.MODE_FRESH_BACKUPS,
+        site_ids=selected_site_ids,
+    )
+    db.commit()
+    if created:
+        background_tasks.add_task(FleetRefreshService.process_run, run.id)
+    elif run.mode not in FleetRefreshService.backup_modes():
+        return RedirectResponse(
+            url=f"/backups?{urlencode(scope_query + [('fresh_backups', 'error'), ('message', 'Another refresh is already running. Please wait until it finishes.')])}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/backups?{urlencode(scope_query + [('fresh_backups', 'running'), ('active_refresh_run_id', run.id)])}",
+        status_code=303,
     )
 
 
@@ -436,12 +553,14 @@ def update_workbench_page(
         # Resume a user-started batch if a process restart interrupted polling.
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
-    active_fleet_refresh_run = fleet_refresh_service.get_active_run()
+    active_fleet_refresh_run = fleet_refresh_service.get_active_run(modes=FleetRefreshService.update_modes())
     progress_refresh_run = (
         fleet_refresh_service.get_run(active_refresh_run_id)
         if active_refresh_run_id is not None
         else active_fleet_refresh_run
     )
+    if progress_refresh_run is not None and progress_refresh_run.mode not in FleetRefreshService.update_modes():
+        progress_refresh_run = active_fleet_refresh_run
     fresh_completion_url = ""
     if (
         fresh_updates == "running"
@@ -460,7 +579,7 @@ def update_workbench_page(
             ("message", "Fresh update checks completed. The table now shows the current results."),
         ]
         fresh_completion_url = f"/updates?{urlencode(completion_scope_query + completion_filter_query)}"
-    refresh_runs = fleet_refresh_service.list_recent_runs(limit=20)
+    refresh_runs = fleet_refresh_service.list_recent_runs(limit=20, modes=FleetRefreshService.update_modes())
     selected_refresh_run = next((run for run in refresh_runs if run.id == refresh_run_id), None)
     refresh_site_results = (
         fleet_refresh_service.list_site_results(run_id=selected_refresh_run.id)
@@ -568,6 +687,11 @@ def show_fresh_updates(
     db.commit()
     if created:
         background_tasks.add_task(FleetRefreshService.process_run, run.id)
+    elif run.mode not in FleetRefreshService.update_modes():
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'error'), ('message', 'Another refresh is already running. Please wait until it finishes.')])}",
+            status_code=303,
+        )
     return RedirectResponse(
         url=f"/updates?{urlencode(scope_query + filter_query + [('fresh_updates', 'running'), ('active_refresh_run_id', run.id)])}",
         status_code=303,
@@ -818,9 +942,12 @@ def cancel_fleet_refresh_run(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     csrf_token: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/updates",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
+    if return_to not in {"/updates", "/users", "/backups"}:
+        return_to = "/updates"
     service = FleetRefreshService(db=db)
     try:
         run, cancelled = service.cancel_run(actor=user, run_id=run_id)
@@ -828,7 +955,7 @@ def cancel_fleet_refresh_run(
     except ValueError as exc:
         db.rollback()
         return RedirectResponse(
-            url=f"/updates?{urlencode({'message': str(exc)})}",
+            url=f"{return_to}?{urlencode({'message': str(exc)})}",
             status_code=303,
         )
 
@@ -840,7 +967,7 @@ def cancel_fleet_refresh_run(
         else "This fleet refresh had already finished."
     )
     return RedirectResponse(
-        url=f"/updates?{urlencode({'active_refresh_run_id': run.id, 'message': message})}",
+        url=f"{return_to}?{urlencode({'active_refresh_run_id': run.id, 'message': message})}",
         status_code=303,
     )
 
@@ -1358,6 +1485,9 @@ def _user_workbench_context(
     error: str = "",
     outcomes: list[dict[str, str]] | None = None,
     action_label: str = "",
+    fresh_users: str = "",
+    active_refresh_run_id: int | None = None,
+    message: str = "",
 ) -> dict:
     service = SiteUserService(db=db, cipher=get_secret_cipher())
     entries = service.list_workbench_entries()
@@ -1392,6 +1522,23 @@ def _user_workbench_context(
         key=lambda site: site.domain.casefold(),
     )
     outcome_rows = outcomes or []
+    refresh_service = FleetRefreshService(db=db)
+    active_refresh_run = refresh_service.get_active_run(modes=FleetRefreshService.user_modes())
+    progress_refresh_run = (
+        refresh_service.get_run(active_refresh_run_id)
+        if active_refresh_run_id is not None
+        else active_refresh_run
+    )
+    if progress_refresh_run is not None and progress_refresh_run.mode not in FleetRefreshService.user_modes():
+        progress_refresh_run = active_refresh_run
+    completion_url = ""
+    if fresh_users == "running" and progress_refresh_run is not None and progress_refresh_run.mode == FleetRefreshService.MODE_FRESH_USERS:
+        completion_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
+        completion_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids or []))
+        completion_query.extend(
+            [("q", query), ("role", role), ("customer_status", customer_status), ("fresh_users", "ok"), ("message", "Fresh user inventory checks completed.")]
+        )
+        completion_url = f"/users?{urlencode(completion_query)}"
     return {
         "entries": filtered_entries,
         "summary": {
@@ -1414,7 +1561,11 @@ def _user_workbench_context(
             sites=site_options,
             selected_site_ids=selected_site_ids,
             site_scope=site_scope,
-            submit_label="Show users",
+            submit_label="Start",
+            csrf_token=get_csrf_token(request),
+            secondary_submit_action="/users/fresh-show",
+            secondary_primary_label="Gespeicherte Benutzer anzeigen",
+            secondary_submit_label="Benutzer frisch prüfen",
         ),
         "role_options": SiteUserService.ROLE_OPTIONS,
         "customer_status_options": status_options,
@@ -1423,6 +1574,82 @@ def _user_workbench_context(
         "outcomes": outcome_rows,
         "action_label": action_label,
         "bulk_limit": SiteUserService.BULK_ACTION_LIMIT,
+        "fresh_users": fresh_users,
+        "message": message,
+        "progress_refresh_run": progress_refresh_run,
+        "refresh_completion_url": completion_url,
+        "refresh_completion_label": "Benutzerprüfung abgeschlossen",
+        "refresh_return_path": "/users",
+        "refresh_eyebrow": "Aktuelles Benutzerinventar",
+        "refresh_item_count": len(filtered_entries),
+    }
+
+
+def _backup_workbench_context(
+    request: Request,
+    db: Session,
+    *,
+    site_ids: set[int] | None,
+    site_scope: str,
+    fresh_backups: str,
+    active_refresh_run_id: int | None,
+    message: str,
+) -> dict:
+    repository = SiteRepository(db)
+    site_options = sorted(
+        (
+            site
+            for site in repository.list_sites(limit=1000)
+            if site.status == "verified"
+            and site.customer is not None
+            and site.customer.zoho_status in SELECTABLE_CUSTOMER_STATUSES
+        ),
+        key=lambda site: site.domain.casefold(),
+    )
+    effective_site_ids = {site.id for site in site_options} if site_scope == "all" else (site_ids or set())
+    selected_sites = [site for site in site_options if site.id in effective_site_ids]
+    snapshots = repository.get_latest_backup_snapshots_by_site_ids([site.id for site in selected_sites])
+    refresh_service = FleetRefreshService(db=db)
+    active_refresh_run = refresh_service.get_active_run(modes=FleetRefreshService.backup_modes())
+    progress_refresh_run = (
+        refresh_service.get_run(active_refresh_run_id)
+        if active_refresh_run_id is not None
+        else active_refresh_run
+    )
+    if progress_refresh_run is not None and progress_refresh_run.mode not in FleetRefreshService.backup_modes():
+        progress_refresh_run = active_refresh_run
+    completion_url = ""
+    if fresh_backups == "running" and progress_refresh_run is not None and progress_refresh_run.mode == FleetRefreshService.MODE_FRESH_BACKUPS:
+        completion_query: list[tuple[str, str | int]] = [("site_scope", "selected")]
+        completion_query.extend(("site_id", selected_id) for selected_id in sorted(effective_site_ids))
+        completion_query.extend([("fresh_backups", "ok"), ("message", "Fresh backup status checks completed.")])
+        completion_url = f"/backups?{urlencode(completion_query)}"
+    available = sum(bool(snapshot and snapshot.backup_available) for snapshot in snapshots.values())
+    complete = sum(bool(snapshot and snapshot.backup_complete) for snapshot in snapshots.values())
+    return {
+        "entries": [{"site": site, "snapshot": snapshots.get(site.id)} for site in selected_sites],
+        "summary": {"sites": len(selected_sites), "available": available, "complete": complete},
+        "site_selector": build_site_selector_context(
+            action="/backups",
+            form_id="backup-site-scope-form",
+            sites=site_options,
+            selected_site_ids=effective_site_ids,
+            site_scope=site_scope,
+            submit_label="Start",
+            csrf_token=get_csrf_token(request),
+            secondary_submit_action="/backups/fresh-show",
+            secondary_primary_label="Gespeicherte Backupstatus anzeigen",
+            secondary_submit_label="Backupstatus frisch prüfen",
+        ),
+        "csrf_token": get_csrf_token(request),
+        "fresh_backups": fresh_backups,
+        "message": message,
+        "progress_refresh_run": progress_refresh_run,
+        "refresh_completion_url": completion_url,
+        "refresh_completion_label": "Backupstatus-Prüfung abgeschlossen",
+        "refresh_return_path": "/backups",
+        "refresh_eyebrow": "Aktueller Backupstatus",
+        "refresh_item_count": len(selected_sites),
     }
 
 

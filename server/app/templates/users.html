@@ -19,6 +19,7 @@
     </div>
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if fresh_users == "ok" %}<p class="notice-success">{{ message }}</p>{% elif fresh_users == "error" %}<p class="notice-error">{{ message }}</p>{% endif %}
 
     <div class="filter-panel filter-panel-workbench">
       <label>
@@ -47,6 +48,8 @@
         <a href="/users">Reset</a>
       </div>
     </div>
+
+    {% include "partials/fleet_refresh_progress.html" %}
 
     <details class="user-workbench-create">
       <summary>Add WordPress user to selected sites</summary>

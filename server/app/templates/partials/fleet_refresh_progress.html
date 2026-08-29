@@ -1,0 +1,100 @@
+{% if progress_refresh_run %}
+  {% set refresh_progress = progress_refresh_run.result_json or {} %}
+  {% set refresh_phase = refresh_progress.get("phase", {}) %}
+  {% set refresh_scope = refresh_progress.get("scope", {}) %}
+  {% set refresh_sites = refresh_progress.get("sites", {}) %}
+  <section
+    class="maintenance-batch fleet-refresh-status-card"
+    data-fleet-refresh-progress
+    data-status-url="/updates/refresh-runs/{{ progress_refresh_run.id }}/status"
+    data-refresh-mode="{{ progress_refresh_run.mode }}"
+    data-refresh-completion-url="{{ refresh_completion_url or '' }}"
+    data-refresh-completion-label="{{ refresh_completion_label or 'Refresh abgeschlossen' }}"
+    aria-labelledby="fleet-refresh-progress-heading"
+  >
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">{{ refresh_eyebrow or 'Aktueller Refresh' }}</p>
+        <h3 id="fleet-refresh-progress-heading">Refresh #{{ progress_refresh_run.id }} <span class="pill pill-{{ progress_refresh_run.status }}" data-refresh-status>{{ progress_refresh_run.status | title }}</span></h3>
+        <p class="subtle" data-refresh-phase>{{ refresh_phase.get("label", "Wartet auf den Hintergrunddienst") }}</p>
+      </div>
+      <p class="subtle" data-refresh-scope>{{ refresh_scope.get("label", "Ausgewählte Websites") }}</p>
+    </div>
+    <div class="fleet-refresh-progress-track" role="progressbar" aria-label="Fortschritt des Refreshs" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" data-refresh-progress-track>
+      <span class="fleet-refresh-progress-fill" data-refresh-progress-fill></span>
+    </div>
+    <div class="fleet-refresh-progress-meta">
+      <strong data-refresh-phase-count>{{ refresh_phase.get("completed", 0) }}/{{ refresh_phase.get("total", 0) }}</strong>
+      <span data-refresh-site-count>Websites: {{ refresh_sites.get("completed", 0) }}/{{ refresh_sites.get("total", 0) }}</span>
+      {% if refresh_item_count is defined %}<span>{{ refresh_item_count }} Items</span>{% endif %}
+    </div>
+    <p class="subtle" hidden data-refresh-summary></p>
+    <p class="notice-success" hidden data-refresh-complete></p>
+    {% if progress_refresh_run.status in ["queued", "running"] %}
+      <form class="fleet-refresh-cancel-form" method="post" action="/updates/refresh-runs/{{ progress_refresh_run.id }}/cancel" data-refresh-cancel-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="return_to" value="{{ refresh_return_path or '/updates' }}">
+        <button class="button button-secondary" type="submit">Abbrechen</button>
+      </form>
+    {% endif %}
+  </section>
+  <script>
+    (function () {
+      var container = document.querySelector("[data-fleet-refresh-progress]");
+      if (!container || !container.dataset.statusUrl) { return; }
+      var terminalStatuses = ["succeeded", "failed", "cancelled"];
+      var statusLabels = {queued: "In Warteschlange", running: "Läuft", cancelling: "Wird abgebrochen", cancelled: "Abgebrochen", succeeded: "Abgeschlossen", failed: "Fehlgeschlagen"};
+      var timer;
+      var redirectScheduled = false;
+      function value(selector) { return container.querySelector(selector); }
+      function number(input) { var parsed = Number(input); return Number.isFinite(parsed) ? parsed : 0; }
+      function setText(selector, text) { var element = value(selector); if (element) { element.textContent = text || ""; } }
+      function render(payload) {
+        var result = payload.result || {};
+        var phase = result.phase || {};
+        var scope = result.scope || {};
+        var sites = result.sites || {};
+        var status = payload.status || "queued";
+        var phaseCompleted = number(phase.completed);
+        var phaseTotal = number(phase.total);
+        var siteCompleted = number(sites.completed);
+        var siteTotal = number(sites.total);
+        var percent = phaseTotal > 0 ? Math.min(100, Math.round((phaseCompleted / phaseTotal) * 100)) : (terminalStatuses.indexOf(status) >= 0 ? 100 : 6);
+        var track = value("[data-refresh-progress-track]");
+        var fill = value("[data-refresh-progress-fill]");
+        var statusElement = value("[data-refresh-status]");
+        var summary = value("[data-refresh-summary]");
+        var completion = value("[data-refresh-complete]");
+        var cancelForm = value("[data-refresh-cancel-form]");
+        if (statusElement) { statusElement.textContent = statusLabels[status] || status; statusElement.className = "pill pill-" + status; }
+        if (track) { track.setAttribute("aria-valuemax", String(Math.max(phaseTotal, 1))); track.setAttribute("aria-valuenow", String(Math.min(phaseCompleted, Math.max(phaseTotal, 1)))); }
+        if (fill) { fill.style.width = percent + "%"; }
+        setText("[data-refresh-phase]", phase.label || "Wartet auf den Hintergrunddienst");
+        setText("[data-refresh-scope]", scope.label || "Ausgewählte Websites");
+        setText("[data-refresh-phase-count]", phaseTotal > 0 ? phaseCompleted + "/" + phaseTotal : "Wartet");
+        setText("[data-refresh-site-count]", "Websites: " + siteCompleted + "/" + siteTotal);
+        if (summary) { summary.hidden = status === "running" || status === "succeeded"; }
+        if (cancelForm) { cancelForm.hidden = terminalStatuses.indexOf(status) >= 0 || status === "cancelling"; }
+        if (status === "succeeded") {
+          if (completion) { completion.hidden = false; completion.textContent = container.dataset.refreshCompletionLabel + ": " + siteCompleted + "/" + siteTotal + " Websites geprüft."; }
+          if (container.dataset.refreshCompletionUrl && !redirectScheduled) { redirectScheduled = true; window.setTimeout(function () { window.location.assign(container.dataset.refreshCompletionUrl); }, 650); }
+        } else if (status === "failed") {
+          setText("[data-refresh-summary]", payload.error_message || "Der Refresh ist fehlgeschlagen.");
+          if (completion) { completion.hidden = false; completion.className = "notice-error"; completion.textContent = "Refresh fehlgeschlagen: " + (payload.error_message || "Bitte das Protokoll prüfen."); }
+        } else if (status === "cancelled") {
+          setText("[data-refresh-summary]", "Der Refresh wurde abgebrochen.");
+          if (completion) { completion.hidden = false; completion.className = "notice-warning"; completion.textContent = "Refresh abgebrochen. Bereits abgeschlossene Website-Prüfungen bleiben dokumentiert."; }
+        } else if (status === "cancelling") { setText("[data-refresh-summary]", "Der Abbruch ist vorgemerkt. Laufende Prüfungen dürfen noch sauber enden.");
+        } else if (status === "queued") { setText("[data-refresh-summary]", "Der Refresh wartet auf den Hintergrunddienst und startet automatisch."); }
+        if (terminalStatuses.indexOf(status) >= 0 && timer) { window.clearInterval(timer); timer = undefined; }
+      }
+      function poll() {
+        window.fetch(container.dataset.statusUrl, {credentials: "same-origin", headers: {Accept: "application/json"}})
+          .then(function (response) { if (!response.ok) { throw new Error("Refresh status could not be loaded."); } return response.json(); })
+          .then(render)
+          .catch(function () { setText("[data-refresh-summary]", "Die Live-Aktualisierung wird erneut versucht."); });
+      }
+      poll(); timer = window.setInterval(poll, 2000);
+    }());
+  </script>
+{% endif %}

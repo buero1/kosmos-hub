@@ -90,10 +90,7 @@
         <select name="maintenance_action" required data-workbench-action-select>
           <option value="" selected disabled>Aktion auswählen</option>
           <option value="direct-updates">Ausgewählte Updates ausführen</option>
-          <option value="refresh-stale">Ausgewählte Websites aktualisieren und diagnostizieren</option>
-          <option value="refresh-full">Ausgewählte Websites vollständig aktualisieren</option>
           <option value="refresh-protocol">Aktualisierungsprotokoll anzeigen</option>
-          {% if active_fleet_refresh_run %}<option value="cancel-refresh">Aktiven Refresh abbrechen</option>{% endif %}
         </select>
       </label>
       <p class="subtle">Umfang: <span data-site-selector-target-summary data-site-selector-target-summary-locale="de">{{ site_selector.selected_site_ids | length }} ausgewählte Website{{ "" if site_selector.selected_site_ids | length == 1 else "s" }}</span>.</p>

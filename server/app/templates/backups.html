@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Backups · kosmos-hub{% endblock %}
+{% block content %}
+  <div class="workbench-page-layout">
+    {% include "partials/site_selector.html" %}
+    <section class="workbench-page-main">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Backup monitoring</p>
+          <h2>Backup status</h2>
+          <p class="subtle">Stored UpdraftPlus status for the selected customer websites. A fresh check only reads the status; it never creates a backup.</p>
+        </div>
+        <div class="inventory-totals">
+          <span><strong>{{ summary.sites }}</strong> sites</span>
+          <span><strong>{{ summary.available }}</strong> backups available</span>
+          <span><strong>{{ summary.complete }}</strong> complete</span>
+        </div>
+      </div>
+
+      {% if fresh_backups == "ok" %}<p class="notice-success">{{ message }}</p>{% elif fresh_backups == "error" %}<p class="notice-error">{{ message }}</p>{% endif %}
+      {% include "partials/fleet_refresh_progress.html" %}
+
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th>Customer</th>
+              <th>Provider</th>
+              <th>Latest backup</th>
+              <th>Status</th>
+              <th>Sets</th>
+              <th>Stored</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              {% set snapshot = entry.snapshot %}
+              <tr>
+                <td><a href="/sites/{{ entry.site.id }}#backup">{{ entry.site.domain }}</a></td>
+                <td><a href="/customers/{{ entry.site.customer.id }}">{{ entry.site.customer.name }}</a></td>
+                <td>
+                  {% if snapshot %}
+                    <span class="pill {% if snapshot.provider_active %}pill-active{% else %}pill-missing{% endif %}">{{ snapshot.provider }}</span>
+                  {% else %}
+                    <span class="pill pill-unknown">Not checked</span>
+                  {% endif %}
+                </td>
+                <td>{{ snapshot.backup_at | berlin_time if snapshot and snapshot.backup_at else "-" }}</td>
+                <td>
+                  {% if snapshot %}
+                    <span class="pill {% if snapshot.backup_available and snapshot.backup_complete %}pill-active{% else %}pill-missing{% endif %}">
+                      {% if snapshot.backup_available and snapshot.backup_complete %}Available{% elif snapshot.backup_available %}Incomplete{% else %}Missing{% endif %}
+                    </span>
+                  {% else %}-{% endif %}
+                </td>
+                <td>{{ snapshot.backup_count if snapshot else "-" }}</td>
+                <td>{{ snapshot.captured_at | berlin_time if snapshot else "-" }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">Select customer websites in the side panel to show their stored backup status.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}

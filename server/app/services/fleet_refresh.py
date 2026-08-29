@@ -31,6 +31,10 @@ class FleetRefreshService:
     MODE_NORMAL = "normal"
     MODE_FULL = "full"
     MODE_FRESH_UPDATES = "fresh-updates"
+    MODE_USERS = "users"
+    MODE_FRESH_USERS = "fresh-users"
+    MODE_BACKUPS = "backups"
+    MODE_FRESH_BACKUPS = "fresh-backups"
     SCHEDULED_REQUESTED_BY = "kosmos-scheduler"
     LEGACY_SCHEDULED_REQUESTED_BY = "kosmos-hub"
     BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
@@ -83,27 +87,30 @@ class FleetRefreshService:
     def get_latest_run(self) -> FleetRefreshRun | None:
         return self.db.scalar(select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(1))
 
-    def get_active_run(self) -> FleetRefreshRun | None:
+    def get_active_run(self, *, modes: set[str] | None = None) -> FleetRefreshRun | None:
         """Return the newest refresh that still needs progress polling."""
-        return self.db.scalar(
-            select(FleetRefreshRun)
-            .where(
-                FleetRefreshRun.status.in_(
-                    (
-                        FleetRefreshRunStatus.queued.value,
-                        FleetRefreshRunStatus.running.value,
-                        FleetRefreshRunStatus.cancelling.value,
-                    )
+        statement = select(FleetRefreshRun).where(
+            FleetRefreshRun.status.in_(
+                (
+                    FleetRefreshRunStatus.queued.value,
+                    FleetRefreshRunStatus.running.value,
+                    FleetRefreshRunStatus.cancelling.value,
                 )
             )
-            .order_by(FleetRefreshRun.created_at.desc())
-            .limit(1)
+        )
+        if modes is not None:
+            statement = statement.where(FleetRefreshRun.mode.in_(modes))
+        return self.db.scalar(
+            statement.order_by(FleetRefreshRun.created_at.desc()).limit(1)
         )
 
-    def list_recent_runs(self, *, limit: int = 20) -> list[FleetRefreshRun]:
+    def list_recent_runs(self, *, limit: int = 20, modes: set[str] | None = None) -> list[FleetRefreshRun]:
+        statement = select(FleetRefreshRun)
+        if modes is not None:
+            statement = statement.where(FleetRefreshRun.mode.in_(modes))
         return list(
             self.db.scalars(
-                select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(limit)
+                statement.order_by(FleetRefreshRun.created_at.desc()).limit(limit)
             ).all()
         )
 
@@ -179,16 +186,21 @@ class FleetRefreshService:
             if not cls._is_scheduled_run_due(db=db, runtime_settings=runtime_settings, now=now):
                 return None
 
-            run = FleetRefreshRun(
-                mode=cls.MODE_NORMAL,
-                status=FleetRefreshRunStatus.queued.value,
-                requested_by=cls.SCHEDULED_REQUESTED_BY,
-                allow_provider_activation=True,
-                result_json=cls._initial_result(cls.MODE_NORMAL),
-            )
-            db.add(run)
+            # A scheduled cycle keeps its independent operational domains separate.
+            # Runs are intentionally queued in this order because the worker is serial.
+            runs: list[FleetRefreshRun] = []
+            for mode in (cls.MODE_NORMAL, cls.MODE_USERS, cls.MODE_BACKUPS):
+                run = FleetRefreshRun(
+                    mode=mode,
+                    status=FleetRefreshRunStatus.queued.value,
+                    requested_by=cls.SCHEDULED_REQUESTED_BY,
+                    allow_provider_activation=mode == cls.MODE_NORMAL,
+                    result_json=cls._initial_result(mode),
+                )
+                db.add(run)
+                runs.append(run)
             db.commit()
-            return run.id
+            return runs[0].id
 
     @classmethod
     def _is_scheduled_run_due(
@@ -304,8 +316,13 @@ class FleetRefreshService:
         target_site_ids: set[int] | None,
     ) -> dict[str, Any]:
         cls._validate_mode(mode)
-        force = mode in (cls.MODE_FULL, cls.MODE_FRESH_UPDATES)
-        updates_only = mode == cls.MODE_FRESH_UPDATES
+        refresh_kind = cls._refresh_kind(mode)
+        force = mode in (
+            cls.MODE_FULL,
+            cls.MODE_FRESH_UPDATES,
+            cls.MODE_FRESH_USERS,
+            cls.MODE_FRESH_BACKUPS,
+        )
         with SessionLocal() as db:
             runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
         result = cls._initial_result(
@@ -315,6 +332,7 @@ class FleetRefreshService:
         )
         targets, cached_targets, skipped_targets = cls._site_targets(
             force=force,
+            refresh_kind=refresh_kind,
             runtime_settings=runtime_settings,
             target_site_ids=target_site_ids,
         )
@@ -327,14 +345,18 @@ class FleetRefreshService:
         result["backups"]["skipped"] = len(skipped_targets)
         result["users"]["skipped"] = len(skipped_targets)
         for target in cached_targets:
-            outcome = cls._cached_site_outcome(target)
+            outcome = cls._cached_site_outcome(target, refresh_kind=refresh_kind)
             cls._record_site_outcome(result, outcome)
             cls._store_site_result(run_id=run_id, outcome=outcome)
         for target in skipped_targets:
             cls._store_site_result(run_id=run_id, outcome=cls._skipped_site_outcome(target))
         result["phase"] = {
             "key": "site-checks",
-            "label": "Checking website status",
+            "label": {
+                "updates": "Checking update status",
+                "users": "Checking WordPress users",
+                "backups": "Checking backup status",
+            }[refresh_kind],
             "completed": result["sites"]["completed"],
             "total": result["sites"]["total"],
         }
@@ -350,7 +372,7 @@ class FleetRefreshService:
                         target = next(targets_iter)
                     except StopIteration:
                         break
-                    futures[executor.submit(cls._refresh_one_site, target, updates_only=updates_only)] = target
+                    futures[executor.submit(cls._refresh_one_site, target, refresh_kind=refresh_kind)] = target
 
                 cancellation_requested = False
                 while futures:
@@ -380,19 +402,28 @@ class FleetRefreshService:
                         next_target = next(targets_iter)
                     except StopIteration:
                         continue
-                    futures[executor.submit(cls._refresh_one_site, next_target, updates_only=updates_only)] = next_target
+                    futures[executor.submit(cls._refresh_one_site, next_target, refresh_kind=refresh_kind)] = next_target
 
         if cls._is_cancellation_requested(run_id):
             return result
-        cls._refresh_provider_evidence(
-            run_id=run_id,
-            result=result,
-            force=force,
-            requested_by=requested_by,
-            allow_provider_activation=allow_provider_activation,
-            runtime_settings=runtime_settings,
-            target_site_ids=target_site_ids,
-        )
+        if refresh_kind == "updates":
+            cls._refresh_provider_evidence(
+                run_id=run_id,
+                result=result,
+                force=force,
+                requested_by=requested_by,
+                allow_provider_activation=allow_provider_activation,
+                runtime_settings=runtime_settings,
+                target_site_ids=target_site_ids,
+            )
+        else:
+            result["phase"] = {
+                "key": "complete",
+                "label": "Refresh completed",
+                "completed": 1,
+                "total": 1,
+            }
+            cls._store_progress(run_id, result)
         return result
 
     @classmethod
@@ -400,6 +431,7 @@ class FleetRefreshService:
         cls,
         *,
         force: bool,
+        refresh_kind: str,
         runtime_settings: FleetRefreshRuntimeSettings,
         target_site_ids: set[int] | None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -427,16 +459,18 @@ class FleetRefreshService:
                     )
                     continue
                 max_age = timedelta(minutes=runtime_settings.site_status_max_age_minutes)
-                state_is_fresh = cls._is_fresh(snapshots.get(site.id), now=now, max_age=max_age)
-                updates_are_fresh = cls._is_fresh(update_snapshots.get(site.id), now=now, max_age=max_age)
-                backups_are_fresh = cls._is_fresh(backup_snapshots.get(site.id), now=now, max_age=max_age)
-                users_are_fresh = cls._is_fresh(user_snapshots.get(site.id), now=now, max_age=max_age)
-                if not force and state_is_fresh and updates_are_fresh and backups_are_fresh and users_are_fresh:
+                fresh_by_kind = {
+                    "updates": cls._is_fresh(snapshots.get(site.id), now=now, max_age=max_age)
+                    and cls._is_fresh(update_snapshots.get(site.id), now=now, max_age=max_age),
+                    "backups": cls._is_fresh(backup_snapshots.get(site.id), now=now, max_age=max_age),
+                    "users": cls._is_fresh(user_snapshots.get(site.id), now=now, max_age=max_age),
+                }
+                if not force and fresh_by_kind[refresh_kind]:
                     cached_targets.append(
                         {
                             "site_id": site.id,
                             "domain": site.domain,
-                            "detail": "All website checks were still fresh and were reused from the cache.",
+                            "detail": f"The stored {refresh_kind} data was still fresh and was reused from the cache.",
                         }
                     )
                     continue
@@ -444,7 +478,7 @@ class FleetRefreshService:
             return targets, cached_targets, skipped_targets
 
     @classmethod
-    def _refresh_one_site(cls, target: dict[str, Any], *, updates_only: bool = False) -> dict[str, Any]:
+    def _refresh_one_site(cls, target: dict[str, Any], *, refresh_kind: str) -> dict[str, Any]:
         site_id = int(target["site_id"])
         with SessionLocal() as db:
             repository = SiteRepository(db)
@@ -452,71 +486,68 @@ class FleetRefreshService:
             if site is None:
                 return {"site_id": site_id, "domain": target["domain"], "state": "failed", "updates": "skipped", "backups": "skipped", "users": "skipped", "errors": ["Site no longer exists."]}
 
-            try:
-                SiteInventoryService(db=db, cipher=get_secret_cipher()).refresh_site_state(site_id)
-            except SiteMcpProxyError as exc:
-                return {"site_id": site_id, "domain": site.domain, "state": "failed", "updates": "skipped", "backups": "skipped", "users": "skipped", "errors": [exc.message]}
-
             errors: list[str] = []
-            if updates_only:
-                if not cls._bridge_supports_updates(site.bridge_version):
-                    errors.append("Bridge update support is unavailable.")
+            if refresh_kind == "users":
+                try:
+                    inventory = SiteUserService(db=db, cipher=get_secret_cipher()).refresh_site_users(site_id)
+                except SiteMcpProxyError as exc:
                     return {
                         "site_id": site_id,
                         "domain": site.domain,
                         "state": "refreshed",
                         "updates": "skipped",
                         "backups": "skipped",
-                        "users": "skipped",
-                        "errors": errors,
-                    }
-                try:
-                    SiteUpdateService(db=db, cipher=get_secret_cipher()).refresh_site_updates(site_id)
-                except SiteMcpProxyError as exc:
-                    errors.append(exc.message)
-                    return {
-                        "site_id": site_id,
-                        "domain": site.domain,
-                        "state": "refreshed",
-                        "updates": "failed",
-                        "backups": "skipped",
-                        "users": "skipped",
-                        "errors": errors,
+                        "users": "failed",
+                        "errors": [exc.message],
                     }
                 return {
                     "site_id": site_id,
                     "domain": site.domain,
                     "state": "refreshed",
-                    "updates": "refreshed",
+                    "updates": "skipped",
                     "backups": "skipped",
+                    "users": "refreshed" if inventory.snapshot.available else "unsupported",
+                    "errors": errors,
+                }
+
+            if refresh_kind == "backups":
+                try:
+                    SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)
+                except SiteMcpProxyError as exc:
+                    return {
+                        "site_id": site_id,
+                        "domain": site.domain,
+                        "state": "refreshed",
+                        "updates": "skipped",
+                        "backups": "failed",
+                        "users": "skipped",
+                        "errors": [exc.message],
+                    }
+                return {
+                    "site_id": site_id,
+                    "domain": site.domain,
+                    "state": "refreshed",
+                    "updates": "skipped",
+                    "backups": "refreshed",
                     "users": "skipped",
                     "errors": errors,
                 }
 
             try:
-                SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)
-                backup_status = "refreshed"
+                SiteInventoryService(db=db, cipher=get_secret_cipher()).refresh_site_state(site_id)
             except SiteMcpProxyError as exc:
-                backup_status = "failed"
-                errors.append(exc.message)
-
-            try:
-                user_inventory = SiteUserService(db=db, cipher=get_secret_cipher()).refresh_site_users(site_id)
-                user_status = "refreshed" if user_inventory.snapshot.available else "unsupported"
-            except SiteMcpProxyError as exc:
-                user_status = "failed"
-                errors.append(exc.message)
+                return {"site_id": site_id, "domain": site.domain, "state": "failed", "updates": "skipped", "backups": "skipped", "users": "skipped", "errors": [exc.message]}
 
             if not cls._bridge_supports_updates(site.bridge_version):
                 errors.append("Bridge update support is unavailable.")
-                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "skipped", "backups": backup_status, "users": user_status, "errors": errors}
+                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "skipped", "backups": "skipped", "users": "skipped", "errors": errors}
 
             try:
                 SiteUpdateService(db=db, cipher=get_secret_cipher()).refresh_site_updates(site_id)
             except SiteMcpProxyError as exc:
                 errors.append(exc.message)
-                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "failed", "backups": backup_status, "users": user_status, "errors": errors}
-            return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "refreshed", "backups": backup_status, "users": user_status, "errors": errors}
+                return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "failed", "backups": "skipped", "users": "skipped", "errors": errors}
+            return {"site_id": site_id, "domain": site.domain, "state": "refreshed", "updates": "refreshed", "backups": "skipped", "users": "skipped", "errors": errors}
 
     @classmethod
     def _record_site_outcome(cls, result: dict[str, Any], outcome: dict[str, Any]) -> None:
@@ -556,14 +587,14 @@ class FleetRefreshService:
             result["errors"].append({"site": outcome.get("domain", "unknown"), "detail": str(error)[:240]})
 
     @staticmethod
-    def _cached_site_outcome(target: dict[str, Any]) -> dict[str, Any]:
+    def _cached_site_outcome(target: dict[str, Any], *, refresh_kind: str) -> dict[str, Any]:
         return {
             "site_id": target["site_id"],
             "domain": target["domain"],
             "state": "cached",
-            "updates": "cached",
-            "backups": "cached",
-            "users": "cached",
+            "updates": "cached" if refresh_kind == "updates" else "skipped",
+            "backups": "cached" if refresh_kind == "backups" else "skipped",
+            "users": "cached" if refresh_kind == "users" else "skipped",
             "detail": target["detail"],
             "errors": [],
         }
@@ -977,6 +1008,28 @@ class FleetRefreshService:
         return current >= (0, 3, 7)
 
     @classmethod
+    def update_modes(cls) -> set[str]:
+        return {cls.MODE_NORMAL, cls.MODE_FULL, cls.MODE_FRESH_UPDATES}
+
+    @classmethod
+    def user_modes(cls) -> set[str]:
+        return {cls.MODE_USERS, cls.MODE_FRESH_USERS}
+
+    @classmethod
+    def backup_modes(cls) -> set[str]:
+        return {cls.MODE_BACKUPS, cls.MODE_FRESH_BACKUPS}
+
+    @classmethod
+    def _refresh_kind(cls, mode: str) -> str:
+        if mode in cls.update_modes():
+            return "updates"
+        if mode in cls.user_modes():
+            return "users"
+        if mode in cls.backup_modes():
+            return "backups"
+        raise ValueError(f"Unknown refresh mode: {mode}")
+
+    @classmethod
     def _validate_mode(cls, mode: str) -> None:
-        if mode not in (cls.MODE_NORMAL, cls.MODE_FULL, cls.MODE_FRESH_UPDATES):
-            raise ValueError("Refresh mode must be normal, full, or fresh-updates.")
+        if mode not in cls.update_modes() | cls.user_modes() | cls.backup_modes():
+            raise ValueError("Refresh mode must be an updates, users, or backups mode.")

@@ -19,8 +19,15 @@ from app.services.fleet_refresh_settings import (
     FleetRefreshSettingsService,
 )
 
-def test_fresh_update_mode_is_valid_for_background_runs():
-    FleetRefreshService._validate_mode(FleetRefreshService.MODE_FRESH_UPDATES)
+def test_domain_specific_refresh_modes_are_valid_for_background_runs():
+    for mode in (
+        FleetRefreshService.MODE_FRESH_UPDATES,
+        FleetRefreshService.MODE_USERS,
+        FleetRefreshService.MODE_FRESH_USERS,
+        FleetRefreshService.MODE_BACKUPS,
+        FleetRefreshService.MODE_FRESH_BACKUPS,
+    ):
+        FleetRefreshService._validate_mode(mode)
 
 
 
@@ -222,7 +229,21 @@ def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
     with Session(engine) as db:
         run = db.get(FleetRefreshRun, run_id)
         assert run is not None
+        assert run.mode == FleetRefreshService.MODE_NORMAL
         assert run.allow_provider_activation is True
+        scheduled_runs = list(
+            db.scalars(
+                select(FleetRefreshRun)
+                .where(FleetRefreshRun.requested_by == FleetRefreshService.SCHEDULED_REQUESTED_BY)
+                .order_by(FleetRefreshRun.id.asc())
+            ).all()
+        )
+        assert [scheduled.mode for scheduled in scheduled_runs] == [
+            FleetRefreshService.MODE_NORMAL,
+            FleetRefreshService.MODE_USERS,
+            FleetRefreshService.MODE_BACKUPS,
+        ]
+        assert [scheduled.allow_provider_activation for scheduled in scheduled_runs] == [True, False, False]
 
 
 def test_berlin_time_format_handles_summer_winter_and_naive_database_values():
