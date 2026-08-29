@@ -528,7 +528,6 @@ class FleetRefreshService:
                     )
                 jet_site_ids = cls._jet_sites_requiring_provider(
                     entries=entries,
-                    changelog_versions=changelog.versions,
                 )
 
             result["crocoblock"]["eligible"] = len(jet_site_ids)
@@ -623,17 +622,17 @@ class FleetRefreshService:
         cls,
         *,
         entries: list[Any],
-        changelog_versions: dict[str, str],
     ) -> set[int]:
         required_site_ids: set[int] = set()
         for entry in entries:
-            if entry.kind != "plugin" or not entry.identifier.startswith("jet-") or not entry.update_available:
+            if (
+                entry.kind != "plugin"
+                or not entry.identifier.startswith("jet-")
+                or not entry.update_available
+                or entry.execution_ready
+            ):
                 continue
-            official_version = changelog_versions.get(entry.identifier)
-            if not official_version or not entry.target_version:
-                continue
-            if OfficialPluginVersionService._version_key(entry.target_version) != OfficialPluginVersionService._version_key(official_version):
-                required_site_ids.add(entry.site.id)
+            required_site_ids.add(entry.site.id)
         return required_site_ids
 
     @classmethod
@@ -718,7 +717,7 @@ class FleetRefreshService:
                 "changelog_unavailable": 0,
                 "changelog_error": None,
             },
-            "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "elementor_pro": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
+            "official_versions": {"total": 0, "checked": 0, "completed": 0, "cached": 0, "wordpress_org": 0, "elementor_pro": 0, "pafe_pro": 0, "provider_offer": 0, "unavailable": 0, "failed": 0},
             "phase": {"key": "queued", "label": "Waiting for a background worker", "completed": 0, "total": 0},
             "mismatches": 0,
             "last_site": "",

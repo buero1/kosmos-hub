@@ -35,6 +35,9 @@ class OfficialPluginVersionService:
     ELEMENTOR_PRO_PLUGIN_FILE = "elementor-pro/elementor-pro.php"
     ELEMENTOR_PRO_CHANGELOG_URL = "https://elementor.com/pro/changelog/"
     ELEMENTOR_PRO_SOURCE = "Elementor Pro Changelog"
+    PAFE_PRO_PLUGIN_FILE = "piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
+    PAFE_PRO_CHANGELOG_URL = "https://pafe.piotnet.com/change-log/"
+    PAFE_PRO_SOURCE = "PAFE Pro Changelog"
     CROCOBLOCK_CHANGELOG_URL = "https://crocoblock.com/wp-content/uploads/jet-changelog/last-updates.json"
     CROCOBLOCK_CHANGELOG_SOURCE = "Crocoblock Changelog"
     CROCOBLOCK_CHANGELOG_SLUGS = {
@@ -43,7 +46,7 @@ class OfficialPluginVersionService:
         "jet-style-manager": "jet-styles-manager",
     }
     PROVIDER_CATALOG_SOURCES = frozenset(
-        {"Crocoblock Jet Dashboard", CROCOBLOCK_CHANGELOG_SOURCE, ELEMENTOR_PRO_SOURCE}
+        {"Crocoblock Jet Dashboard", CROCOBLOCK_CHANGELOG_SOURCE, ELEMENTOR_PRO_SOURCE, PAFE_PRO_SOURCE}
     )
     REQUEST_TIMEOUT_SECONDS = 8
     MAX_CONCURRENT_REQUESTS = 6
@@ -78,6 +81,7 @@ class OfficialPluginVersionService:
                 "cached": 0,
                 "wordpress_org": 0,
                 "elementor_pro": 0,
+                "pafe_pro": 0,
                 "provider_offer": 0,
                 "unavailable": 0,
                 "failed": 0,
@@ -104,6 +108,7 @@ class OfficialPluginVersionService:
             "cached": len(candidates) - len(stale_candidates),
             "wordpress_org": 0,
             "elementor_pro": 0,
+            "pafe_pro": 0,
             "provider_offer": 0,
             "unavailable": 0,
             "failed": 0,
@@ -134,10 +139,32 @@ class OfficialPluginVersionService:
                 if progress_callback is not None:
                     progress_callback(summary.copy())
 
+        pafe_candidates = [
+            candidate
+            for candidate in stale_candidates.values()
+            if self._is_pafe_pro_plugin(candidate.plugin_file)
+        ]
+        if pafe_candidates and not cancellation_requested:
+            version, error = self._fetch_pafe_pro_version()
+            for candidate in pafe_candidates:
+                catalog_results[candidate.plugin_file] = (version, error)
+                summary["completed"] += 1
+                if version:
+                    summary["pafe_pro"] += 1
+                elif self._has_provider_catalog(existing.get(candidate.plugin_file)):
+                    summary["provider_offer"] += 1
+                else:
+                    summary["unavailable"] += 1
+                    if error and error != "pafe_pro_version_missing":
+                        summary["failed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
+
         wordpress_org_candidates = [
             candidate
             for candidate in stale_candidates.values()
             if not self._is_elementor_pro_plugin(candidate.plugin_file)
+            and not self._is_pafe_pro_plugin(candidate.plugin_file)
         ]
         with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
             candidates_iter = iter(wordpress_org_candidates)
@@ -182,7 +209,12 @@ class OfficialPluginVersionService:
         for plugin_file, (version, error) in catalog_results.items():
             if version:
                 official_version = version
-                source = self.ELEMENTOR_PRO_SOURCE if self._is_elementor_pro_plugin(plugin_file) else "WordPress.org"
+                if self._is_elementor_pro_plugin(plugin_file):
+                    source = self.ELEMENTOR_PRO_SOURCE
+                elif self._is_pafe_pro_plugin(plugin_file):
+                    source = self.PAFE_PRO_SOURCE
+                else:
+                    source = "WordPress.org"
                 last_error = None
             else:
                 record = existing.get(plugin_file)
@@ -239,6 +271,8 @@ class OfficialPluginVersionService:
         if force:
             return True
         if cls._is_elementor_pro_plugin(candidate.plugin_file) and (record is None or record.source != cls.ELEMENTOR_PRO_SOURCE):
+            return True
+        if cls._is_pafe_pro_plugin(candidate.plugin_file) and (record is None or record.source != cls.PAFE_PRO_SOURCE):
             return True
         return not cls._is_fresh(record, now=now, max_age=max_age)
 
@@ -466,6 +500,22 @@ class OfficialPluginVersionService:
         version = self._parse_elementor_pro_version(changelog)
         return (version, None) if version else (None, "elementor_pro_version_missing")
 
+    def _fetch_pafe_pro_version(self) -> tuple[str | None, str | None]:
+        request = Request(
+            self.PAFE_PRO_CHANGELOG_URL,
+            headers={"User-Agent": "Kosmos-Hub/0.1 (+https://kosmos-hub.31-70-92-95.sslip.io)"},
+        )
+        try:
+            with urlopen(request, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310: fixed official PAFE endpoint.
+                changelog = response.read().decode("utf-8")
+        except HTTPError as exc:
+            return None, f"pafe_pro_http_{exc.code}"
+        except (URLError, TimeoutError, UnicodeDecodeError):
+            return None, "pafe_pro_request_failed"
+
+        version = self._parse_pafe_pro_version(changelog)
+        return (version, None) if version else (None, "pafe_pro_version_missing")
+
     @staticmethod
     def _parse_elementor_pro_version(changelog: str) -> str | None:
         for heading in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", changelog, flags=re.IGNORECASE | re.DOTALL):
@@ -474,6 +524,15 @@ class OfficialPluginVersionService:
             if match:
                 return match.group(1)
         return None
+
+    @staticmethod
+    def _parse_pafe_pro_version(changelog: str) -> str | None:
+        match = re.search(
+            r"\[PRO\]\s*(\d+(?:\.\d+)+(?:[-+][A-Za-z0-9.-]+)?)\s*\(\d{4}/\d{2}/\d{2}\)",
+            changelog,
+            flags=re.IGNORECASE,
+        )
+        return match.group(1) if match else None
 
     @staticmethod
     def _parse_crocoblock_changelog_version(name: str) -> str | None:
@@ -490,6 +549,10 @@ class OfficialPluginVersionService:
     @classmethod
     def _is_elementor_pro_plugin(cls, plugin_file: str) -> bool:
         return plugin_file.strip().replace("\\", "/").casefold() == cls.ELEMENTOR_PRO_PLUGIN_FILE
+
+    @classmethod
+    def _is_pafe_pro_plugin(cls, plugin_file: str) -> bool:
+        return plugin_file.strip().replace("\\", "/").casefold() == cls.PAFE_PRO_PLUGIN_FILE
 
     @staticmethod
     def _wordpress_org_slug(plugin_file: str) -> str:

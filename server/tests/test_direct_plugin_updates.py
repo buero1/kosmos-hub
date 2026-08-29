@@ -429,13 +429,14 @@ def test_crocoblock_changelog_parser_rejects_entries_without_a_version():
     assert OfficialPluginVersionService._parse_crocoblock_changelog_version("JetElements current") is None
 
 
-def test_automatic_crocoblock_activation_candidates_require_a_conflicting_update_offer():
+def test_automatic_crocoblock_activation_candidates_require_an_unavailable_update_package():
     entries = [
         SimpleNamespace(
             kind="plugin",
             identifier="jet-elements/jet-elements.php",
             update_available=True,
             target_version="2.9.2",
+            execution_ready=True,
             site=SimpleNamespace(id=1),
         ),
         SimpleNamespace(
@@ -443,6 +444,7 @@ def test_automatic_crocoblock_activation_candidates_require_a_conflicting_update
             identifier="jet-engine/jet-engine.php",
             update_available=True,
             target_version="3.8.13",
+            execution_ready=False,
             site=SimpleNamespace(id=2),
         ),
         SimpleNamespace(
@@ -450,17 +452,13 @@ def test_automatic_crocoblock_activation_candidates_require_a_conflicting_update
             identifier="jet-tabs/jet-tabs.php",
             update_available=False,
             target_version="2.3.2",
+            execution_ready=False,
             site=SimpleNamespace(id=3),
         ),
     ]
 
     selected = FleetRefreshService._jet_sites_requiring_provider(
         entries=entries,
-        changelog_versions={
-            "jet-elements/jet-elements.php": "2.9.2",
-            "jet-engine/jet-engine.php": "3.8.14.3",
-            "jet-tabs/jet-tabs.php": "2.3.3",
-        },
     )
 
     assert selected == {2}
@@ -500,6 +498,64 @@ def test_elementor_pro_replaces_legacy_unavailable_catalog_entries_without_waiti
 
     assert OfficialPluginVersionService._needs_catalog_refresh(
         candidate=OfficialVersionCandidate(plugin_file="elementor-pro/elementor-pro.php"),
+        record=legacy_record,
+        force=False,
+        now=now,
+        max_age=timedelta(hours=24),
+    ) is True
+
+
+def test_pafe_pro_changelog_parser_returns_the_newest_version():
+    changelog = """
+        <h2>[PRO] 7.1.73 (2026/06/23)</h2>
+        <h2>[PRO] 7.1.72 (2026/06/11)</h2>
+    """
+
+    assert OfficialPluginVersionService._parse_pafe_pro_version(changelog) == "7.1.73"
+
+
+def test_official_version_refresh_uses_pafe_pro_changelog_once_per_catalogue_check():
+    records = []
+    service = object.__new__(OfficialPluginVersionService)
+    service.db = SimpleNamespace(add=records.append, flush=lambda: None)
+    service._collect_candidates = lambda _items: {
+        "piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php": SimpleNamespace(
+            plugin_file="piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
+        ),
+        "wordpress-seo/wp-seo.php": SimpleNamespace(plugin_file="wordpress-seo/wp-seo.php"),
+    }
+    service.get_cached = lambda _candidates: {}
+    wordpress_org_requests = []
+    service._fetch_wordpress_org_version = lambda plugin_file: (wordpress_org_requests.append(plugin_file) or ("25.1", None))
+    service._fetch_pafe_pro_version = lambda: ("7.1.73", None)
+
+    summary = service.refresh_for_inventory([])
+
+    assert summary["checked"] == 2
+    assert summary["completed"] == 2
+    assert summary["pafe_pro"] == 1
+    assert wordpress_org_requests == ["wordpress-seo/wp-seo.php"]
+    pafe_record = next(
+        record
+        for record in records
+        if record.plugin_file == "piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
+    )
+    assert pafe_record.official_version == "7.1.73"
+    assert pafe_record.source == "PAFE Pro Changelog"
+
+
+def test_pafe_pro_replaces_legacy_unavailable_catalog_entries_without_waiting_for_the_cache():
+    now = datetime.now(UTC)
+    legacy_record = SimpleNamespace(
+        official_version=None,
+        source="No public or provider catalog available",
+        checked_at=now,
+    )
+
+    assert OfficialPluginVersionService._needs_catalog_refresh(
+        candidate=OfficialVersionCandidate(
+            plugin_file="piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
+        ),
         record=legacy_record,
         force=False,
         now=now,
