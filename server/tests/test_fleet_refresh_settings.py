@@ -1,14 +1,15 @@
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.services.fleet_refresh as fleet_refresh_module
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
-from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus
+from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
 from app.models.hub_user import HubUser
+from app.models.site import Site, SiteStatus
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import (
     FleetRefreshRuntimeSettings,
@@ -214,6 +215,74 @@ def test_selected_refresh_scope_is_persisted_for_the_background_worker():
         }
         assert FleetRefreshService._target_site_ids(run.result_json) == {7, 11, 19}
         assert FleetRefreshService._target_site_ids(FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL)) is None
+
+
+def test_refresh_site_result_keeps_the_website_and_jet_license_outcomes(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(fleet_refresh_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="refresh-result-site",
+            domain="example.test",
+            home_url="https://example.test",
+            site_url="https://example.test",
+            status=SiteStatus.verified.value,
+        )
+        run = FleetRefreshRun(
+            mode=FleetRefreshService.MODE_NORMAL,
+            status=FleetRefreshRunStatus.running.value,
+            requested_by="operator",
+            result_json=FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL),
+        )
+        db.add_all((site, run))
+        db.commit()
+
+        run_id = run.id
+        site_id = site.id
+
+    FleetRefreshService._store_site_result(
+        run_id=run_id,
+        outcome={
+            "site_id": site_id,
+            "domain": "example.test",
+            "state": "refreshed",
+            "updates": "refreshed",
+            "backups": "refreshed",
+            "users": "unsupported",
+            "detail": "Website evidence was refreshed.",
+            "errors": [],
+        },
+    )
+    FleetRefreshService._store_jet_result(
+        run_id=run_id,
+        outcome={
+            "site_id": site_id,
+            "status": "activation-verified",
+            "detail": "The stored Crocoblock license was not active and was activated for this website.",
+            "license_was_already_active": False,
+            "update_package_ready": True,
+            "plugins": [{"plugin_file": "jet-engine/jet-engine.php", "name": "JetEngine"}],
+            "provider_versions": [{"plugin_file": "jet-engine/jet-engine.php", "version": "3.8.14.3"}],
+        },
+    )
+
+    with Session(engine) as db:
+        record = db.scalar(select(FleetRefreshSiteResult))
+        assert record is not None
+        assert record.state_status == "refreshed"
+        assert record.updates_status == "refreshed"
+        assert record.users_status == "unsupported"
+        assert record.jet_status == "activation-verified"
+        assert record.result_json["jet"] == {
+            "status": "activation-verified",
+            "detail": "The stored Crocoblock license was not active and was activated for this website.",
+            "license_was_already_active": False,
+            "update_package_ready": True,
+            "plugins": [{"plugin_file": "jet-engine/jet-engine.php", "name": "JetEngine"}],
+            "provider_versions": [{"plugin_file": "jet-engine/jet-engine.php", "version": "3.8.14.3"}],
+        }
 
 
 def test_active_refresh_status_only_returns_running_work():

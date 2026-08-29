@@ -146,6 +146,7 @@
               <th>Sites</th>
               <th>Catalogues</th>
               <th>Result</th>
+              <th>Details</th>
             </tr>
           </thead>
           <tbody>
@@ -171,14 +172,74 @@
                     {{ run.error_message or run_progress.get("phase", {}).get("label", "Waiting") }}
                   {% endif %}
                 </td>
+                <td><a href="/updates?view=refresh-protocol&refresh_run_id={{ run.id }}#refresh-run-details">Show report</a></td>
               </tr>
             {% else %}
-              <tr><td colspan="9">No refresh runs are documented yet.</td></tr>
+              <tr><td colspan="10">No refresh runs are documented yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     </section>
+
+    {% if selected_refresh_run %}
+      <section id="refresh-run-details" class="maintenance-batch refresh-run-details" aria-labelledby="refresh-run-details-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Detailed refresh report</p>
+            <h3 id="refresh-run-details-heading">Run #{{ selected_refresh_run.id }}</h3>
+            <p class="subtle">Every website result captured during this run. Jet entries describe the Crocoblock license and package check when one was needed.</p>
+          </div>
+        </div>
+        {% if refresh_site_results %}
+          <div class="table-scroll">
+            <table class="refresh-run-site-table">
+              <thead>
+                <tr>
+                  <th>Website</th>
+                  <th>Website status</th>
+                  <th>Updates</th>
+                  <th>Backups</th>
+                  <th>Users</th>
+                  <th>Jet / Crocoblock</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for site_result in refresh_site_results %}
+                  {% set site_detail = site_result.result_json or {} %}
+                  {% set jet = site_detail.get("jet", {}) %}
+                  <tr>
+                    <td><a href="/sites/{{ site_result.site_id }}">{{ site_result.domain }}</a></td>
+                    <td><span class="pill pill-{{ site_result.state_status }}">{{ site_result.state_status | replace("-", " ") | title }}</span></td>
+                    <td><span class="pill pill-{{ site_result.updates_status }}">{{ site_result.updates_status | replace("-", " ") | title }}</span></td>
+                    <td><span class="pill pill-{{ site_result.backups_status }}">{{ site_result.backups_status | replace("-", " ") | title }}</span></td>
+                    <td><span class="pill pill-{{ site_result.users_status }}">{{ site_result.users_status | replace("-", " ") | title }}</span></td>
+                    <td>
+                      {% if jet %}
+                        <span class="pill pill-{{ site_result.jet_status }}">{{ site_result.jet_status | replace("-", " ") | title }}</span>
+                        {% if jet.get("detail") %}<p class="subtle table-note">{{ jet.get("detail") }}</p>{% endif %}
+                        {% for plugin in jet.get("plugins", []) %}
+                          <p class="table-note"><strong>{{ plugin.get("name") or plugin.get("plugin_file") }}</strong>{% if plugin.get("current_version") or plugin.get("target_version") %}: {{ plugin.get("current_version") }} → {{ plugin.get("target_version") }}{% endif %}</p>
+                        {% endfor %}
+                      {% else %}
+                        <span class="subtle">No Jet license check needed.</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if site_result.detail %}<p class="subtle table-note">{{ site_result.detail }}</p>{% endif %}
+                      {% if site_result.error_message %}<p class="notice-error table-note">{{ site_result.error_message }}</p>{% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="subtle">This earlier run has no website-level report yet. New refreshes record every website outcome.</p>
+        {% endif %}
+      </section>
+    {% endif %}
     {% endif %}
 
     {% if batch_runs %}

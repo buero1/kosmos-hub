@@ -391,6 +391,7 @@ def update_workbench_page(
     official_versions: str = "",
     message: str = "",
     view: Literal["updates", "refresh-protocol"] = "updates",
+    refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
 ):
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
     all_items = inventory_service.list_items(limit=1000)
@@ -434,6 +435,13 @@ def update_workbench_page(
         schedule_pending_direct_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
     active_fleet_refresh_run = fleet_refresh_service.get_active_run()
+    refresh_runs = fleet_refresh_service.list_recent_runs(limit=20)
+    selected_refresh_run = next((run for run in refresh_runs if run.id == refresh_run_id), None)
+    refresh_site_results = (
+        fleet_refresh_service.list_site_results(run_id=selected_refresh_run.id)
+        if selected_refresh_run is not None
+        else []
+    )
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -469,7 +477,9 @@ def update_workbench_page(
             "official_versions": official_versions,
             "active_fleet_refresh_run": active_fleet_refresh_run,
             "show_refresh_protocol": view == "refresh-protocol",
-            "refresh_runs": fleet_refresh_service.list_recent_runs(limit=20),
+            "refresh_runs": refresh_runs,
+            "selected_refresh_run": selected_refresh_run,
+            "refresh_site_results": refresh_site_results,
             "message": message,
         },
     )

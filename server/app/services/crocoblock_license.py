@@ -70,6 +70,7 @@ class CrocoblockLicenseService:
         actor: str,
         site_ids: set[int],
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        site_result_callback: Callable[[dict[str, Any]], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Authorize Jet Dashboard metadata checks without installing any plugin."""
@@ -88,6 +89,18 @@ class CrocoblockLicenseService:
         if config is None or not config.enabled:
             summary["skipped"] = len(eligible_site_ids)
             summary["completed"] = len(eligible_site_ids)
+            if site_result_callback is not None:
+                for site_id in eligible_site_ids:
+                    site_result_callback(
+                        {
+                            "site_id": site_id,
+                            "status": "license-unavailable",
+                            "detail": "No enabled Crocoblock license is stored in the Hub.",
+                            "license_was_already_active": None,
+                            "update_package_ready": None,
+                            "provider_versions": [],
+                        }
+                    )
             if progress_callback is not None:
                 progress_callback(summary.copy())
             return summary
@@ -100,9 +113,20 @@ class CrocoblockLicenseService:
                 break
             try:
                 activation = self._activate_for_site(actor=actor, site_id=site_id, purpose="version check")
-            except CrocoblockLicenseError:
+            except CrocoblockLicenseError as exc:
                 summary["failed"] += 1
                 summary["completed"] += 1
+                if site_result_callback is not None:
+                    site_result_callback(
+                        {
+                            "site_id": site_id,
+                            "status": "activation-failed",
+                            "detail": str(exc),
+                            "license_was_already_active": None,
+                            "update_package_ready": None,
+                            "provider_versions": [],
+                        }
+                    )
                 if progress_callback is not None:
                     progress_callback(summary.copy())
                 continue
@@ -111,14 +135,36 @@ class CrocoblockLicenseService:
             summary["versions"].extend(activation["provider_versions"])
             try:
                 SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(site_id)
-            except SiteMcpProxyError:
+            except SiteMcpProxyError as exc:
                 summary["failed"] += 1
                 summary["completed"] += 1
+                if site_result_callback is not None:
+                    site_result_callback(
+                        {
+                            "site_id": site_id,
+                            "status": "activation-verified-update-refresh-failed",
+                            "detail": f"{self._license_check_detail(activation)} Update inventory refresh failed: {exc.message}",
+                            "license_was_already_active": activation["license_was_already_active"],
+                            "update_package_ready": activation["update_package_ready"],
+                            "provider_versions": activation["provider_versions"],
+                        }
+                    )
                 if progress_callback is not None:
                     progress_callback(summary.copy())
                 continue
             summary["refreshed"] += 1
             summary["completed"] += 1
+            if site_result_callback is not None:
+                site_result_callback(
+                    {
+                        "site_id": site_id,
+                        "status": "activation-verified",
+                        "detail": self._license_check_detail(activation),
+                        "license_was_already_active": activation["license_was_already_active"],
+                        "update_package_ready": activation["update_package_ready"],
+                        "provider_versions": activation["provider_versions"],
+                    }
+                )
             if progress_callback is not None:
                 progress_callback(summary.copy())
 
@@ -195,9 +241,25 @@ class CrocoblockLicenseService:
         self.db.commit()
         return {
             "site": site,
+            "license_was_already_active": result.get("license_was_already_active")
+            if isinstance(result.get("license_was_already_active"), bool)
+            else None,
             "update_package_ready": result.get("update_package_ready") is True,
             "provider_versions": self._provider_versions(result),
         }
+
+    @staticmethod
+    def _license_check_detail(activation: dict[str, object]) -> str:
+        was_already_active = activation.get("license_was_already_active")
+        if was_already_active is True:
+            detail = "The Crocoblock license was already active before this check; update availability was refreshed."
+        elif was_already_active is False:
+            detail = "The stored Crocoblock license was not active and was activated for this website."
+        else:
+            detail = "Crocoblock license activation was verified; this Bridge version did not report the prior license state."
+        if activation.get("update_package_ready") is True:
+            return f"{detail} An authorized update package is now available."
+        return f"{detail} An authorized update package is still unavailable."
 
     def _require_admin(self, actor: HubUser) -> None:
         if actor.role != "admin":

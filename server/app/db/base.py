@@ -1,7 +1,7 @@
 from app.models.audit_log import AuditLog
 from app.models.ai_provider_config import AiProviderConfig
 from app.models.customer import Customer
-from app.models.fleet_refresh_run import FleetRefreshRun
+from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshSiteResult
 from app.models.fleet_refresh_settings import FleetRefreshSettings
 from app.models.hub_access_token import HubAccessToken
 from app.models.hub_setup_token import HubSetupToken
@@ -27,6 +27,8 @@ __all__ = [
     "AiProviderConfig",
     "Base",
     "Customer",
+    "FleetRefreshRun",
+    "FleetRefreshSiteResult",
     "HubAccessToken",
     "HubSetupToken",
     "HubUser",

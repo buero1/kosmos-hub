@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_secret_cipher
 from app.db.session import SessionLocal
-from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus
+from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
 from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.repositories.site_repository import SiteRepository
@@ -103,6 +103,15 @@ class FleetRefreshService:
         return list(
             self.db.scalars(
                 select(FleetRefreshRun).order_by(FleetRefreshRun.created_at.desc()).limit(limit)
+            ).all()
+        )
+
+    def list_site_results(self, *, run_id: int) -> list[FleetRefreshSiteResult]:
+        return list(
+            self.db.scalars(
+                select(FleetRefreshSiteResult)
+                .where(FleetRefreshSiteResult.fleet_refresh_run_id == run_id)
+                .order_by(FleetRefreshSiteResult.domain.asc())
             ).all()
         )
 
@@ -302,26 +311,30 @@ class FleetRefreshService:
             runtime_settings=runtime_settings,
             target_site_ids=target_site_ids,
         )
-        targets, cached_count, skipped_count = cls._site_targets(
+        targets, cached_targets, skipped_targets = cls._site_targets(
             force=force,
             runtime_settings=runtime_settings,
             target_site_ids=target_site_ids,
         )
         result["sites"].update(
             {
-                "total": len(targets) + cached_count,
-                "completed": cached_count,
-                "cached": cached_count,
-                "skipped": skipped_count,
+                "total": len(targets) + len(cached_targets),
+                "skipped": len(skipped_targets),
             }
         )
-        result["backups"].update({"cached": cached_count, "skipped": skipped_count})
-        result["users"].update({"cached": cached_count, "skipped": skipped_count})
+        result["backups"]["skipped"] = len(skipped_targets)
+        result["users"]["skipped"] = len(skipped_targets)
+        for target in cached_targets:
+            outcome = cls._cached_site_outcome(target)
+            cls._record_site_outcome(result, outcome)
+            cls._store_site_result(run_id=run_id, outcome=outcome)
+        for target in skipped_targets:
+            cls._store_site_result(run_id=run_id, outcome=cls._skipped_site_outcome(target))
         result["phase"] = {
             "key": "site-checks",
             "label": "Checking website status",
-            "completed": cached_count,
-            "total": len(targets) + cached_count,
+            "completed": result["sites"]["completed"],
+            "total": result["sites"]["total"],
         }
         cls._store_progress(run_id, result)
 
@@ -354,6 +367,7 @@ class FleetRefreshService:
                             "errors": [str(exc)],
                         }
                     cls._record_site_outcome(result, outcome)
+                    cls._store_site_result(run_id=run_id, outcome=outcome)
                     result["phase"]["completed"] = result["sites"]["completed"]
                     cls._store_progress(run_id, result)
 
@@ -386,7 +400,7 @@ class FleetRefreshService:
         force: bool,
         runtime_settings: FleetRefreshRuntimeSettings,
         target_site_ids: set[int] | None,
-    ) -> tuple[list[dict[str, Any]], int, int]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         with SessionLocal() as db:
             repository = SiteRepository(db)
             sites = repository.list_sites(limit=1000)
@@ -398,11 +412,17 @@ class FleetRefreshService:
             user_snapshots = repository.get_latest_user_snapshots_by_site_ids([site.id for site in sites])
             now = datetime.now(UTC)
             targets: list[dict[str, Any]] = []
-            cached_count = 0
-            skipped_count = 0
+            cached_targets: list[dict[str, Any]] = []
+            skipped_targets: list[dict[str, Any]] = []
             for site in sites:
                 if site.status != SiteStatus.verified.value:
-                    skipped_count += 1
+                    skipped_targets.append(
+                        {
+                            "site_id": site.id,
+                            "domain": site.domain,
+                            "detail": f"Skipped because this site is {site.status or 'not verified'}.",
+                        }
+                    )
                     continue
                 max_age = timedelta(minutes=runtime_settings.site_status_max_age_minutes)
                 state_is_fresh = cls._is_fresh(snapshots.get(site.id), now=now, max_age=max_age)
@@ -410,10 +430,16 @@ class FleetRefreshService:
                 backups_are_fresh = cls._is_fresh(backup_snapshots.get(site.id), now=now, max_age=max_age)
                 users_are_fresh = cls._is_fresh(user_snapshots.get(site.id), now=now, max_age=max_age)
                 if not force and state_is_fresh and updates_are_fresh and backups_are_fresh and users_are_fresh:
-                    cached_count += 1
+                    cached_targets.append(
+                        {
+                            "site_id": site.id,
+                            "domain": site.domain,
+                            "detail": "All website checks were still fresh and were reused from the cache.",
+                        }
+                    )
                     continue
                 targets.append({"site_id": site.id, "domain": site.domain})
-            return targets, cached_count, skipped_count
+            return targets, cached_targets, skipped_targets
 
     @classmethod
     def _refresh_one_site(cls, target: dict[str, Any]) -> dict[str, Any]:
@@ -462,6 +488,8 @@ class FleetRefreshService:
         if outcome.get("state") == "refreshed":
             result["state"]["refreshed"] += 1
             result["sites"]["refreshed"] += 1
+        elif outcome.get("state") == "cached":
+            result["sites"]["cached"] += 1
         else:
             result["state"]["failed"] += 1
             result["sites"]["failed"] += 1
@@ -469,20 +497,90 @@ class FleetRefreshService:
             result["updates"]["refreshed"] += 1
         elif outcome.get("updates") == "failed":
             result["updates"]["failed"] += 1
+        elif outcome.get("updates") == "cached":
+            result["updates"]["cached"] += 1
         else:
             result["updates"]["skipped"] += 1
         if outcome.get("backups") == "refreshed":
             result["backups"]["refreshed"] += 1
         elif outcome.get("backups") == "failed":
             result["backups"]["failed"] += 1
+        elif outcome.get("backups") == "cached":
+            result["backups"]["cached"] += 1
         if outcome.get("users") == "refreshed":
             result["users"]["refreshed"] += 1
         elif outcome.get("users") == "failed":
             result["users"]["failed"] += 1
         elif outcome.get("users") == "unsupported":
             result["users"]["unsupported"] += 1
+        elif outcome.get("users") == "cached":
+            result["users"]["cached"] += 1
         for error in outcome.get("errors", []):
             result["errors"].append({"site": outcome.get("domain", "unknown"), "detail": str(error)[:240]})
+
+    @staticmethod
+    def _cached_site_outcome(target: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "site_id": target["site_id"],
+            "domain": target["domain"],
+            "state": "cached",
+            "updates": "cached",
+            "backups": "cached",
+            "users": "cached",
+            "detail": target["detail"],
+            "errors": [],
+        }
+
+    @staticmethod
+    def _skipped_site_outcome(target: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "site_id": target["site_id"],
+            "domain": target["domain"],
+            "state": "skipped",
+            "updates": "skipped",
+            "backups": "skipped",
+            "users": "skipped",
+            "detail": target["detail"],
+            "errors": [],
+        }
+
+    @classmethod
+    def _store_site_result(cls, *, run_id: int, outcome: dict[str, Any]) -> None:
+        site_id = int(outcome["site_id"])
+        details = copy.deepcopy(outcome)
+        errors = [str(error)[:240] for error in details.get("errors", [])]
+        with SessionLocal() as db:
+            record = db.scalar(
+                select(FleetRefreshSiteResult).where(
+                    FleetRefreshSiteResult.fleet_refresh_run_id == run_id,
+                    FleetRefreshSiteResult.site_id == site_id,
+                )
+            )
+            if record is None:
+                record = FleetRefreshSiteResult(
+                    fleet_refresh_run_id=run_id,
+                    site_id=site_id,
+                    domain=str(outcome.get("domain", "unknown")),
+                    status=str(outcome.get("state", "failed")),
+                    state_status=str(outcome.get("state", "failed")),
+                    updates_status=str(outcome.get("updates", "skipped")),
+                    backups_status=str(outcome.get("backups", "skipped")),
+                    users_status=str(outcome.get("users", "skipped")),
+                    jet_status="not-applicable",
+                )
+                db.add(record)
+            else:
+                record.domain = str(outcome.get("domain", record.domain))
+                record.status = str(outcome.get("state", record.status))
+                record.state_status = str(outcome.get("state", record.state_status))
+                record.updates_status = str(outcome.get("updates", record.updates_status))
+                record.backups_status = str(outcome.get("backups", record.backups_status))
+                record.users_status = str(outcome.get("users", record.users_status))
+            record.completed_at = datetime.now(UTC)
+            record.detail = str(outcome.get("detail", "")) or None
+            record.result_json = details
+            record.error_message = "\n".join(errors) or None
+            db.commit()
 
     @classmethod
     def _refresh_provider_evidence(
@@ -529,6 +627,11 @@ class FleetRefreshService:
                 jet_site_ids = cls._jet_sites_requiring_provider(
                     entries=entries,
                 )
+                cls._record_jet_license_candidates(
+                    run_id=run_id,
+                    entries=entries,
+                    site_ids=jet_site_ids,
+                )
 
             result["crocoblock"]["eligible"] = len(jet_site_ids)
             result["phase"] = {
@@ -548,6 +651,7 @@ class FleetRefreshService:
                     actor=requested_by,
                     site_ids=jet_site_ids,
                     progress_callback=report_crocoblock_progress,
+                    site_result_callback=lambda outcome: cls._store_jet_result(run_id=run_id, outcome=outcome),
                     should_cancel=lambda: cls._is_cancellation_requested(run_id),
                 )
                 result["crocoblock"].update(
@@ -636,6 +740,73 @@ class FleetRefreshService:
         return required_site_ids
 
     @classmethod
+    def _record_jet_license_candidates(
+        cls,
+        *,
+        run_id: int,
+        entries: list[Any],
+        site_ids: set[int],
+    ) -> None:
+        plugins_by_site: dict[int, list[dict[str, str]]] = {}
+        for entry in entries:
+            if (
+                entry.site.id not in site_ids
+                or entry.kind != "plugin"
+                or not entry.identifier.startswith("jet-")
+                or not entry.update_available
+                or entry.execution_ready
+            ):
+                continue
+            plugins_by_site.setdefault(entry.site.id, []).append(
+                {
+                    "plugin_file": entry.identifier,
+                    "name": entry.name,
+                    "current_version": entry.current_version or "",
+                    "target_version": entry.target_version or "",
+                }
+            )
+        for site_id in site_ids:
+            cls._store_jet_result(
+                run_id=run_id,
+                outcome={
+                    "site_id": site_id,
+                    "status": "license-check-queued",
+                    "detail": "A Jet update is available but its authorized package is not ready; the stored Crocoblock license will be checked.",
+                    "license_was_already_active": None,
+                    "update_package_ready": None,
+                    "provider_versions": [],
+                    "plugins": plugins_by_site.get(site_id, []),
+                },
+            )
+
+    @classmethod
+    def _store_jet_result(cls, *, run_id: int, outcome: dict[str, Any]) -> None:
+        site_id = int(outcome["site_id"])
+        with SessionLocal() as db:
+            record = db.scalar(
+                select(FleetRefreshSiteResult).where(
+                    FleetRefreshSiteResult.fleet_refresh_run_id == run_id,
+                    FleetRefreshSiteResult.site_id == site_id,
+                )
+            )
+            if record is None:
+                return
+            result = copy.deepcopy(record.result_json or {})
+            previous_jet = result.get("jet") if isinstance(result.get("jet"), dict) else {}
+            plugins = outcome.get("plugins") or previous_jet.get("plugins") or []
+            result["jet"] = {
+                "status": str(outcome["status"]),
+                "detail": str(outcome["detail"]),
+                "license_was_already_active": outcome.get("license_was_already_active"),
+                "update_package_ready": outcome.get("update_package_ready"),
+                "plugins": plugins,
+                "provider_versions": outcome.get("provider_versions", []),
+            }
+            record.jet_status = str(outcome["status"])
+            record.result_json = result
+            db.commit()
+
+    @classmethod
     def _store_progress(cls, run_id: int, result: dict[str, Any]) -> None:
         with SessionLocal() as db:
             run = db.get(FleetRefreshRun, run_id)
@@ -701,7 +872,7 @@ class FleetRefreshService:
             },
             "sites": {"total": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "skipped": 0},
             "state": {"refreshed": 0, "failed": 0},
-            "updates": {"refreshed": 0, "failed": 0, "skipped": 0},
+            "updates": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
             "users": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0, "unsupported": 0},
             "crocoblock": {

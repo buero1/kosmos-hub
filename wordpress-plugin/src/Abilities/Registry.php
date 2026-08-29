@@ -1644,6 +1644,8 @@ class Registry {
 			);
 		}
 
+		$license_was_already_active = \Jet_Dashboard\Utils::is_site_activated();
+
 		try {
 			if (
 				! method_exists( $license_manager, 'license_action_query' ) ||
@@ -1709,6 +1711,7 @@ class Registry {
 		return array(
 			'activated'            => true,
 			'site_activated'       => (bool) $site_activated,
+			'license_was_already_active' => (bool) $license_was_already_active,
 			'update_package_ready' => $package_ready,
 			'plugins'              => $provider_versions,
 			'message'              => $site_activated
@@ -2860,11 +2863,12 @@ class Registry {
 			'properties' => array(
 				'activated'            => array( 'type' => 'boolean' ),
 				'site_activated'       => array( 'type' => 'boolean' ),
+				'license_was_already_active' => array( 'type' => 'boolean' ),
 				'update_package_ready' => array( 'type' => 'boolean' ),
 				'plugins'              => array( 'type' => 'array', 'items' => $plugin_item ),
 				'message'              => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'activated', 'site_activated', 'update_package_ready', 'plugins', 'message' ),
+			'required'   => array( 'activated', 'site_activated', 'license_was_already_active', 'update_package_ready', 'plugins', 'message' ),
 		);
 	}
 
