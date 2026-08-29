@@ -16,6 +16,7 @@ Monorepo fuer die zentrale Kosmos-Plattform und das zugehoerige WordPress-Plugin
 - Die Update-Dateien liegen unter `https://plugins.kosmos-medien.de/kosmos-bridge/`.
 - Der Release-Workflow liegt in `.github/workflows/release-kosmos-bridge.yml`.
 - Plugin-Releases werden ueber Git-Tags im Format `bridge-vX.Y.Z` ausgeloest.
+- Der Betriebsablauf fuer Hub-Releases steht in [docs/release-playbook.md](docs/release-playbook.md).
 
 ## Phase 1
 
