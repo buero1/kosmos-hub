@@ -548,7 +548,7 @@
       </script>
     {% endif %}
 
-    {% if not show_refresh_protocol %}
+    {% if show_update_selection %}
     <form id="direct-update-form" method="post" action="/updates/apply-action" data-direct-update-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="maintenance_action" value="direct-updates">

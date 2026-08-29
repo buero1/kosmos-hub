@@ -622,6 +622,7 @@ def update_workbench_page(
             "update_batch": update_batch if batch_runs else "",
             "batch_runs": batch_runs,
             "batch_running": batch_running,
+            "show_update_selection": not batch_runs and view != "refresh-protocol",
             "direct_update": direct_update,
             "official_versions": official_versions,
             "fresh_updates": fresh_updates,
