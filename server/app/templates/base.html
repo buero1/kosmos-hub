@@ -1392,6 +1392,47 @@
       .maintenance-history .section-heading > div {
         width: 100%;
       }
+      .maintenance-history-tabs {
+        display: flex;
+        gap: 0.4rem;
+        overflow-x: auto;
+        margin: 1rem 0 0;
+        padding: 0 0 0.55rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .maintenance-history-tab {
+        flex: 0 0 auto;
+        border: 1px solid var(--border);
+        border-bottom-color: transparent;
+        border-radius: 12px 12px 0 0;
+        background: rgba(255, 250, 242, 0.7);
+        color: var(--muted);
+        cursor: pointer;
+        font: 700 0.78rem "Trebuchet MS", sans-serif;
+        padding: 0.55rem 0.7rem;
+      }
+      .maintenance-history-tab:hover,
+      .maintenance-history-tab:focus-visible,
+      .maintenance-history-tab.is-active {
+        background: var(--accent-soft);
+        border-color: #8dbdae;
+        color: #075f4e;
+      }
+      .maintenance-history-tab span {
+        display: inline-grid;
+        min-width: 1.35rem;
+        place-items: center;
+        margin-left: 0.2rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        font-size: 0.7rem;
+      }
+      .maintenance-history-panel {
+        padding-top: 0.15rem;
+      }
+      .maintenance-history-day-summary {
+        margin: 0.7rem 0 0.45rem;
+      }
       a.button {
         display: inline-block;
         margin-top: 1rem;

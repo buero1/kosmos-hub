@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import SecretCipher
+from app.core.timezones import BERLIN_TIMEZONE
 from app.models.maintenance_run import (
     MaintenanceRun,
     MaintenanceRunStatus,
@@ -47,6 +48,13 @@ class DirectUpdateBatchCancellationOutcome:
     cancelled_queued_runs: int
     processing_runs: int
     cancellation_requested: bool
+
+
+@dataclass(frozen=True)
+class SiteMaintenanceHistoryDay:
+    key: str
+    label: str
+    runs: list[MaintenanceRun]
 
 
 class MaintenanceRunService:
@@ -94,15 +102,49 @@ class MaintenanceRunService:
         self.repository = SiteRepository(db)
         self.proxy = SiteMcpProxyService(db=db, cipher=cipher)
 
-    def list_site_runs(self, site_id: int, *, limit: int = 8) -> list[MaintenanceRun]:
+    def list_site_runs(self, site_id: int, *, limit: int | None = None) -> list[MaintenanceRun]:
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps))
             .where(MaintenanceRun.site_id == site_id)
             .order_by(MaintenanceRun.started_at.desc())
-            .limit(limit)
         )
+        if limit is not None:
+            statement = statement.limit(limit)
         return list(self.db.scalars(statement))
+
+    def list_site_run_history(self, site_id: int) -> list[SiteMaintenanceHistoryDay]:
+        """Return the complete site history grouped by the operator's calendar day."""
+        history: list[SiteMaintenanceHistoryDay] = []
+        current_day_key: str | None = None
+        current_day_runs: list[MaintenanceRun] = []
+
+        for run in self.list_site_runs(site_id):
+            local_started_at = self._as_utc(run.started_at).astimezone(BERLIN_TIMEZONE)
+            day_key = local_started_at.strftime("%Y-%m-%d")
+            if current_day_key is None:
+                current_day_key = day_key
+            if day_key != current_day_key:
+                history.append(
+                    SiteMaintenanceHistoryDay(
+                        key=current_day_key,
+                        label=self._maintenance_history_day_label(current_day_key),
+                        runs=current_day_runs,
+                    )
+                )
+                current_day_key = day_key
+                current_day_runs = []
+            current_day_runs.append(run)
+
+        if current_day_key is not None:
+            history.append(
+                SiteMaintenanceHistoryDay(
+                    key=current_day_key,
+                    label=self._maintenance_history_day_label(current_day_key),
+                    runs=current_day_runs,
+                )
+            )
+        return history
 
     def start_updraftplus_backup(self, *, site_id: int, actor: str) -> MaintenanceRunOutcome:
         site = self.repository.get_site(site_id)
@@ -3370,3 +3412,7 @@ class MaintenanceRunService:
     @staticmethod
     def _as_utc(value: datetime) -> datetime:
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    @staticmethod
+    def _maintenance_history_day_label(day_key: str) -> str:
+        return datetime.strptime(day_key, "%Y-%m-%d").strftime("%d.%m.%Y")

@@ -1231,7 +1231,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
     if site is None:
         raise HTTPException(status_code=404, detail="Site not found.")
     inventory_service = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    maintenance_runs = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_site_runs(site_id)
+    maintenance_run_history = MaintenanceRunService(db=db, cipher=get_secret_cipher()).list_site_run_history(site_id)
     user_inventory = SiteUserService(db=db, cipher=get_secret_cipher()).get_latest_inventory(site_id)
     site_entries = [
         entry
@@ -1245,7 +1245,7 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
             "site": site,
             "update_entries": site_entries,
             "csrf_token": get_csrf_token(request),
-            "maintenance_runs": maintenance_runs,
+            "maintenance_run_history": maintenance_run_history,
             "user_inventory": user_inventory,
             "removable_test_registration": _is_removable_empty_test_registration(site),
         },

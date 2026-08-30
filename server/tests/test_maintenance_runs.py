@@ -11,6 +11,54 @@ from app.services.maintenance_runs import MaintenanceRunService
 from app.services.site_mcp_proxy import SiteMcpProxyService
 
 
+def test_site_maintenance_history_includes_all_runs_and_groups_by_berlin_day():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="abcdef12-56ef-78ab-90cd-12ef34ab56cd",
+            domain="history.example",
+            home_url="https://history.example/",
+            site_url="https://history.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.flush()
+
+        for index in range(10):
+            db.add(
+                MaintenanceRun(
+                    site=site,
+                    kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+                    status=MaintenanceRunStatus.succeeded.value,
+                    requested_by="operator",
+                    started_at=datetime(2026, 8, 29, 22, index, tzinfo=UTC),
+                    result_json={},
+                )
+            )
+        db.add(
+            MaintenanceRun(
+                site=site,
+                kind=MaintenanceRunService.COMPLETE_SITE_UPDATE_KIND,
+                status=MaintenanceRunStatus.succeeded.value,
+                requested_by="operator",
+                started_at=datetime(2026, 8, 29, 20, 30, tzinfo=UTC),
+                result_json={},
+            )
+        )
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        history = service.list_site_run_history(site.id)
+
+        assert [(day.key, day.label, len(day.runs)) for day in history] == [
+            ("2026-08-30", "30.08.2026", 10),
+            ("2026-08-29", "29.08.2026", 1),
+        ]
+        assert len(service.list_site_runs(site.id)) == 11
+
+
 def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

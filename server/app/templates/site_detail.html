@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ site.domain }} · kosmos-hub{% endblock %}
 {% block content %}
+  {% set maintenance_runs = maintenance_run_history | map(attribute="runs") | sum(start=[]) %}
   {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
   {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "equalto", "updraftplus-backup") | list %}
   {% set running_update_runs = running_maintenance_runs | selectattr("kind", "equalto", "direct-plugin-update") | list %}
@@ -500,51 +501,89 @@
           <div>
             <p class="eyebrow">Maintenance record</p>
             <h2 id="protocol-heading">Protokoll</h2>
-            <p class="subtle">Every backup and direct-update run is documented here, including the latest run.</p>
+            <p class="subtle">Alle Wartungsläufe sind nach dem Startdatum gruppiert. Vollständige Website-Läufe und ihre einzelnen Schritte bleiben getrennt erkennbar.</p>
           </div>
         </div>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Run</th>
-                <th>Type</th>
-                <th>Target</th>
-                <th>Status</th>
-                <th>Started</th>
-                <th>Completed</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for run in maintenance_runs %}
-                <tr>
-                  <td>#{{ run.id }}</td>
-                  <td>{{ run.kind | replace("-", " ") | title }}</td>
-                  <td>
-                    {% if run.kind == "direct-plugin-update" %}
-                      <strong>{{ run.result_json.update_name or run.result_json.plugin_name }}</strong>
-                      <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
-                    {% elif run.kind == "updraftplus-backup" %}
-                      <strong>UpdraftPlus backup</strong>
-                      {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at | berlin_time }}</p>{% endif %}
-                    {% else %}
-                      <span class="subtle">-</span>
-                    {% endif %}
-                  </td>
-                  <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
-                  <td>{{ run.started_at | berlin_time }}</td>
-                  <td>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Still running{% endif %}</td>
-                  <td>{{ run.error_message or run.result_json.stage_message or "Completed" }}</td>
-                </tr>
-              {% else %}
-                <tr>
-                  <td colspan="7">No maintenance runs are documented for this site yet.</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+        {% if maintenance_run_history %}
+          <div class="maintenance-history-tabs" role="tablist" aria-label="Protokoll nach Datum">
+            {% for day in maintenance_run_history %}
+              <button
+                class="maintenance-history-tab{% if loop.first %} is-active{% endif %}"
+                type="button"
+                role="tab"
+                id="maintenance-history-tab-{{ day.key }}"
+                aria-selected="{{ 'true' if loop.first else 'false' }}"
+                aria-controls="maintenance-history-panel-{{ day.key }}"
+                data-maintenance-history-tab="{{ day.key }}"
+              >{{ day.label }} <span>{{ day.runs | length }}</span></button>
+            {% endfor %}
+          </div>
+          {% for day in maintenance_run_history %}
+            <div
+              class="maintenance-history-panel"
+              id="maintenance-history-panel-{{ day.key }}"
+              role="tabpanel"
+              aria-labelledby="maintenance-history-tab-{{ day.key }}"
+              data-maintenance-history-panel="{{ day.key }}"
+              {% if not loop.first %}hidden{% endif %}
+            >
+              <p class="subtle maintenance-history-day-summary">{{ day.runs | length }} {{ "Eintrag" if day.runs | length == 1 else "Einträge" }}</p>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Run</th>
+                      <th>Art</th>
+                      <th>Ziel</th>
+                      <th>Status</th>
+                      <th>Gestartet</th>
+                      <th>Abgeschlossen</th>
+                      <th>Ergebnis</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for run in day.runs %}
+                      {% set workflow_run_id = run.result_json.workflow_run_id if run.result_json else none %}
+                      <tr>
+                        <td>#{{ run.id }}</td>
+                        <td>
+                          {% if run.kind == "complete-site-update" %}
+                            <span class="pill pill-system">Vollständiger Lauf</span>
+                          {% elif workflow_run_id %}
+                            <span class="pill pill-system">Teil eines vollständigen Laufs</span>
+                            <p class="subtle table-note">Workflow #{{ workflow_run_id }} · {{ run.result_json.workflow_phase | title }} · Welle {{ run.result_json.workflow_wave }}</p>
+                          {% else %}
+                            {{ run.kind | replace("-", " ") | title }}
+                          {% endif %}
+                        </td>
+                        <td>
+                          {% if run.kind == "complete-site-update" %}
+                            <strong>Website vollständig aktualisieren</strong>
+                            <p class="subtle table-note">{{ run.result_json.successful_updates or 0 }} erfolgreich · {{ run.result_json.failed_updates or 0 }} fehlgeschlagen · {{ run.result_json.skipped_updates or 0 }} übersprungen</p>
+                          {% elif run.kind == "direct-plugin-update" %}
+                            <strong>{{ run.result_json.update_name or run.result_json.plugin_name }}</strong>
+                            <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
+                          {% elif run.kind == "updraftplus-backup" %}
+                            <strong>UpdraftPlus backup</strong>
+                            {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at | berlin_time }}</p>{% endif %}
+                          {% else %}
+                            <span class="subtle">-</span>
+                          {% endif %}
+                        </td>
+                        <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
+                        <td>{{ run.started_at | berlin_time }}</td>
+                        <td>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</td>
+                        <td>{{ run.error_message or run.result_json.stage_message or "Abgeschlossen" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="subtle">Für diese Website sind noch keine Wartungsläufe dokumentiert.</p>
+        {% endif %}
       </section>
     </div>
   </div>
@@ -555,6 +594,26 @@
       }, 10000);
     </script>
   {% endif %}
+  <script>
+    (function () {
+      var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-maintenance-history-tab]"));
+      var panels = Array.prototype.slice.call(document.querySelectorAll("[data-maintenance-history-panel]"));
+
+      tabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          var selectedDay = tab.getAttribute("data-maintenance-history-tab");
+          tabs.forEach(function (candidate) {
+            var selected = candidate === tab;
+            candidate.classList.toggle("is-active", selected);
+            candidate.setAttribute("aria-selected", selected ? "true" : "false");
+          });
+          panels.forEach(function (panel) {
+            panel.hidden = panel.getAttribute("data-maintenance-history-panel") !== selectedDay;
+          });
+        });
+      });
+    }());
+  </script>
   <script>
     (function () {
       var sections = Array.prototype.slice.call(document.querySelectorAll(".site-section"));
