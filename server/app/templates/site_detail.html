@@ -505,100 +505,83 @@
           </div>
         </div>
         {% if maintenance_run_history %}
-          <div class="maintenance-history-tabs" role="tablist" aria-label="Protokoll nach Datum">
+          <div class="maintenance-history-list" aria-label="Wartungsläufe">
             {% for day in maintenance_run_history %}
-              <button
-                class="maintenance-history-tab{% if loop.first %} is-active{% endif %}"
-                type="button"
-                role="tab"
-                id="maintenance-history-tab-{{ day.key }}"
-                aria-selected="{{ 'true' if loop.first else 'false' }}"
-                aria-controls="maintenance-history-panel-{{ day.key }}"
-                data-maintenance-history-tab="{{ day.key }}"
-              >{{ day.label }} <span>{{ day.run_count }}</span></button>
-            {% endfor %}
-          </div>
-          {% for day in maintenance_run_history %}
-            <div
-              class="maintenance-history-panel"
-              id="maintenance-history-panel-{{ day.key }}"
-              role="tabpanel"
-              aria-labelledby="maintenance-history-tab-{{ day.key }}"
-              data-maintenance-history-panel="{{ day.key }}"
-              {% if not loop.first %}hidden{% endif %}
-            >
-              <p class="subtle maintenance-history-day-summary">{{ day.run_count }} {{ "Eintrag" if day.run_count == 1 else "Einträge" }}</p>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Art</th>
-                      <th>Ziel</th>
-                      <th>Status</th>
-                      <th>Gestartet</th>
-                      <th>Abgeschlossen</th>
-                      <th>Ergebnis</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for run in day.runs %}
-                      {% set child_runs = day.workflow_child_runs.get(run.id, []) %}
-                      <tr>
-                        <td>#{{ run.id }}</td>
-                        <td>
-                          {% if run.kind == "complete-site-update" %}
-                            <span class="pill pill-system">Vollständiger Lauf</span>
-                          {% else %}
-                            {{ run.kind | replace("-", " ") | title }}
-                          {% endif %}
-                        </td>
-                        <td>
+              {% for run in day.runs %}
+                {% set child_runs = day.workflow_child_runs.get(run.id, []) %}
+                <details class="maintenance-history-entry">
+                  <summary>
+                    <span class="maintenance-history-entry-id">#{{ run.id }}</span>
+                    <span class="maintenance-history-entry-kind">{% if run.kind == "complete-site-update" %}Vollständiger Lauf{% else %}{{ run.kind | replace("-", " ") | title }}{% endif %}</span>
+                    <time class="maintenance-history-entry-time">{{ run.started_at | berlin_time }}</time>
+                  </summary>
+                  <div class="maintenance-history-entry-content">
+                    <dl class="maintenance-history-entry-details">
+                      <div>
+                        <dt>Status</dt>
+                        <dd><span class="pill pill-{{ run.status }}">{{ run.status }}</span></dd>
+                      </div>
+                      <div>
+                        <dt>Abgeschlossen</dt>
+                        <dd>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</dd>
+                      </div>
+                      <div>
+                        <dt>Ziel</dt>
+                        <dd>
                           {% if run.kind == "complete-site-update" %}
                             <strong>Website vollständig aktualisieren</strong>
-                            <p class="subtle table-note">{{ run.result_json.successful_updates or 0 }} erfolgreich · {{ run.result_json.failed_updates or 0 }} fehlgeschlagen · {{ run.result_json.skipped_updates or 0 }} übersprungen</p>
+                            <span class="subtle">{{ run.result_json.successful_updates or 0 }} erfolgreich · {{ run.result_json.failed_updates or 0 }} fehlgeschlagen · {{ run.result_json.skipped_updates or 0 }} übersprungen</span>
                           {% elif run.kind == "direct-plugin-update" %}
                             <strong>{{ run.result_json.update_name or run.result_json.plugin_name }}</strong>
-                            <p class="subtle table-note">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</p>
+                            <span class="subtle">{{ run.result_json.current_version }} → {{ run.result_json.target_version }}</span>
                           {% elif run.kind == "updraftplus-backup" %}
                             <strong>UpdraftPlus backup</strong>
-                            {% if run.result_json.backup_at %}<p class="subtle table-note">Verified: {{ run.result_json.backup_at | berlin_time }}</p>{% endif %}
                           {% else %}
                             <span class="subtle">-</span>
                           {% endif %}
-                        </td>
-                        <td><span class="pill pill-{{ run.status }}">{{ run.status }}</span></td>
-                        <td>{{ run.started_at | berlin_time }}</td>
-                        <td>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</td>
-                        <td>{{ run.error_message or run.result_json.stage_message or "Abgeschlossen" }}</td>
-                      </tr>
-                      {% for child_run in child_runs %}
-                        <tr class="maintenance-history-child-row">
-                          <td><span aria-hidden="true">↳</span> #{{ child_run.id }}</td>
-                          <td>
-                            <span class="pill pill-system">Schritt des vollständigen Laufs</span>
-                            <p class="subtle table-note">{{ child_run.result_json.workflow_phase | title }} · Welle {{ child_run.result_json.workflow_wave }}</p>
-                          </td>
-                          <td>
-                            {% if child_run.kind == "direct-plugin-update" %}
-                              <strong>{{ child_run.result_json.update_name or child_run.result_json.plugin_name }}</strong>
-                              <p class="subtle table-note">{{ child_run.result_json.current_version }} → {{ child_run.result_json.target_version }}</p>
-                            {% else %}
-                              <span class="subtle">{{ child_run.kind | replace("-", " ") | title }}</span>
-                            {% endif %}
-                          </td>
-                          <td><span class="pill pill-{{ child_run.status }}">{{ child_run.status }}</span></td>
-                          <td>{{ child_run.started_at | berlin_time }}</td>
-                          <td>{% if child_run.completed_at %}{{ child_run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</td>
-                          <td>{{ child_run.error_message or child_run.result_json.stage_message or "Abgeschlossen" }}</td>
-                        </tr>
-                      {% endfor %}
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          {% endfor %}
+                        </dd>
+                      </div>
+                      <div class="maintenance-history-entry-result">
+                        <dt>Ergebnis</dt>
+                        <dd>{{ run.error_message or run.result_json.stage_message or "Abgeschlossen" }}</dd>
+                      </div>
+                    </dl>
+                    {% if child_runs %}
+                      <section class="maintenance-history-child-updates" aria-label="Teilupdates des vollständigen Laufs">
+                        <h3>Teilupdates <span>{{ child_runs | length }}</span></h3>
+                        <div class="table-scroll">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Phase</th>
+                                <th>Update</th>
+                                <th>Status</th>
+                                <th>Gestartet</th>
+                                <th>Ergebnis</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {% for child_run in child_runs %}
+                                <tr class="maintenance-history-child-row">
+                                  <td>{{ child_run.result_json.workflow_phase | title }} · Welle {{ child_run.result_json.workflow_wave }}</td>
+                                  <td>
+                                    <strong>{{ child_run.result_json.update_name or child_run.result_json.plugin_name }}</strong>
+                                    <p class="subtle table-note">{{ child_run.result_json.current_version }} → {{ child_run.result_json.target_version }}</p>
+                                  </td>
+                                  <td><span class="pill pill-{{ child_run.status }}">{{ child_run.status }}</span></td>
+                                  <td>{{ child_run.started_at | berlin_time }}</td>
+                                  <td>{{ child_run.error_message or child_run.result_json.stage_message or "Abgeschlossen" }}</td>
+                                </tr>
+                              {% endfor %}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    {% endif %}
+                  </div>
+                </details>
+              {% endfor %}
+            {% endfor %}
         {% else %}
           <p class="subtle">Für diese Website sind noch keine Wartungsläufe dokumentiert.</p>
         {% endif %}
@@ -612,26 +595,6 @@
       }, 10000);
     </script>
   {% endif %}
-  <script>
-    (function () {
-      var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-maintenance-history-tab]"));
-      var panels = Array.prototype.slice.call(document.querySelectorAll("[data-maintenance-history-panel]"));
-
-      tabs.forEach(function (tab) {
-        tab.addEventListener("click", function () {
-          var selectedDay = tab.getAttribute("data-maintenance-history-tab");
-          tabs.forEach(function (candidate) {
-            var selected = candidate === tab;
-            candidate.classList.toggle("is-active", selected);
-            candidate.setAttribute("aria-selected", selected ? "true" : "false");
-          });
-          panels.forEach(function (panel) {
-            panel.hidden = panel.getAttribute("data-maintenance-history-panel") !== selectedDay;
-          });
-        });
-      });
-    }());
-  </script>
   <script>
     (function () {
       var sections = Array.prototype.slice.call(document.querySelectorAll(".site-section"));
