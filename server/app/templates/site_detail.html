@@ -509,7 +509,7 @@
             {% for day in maintenance_run_history %}
               {% for run in day.runs %}
                 {% set child_runs = day.workflow_child_runs.get(run.id, []) %}
-                <details class="maintenance-history-entry">
+                <details class="maintenance-history-entry{% if run.kind == "complete-site-update" %} maintenance-history-entry-complete{% endif %}">
                   <summary>
                     <span class="maintenance-history-entry-id">#{{ run.id }}</span>
                     <span class="maintenance-history-entry-kind">{% if run.kind == "complete-site-update" %}Vollständiger Lauf{% else %}{{ run.kind | replace("-", " ") | title }}{% endif %}</span>
@@ -595,6 +595,23 @@
       }, 10000);
     </script>
   {% endif %}
+  <script>
+    (function () {
+      var entries = Array.prototype.slice.call(document.querySelectorAll(".maintenance-history-entry"));
+      entries.forEach(function (entry) {
+        entry.addEventListener("toggle", function () {
+          if (!entry.open) {
+            return;
+          }
+          entries.forEach(function (otherEntry) {
+            if (otherEntry !== entry) {
+              otherEntry.open = false;
+            }
+          });
+        });
+      });
+    }());
+  </script>
   <script>
     (function () {
       var sections = Array.prototype.slice.call(document.querySelectorAll(".site-section"));

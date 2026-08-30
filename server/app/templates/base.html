@@ -1402,6 +1402,11 @@
         border-radius: 14px;
         background: rgba(255, 250, 242, 0.72);
       }
+      .maintenance-history-entry-complete {
+        border-color: #8ebdad;
+        background: linear-gradient(90deg, rgba(217, 239, 232, 0.72), rgba(255, 250, 242, 0.86));
+        box-shadow: inset 4px 0 0 var(--accent);
+      }
       .maintenance-history-entry > summary {
         display: grid;
         grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -1424,6 +1429,11 @@
         font-weight: 800;
       }
       .maintenance-history-entry[open] > summary::before { content: "-"; }
+      .maintenance-history-entry-complete > summary::before {
+        background: var(--accent);
+        color: white;
+      }
+      .maintenance-history-entry-complete .maintenance-history-entry-kind { color: #075f4e; }
       .maintenance-history-entry > summary:focus-visible {
         outline: 3px solid rgba(13, 135, 112, 0.35);
         outline-offset: -3px;
