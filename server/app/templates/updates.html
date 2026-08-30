@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "partials/site_domain.html" import site_domain_link with context %}
+{% from "partials/site_domain.html" import site_domain_heading, site_domain_link with context %}
 {% block title %}Update Workbench · kosmos-hub{% endblock %}
 {% block content %}
   <div class="workbench-page-layout">
@@ -585,7 +585,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Vollständige Aktualisierung</p>
-            <h3 id="complete-site-update-progress-heading">{{ complete_site_update_run.site.domain }}</h3>
+            {{ site_domain_heading(complete_site_update_run.site, "/sites/" ~ complete_site_update_run.site.id ~ "#updates", "complete-site-update-progress-heading") }}
             <p class="subtle" data-complete-site-update-summary>{{ complete_result.get("stage_message") or "Workflow wird vorbereitet." }}</p>
           </div>
           {% if complete_site_update_running and not complete_result.get("cancellation") %}
