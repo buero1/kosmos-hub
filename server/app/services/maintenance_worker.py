@@ -25,6 +25,10 @@ def process_pending_direct_updates() -> dict[str, int]:
             with SessionLocal() as db:
                 max_workers = FleetRefreshSettingsService(db=db).get_runtime_settings().max_parallel_direct_updates
                 service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+                recovered = service.recover_stale_direct_update_postflights(limit=max_workers)
+                summary["checked"] += sum(recovered.values())
+                for outcome, count in recovered.items():
+                    summary[outcome] += count
                 run_ids = service.next_parallel_direct_update_run_ids(limit=max_workers)
                 direct_update_batch_ids = service.direct_update_batch_ids_for_run_ids(run_ids)
             if not run_ids:

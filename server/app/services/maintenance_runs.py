@@ -87,6 +87,7 @@ class MaintenanceRunService:
     BACKUP_TIMEOUT = timedelta(minutes=3)
     POST_UPDATE_HEALTH_MAX_ATTEMPTS = 3
     POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS = 10
+    POST_UPDATE_HEALTH_STALE_RECOVERY_AFTER = timedelta(minutes=5)
     POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS = 5
     POST_UPDATE_FRAMEWORK_PLUGIN_IDENTIFIERS = frozenset(
         {
@@ -145,6 +146,94 @@ class MaintenanceRunService:
                 )
             )
         return history
+
+    def recover_stale_direct_update_postflights(self, *, limit: int = 25) -> dict[str, int]:
+        """Finish an interrupted post-update health check without running the update again."""
+        outcomes = {"succeeded": 0, "failed": 0, "waiting": 0}
+        if limit < 1:
+            return outcomes
+
+        stale_before = datetime.now(UTC) - self.POST_UPDATE_HEALTH_STALE_RECOVERY_AFTER
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.last_checked_at.asc(), MaintenanceRun.id.asc())
+        )
+        stale_runs = [
+            run
+            for run in self.db.scalars(statement)
+            if (run.result_json or {}).get("stage") == "postflight-health"
+            and run.last_checked_at is not None
+            and self._as_utc(run.last_checked_at) <= stale_before
+        ][:limit]
+
+        for run in stale_runs:
+            details = self._direct_update_details(run)
+            update_step = self._find_step(run, self._update_step_key(details["update_kind"])) if details else None
+            update_result = dict(update_step.result_json or {}) if update_step is not None else {}
+            if details is None or self._direct_update_result_error(details, update_result):
+                outcomes["waiting"] += 1
+                continue
+
+            health_step = self._find_step(run, "postflight-health")
+            self._start_plugin_update_step(
+                run,
+                health_step,
+                "Resuming the post-update health check after an interrupted Hub worker.",
+            )
+            health_error, health_detail, health_result = self._run_direct_update_postflight_health(run, health_step)
+            if health_error:
+                run.result_json = {**(run.result_json or {}), "post_update_health": health_result}
+                self._fail_plugin_update_run(
+                    run,
+                    f"{details['update_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
+                    health_step=health_step,
+                )
+                outcomes["failed"] += 1
+                continue
+
+            self._complete_confirmed_direct_update_run(
+                run,
+                details,
+                update_result,
+                health_step,
+                health_detail,
+                health_result,
+                recovery_note="An interrupted post-update health check was resumed without repeating the update.",
+            )
+            outcomes["succeeded"] += 1
+        return outcomes
+
+    def reconcile_admin_ajax_access_denied_batch(self, batch_id: str) -> int:
+        """Repair confirmed updates that an access policy misclassified as failed."""
+        reconciled = 0
+        for run in self._direct_update_batch_runs(batch_id):
+            health_result = (run.result_json or {}).get("post_update_health")
+            if run.status != MaintenanceRunStatus.failed.value or not self._admin_ajax_access_is_ignored(health_result):
+                continue
+
+            details = self._direct_update_details(run)
+            update_step = self._find_step(run, self._update_step_key(details["update_kind"])) if details else None
+            update_result = dict(update_step.result_json or {}) if update_step is not None else {}
+            if details is None or self._direct_update_result_error(details, update_result):
+                continue
+
+            health_step = self._find_step(run, "postflight-health")
+            self._complete_confirmed_direct_update_run(
+                run,
+                details,
+                update_result,
+                health_step,
+                self._plugin_update_health_detail(health_result),
+                health_result,
+                recovery_note="The admin AJAX access policy returned HTTP 403 and was recorded as a non-blocking warning.",
+            )
+            reconciled += 1
+        return reconciled
 
     def start_updraftplus_backup(self, *, site_id: int, actor: str) -> MaintenanceRunOutcome:
         site = self.repository.get_site(site_id)
@@ -1644,35 +1733,14 @@ class MaintenanceRunService:
             )
             return "failed"
 
-        self._complete_plugin_update_step(run, health_step, health_detail, health_result)
-        self._record_confirmed_direct_update(run, details, result)
-
-        completed_at = datetime.now(UTC)
-        run.status = MaintenanceRunStatus.succeeded.value
-        run.completed_at = completed_at
-        run.last_checked_at = completed_at
-        run.result_json = {
-            **(run.result_json or {}),
-            "stage": "completed",
-            "stage_message": f"{details['update_name']} was updated and verified. Stored inventory and update offers were reconciled locally.",
-            "installed_version": details["target_version"],
-        }
-        write_audit_log(
-            self.db,
-            site=site,
-            actor="kosmos-hub",
-            source="hub-worker",
-            action="complete-direct-update-run",
-            result="succeeded",
-            detail=(
-                f"Direct update run {run.id} updated {details['update_name']} "
-                f"{details['current_version']} -> {details['target_version']}. {health_detail} "
-                "Stored inventory and update offers were reconciled locally."
-            ),
-            request_id=self._plugin_update_batch_id(run),
+        return self._complete_confirmed_direct_update_run(
+            run,
+            details,
+            result,
+            health_step,
+            health_detail,
+            health_result,
         )
-        self.db.commit()
-        return "succeeded"
 
     def _wait_for_post_update_framework_stabilization(
         self,
@@ -1726,6 +1794,53 @@ class MaintenanceRunService:
             update_kind=details["update_kind"],
             identifier=details["update_identifier"],
         )
+
+    def _complete_confirmed_direct_update_run(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        update_result: dict[str, Any],
+        health_step: MaintenanceRunStep | None,
+        health_detail: str,
+        health_result: dict[str, Any],
+        *,
+        recovery_note: str = "",
+    ) -> str:
+        """Persist a Bridge-confirmed update after its non-blocking health checks pass."""
+        self._complete_plugin_update_step(run, health_step, health_detail, health_result)
+        self._record_confirmed_direct_update(run, details, update_result)
+
+        completed_at = datetime.now(UTC)
+        stage_message = f"{details['update_name']} was updated and verified. Stored inventory and update offers were reconciled locally."
+        if recovery_note:
+            stage_message = f"{stage_message} {recovery_note}"
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.error_message = None
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "completed",
+            "stage_message": stage_message,
+            "installed_version": details["target_version"],
+            "post_update_health": health_result,
+        }
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-direct-update-run",
+            result="succeeded",
+            detail=(
+                f"Direct update run {run.id} updated {details['update_name']} "
+                f"{details['current_version']} -> {details['target_version']}. {health_detail} "
+                f"Stored inventory and update offers were reconciled locally. {recovery_note}"
+            ).strip(),
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
+        return "succeeded"
 
     def _poll_plugin_installation(self, run: MaintenanceRun) -> str:
         details = self._plugin_installation_details(run)
@@ -2669,7 +2784,11 @@ class MaintenanceRunService:
             return f"the public homepage health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('home_status'))})"
         if result.get("rest_healthy") is not True:
             return f"the WordPress REST API health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('rest_status'))})"
-        if "admin_ajax_healthy" in result and result.get("admin_ajax_healthy") is not True:
+        if (
+            "admin_ajax_healthy" in result
+            and result.get("admin_ajax_healthy") is not True
+            and not MaintenanceRunService._admin_ajax_access_is_ignored(result)
+        ):
             return f"the WordPress admin AJAX health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('admin_ajax_status'))})"
         return None
 
@@ -2682,6 +2801,8 @@ class MaintenanceRunService:
             f"homepage HTTP {MaintenanceRunService._health_status(result.get('home_status'))}; "
             f"WordPress REST API HTTP {MaintenanceRunService._health_status(result.get('rest_status'))}."
         )
+        if MaintenanceRunService._admin_ajax_access_is_ignored(result):
+            return f"{detail[:-1]}; WordPress admin AJAX returned HTTP 403 and is blocked by an access policy."
         if "admin_ajax_status" in result:
             return f"{detail[:-1]}; WordPress admin AJAX HTTP {MaintenanceRunService._health_status(result.get('admin_ajax_status'))}."
         return detail
@@ -2696,9 +2817,22 @@ class MaintenanceRunService:
             return "homepage"
         if result.get("rest_healthy") is not True:
             return "rest-api"
-        if "admin_ajax_healthy" in result and result.get("admin_ajax_healthy") is not True:
+        if (
+            "admin_ajax_healthy" in result
+            and result.get("admin_ajax_healthy") is not True
+            and not MaintenanceRunService._admin_ajax_access_is_ignored(result)
+        ):
             return "admin-ajax"
         return None
+
+    @staticmethod
+    def _admin_ajax_access_is_ignored(result: object) -> bool:
+        """A 403 is normally a local access policy, not an application health failure."""
+        return (
+            isinstance(result, dict)
+            and result.get("admin_ajax_healthy") is False
+            and result.get("admin_ajax_status") == 403
+        )
 
     @staticmethod
     def _post_update_health_failure_label(kind: str) -> str:

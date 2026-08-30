@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
@@ -24,7 +24,7 @@ from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.provider_credentials import ProviderCredentialService
 from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.site_inventory import SiteInventoryService
-from app.services.site_mcp_proxy import SiteMcpProxyError
+from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 from app.services.site_updates import SiteUpdateService
 
 
@@ -1376,6 +1376,107 @@ def test_direct_updates_require_healthy_homepage_rest_api_and_supported_admin_aj
             "admin_ajax_status": 500,
         }
     ) == "the WordPress admin AJAX health check did not pass (HTTP 500)"
+    access_policy_result = {
+        "home_healthy": True,
+        "home_status": 200,
+        "rest_healthy": True,
+        "rest_status": 200,
+        "admin_ajax_healthy": False,
+        "admin_ajax_status": 403,
+    }
+    assert MaintenanceRunService._plugin_update_health_error(access_policy_result) is None
+    assert MaintenanceRunService._post_update_health_failure_kind(access_policy_result) is None
+    assert "access policy" in MaintenanceRunService._plugin_update_health_detail(access_policy_result)
+
+
+def test_stale_direct_update_postflight_is_recovered_without_repeating_the_update(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime.now(UTC)
+    health_calls = []
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        health_calls.append((site_id, ability_name, ability_input, timeout_seconds))
+        assert ability_name == MaintenanceRunService.SITE_HEALTH_ABILITY
+        return {
+            "result": {
+                "home_healthy": True,
+                "home_status": 200,
+                "rest_healthy": True,
+                "rest_status": 200,
+                "admin_ajax_healthy": False,
+                "admin_ajax_status": 403,
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(MaintenanceRunService, "_record_confirmed_direct_update", lambda *_args: None)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="87654321-1234-1234-1234-123456789012",
+            domain="stale-postflight.example",
+            home_url="https://stale-postflight.example",
+            site_url="https://stale-postflight.example",
+            status=SiteStatus.verified.value,
+        )
+        run = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by="operator",
+            started_at=now - timedelta(minutes=6),
+            last_checked_at=now - timedelta(minutes=6),
+            result_json={
+                "batch_id": "a" * 32,
+                "stage": "postflight-health",
+                "update_kind": "plugin",
+                "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+                "update_name": "Kosmos Bridge",
+                "current_version": "0.3.60",
+                "target_version": "0.3.61",
+                "expected_active": True,
+            },
+        )
+        run.steps.extend(
+            [
+                MaintenanceRunStep(
+                    step_key="update-plugin",
+                    status=MaintenanceRunStepStatus.succeeded.value,
+                    started_at=now - timedelta(minutes=6),
+                    completed_at=now - timedelta(minutes=6),
+                    result_json={
+                        "updated": True,
+                        "plugin_file": "kosmos-bridge/kosmos-bridge.php",
+                        "previous_version": "0.3.60",
+                        "installed_version": "0.3.61",
+                        "active": True,
+                    },
+                ),
+                MaintenanceRunStep(
+                    step_key="postflight-health",
+                    status=MaintenanceRunStepStatus.running.value,
+                    started_at=now - timedelta(minutes=6),
+                    result_json={},
+                ),
+            ]
+        )
+        db.add(run)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=None)
+        assert service.recover_stale_direct_update_postflights() == {
+            "succeeded": 1,
+            "failed": 0,
+            "waiting": 0,
+        }
+
+        db.refresh(run)
+        assert run.status == MaintenanceRunStatus.succeeded.value
+        assert run.result_json["stage"] == "completed"
+        assert run.result_json["installed_version"] == "0.3.61"
+        assert run.steps[1].status == MaintenanceRunStepStatus.succeeded.value
+        assert health_calls == [(site.id, MaintenanceRunService.SITE_HEALTH_ABILITY, None, 45)]
 
 
 def test_framework_stabilization_is_limited_to_wordpress_and_active_framework_plugins():
