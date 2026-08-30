@@ -26,7 +26,7 @@
       </div>
     </div>
 
-    <div class="filter-panel filter-panel-workbench">
+    <div class="filter-panel filter-panel-workbench"{% if show_update_selection and entries %} data-update-auto-filter{% endif %}>
       <label>
         <span>Search</span>
         <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
@@ -677,6 +677,8 @@
   </div>
   <script>
     (function () {
+      var autoFilterPanel = document.querySelector("[data-update-auto-filter]");
+      var siteSelectorForm = document.getElementById("{{ site_selector.form_id }}");
       var selectAll = document.getElementById("select-all-filtered-updates");
       var directUpdateForm = document.querySelector("[data-direct-update-form]");
       var directUpdateSubmit = document.querySelector("[data-direct-update-submit]");
@@ -685,6 +687,14 @@
       var confirmationText = document.querySelector("[data-direct-update-confirmation-text]");
       var confirmationList = document.querySelector("[data-direct-update-confirmation-list]");
       var confirmationButton = document.querySelector("[data-direct-update-confirm]");
+
+      if (autoFilterPanel && siteSelectorForm) {
+        autoFilterPanel.querySelectorAll("select").forEach(function (filter) {
+          filter.addEventListener("change", function () {
+            siteSelectorForm.requestSubmit();
+          });
+        });
+      }
       if (!selectAll) {
         return;
       }
