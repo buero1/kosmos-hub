@@ -45,6 +45,8 @@ class Plugin {
 		add_action( 'admin_post_kosmos_bridge_save_settings', array( self::class, 'save_settings' ) );
 		add_action( 'wp_ajax_kosmos_bridge_collect_update_inventory', array( AbilityRegistry::class, 'handle_admin_update_loopback' ) );
 		add_action( 'wp_ajax_nopriv_kosmos_bridge_collect_update_inventory', array( AbilityRegistry::class, 'handle_admin_update_loopback' ) );
+		add_action( 'wp_ajax_' . AbilityRegistry::HEALTH_LOOPBACK_ACTION, array( AbilityRegistry::class, 'handle_admin_health_loopback' ) );
+		add_action( 'wp_ajax_nopriv_' . AbilityRegistry::HEALTH_LOOPBACK_ACTION, array( AbilityRegistry::class, 'handle_admin_health_loopback' ) );
 		add_action( 'rest_api_init', array( DebugController::class, 'register_routes' ) );
 		add_action( 'rest_api_init', array( McpController::class, 'register_routes' ) );
 	}

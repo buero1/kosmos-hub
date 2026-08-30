@@ -79,6 +79,14 @@ class MaintenanceRunService:
     BACKUP_TIMEOUT = timedelta(minutes=3)
     POST_UPDATE_HEALTH_MAX_ATTEMPTS = 3
     POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS = 10
+    POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS = 5
+    POST_UPDATE_FRAMEWORK_PLUGIN_IDENTIFIERS = frozenset(
+        {
+            "elementor/elementor.php",
+            "elementor-pro/elementor-pro.php",
+            "jet-engine/jet-engine.php",
+        }
+    )
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -1045,6 +1053,18 @@ class MaintenanceRunService:
                     )
 
                     if outcome == "failed":
+                        health_failure = self._post_update_health_failure_kind(child_result.get("post_update_health"))
+                        if health_failure is not None:
+                            return self._finish_complete_site_update(
+                                run,
+                                status=MaintenanceRunStatus.failed.value,
+                                stage="post-update-health-failed",
+                                message=(
+                                    f"Stopped after {entry.name} because its post-update "
+                                    f"{self._post_update_health_failure_label(health_failure)} check did not pass. "
+                                    "No further updates were started for this website."
+                                ),
+                            )
                         failure_streak += 1
                         if phase == "wordpress":
                             return self._finish_complete_site_update(
@@ -1560,12 +1580,21 @@ class MaintenanceRunService:
         )
 
         health_step = self._find_step(run, "postflight-health")
-        self._start_plugin_update_step(run, health_step, "Checking the public homepage and WordPress REST API.")
+        self._wait_for_post_update_framework_stabilization(run, details, health_step)
+        self._start_plugin_update_step(
+            run,
+            health_step,
+            "Checking the public homepage, WordPress REST API, and admin AJAX endpoint.",
+        )
         health_error, health_detail, health_result = self._run_direct_update_postflight_health(
             run,
             health_step,
         )
         if health_error:
+            run.result_json = {
+                **(run.result_json or {}),
+                "post_update_health": health_result,
+            }
             self._fail_plugin_update_run(
                 run,
                 f"{details['update_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
@@ -1602,6 +1631,37 @@ class MaintenanceRunService:
         )
         self.db.commit()
         return "succeeded"
+
+    def _wait_for_post_update_framework_stabilization(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        health_step: MaintenanceRunStep | None,
+    ) -> None:
+        """Give active WordPress frameworks time to finish their in-place upgrade cleanup."""
+        if not self._requires_post_update_framework_stabilization(details):
+            return
+
+        seconds = self.POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS
+        self._start_plugin_update_step(
+            run,
+            health_step,
+            (
+                f"Allowing {details['update_name']} {seconds} seconds to finish WordPress "
+                "update cleanup before the admin health check."
+            ),
+        )
+        time.sleep(seconds)
+
+    @classmethod
+    def _requires_post_update_framework_stabilization(cls, details: dict[str, Any]) -> bool:
+        if details["update_kind"] == "wordpress":
+            return True
+        return (
+            details["update_kind"] == "plugin"
+            and details.get("expected_active") is True
+            and details["update_identifier"] in cls.POST_UPDATE_FRAMEWORK_PLUGIN_IDENTIFIERS
+        )
 
     def _record_confirmed_direct_update(
         self,
@@ -2567,17 +2627,45 @@ class MaintenanceRunService:
             return f"the public homepage health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('home_status'))})"
         if result.get("rest_healthy") is not True:
             return f"the WordPress REST API health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('rest_status'))})"
+        if "admin_ajax_healthy" in result and result.get("admin_ajax_healthy") is not True:
+            return f"the WordPress admin AJAX health check did not pass (HTTP {MaintenanceRunService._health_status(result.get('admin_ajax_status'))})"
         return None
 
     @staticmethod
     def _plugin_update_health_detail(result: object) -> str:
         if not isinstance(result, dict):
             return "Post-update health check returned no verifiable result."
-        return (
+        detail = (
             "Post-update health check: "
             f"homepage HTTP {MaintenanceRunService._health_status(result.get('home_status'))}; "
             f"WordPress REST API HTTP {MaintenanceRunService._health_status(result.get('rest_status'))}."
         )
+        if "admin_ajax_status" in result:
+            return f"{detail[:-1]}; WordPress admin AJAX HTTP {MaintenanceRunService._health_status(result.get('admin_ajax_status'))}."
+        return detail
+
+    @staticmethod
+    def _post_update_health_failure_kind(result: object) -> str | None:
+        if not isinstance(result, dict):
+            return None
+        if "home_healthy" not in result or "rest_healthy" not in result:
+            return "unverified"
+        if result.get("home_healthy") is not True:
+            return "homepage"
+        if result.get("rest_healthy") is not True:
+            return "rest-api"
+        if "admin_ajax_healthy" in result and result.get("admin_ajax_healthy") is not True:
+            return "admin-ajax"
+        return None
+
+    @staticmethod
+    def _post_update_health_failure_label(kind: str) -> str:
+        return {
+            "homepage": "public homepage",
+            "rest-api": "WordPress REST API",
+            "admin-ajax": "WordPress admin AJAX",
+            "unverified": "post-update health verification",
+        }.get(kind, "post-update health")
 
     def _start_plugin_update_step(
         self,

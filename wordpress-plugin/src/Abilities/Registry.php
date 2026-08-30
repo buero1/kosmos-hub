@@ -6,6 +6,7 @@ defined( 'ABSPATH' ) || exit;
 class Registry {
 	const UPDATE_LOOPBACK_ACTION = 'kosmos_bridge_collect_update_inventory';
 	const UPDATE_LOOPBACK_TTL    = 60;
+	const HEALTH_LOOPBACK_ACTION = 'kosmos_bridge_check_admin_ajax';
 	const UPDATE_OFFER_CACHE_OPTION = 'kosmos_bridge_plugin_update_offers_v1';
 	const UPDATE_OFFER_CACHE_TTL    = 172800;
 	const UPDRAFT_BACKUP_REQUEST_ACTION    = 'updraft_backupnow_backup_all';
@@ -178,7 +179,7 @@ class Registry {
 			'kosmos-bridge/check-site-health',
 			array(
 				'label'               => __( 'Check Site Health', 'kosmos-bridge' ),
-				'description'         => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
+				'description'         => __( 'Performs read-only public homepage, WordPress REST API, and admin AJAX health checks.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
 				'output_schema'       => self::site_health_output_schema(),
 				'execute_callback'    => array( self::class, 'execute_check_site_health' ),
@@ -972,25 +973,30 @@ class Registry {
 	}
 
 	/**
-	 * Verify that the public homepage and the WordPress REST API still return a
-	 * successful HTTP response. This does not change site content or settings.
+	 * Verify that the public homepage, WordPress REST API, and authenticated
+	 * Bridge admin-AJAX loopback still return successful responses.
 	 *
 	 * @return array
 	 */
 	public static function execute_check_site_health() {
-		$home_url = home_url( '/' );
-		$rest_url = rest_url( '/' );
-		$home     = self::request_health_url( $home_url );
-		$rest     = self::request_health_url( $rest_url );
+		$home_url       = home_url( '/' );
+		$rest_url       = rest_url( '/' );
+		$admin_ajax_url = admin_url( 'admin-ajax.php' );
+		$home           = self::request_health_url( $home_url );
+		$rest           = self::request_health_url( $rest_url );
+		$admin_ajax     = self::request_admin_ajax_health( $admin_ajax_url );
 
 		return array(
-			'home_url'      => $home_url,
-			'rest_url'      => $rest_url,
-			'home_status'   => $home['status'],
-			'rest_status'   => $rest['status'],
-			'home_healthy'  => $home['healthy'],
-			'rest_healthy'  => $rest['healthy'],
-			'message'       => self::site_health_message( $home, $rest ),
+			'home_url'           => $home_url,
+			'rest_url'           => $rest_url,
+			'admin_ajax_url'     => $admin_ajax_url,
+			'home_status'        => $home['status'],
+			'rest_status'        => $rest['status'],
+			'admin_ajax_status'  => $admin_ajax['status'],
+			'home_healthy'       => $home['healthy'],
+			'rest_healthy'       => $rest['healthy'],
+			'admin_ajax_healthy' => $admin_ajax['healthy'],
+			'message'            => self::site_health_message( $home, $rest, $admin_ajax ),
 		);
 	}
 
@@ -2179,6 +2185,21 @@ class Registry {
 	}
 
 	/**
+	 * Handle a signed, no-op admin-AJAX request so post-update health checks
+	 * exercise the same WordPress bootstrap path as admin interactions.
+	 *
+	 * @return void
+	 */
+	public static function handle_admin_health_loopback() {
+		$token = isset( $_POST['token'] ) ? (string) wp_unslash( $_POST['token'] ) : '';
+		if ( ! self::consume_loopback_token( $token ) ) {
+			wp_send_json_error( array( 'code' => 'kosmos_bridge_loopback_forbidden' ), 403 );
+		}
+
+		wp_send_json_success();
+	}
+
+	/**
 	 * Read the WordPress update state without installing or downloading updates.
 	 *
 	 * @param string $check_mode Source context for this update inventory.
@@ -2542,7 +2563,7 @@ class Registry {
 			array(
 				'name'          => 'kosmos-bridge/check-site-health',
 				'label'         => __( 'Check Site Health', 'kosmos-bridge' ),
-				'description'   => __( 'Performs read-only public homepage and WordPress REST API health checks.', 'kosmos-bridge' ),
+				'description'   => __( 'Performs read-only public homepage, WordPress REST API, and admin AJAX health checks.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
 				'input_schema'  => array(),
 				'output_schema' => self::site_health_output_schema(),
@@ -3203,15 +3224,18 @@ class Registry {
 		return array(
 			'type'       => 'object',
 			'properties' => array(
-				'home_url'     => array( 'type' => 'string', 'format' => 'uri' ),
-				'rest_url'     => array( 'type' => 'string', 'format' => 'uri' ),
-				'home_status'  => array( 'type' => 'integer' ),
-				'rest_status'  => array( 'type' => 'integer' ),
-				'home_healthy' => array( 'type' => 'boolean' ),
-				'rest_healthy' => array( 'type' => 'boolean' ),
-				'message'      => array( 'type' => 'string' ),
+				'home_url'           => array( 'type' => 'string', 'format' => 'uri' ),
+				'rest_url'           => array( 'type' => 'string', 'format' => 'uri' ),
+				'admin_ajax_url'     => array( 'type' => 'string', 'format' => 'uri' ),
+				'home_status'        => array( 'type' => 'integer' ),
+				'rest_status'        => array( 'type' => 'integer' ),
+				'admin_ajax_status'  => array( 'type' => 'integer' ),
+				'home_healthy'       => array( 'type' => 'boolean' ),
+				'rest_healthy'       => array( 'type' => 'boolean' ),
+				'admin_ajax_healthy' => array( 'type' => 'boolean' ),
+				'message'            => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'home_url', 'rest_url', 'home_status', 'rest_status', 'home_healthy', 'rest_healthy', 'message' ),
+			'required'   => array( 'home_url', 'rest_url', 'admin_ajax_url', 'home_status', 'rest_status', 'admin_ajax_status', 'home_healthy', 'rest_healthy', 'admin_ajax_healthy', 'message' ),
 		);
 	}
 
@@ -3935,11 +3959,12 @@ class Registry {
 	/**
 	 * @param array{status:int,healthy:bool} $home Homepage response result.
 	 * @param array{status:int,healthy:bool} $rest REST API response result.
+	 * @param array{status:int,healthy:bool} $admin_ajax Admin AJAX response result.
 	 * @return string
 	 */
-	private static function site_health_message( $home, $rest ) {
-		if ( $home['healthy'] && $rest['healthy'] ) {
-			return 'Public homepage and WordPress REST API health checks passed.';
+	private static function site_health_message( $home, $rest, $admin_ajax ) {
+		if ( $home['healthy'] && $rest['healthy'] && $admin_ajax['healthy'] ) {
+			return 'Public homepage, WordPress REST API, and admin AJAX health checks passed.';
 		}
 
 		$failed = array();
@@ -3949,8 +3974,47 @@ class Registry {
 		if ( ! $rest['healthy'] ) {
 			$failed[] = 'WordPress REST API';
 		}
+		if ( ! $admin_ajax['healthy'] ) {
+			$failed[] = 'WordPress admin AJAX';
+		}
 
 		return implode( ' and ', $failed ) . ' health check did not return a successful HTTP response.';
+	}
+
+	/**
+	 * @param string $admin_ajax_url WordPress admin-AJAX endpoint.
+	 * @return array{status:int,healthy:bool}
+	 */
+	private static function request_admin_ajax_health( $admin_ajax_url ) {
+		$token = self::generate_loopback_token();
+		set_transient( self::loopback_token_key( $token ), hash( 'sha256', $token ), self::UPDATE_LOOPBACK_TTL );
+
+		$response = wp_remote_post(
+			$admin_ajax_url,
+			array(
+				'timeout'     => 15,
+				'redirection' => 0,
+				'body'        => array(
+					'action' => self::HEALTH_LOOPBACK_ACTION,
+					'token'  => $token,
+				),
+			)
+		);
+		delete_transient( self::loopback_token_key( $token ) );
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'status'  => 0,
+				'healthy' => false,
+			);
+		}
+
+		$status  = (int) wp_remote_retrieve_response_code( $response );
+		$payload = json_decode( wp_remote_retrieve_body( $response ), true );
+		return array(
+			'status'  => $status,
+			'healthy' => 200 === $status && is_array( $payload ) && ! empty( $payload['success'] ),
+		);
 	}
 
 	/**

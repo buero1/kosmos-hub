@@ -595,6 +595,80 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
         assert any(event["status"] == "succeeded" for event in completed.result_json["events"])
 
 
+def test_complete_site_update_stops_one_site_after_an_admin_ajax_health_failure(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    def entry(name, identifier):
+        return SimpleNamespace(
+            kind="plugin",
+            name=name,
+            identifier=identifier,
+            current_version="1.0.0",
+            target_version="1.1.0",
+            update_available=True,
+        )
+
+    phase_entries = {
+        "wordpress": [],
+        "theme": [],
+        "plugin": [
+            entry("JetEngine", "jet-engine/jet-engine.php"),
+            entry("JetReviews", "jet-reviews/jet-reviews.php"),
+        ],
+        "verification": [],
+    }
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="d23dcd24-56ef-78ab-90cd-12ef34ab56cd",
+            domain="workflow-health.example",
+            home_url="https://workflow-health.example",
+            site_url="https://workflow-health.example",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=None)
+        outcome = service.start_complete_site_update(site_id=site.id, actor="operator")
+        run = service.get_complete_site_update_run(outcome.run.id)
+        assert run is not None
+
+        child_runs = []
+        monkeypatch.setattr(service, "_fresh_complete_site_update_entries", lambda _run, *, phase, wave: (phase_entries[phase], None))
+        monkeypatch.setattr(service, "_complete_site_update_entries_by_readiness", lambda entries: (entries, []))
+
+        def create_child(_run, update, *, phase, wave):
+            child = SimpleNamespace(id=len(child_runs) + 1, result_json={}, error_message=None)
+            child_runs.append(update.name)
+            return child
+
+        def fail_admin_ajax_health(child):
+            child.error_message = "JetEngine was updated, but the WordPress admin AJAX health check did not pass."
+            child.result_json = {
+                "stage_message": child.error_message,
+                "post_update_health": {
+                    "home_healthy": True,
+                    "rest_healthy": True,
+                    "admin_ajax_healthy": False,
+                    "admin_ajax_status": 500,
+                },
+            }
+            return "failed"
+
+        monkeypatch.setattr(service, "_create_complete_site_update_child_run", create_child)
+        monkeypatch.setattr(service, "_poll_plugin_update", fail_admin_ajax_health)
+
+        assert service.poll_complete_site_update_run(run.id) == "failed"
+
+        completed = service.get_complete_site_update_run(run.id)
+        assert completed is not None
+        assert completed.result_json["stage"] == "post-update-health-failed"
+        assert "admin AJAX" in completed.result_json["stage_message"]
+        assert child_runs == ["JetEngine"]
+
+
 def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():
     details = {
         "update_name": "Kosmos Bridge",
@@ -1278,13 +1352,57 @@ def test_crocoblock_dashboard_diagnostic_reports_when_bridge_update_is_needed():
     assert "0.3.57" in diagnostic["message"]
 
 
-def test_direct_updates_require_healthy_homepage_and_rest_api():
+def test_direct_updates_require_healthy_homepage_rest_api_and_supported_admin_ajax():
     assert MaintenanceRunService._plugin_update_health_error(
-        {"home_healthy": True, "home_status": 200, "rest_healthy": True, "rest_status": 200}
+        {
+            "home_healthy": True,
+            "home_status": 200,
+            "rest_healthy": True,
+            "rest_status": 200,
+            "admin_ajax_healthy": True,
+            "admin_ajax_status": 200,
+        }
     ) is None
     assert MaintenanceRunService._plugin_update_health_error(
         {"home_healthy": False, "home_status": 503, "rest_healthy": True, "rest_status": 200}
     ) == "the public homepage health check did not pass (HTTP 503)"
+    assert MaintenanceRunService._plugin_update_health_error(
+        {
+            "home_healthy": True,
+            "home_status": 200,
+            "rest_healthy": True,
+            "rest_status": 200,
+            "admin_ajax_healthy": False,
+            "admin_ajax_status": 500,
+        }
+    ) == "the WordPress admin AJAX health check did not pass (HTTP 500)"
+
+
+def test_framework_stabilization_is_limited_to_wordpress_and_active_framework_plugins():
+    assert MaintenanceRunService._requires_post_update_framework_stabilization(
+        {"update_kind": "wordpress", "update_identifier": "wordpress-core"}
+    ) is True
+    assert MaintenanceRunService._requires_post_update_framework_stabilization(
+        {
+            "update_kind": "plugin",
+            "update_identifier": "jet-engine/jet-engine.php",
+            "expected_active": True,
+        }
+    ) is True
+    assert MaintenanceRunService._requires_post_update_framework_stabilization(
+        {
+            "update_kind": "plugin",
+            "update_identifier": "jet-engine/jet-engine.php",
+            "expected_active": False,
+        }
+    ) is False
+    assert MaintenanceRunService._requires_post_update_framework_stabilization(
+        {
+            "update_kind": "plugin",
+            "update_identifier": "akismet/akismet.php",
+            "expected_active": True,
+        }
+    ) is False
 
 
 def test_plugin_installation_requires_the_checked_file_version_and_requested_activation():
