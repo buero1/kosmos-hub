@@ -24,7 +24,7 @@ class AdminLaunch {
 	 * @return array|WP_Error
 	 */
 	public static function execute_prepare_admin_launch() {
-		$access_user_created = 0 === (int) get_option( self::ACCESS_USER_OPTION, 0 );
+		$access_user_created = 0 === (int) get_option( self::ACCESS_USER_OPTION, 0 ) && ! self::has_reusable_default_access_user();
 		$user = self::get_or_create_access_user();
 		if ( is_wp_error( $user ) ) {
 			return $user;
@@ -60,7 +60,7 @@ class AdminLaunch {
 		}
 
 		$user = get_user_by( 'id', $user_id );
-		if ( ! $user instanceof \WP_User || ! user_can( $user, 'manage_options' ) ) {
+		if ( ! $user instanceof \WP_User || ! self::is_administrator_user( $user ) ) {
 			self::deny_launch();
 		}
 
@@ -88,7 +88,7 @@ class AdminLaunch {
 					array( 'status' => 409 )
 				);
 			}
-			if ( ! user_can( $stored_user, 'manage_options' ) ) {
+			if ( ! self::is_administrator_user( $stored_user ) ) {
 				return new WP_Error(
 					'kosmos_bridge_admin_access_user_not_administrator',
 					'The configured Kosmos Hub access user no longer has administrator permission.',
@@ -97,6 +97,11 @@ class AdminLaunch {
 			}
 
 			return $stored_user;
+		}
+
+		$existing_user = self::get_reusable_default_access_user();
+		if ( $existing_user instanceof \WP_User ) {
+			return self::remember_access_user( $existing_user );
 		}
 
 		$login = self::next_available_access_login();
@@ -121,7 +126,7 @@ class AdminLaunch {
 		}
 
 		$user = get_user_by( 'id', (int) $user_id );
-		if ( ! $user instanceof \WP_User || ! user_can( $user, 'manage_options' ) ) {
+		if ( ! $user instanceof \WP_User || ! self::is_administrator_user( $user ) ) {
 			return new WP_Error(
 				'kosmos_bridge_admin_access_user_unverified',
 				'WordPress could not verify the dedicated Kosmos Hub administrator.',
@@ -129,6 +134,43 @@ class AdminLaunch {
 			);
 		}
 
+		return self::remember_access_user( $user );
+	}
+
+	/**
+	 * Some security plugins alter capability checks while an authenticated Bridge
+	 * request is being processed. The account's explicit WordPress role is the
+	 * stable fact we need to verify before issuing a browser ticket.
+	 *
+	 * @param WP_User $user WordPress user to inspect.
+	 * @return bool
+	 */
+	private static function is_administrator_user( \WP_User $user ) {
+		return in_array( 'administrator', (array) $user->roles, true );
+	}
+
+	/**
+	 * Reuses a partially created account from an earlier interrupted launch.
+	 *
+	 * @return WP_User|false
+	 */
+	private static function get_reusable_default_access_user() {
+		$user = get_user_by( 'login', self::ACCESS_USER_LOGIN );
+		return $user instanceof \WP_User && self::is_administrator_user( $user ) ? $user : false;
+	}
+
+	/**
+	 * @return bool
+	 */
+	private static function has_reusable_default_access_user() {
+		return self::get_reusable_default_access_user() instanceof \WP_User;
+	}
+
+	/**
+	 * @param WP_User $user Verified dedicated access user.
+	 * @return WP_User
+	 */
+	private static function remember_access_user( \WP_User $user ) {
 		update_user_meta( $user->ID, self::ACCESS_USER_META, '1' );
 		update_option( self::ACCESS_USER_OPTION, (int) $user->ID, false );
 		return $user;
