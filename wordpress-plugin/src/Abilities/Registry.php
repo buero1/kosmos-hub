@@ -2952,11 +2952,12 @@ class Registry {
 		return array(
 			'type'       => 'object',
 			'properties' => array(
-				'launch_url'          => array( 'type' => 'string' ),
-				'expires_at'          => array( 'type' => 'string' ),
-				'access_user_created' => array( 'type' => 'boolean' ),
+				'launch_url'                   => array( 'type' => 'string' ),
+				'expires_at'                   => array( 'type' => 'string' ),
+				'access_user_created'          => array( 'type' => 'boolean' ),
+				'white_label_access_granted'   => array( 'type' => 'boolean' ),
 			),
-			'required'   => array( 'launch_url', 'expires_at', 'access_user_created' ),
+			'required'   => array( 'launch_url', 'expires_at', 'access_user_created', 'white_label_access_granted' ),
 		);
 	}
 

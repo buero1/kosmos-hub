@@ -14,6 +14,8 @@ class AdminLaunch {
 	const ACCESS_USER_OPTION        = 'kosmos_bridge_hub_access_user_id';
 	const ACCESS_USER_META          = 'kosmos_bridge_hub_access_user';
 	const ACCESS_USER_LOGIN         = 'kosmos-hub-access';
+	const WHITE_LABEL_CMS_PLUGIN    = 'white-label-cms/wlcms-plugin.php';
+	const WHITE_LABEL_CMS_OPTIONS   = 'wlcms_options';
 	const LAUNCH_QUERY_ARGUMENT     = 'kosmos_admin_launch';
 	const LAUNCH_OPTION_PREFIX      = 'kosmos_bridge_admin_launch_';
 	const LAUNCH_TTL                = 60;
@@ -29,6 +31,7 @@ class AdminLaunch {
 		if ( is_wp_error( $user ) ) {
 			return $user;
 		}
+		$white_label_access_granted = self::grant_white_label_cms_access( $user );
 
 		$launch = self::create_launch_ticket( (int) $user->ID );
 		if ( is_wp_error( $launch ) ) {
@@ -39,6 +42,7 @@ class AdminLaunch {
 			'launch_url'          => add_query_arg( self::LAUNCH_QUERY_ARGUMENT, $launch['token'], home_url( '/' ) ),
 			'expires_at'          => gmdate( 'c', $launch['expires_at'] ),
 			'access_user_created' => $access_user_created,
+			'white_label_access_granted' => $white_label_access_granted,
 		);
 	}
 
@@ -174,6 +178,65 @@ class AdminLaunch {
 		update_user_meta( $user->ID, self::ACCESS_USER_META, '1' );
 		update_option( self::ACCESS_USER_OPTION, (int) $user->ID, false );
 		return $user;
+	}
+
+	/**
+	 * White Label CMS stores the administrators allowed to see its full backend
+	 * as WordPress user IDs. Add only the dedicated Hub account and leave every
+	 * other White Label setting unchanged.
+	 *
+	 * @param WP_User $user Verified dedicated access user.
+	 * @return bool Whether the user was newly added to White Label CMS access.
+	 */
+	private static function grant_white_label_cms_access( \WP_User $user ) {
+		if ( ! self::is_white_label_cms_active() ) {
+			return false;
+		}
+
+		$settings = get_option( self::WHITE_LABEL_CMS_OPTIONS, array() );
+		if ( ! is_array( $settings ) || empty( $settings['enable_wlcms_admin'] ) ) {
+			return false;
+		}
+
+		$administrator_ids = array_values( array_unique( array_filter( array_map( 'absint', (array) ( $settings['wlcms_admin'] ?? array() ) ) ) ) );
+		if ( in_array( (int) $user->ID, $administrator_ids, true ) ) {
+			return false;
+		}
+
+		$administrator_ids[]      = (int) $user->ID;
+		$settings['wlcms_admin'] = $administrator_ids;
+		if ( ! update_option( self::WHITE_LABEL_CMS_OPTIONS, $settings, false ) ) {
+			return false;
+		}
+
+		$stored_settings = get_option( self::WHITE_LABEL_CMS_OPTIONS, array() );
+		$stored_ids      = is_array( $stored_settings ) ? array_map( 'absint', (array) ( $stored_settings['wlcms_admin'] ?? array() ) ) : array();
+		return in_array( (int) $user->ID, $stored_ids, true );
+	}
+
+	/**
+	 * Avoid loading White Label CMS classes during an authenticated Bridge call.
+	 * The plugin's active-state data is enough to decide whether its option can
+	 * safely be updated.
+	 *
+	 * @return bool
+	 */
+	private static function is_white_label_cms_active() {
+		if ( defined( 'WLCMS_VERSION' ) ) {
+			return true;
+		}
+
+		$active_plugins = (array) get_option( 'active_plugins', array() );
+		if ( in_array( self::WHITE_LABEL_CMS_PLUGIN, $active_plugins, true ) ) {
+			return true;
+		}
+
+		if ( is_multisite() ) {
+			$network_active = (array) get_site_option( 'active_sitewide_plugins', array() );
+			return isset( $network_active[ self::WHITE_LABEL_CMS_PLUGIN ] );
+		}
+
+		return false;
 	}
 
 	/**

@@ -31,6 +31,7 @@ def test_admin_launch_uses_the_bridge_ticket_and_records_audit_entry(monkeypatch
             "result": {
                 "launch_url": "https://launch.example/?kosmos_admin_launch=abc.def",
                 "access_user_created": True,
+                "white_label_access_granted": True,
             }
         }
 
@@ -44,10 +45,12 @@ def test_admin_launch_uses_the_bridge_ticket_and_records_audit_entry(monkeypatch
 
         assert launch.launch_url == "https://launch.example/?kosmos_admin_launch=abc.def"
         assert launch.access_user_created is True
+        assert launch.white_label_access_granted is True
         audit = db.scalar(select(AuditLog).where(AuditLog.action == "open-wordpress-admin"))
         assert audit is not None
         assert audit.actor == "operator"
         assert "dedicated local" in audit.detail
+        assert "White Label CMS" in audit.detail
 
 
 def test_admin_launch_rejects_a_bridge_url_for_another_domain(monkeypatch):

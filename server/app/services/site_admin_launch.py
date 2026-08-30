@@ -15,6 +15,7 @@ from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 class SiteAdminLaunch:
     launch_url: str
     access_user_created: bool
+    white_label_access_granted: bool
 
 
 class SiteAdminLaunchService:
@@ -42,6 +43,7 @@ class SiteAdminLaunchService:
         result = result if isinstance(result, dict) else {}
         launch_url = self._trusted_launch_url(site, result.get("launch_url"))
         access_user_created = result.get("access_user_created") is True
+        white_label_access_granted = result.get("white_label_access_granted") is True
 
         write_audit_log(
             self.db,
@@ -51,13 +53,23 @@ class SiteAdminLaunchService:
             action="open-wordpress-admin",
             result="ok",
             detail=(
-                "Opened a one-time WordPress admin launch through Kosmos Bridge."
-                if not access_user_created
+                "Added the dedicated Kosmos Hub user to the active White Label CMS administrator list and opened a one-time WordPress admin launch."
+                if white_label_access_granted
+                else "Opened a one-time WordPress admin launch through Kosmos Bridge."
+            )
+            if not access_user_created
+            else (
+                "Created the dedicated local Kosmos Hub access user, added it to the active White Label CMS administrator list, and opened a one-time WordPress admin launch."
+                if white_label_access_granted
                 else "Created the dedicated local Kosmos Hub access user and opened a one-time WordPress admin launch."
             ),
         )
         self.db.commit()
-        return SiteAdminLaunch(launch_url=launch_url, access_user_created=access_user_created)
+        return SiteAdminLaunch(
+            launch_url=launch_url,
+            access_user_created=access_user_created,
+            white_label_access_granted=white_label_access_granted,
+        )
 
     @classmethod
     def bridge_supports_launch(cls, version: object) -> bool:
