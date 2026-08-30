@@ -867,6 +867,7 @@ def apply_update_workbench_action(
     db: Annotated[Session, Depends(get_db)],
     maintenance_action: Annotated[Literal["direct-updates"], Form()],
     selected: Annotated[list[str] | None, Form()] = None,
+    large_batch_confirmation: Annotated[str, Form()] = "",
     site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
     site_id: Annotated[list[int] | None, Form()] = None,
     csrf_token: Annotated[str, Form()] = "",
@@ -885,6 +886,7 @@ def apply_update_workbench_action(
         outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_direct_updates(
             selected_keys=selected or [],
             actor=user.username,
+            large_batch_confirmation=large_batch_confirmation,
         )
     except ValueError as exc:
         return RedirectResponse(

@@ -560,6 +560,7 @@
     <form id="direct-update-form" method="post" action="/updates/apply-action" data-direct-update-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="maintenance_action" value="direct-updates">
+      <input type="hidden" name="large_batch_confirmation" value="" data-large-batch-confirmation-value>
       <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}">
       {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
       <div class="direct-update-controls">
@@ -593,7 +594,7 @@
             <tr>
               <td>
                 {% if entry.direct_update_selectable %}
-                  <input class="update-selection" type="checkbox" name="selected" value="{{ entry.plan_key }}" data-update-site="{{ entry.site.domain }}" data-update-name="{{ entry.name }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
+                  <input class="update-selection" type="checkbox" name="selected" value="{{ entry.plan_key }}" data-update-site="{{ entry.site.domain }}" data-update-name="{{ entry.name }}" data-update-kind="{{ entry.kind }}" aria-label="Select {{ entry.name }} on {{ entry.site.domain }}">
                 {% else %}
                   <span class="subtle">Not ready</span>
                 {% endif %}
@@ -680,6 +681,12 @@
         <p data-direct-update-confirmation-text>Die ausgewählten Updates werden nacheinander installiert und anschließend geprüft.</p>
         <p class="dialog-selection-heading">Ausgewählte Websites und Updates</p>
         <ul class="update-confirmation-list" data-direct-update-confirmation-list></ul>
+        <div class="update-confirmation-safeguard" hidden data-large-batch-confirmation>
+          <label for="large-batch-confirmation-input">Zum Bestätigen von mehr als 100 Plugin-Updates <strong>update</strong> eingeben.
+            <input id="large-batch-confirmation-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" data-large-batch-confirmation-input>
+          </label>
+          <p class="subtle" data-large-batch-confirmation-feedback></p>
+        </div>
         <div class="dialog-actions">
           <button class="button button-secondary" value="cancel">Abbrechen</button>
           <button class="button" value="confirm" data-direct-update-confirm>Updates ausführen</button>
@@ -701,6 +708,11 @@
       var confirmationText = document.querySelector("[data-direct-update-confirmation-text]");
       var confirmationList = document.querySelector("[data-direct-update-confirmation-list]");
       var confirmationButton = document.querySelector("[data-direct-update-confirm]");
+      var largeBatchConfirmation = document.querySelector("[data-large-batch-confirmation]");
+      var largeBatchConfirmationInput = document.querySelector("[data-large-batch-confirmation-input]");
+      var largeBatchConfirmationValue = document.querySelector("[data-large-batch-confirmation-value]");
+      var largeBatchConfirmationFeedback = document.querySelector("[data-large-batch-confirmation-feedback]");
+      var largeBatchPluginThreshold = 100;
 
       if (autoFilterPanel && siteSelectorForm) {
         autoFilterPanel.querySelectorAll("select").forEach(function (filter) {
@@ -756,6 +768,28 @@
         });
       }
 
+      function selectedPluginUpdates() {
+        return selections().filter(function (selection) {
+          return selection.checked && selection.getAttribute("data-update-kind") === "plugin";
+        }).length;
+      }
+
+      function configureLargeBatchConfirmation(pluginUpdates) {
+        var required = pluginUpdates > largeBatchPluginThreshold;
+        if (largeBatchConfirmation) { largeBatchConfirmation.hidden = !required; }
+        if (largeBatchConfirmationValue) { largeBatchConfirmationValue.value = ""; }
+        if (!required) {
+          if (confirmationButton) { confirmationButton.disabled = false; }
+          return false;
+        }
+        if (largeBatchConfirmationInput) { largeBatchConfirmationInput.value = ""; }
+        if (largeBatchConfirmationFeedback) {
+          largeBatchConfirmationFeedback.textContent = pluginUpdates + " Plugin-Updates ausgewählt.";
+        }
+        if (confirmationButton) { confirmationButton.disabled = true; }
+        return true;
+      }
+
       selectAll.addEventListener("change", function () {
         selections().forEach(function (selection) {
           selection.checked = selectAll.checked;
@@ -779,11 +813,30 @@
               ? "1 ausgewähltes Update wird nacheinander installiert und anschließend geprüft."
               : selected + " ausgewählte Updates werden nacheinander installiert und anschließend geprüft.";
           }
+          configureLargeBatchConfirmation(selectedPluginUpdates());
           fillConfirmationList();
           confirmationDialog.showModal();
         });
+        if (largeBatchConfirmationInput) {
+          largeBatchConfirmationInput.addEventListener("input", function () {
+            var confirmed = largeBatchConfirmationInput.value.trim().toLowerCase() === "update";
+            if (confirmationButton) { confirmationButton.disabled = !confirmed; }
+            if (largeBatchConfirmationFeedback) {
+              largeBatchConfirmationFeedback.textContent = confirmed
+                ? "Bestätigung erkannt."
+                : "Bitte update eingeben.";
+            }
+          });
+        }
         confirmationButton.addEventListener("click", function (event) {
           event.preventDefault();
+          var requiresLargeBatchConfirmation = selectedPluginUpdates() > largeBatchPluginThreshold;
+          var confirmed = largeBatchConfirmationInput && largeBatchConfirmationInput.value.trim().toLowerCase() === "update";
+          if (requiresLargeBatchConfirmation && !confirmed) {
+            if (largeBatchConfirmationInput) { largeBatchConfirmationInput.focus(); }
+            return;
+          }
+          if (largeBatchConfirmationValue) { largeBatchConfirmationValue.value = requiresLargeBatchConfirmation ? "update" : ""; }
           directUpdateForm.dataset.confirmed = "true";
           confirmationDialog.close();
           directUpdateForm.requestSubmit();

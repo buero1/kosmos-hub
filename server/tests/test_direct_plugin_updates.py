@@ -55,6 +55,15 @@ def test_direct_updates_accept_inactive_plugins():
     assert MaintenanceRunService._direct_plugin_update_scope_error(plugin_entry(is_active=False)) is None
 
 
+def test_large_direct_plugin_batches_require_the_update_confirmation_word():
+    entries = [plugin_entry() for _ in range(101)]
+
+    assert MaintenanceRunService._large_direct_plugin_batch_confirmation_error(entries[:100], "") is None
+    assert "Type update" in MaintenanceRunService._large_direct_plugin_batch_confirmation_error(entries, "")
+    assert MaintenanceRunService._large_direct_plugin_batch_confirmation_error(entries, "update") is None
+    assert MaintenanceRunService._large_direct_plugin_batch_confirmation_error(entries, "UPDATE") is None
+
+
 def test_direct_update_details_preserve_an_inactive_selection():
     details = MaintenanceRunService._direct_update_details(
         SimpleNamespace(

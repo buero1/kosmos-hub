@@ -56,6 +56,7 @@ class MaintenanceRunService:
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
     PLUGIN_INSTALLATION_KIND = "plugin-installation"
     DIRECT_UPDATE_FAILURE_STREAK_LIMIT = 5
+    LARGE_DIRECT_PLUGIN_BATCH_THRESHOLD = 100
     FINAL_BRIDGE_PREFLIGHT_MIN_VERSION = "0.3.59"
     FINAL_BRIDGE_PREFLIGHT_RETRY_LIMIT = 2
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
@@ -209,6 +210,7 @@ class MaintenanceRunService:
         selected_keys: list[str],
         actor: str,
         expected_site_id: int | None = None,
+        large_batch_confirmation: str = "",
     ) -> PluginUpdateBatchOutcome:
         """Queue selected WordPress, theme, or plugin updates without review plans."""
         inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
@@ -225,6 +227,12 @@ class MaintenanceRunService:
         scope_error = self._selection_scope_error(selected_entries, expected_site_id=expected_site_id)
         if scope_error:
             raise ValueError(scope_error)
+        confirmation_error = self._large_direct_plugin_batch_confirmation_error(
+            selected_entries,
+            large_batch_confirmation,
+        )
+        if confirmation_error:
+            raise ValueError(confirmation_error)
         has_stored_crocoblock_license = self._has_stored_crocoblock_license()
         for entry in selected_entries:
             scope_error = self._direct_plugin_update_scope_error(
@@ -333,6 +341,21 @@ class MaintenanceRunService:
     ) -> PluginUpdateBatchOutcome:
         """Backward-compatible name for starting updates from the global workbench."""
         return self.start_direct_updates(selected_keys=selected_keys, actor=actor)
+
+    @classmethod
+    def _large_direct_plugin_batch_confirmation_error(
+        cls,
+        entries: list[UpdateWorkbenchEntry],
+        confirmation: str,
+    ) -> str | None:
+        plugin_count = sum(entry.kind == "plugin" for entry in entries)
+        if plugin_count <= cls.LARGE_DIRECT_PLUGIN_BATCH_THRESHOLD:
+            return None
+        if confirmation.strip().casefold() == "update":
+            return None
+        return (
+            f"Type update to confirm more than {cls.LARGE_DIRECT_PLUGIN_BATCH_THRESHOLD} selected plugin updates."
+        )
 
     def start_plugin_installations(
         self,
