@@ -165,6 +165,8 @@ class FleetRefreshService:
             settings_service = FleetRefreshSettingsService(db=db)
             now = now or datetime.now(UTC)
             runtime_settings = settings_service.ensure_auto_refresh_schedule(now=now)
+            # Persist the initial schedule for older rows even when the next run is not due yet.
+            db.commit()
             if not runtime_settings.auto_refresh_enabled:
                 return None
 

@@ -10,6 +10,7 @@ from app.api.routes.web import _direct_update_batch_status_payload, _fleet_refre
 from app.core.timezones import format_berlin_time
 from app.db.base import Base
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
+from app.models.fleet_refresh_settings import FleetRefreshSettings
 from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.services.fleet_refresh import FleetRefreshService
@@ -243,6 +244,33 @@ def test_changing_parallel_limits_does_not_reschedule_automatic_refresh():
         )
 
         assert updated.auto_refresh_next_run_at == first_next_run_at
+
+
+def test_scheduler_persists_an_initial_due_time_before_it_is_due(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(fleet_refresh_module, "SessionLocal", sessionmaker(bind=engine))
+
+    with Session(engine) as db:
+        db.add(
+            FleetRefreshSettings(
+                id=1,
+                auto_refresh_enabled=True,
+                auto_refresh_interval_hours=24,
+                auto_refresh_time="06:35",
+            )
+        )
+        db.commit()
+
+    run_id = FleetRefreshService.queue_scheduled_run(now=datetime(2026, 8, 30, 4, 33, tzinfo=UTC))
+
+    with Session(engine) as db:
+        settings = db.get(FleetRefreshSettings, 1)
+        assert run_id is None
+        assert settings is not None
+        assert FleetRefreshSettingsService._as_utc(settings.auto_refresh_next_run_at) == datetime(
+            2026, 8, 30, 4, 35, tzinfo=UTC
+        )
 
 
 def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
