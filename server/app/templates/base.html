@@ -1658,5 +1658,101 @@
     <main>
       {% block content %}{% endblock %}
     </main>
+    <script>
+      (function () {
+        var adminIconPaths = [
+          "M4 21h16", "M6 21V4a1 1 0 0 1 1-1h8l3 3v15", "M14 3v4h4", "M11 12h8", "m16 8 4 4-4 4"
+        ];
+        var homeIconPaths = ["m3 11 9-8 9 8", "M5 10v10h14V10", "M9 20v-6h6v6"];
+
+        function icon(paths) {
+          var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("viewBox", "0 0 24 24");
+          svg.setAttribute("aria-hidden", "true");
+          paths.forEach(function (pathData) {
+            var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", pathData);
+            svg.appendChild(path);
+          });
+          return svg;
+        }
+
+        function disabledAction(paths, title) {
+          var action = document.createElement("span");
+          action.className = "site-quick-action is-disabled";
+          action.setAttribute("aria-disabled", "true");
+          action.title = title;
+          action.appendChild(icon(paths));
+          return action;
+        }
+
+        function appendSiteDomainLink(container, site) {
+          var primary = document.createElement("div");
+          primary.className = "site-domain-primary";
+          var actions = document.createElement("div");
+          actions.className = "site-quick-actions";
+
+          if (site.adminLaunchSupported) {
+            var adminButton = document.createElement("button");
+            adminButton.className = "site-quick-action";
+            adminButton.type = "button";
+            adminButton.dataset.wordpressAdminLaunch = "";
+            adminButton.dataset.siteId = String(site.id);
+            adminButton.dataset.csrfToken = site.csrfToken || "";
+            adminButton.setAttribute("aria-label", "WordPress-Backend von " + site.domain + " öffnen");
+            adminButton.title = "WordPress-Backend öffnen";
+            adminButton.appendChild(icon(adminIconPaths));
+            actions.appendChild(adminButton);
+          } else {
+            actions.appendChild(disabledAction(adminIconPaths, "Kosmos Bridge 0.3.62 oder neuer erforderlich"));
+          }
+
+          if (site.homeUrl) {
+            var homeLink = document.createElement("a");
+            homeLink.className = "site-quick-action";
+            homeLink.href = site.homeUrl;
+            homeLink.target = "_blank";
+            homeLink.rel = "noopener noreferrer";
+            homeLink.setAttribute("aria-label", "Startseite von " + site.domain + " öffnen");
+            homeLink.title = "Startseite öffnen";
+            homeLink.appendChild(icon(homeIconPaths));
+            actions.appendChild(homeLink);
+          } else {
+            actions.appendChild(disabledAction(homeIconPaths, "Keine Startseite gespeichert"));
+          }
+
+          var domainLink = document.createElement("a");
+          domainLink.href = "/sites/" + site.id;
+          domainLink.textContent = site.domain;
+          primary.appendChild(actions);
+          primary.appendChild(domainLink);
+          container.appendChild(primary);
+        }
+
+        window.kosmosSiteDomainLinks = { append: appendSiteDomainLink };
+
+        document.addEventListener("click", function (event) {
+          var button = event.target.closest("[data-wordpress-admin-launch]");
+          if (!button) { return; }
+          event.preventDefault();
+          var siteId = button.dataset.siteId || "";
+          var csrfToken = button.dataset.csrfToken || "";
+          if (!/^\d+$/.test(siteId) || !csrfToken) { return; }
+
+          var form = document.createElement("form");
+          form.method = "post";
+          form.action = "/sites/" + siteId + "/open-wordpress-admin";
+          form.target = "_blank";
+          var input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "csrf_token";
+          input.value = csrfToken;
+          form.appendChild(input);
+          document.body.appendChild(form);
+          form.submit();
+          form.remove();
+        });
+      }());
+    </script>
   </body>
 </html>

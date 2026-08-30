@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}Update Workbench · kosmos-hub{% endblock %}
 {% block content %}
   <div class="workbench-page-layout">
@@ -335,7 +336,14 @@
                   {% set site_detail = site_result.result_json or {} %}
                   {% set jet = site_detail.get("jet", {}) %}
                   <tr>
-                    <td><a href="/sites/{{ site_result.site_id }}">{{ site_result.domain }}</a></td>
+                    <td>
+                      {% set result_site = refresh_result_sites.get(site_result.site_id) %}
+                      {% if result_site %}
+                        {{ site_domain_link(result_site, "/sites/" ~ result_site.id) }}
+                      {% else %}
+                        <a href="/sites/{{ site_result.site_id }}">{{ site_result.domain }}</a>
+                      {% endif %}
+                    </td>
                     <td><span class="pill pill-{{ site_result.state_status }}">{{ site_result.state_status | replace("-", " ") | title }}</span></td>
                     <td><span class="pill pill-{{ site_result.updates_status }}">{{ site_result.updates_status | replace("-", " ") | title }}</span></td>
                     <td><span class="pill pill-{{ site_result.backups_status }}">{{ site_result.backups_status | replace("-", " ") | title }}</span></td>
@@ -405,7 +413,7 @@
               {% for run in batch_runs %}
                 {% set result = run.result_json or {} %}
                 <tr data-direct-update-run-id="{{ run.id }}">
-                  <td><a href="/sites/{{ run.site.id }}">{{ run.site.domain }}</a></td>
+                  <td>{{ site_domain_link(run.site, "/sites/" ~ run.site.id) }}</td>
                   <td><strong>{{ result.update_name or result.plugin_name or "Unknown update" }}</strong><span class="pill pill-{{ result.update_kind | default("plugin", true) }}">{{ result.update_kind | default("plugin", true) | title }}</span></td>
                   <td>{{ result.current_version or "-" }} → {{ result.target_version or "-" }}</td>
                   <td>
@@ -467,10 +475,20 @@
               row.dataset.directUpdateRunId = String(run.id);
 
               var siteCell = document.createElement("td");
-              var siteLink = document.createElement("a");
-              siteLink.href = "/sites/" + run.site_id;
-              siteLink.textContent = run.site_domain;
-              siteCell.appendChild(siteLink);
+              if (window.kosmosSiteDomainLinks) {
+                window.kosmosSiteDomainLinks.append(siteCell, {
+                  id: run.site_id,
+                  domain: run.site_domain,
+                  homeUrl: run.site_home_url,
+                  adminLaunchSupported: Boolean(run.site_admin_launch_supported),
+                  csrfToken: "{{ csrf_token }}"
+                });
+              } else {
+                var siteLink = document.createElement("a");
+                siteLink.href = "/sites/" + run.site_id;
+                siteLink.textContent = run.site_domain;
+                siteCell.appendChild(siteLink);
+              }
               row.appendChild(siteCell);
 
               var updateCell = document.createElement("td");
@@ -816,25 +834,7 @@
                   <span class="subtle">Not ready</span>
                 {% endif %}
               </td>
-              <td>
-                <div class="site-domain-primary">
-                  <div class="site-quick-actions">
-                    {% if can_launch_wordpress_admin and entry.site.id in plugin_admin_launch_site_ids %}
-                      <button class="site-quick-action" type="button" data-plugin-admin-launch data-site-id="{{ entry.site.id }}" aria-label="Plugin-Verwaltung von {{ entry.site.domain }} öffnen" title="Plugins öffnen">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
-                      </button>
-                    {% else %}
-                      <span class="site-quick-action is-disabled" aria-disabled="true" title="{% if not can_launch_wordpress_admin %}WordPress-Backend ist nur für Hub-Administratoren verfügbar{% else %}Kosmos Bridge 0.3.65 oder neuer erforderlich{% endif %}">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
-                      </span>
-                    {% endif %}
-                    <a class="site-quick-action" href="{{ entry.site.home_url }}" target="_blank" rel="noopener noreferrer" aria-label="Startseite von {{ entry.site.domain }} öffnen" title="Startseite öffnen">
-                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
-                    </a>
-                  </div>
-                  <a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a>
-                </div>
-              </td>
+              <td>{{ site_domain_link(entry.site, "/sites/" ~ entry.site.id) }}</td>
               <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
               <td>
                 <strong>{{ entry.name }}</strong>
@@ -954,32 +954,6 @@
       var completeSiteUpdateDialog = document.querySelector("[data-complete-site-update-confirmation]");
       var completeSiteUpdateText = document.querySelector("[data-complete-site-update-confirmation-text]");
       var completeSiteUpdateConfirm = document.querySelector("[data-complete-site-update-confirm]");
-      var pluginAdminLaunchButtons = document.querySelectorAll("[data-plugin-admin-launch]");
-
-      pluginAdminLaunchButtons.forEach(function (button) {
-        button.addEventListener("click", function () {
-          var siteId = button.getAttribute("data-site-id") || "";
-          if (!/^\d+$/.test(siteId)) { return; }
-          var form = document.createElement("form");
-          form.method = "post";
-          form.action = "/sites/" + siteId + "/open-wordpress-admin";
-          form.target = "_blank";
-          [
-            ["csrf_token", "{{ csrf_token }}"],
-            ["destination", "plugins"]
-          ].forEach(function (field) {
-            var input = document.createElement("input");
-            input.type = "hidden";
-            input.name = field[0];
-            input.value = field[1];
-            form.appendChild(input);
-          });
-          document.body.appendChild(form);
-          form.submit();
-          form.remove();
-        });
-      });
-
       if (autoFilterPanel && siteSelectorForm) {
         autoFilterPanel.querySelectorAll("select").forEach(function (filter) {
           filter.addEventListener("change", function () {

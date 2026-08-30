@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}Review user deletion · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -21,7 +22,7 @@
             {% for review_item in review_items %}
               {% set target = review_item.target %}
               <tr>
-                <td>{{ target.site.domain }}</td>
+                <td>{{ site_domain_link(target.site, "/sites/" ~ target.site.id ~ "#users") }}</td>
                 <td><strong>{{ target.user.username }}</strong><p class="subtle table-note">{{ target.user.email or "No email" }}</p></td>
                 <td>
                   <input type="hidden" name="selected" value="{{ target.key }}">

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.api.routes.accounts import get_csrf_token, require_csrf
+from app.core.csrf import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
 from app.db.session import get_db

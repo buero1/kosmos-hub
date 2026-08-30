@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}Customers · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -63,14 +64,14 @@
               <td>{{ entry.customer.website_domain or "-" }}</td>
               <td>
                 {% for site in entry.linked_sites %}
-                  <a href="/sites/{{ site.id }}">{{ site.domain }}</a>{% if not loop.last %}<br>{% endif %}
+                  {{ site_domain_link(site, "/sites/" ~ site.id) }}{% if not loop.last %}<br>{% endif %}
                 {% else %}
                   <span class="subtle">Not linked</span>
                 {% endfor %}
               </td>
               <td>
                 {% if entry.exact_match_candidate %}
-                  <p class="table-note"><a href="/sites/{{ entry.exact_match_candidate.id }}">{{ entry.exact_match_candidate.domain }}</a></p>
+                  <div class="table-note">{{ site_domain_link(entry.exact_match_candidate, "/sites/" ~ entry.exact_match_candidate.id) }}</div>
                   <form class="inline-form" method="post" action="/customers/{{ entry.customer.id }}/link-site">
                     <input type="hidden" name="site_id" value="{{ entry.exact_match_candidate.id }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -1,5 +1,4 @@
 from pathlib import Path
-from secrets import compare_digest, token_urlsafe
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -7,6 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.csrf import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
 from app.db.session import get_db
@@ -732,20 +732,6 @@ def _require_admin_user(request: Request):
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Administrator access required.")
     return user
-
-
-def get_csrf_token(request: Request) -> str:
-    token = request.session.get("csrf_token")
-    if not isinstance(token, str):
-        token = token_urlsafe(32)
-        request.session["csrf_token"] = token
-    return token
-
-
-def require_csrf(request: Request, provided_token: str) -> None:
-    expected_token = request.session.get("csrf_token")
-    if not isinstance(expected_token, str) or not compare_digest(expected_token, provided_token):
-        raise HTTPException(status_code=403, detail="Invalid form token.")
 
 
 def _safe_next(value: str) -> str:

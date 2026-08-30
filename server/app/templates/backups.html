@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}Backups · kosmos-hub{% endblock %}
 {% block content %}
   <div class="workbench-page-layout">
@@ -37,7 +38,7 @@
             {% for entry in entries %}
               {% set snapshot = entry.snapshot %}
               <tr>
-                <td><a href="/sites/{{ entry.site.id }}#backup">{{ entry.site.domain }}</a></td>
+                <td>{{ site_domain_link(entry.site, "/sites/" ~ entry.site.id ~ "#backup") }}</td>
                 <td><a href="/customers/{{ entry.site.customer.id }}">{{ entry.site.customer.name }}</a></td>
                 <td>
                   {% if snapshot %}

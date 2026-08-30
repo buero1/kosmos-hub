@@ -1,0 +1,26 @@
+{% macro site_domain_link(site, href) -%}
+  {% set backend_supported = bridge_supports_admin_launch(site.bridge_version) %}
+  <div class="site-domain-primary">
+    <div class="site-quick-actions">
+      {% if can_launch_wordpress_admin and site.status == "verified" and backend_supported %}
+        <button class="site-quick-action" type="button" data-wordpress-admin-launch data-site-id="{{ site.id }}" data-csrf-token="{{ csrf_token }}" aria-label="WordPress-Backend von {{ site.domain }} öffnen" title="WordPress-Backend öffnen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+        </button>
+      {% else %}
+        <span class="site-quick-action is-disabled" aria-disabled="true" title="{% if not can_launch_wordpress_admin %}WordPress-Backend ist nur für Hub-Administratoren verfügbar{% elif site.status != "verified" %}WordPress-Backend ist nur für verifizierte Websites verfügbar{% else %}Kosmos Bridge 0.3.62 oder neuer erforderlich{% endif %}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+        </span>
+      {% endif %}
+      {% if site.home_url %}
+        <a class="site-quick-action" href="{{ site.home_url }}" target="_blank" rel="noopener noreferrer" aria-label="Startseite von {{ site.domain }} öffnen" title="Startseite öffnen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+        </a>
+      {% else %}
+        <span class="site-quick-action is-disabled" aria-disabled="true" title="Keine Startseite gespeichert">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+        </span>
+      {% endif %}
+    </div>
+    <a href="{{ href }}">{{ site.domain }}</a>
+  </div>
+{%- endmacro %}

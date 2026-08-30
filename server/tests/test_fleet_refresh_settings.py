@@ -76,7 +76,13 @@ def test_direct_update_batch_status_payload_exposes_compact_live_rows():
             id=17,
             status="running",
             error_message=None,
-            site=SimpleNamespace(id=7, domain="second.example"),
+            site=SimpleNamespace(
+                id=7,
+                domain="second.example",
+                home_url="https://second.example/",
+                status="verified",
+                bridge_version="0.3.62",
+            ),
             result_json={
                 "batch_position": 1,
                 "update_kind": "theme",
@@ -115,6 +121,10 @@ def test_direct_update_batch_status_payload_exposes_compact_live_rows():
     assert payload["cancellation_requested"] is False
     assert [row["id"] for row in payload["runs"]] == [17, 18, 19, 20]
     assert payload["runs"][0]["stage"] == "processing"
+    assert payload["runs"][0]["site_home_url"] == "https://second.example/"
+    assert payload["runs"][0]["site_admin_launch_supported"] is True
+    assert payload["runs"][1]["site_home_url"] == ""
+    assert payload["runs"][1]["site_admin_launch_supported"] is False
     assert payload["runs"][2]["error_message"] == "The site did not confirm the update."
     assert payload["runs"][3]["update_name"] == "JetFormBuilder"
 

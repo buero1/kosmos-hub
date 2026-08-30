@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}{{ plan.name }} · kosmos-hub{% endblock %}
 {% block content %}
   {% if action_message %}
@@ -103,7 +104,7 @@
         <tbody>
           {% for check in preflight %}
             <tr>
-              <td><a href="/sites/{{ check.item.site.id }}">{{ check.item.site.domain }}</a></td>
+              <td>{{ site_domain_link(check.item.site, "/sites/" ~ check.item.site.id) }}</td>
               <td><strong>{{ check.item.update_name }}</strong><p class="subtle table-note">{{ check.item.update_type }}</p></td>
               <td>{{ check.item.current_version or "-" }} → {{ check.item.target_version or "Not reported" }}</td>
               <td>{{ "Yes" if check.update_still_available else "No" }}</td>

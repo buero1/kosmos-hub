@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/site_domain.html" import site_domain_link with context %}
 {% block title %}Dashboard · kosmos-hub{% endblock %}
 {% block content %}
   <section class="grid">
@@ -61,7 +62,7 @@
       <tbody>
         {% for site in sites %}
           <tr>
-            <td><a href="/sites/{{ site.id }}">{{ site.domain }}</a></td>
+            <td>{{ site_domain_link(site, "/sites/" ~ site.id) }}</td>
             <td><span class="pill">{{ site.status }}</span></td>
             <td>{{ site.wordpress_version or "-" }}</td>
             <td>{{ site.php_version or "-" }}</td>

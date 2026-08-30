@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.api.routes.accounts import get_csrf_token, require_csrf
+from app.core.csrf import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
 from app.db.session import get_db
@@ -625,6 +625,7 @@ def update_workbench_page(
         if selected_refresh_run is not None
         else []
     )
+    refresh_result_sites = {item.site.id: item.site for item in all_items}
     return templates.TemplateResponse(
         request,
         "updates.html",
@@ -658,14 +659,6 @@ def update_workbench_page(
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
-            "can_launch_wordpress_admin": getattr(request.state, "hub_user", None) is not None
-            and request.state.hub_user.role == "admin",
-            "plugin_admin_launch_site_ids": {
-                entry.site.id
-                for entry in filtered_entries
-                if entry.site.status == "verified"
-                and SiteAdminLaunchService.bridge_supports_plugin_destination(entry.site.bridge_version)
-            },
             "matching_sites": matching_sites,
             "update_batch": update_batch if batch_runs else "",
             "batch_runs": batch_runs,
@@ -686,6 +679,7 @@ def update_workbench_page(
             "refresh_runs": refresh_runs,
             "selected_refresh_run": selected_refresh_run,
             "refresh_site_results": refresh_site_results,
+            "refresh_result_sites": refresh_result_sites,
             "message": message,
         },
     )
@@ -1813,6 +1807,11 @@ def _direct_update_batch_status_payload(batch_id: str, runs: list) -> dict:
                 "id": run.id,
                 "site_id": run.site.id,
                 "site_domain": run.site.domain,
+                "site_home_url": getattr(run.site, "home_url", "") or "",
+                "site_admin_launch_supported": (
+                    getattr(run.site, "status", "") == "verified"
+                    and SiteAdminLaunchService.bridge_supports_launch(getattr(run.site, "bridge_version", None))
+                ),
                 "update_kind": result.get("update_kind") or "plugin",
                 "update_name": result.get("update_name") or result.get("plugin_name") or "Unknown update",
                 "current_version": result.get("current_version") or "-",
