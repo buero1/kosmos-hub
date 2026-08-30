@@ -79,6 +79,7 @@ def sites_page(
         wordpress_version=wordpress,
         bridge_version=bridge,
     )
+    items.sort(key=lambda item: (item.site.domain.casefold(), item.site.id))
     return templates.TemplateResponse(
         request,
         "sites.html",
