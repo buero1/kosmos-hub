@@ -816,7 +816,25 @@
                   <span class="subtle">Not ready</span>
                 {% endif %}
               </td>
-              <td><a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a></td>
+              <td>
+                <div class="site-domain-primary">
+                  <div class="site-quick-actions">
+                    {% if can_launch_wordpress_admin and entry.site.id in plugin_admin_launch_site_ids %}
+                      <button class="site-quick-action" type="button" data-plugin-admin-launch data-site-id="{{ entry.site.id }}" aria-label="Plugin-Verwaltung von {{ entry.site.domain }} öffnen" title="Plugins öffnen">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+                      </button>
+                    {% else %}
+                      <span class="site-quick-action is-disabled" aria-disabled="true" title="{% if not can_launch_wordpress_admin %}WordPress-Backend ist nur für Hub-Administratoren verfügbar{% else %}Kosmos Bridge 0.3.65 oder neuer erforderlich{% endif %}">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+                      </span>
+                    {% endif %}
+                    <a class="site-quick-action" href="{{ entry.site.home_url }}" target="_blank" rel="noopener noreferrer" aria-label="Startseite von {{ entry.site.domain }} öffnen" title="Startseite öffnen">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+                    </a>
+                  </div>
+                  <a href="/sites/{{ entry.site.id }}">{{ entry.site.domain }}</a>
+                </div>
+              </td>
               <td><span class="pill pill-{{ entry.kind }}">{{ entry.kind_label }}</span></td>
               <td>
                 <strong>{{ entry.name }}</strong>
@@ -936,6 +954,31 @@
       var completeSiteUpdateDialog = document.querySelector("[data-complete-site-update-confirmation]");
       var completeSiteUpdateText = document.querySelector("[data-complete-site-update-confirmation-text]");
       var completeSiteUpdateConfirm = document.querySelector("[data-complete-site-update-confirm]");
+      var pluginAdminLaunchButtons = document.querySelectorAll("[data-plugin-admin-launch]");
+
+      pluginAdminLaunchButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          var siteId = button.getAttribute("data-site-id") || "";
+          if (!/^\d+$/.test(siteId)) { return; }
+          var form = document.createElement("form");
+          form.method = "post";
+          form.action = "/sites/" + siteId + "/open-wordpress-admin";
+          form.target = "_blank";
+          [
+            ["csrf_token", "{{ csrf_token }}"],
+            ["destination", "plugins"]
+          ].forEach(function (field) {
+            var input = document.createElement("input");
+            input.type = "hidden";
+            input.name = field[0];
+            input.value = field[1];
+            form.appendChild(input);
+          });
+          document.body.appendChild(form);
+          form.submit();
+          form.remove();
+        });
+      });
 
       if (autoFilterPanel && siteSelectorForm) {
         autoFilterPanel.querySelectorAll("select").forEach(function (filter) {

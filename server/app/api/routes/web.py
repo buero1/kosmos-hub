@@ -128,11 +128,16 @@ def open_site_wordpress_admin(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     csrf_token: Annotated[str, Form()] = "",
+    destination: Annotated[Literal["dashboard", "plugins"], Form()] = "dashboard",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
     try:
-        launch = SiteAdminLaunchService(db=db, cipher=get_secret_cipher()).open_admin(site_id=site_id, actor=user.username)
+        launch = SiteAdminLaunchService(db=db, cipher=get_secret_cipher()).open_admin(
+            site_id=site_id,
+            actor=user.username,
+            destination=destination,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SiteMcpProxyError as exc:
@@ -653,6 +658,14 @@ def update_workbench_page(
             ),
             "plugin_options": plugin_options,
             "csrf_token": get_csrf_token(request),
+            "can_launch_wordpress_admin": getattr(request.state, "hub_user", None) is not None
+            and request.state.hub_user.role == "admin",
+            "plugin_admin_launch_site_ids": {
+                entry.site.id
+                for entry in filtered_entries
+                if entry.site.status == "verified"
+                and SiteAdminLaunchService.bridge_supports_plugin_destination(entry.site.bridge_version)
+            },
             "matching_sites": matching_sites,
             "update_batch": update_batch if batch_runs else "",
             "batch_runs": batch_runs,

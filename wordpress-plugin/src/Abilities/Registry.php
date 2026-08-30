@@ -292,7 +292,7 @@ class Registry {
 				'label'               => __( 'Prepare WordPress Admin Launch', 'kosmos-bridge' ),
 				'description'         => __( 'Creates a single-use, one-minute browser handoff to the dedicated local Kosmos Hub administrator. The Hub never receives a WordPress password or session cookie.', 'kosmos-bridge' ),
 				'category'            => 'kosmos-bridge',
-				'input_schema'        => self::empty_object_input_schema(),
+				'input_schema'        => self::admin_launch_input_schema(),
 				'output_schema'       => self::admin_launch_output_schema(),
 				'execute_callback'    => array( \KosmosBridge\AdminLaunch::class, 'execute_prepare_admin_launch' ),
 				'permission_callback' => array( self::class, 'allow_mutation_access' ),
@@ -2642,7 +2642,7 @@ class Registry {
 				'label'         => __( 'Prepare WordPress Admin Launch', 'kosmos-bridge' ),
 				'description'   => __( 'Creates a single-use, one-minute browser handoff to the dedicated local Kosmos Hub administrator.', 'kosmos-bridge' ),
 				'category'      => 'kosmos-bridge',
-				'input_schema'  => self::empty_object_input_schema(),
+				'input_schema'  => self::admin_launch_input_schema(),
 				'output_schema' => self::admin_launch_output_schema(),
 				'meta'          => self::mutation_meta(),
 			),
@@ -2742,7 +2742,7 @@ class Registry {
 			return self::execute_activate_plugin( $input );
 		}
 		if ( \KosmosBridge\AdminLaunch::ABILITY_NAME === $ability_name ) {
-			return \KosmosBridge\AdminLaunch::execute_prepare_admin_launch();
+			return \KosmosBridge\AdminLaunch::execute_prepare_admin_launch( $input );
 		}
 		if ( 'kosmos-bridge/create-wp-user' === $ability_name ) {
 			return self::execute_create_wp_user( $input );
@@ -2909,6 +2909,21 @@ class Registry {
 		return array(
 			'type'       => 'object',
 			'properties' => array(),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function admin_launch_input_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'destination' => array(
+					'type' => 'string',
+					'enum' => array( 'dashboard', 'plugins' ),
+				),
+			),
 		);
 	}
 

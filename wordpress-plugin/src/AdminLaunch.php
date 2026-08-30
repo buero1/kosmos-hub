@@ -16,6 +16,8 @@ class AdminLaunch {
 	const ACCESS_USER_LOGIN         = 'kosmos-hub-access';
 	const WHITE_LABEL_CMS_PLUGIN    = 'white-label-cms/wlcms-plugin.php';
 	const WHITE_LABEL_CMS_OPTIONS   = 'wlcms_options';
+	const DESTINATION_DASHBOARD     = 'dashboard';
+	const DESTINATION_PLUGINS       = 'plugins';
 	const LAUNCH_QUERY_ARGUMENT     = 'kosmos_admin_launch';
 	const LAUNCH_OPTION_PREFIX      = 'kosmos_bridge_admin_launch_';
 	const LAUNCH_TTL                = 60;
@@ -25,7 +27,12 @@ class AdminLaunch {
 	/**
 	 * @return array|WP_Error
 	 */
-	public static function execute_prepare_admin_launch() {
+	public static function execute_prepare_admin_launch( $input = array() ) {
+		$destination = self::normalize_destination( $input );
+		if ( is_wp_error( $destination ) ) {
+			return $destination;
+		}
+
 		$access_user_created = 0 === (int) get_option( self::ACCESS_USER_OPTION, 0 ) && ! self::has_reusable_default_access_user();
 		$user = self::get_or_create_access_user();
 		if ( is_wp_error( $user ) ) {
@@ -33,7 +40,7 @@ class AdminLaunch {
 		}
 		$white_label_access_granted = self::grant_white_label_cms_access( $user );
 
-		$launch = self::create_launch_ticket( (int) $user->ID );
+		$launch = self::create_launch_ticket( (int) $user->ID, $destination );
 		if ( is_wp_error( $launch ) ) {
 			return $launch;
 		}
@@ -58,10 +65,11 @@ class AdminLaunch {
 		}
 
 		$token   = is_string( $_GET[ self::LAUNCH_QUERY_ARGUMENT ] ) ? wp_unslash( $_GET[ self::LAUNCH_QUERY_ARGUMENT ] ) : '';
-		$user_id = self::consume_launch_ticket( $token );
-		if ( $user_id <= 0 ) {
+		$launch = self::consume_launch_ticket( $token );
+		if ( ! is_array( $launch ) ) {
 			self::deny_launch();
 		}
+		$user_id = (int) $launch['user_id'];
 
 		$user = get_user_by( 'id', $user_id );
 		if ( ! $user instanceof \WP_User || ! self::is_administrator_user( $user ) ) {
@@ -74,8 +82,37 @@ class AdminLaunch {
 
 		nocache_headers();
 		header( 'Referrer-Policy: no-referrer' );
-		wp_safe_redirect( admin_url() );
+		wp_safe_redirect( self::destination_url( (string) $launch['destination'] ) );
 		exit;
+	}
+
+	/**
+	 * The Hub can select only the dashboard or the plugin management screen.
+	 * Persisting a named destination inside the one-time ticket avoids trusting
+	 * an arbitrary redirect path from the browser.
+	 *
+	 * @param mixed $input Ability input.
+	 * @return string|WP_Error
+	 */
+	private static function normalize_destination( $input ) {
+		$destination = is_array( $input ) && isset( $input['destination'] ) ? (string) $input['destination'] : self::DESTINATION_DASHBOARD;
+		if ( in_array( $destination, array( self::DESTINATION_DASHBOARD, self::DESTINATION_PLUGINS ), true ) ) {
+			return $destination;
+		}
+
+		return new WP_Error(
+			'kosmos_bridge_admin_launch_destination_invalid',
+			'The requested WordPress admin destination is not supported.',
+			array( 'status' => 422 )
+		);
+	}
+
+	/**
+	 * @param string $destination Validated ticket destination.
+	 * @return string
+	 */
+	private static function destination_url( $destination ) {
+		return self::DESTINATION_PLUGINS === $destination ? admin_url( 'plugins.php' ) : admin_url();
 	}
 
 	/**
@@ -254,10 +291,11 @@ class AdminLaunch {
 	}
 
 	/**
-	 * @param int $user_id WordPress administrator ID.
+	 * @param int    $user_id WordPress administrator ID.
+	 * @param string $destination Validated admin destination.
 	 * @return array|WP_Error
 	 */
-	private static function create_launch_ticket( $user_id ) {
+	private static function create_launch_ticket( $user_id, $destination ) {
 		self::delete_expired_launch_tickets();
 
 		try {
@@ -275,6 +313,7 @@ class AdminLaunch {
 		$payload    = wp_json_encode(
 			array(
 				'user_id'     => $user_id,
+				'destination' => $destination,
 				'secret_hash' => hash( 'sha256', $secret ),
 				'expires_at'  => $expires_at,
 			)
@@ -295,30 +334,30 @@ class AdminLaunch {
 
 	/**
 	 * @param string $token Browser-provided ticket.
-	 * @return int
+	 * @return array|false
 	 */
 	private static function consume_launch_ticket( $token ) {
 		if ( ! is_string( $token ) || ! preg_match( '/^([a-f0-9]{24})\.([a-f0-9]{64})$/', $token, $matches ) ) {
-			return 0;
+			return false;
 		}
 
 		global $wpdb;
 		$option_name = self::launch_option_name( $matches[1] );
 		$raw_payload = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $option_name ) );
 		if ( ! is_string( $raw_payload ) || '' === $raw_payload ) {
-			return 0;
+			return false;
 		}
 
 		$payload = json_decode( $raw_payload, true );
 		if ( ! is_array( $payload ) ) {
-			return 0;
+			return false;
 		}
 
 		$expected_secret_hash = isset( $payload['secret_hash'] ) ? (string) $payload['secret_hash'] : '';
 		$expires_at           = isset( $payload['expires_at'] ) ? (int) $payload['expires_at'] : 0;
 		$user_id              = isset( $payload['user_id'] ) ? (int) $payload['user_id'] : 0;
 		if ( $expires_at < time() || $user_id <= 0 || ! hash_equals( $expected_secret_hash, hash( 'sha256', $matches[2] ) ) ) {
-			return 0;
+			return false;
 		}
 
 		$deleted = $wpdb->query(
@@ -328,7 +367,19 @@ class AdminLaunch {
 				$raw_payload
 			)
 		);
-		return 1 === (int) $deleted ? $user_id : 0;
+		if ( 1 !== (int) $deleted ) {
+			return false;
+		}
+
+		$destination = isset( $payload['destination'] ) ? (string) $payload['destination'] : self::DESTINATION_DASHBOARD;
+		if ( ! in_array( $destination, array( self::DESTINATION_DASHBOARD, self::DESTINATION_PLUGINS ), true ) ) {
+			$destination = self::DESTINATION_DASHBOARD;
+		}
+
+		return array(
+			'user_id'     => $user_id,
+			'destination' => $destination,
+		);
 	}
 
 	/**

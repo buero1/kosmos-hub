@@ -74,7 +74,35 @@ def test_admin_launch_rejects_a_bridge_url_for_another_domain(monkeypatch):
             raise AssertionError("An admin launch URL for another domain must be rejected.")
 
 
+def test_admin_launch_passes_the_plugins_destination_to_a_supported_bridge(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert ability_name == "kosmos-bridge/prepare-admin-launch"
+        assert ability_input == {"destination": "plugins"}
+        return {"result": {"launch_url": "https://launch.example/?kosmos_admin_launch=abc.def"}}
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    with Session(engine) as db:
+        site = _site()
+        site.bridge_version = "0.3.65"
+        db.add(site)
+        db.commit()
+
+        launch = SiteAdminLaunchService(db=db, cipher=SecretCipher("a" * 32)).open_admin(
+            site_id=site.id,
+            actor="operator",
+            destination="plugins",
+        )
+
+        assert launch.launch_url == "https://launch.example/?kosmos_admin_launch=abc.def"
+        assert launch.white_label_access_granted is False
+
+
 def test_admin_launch_requires_bridge_0362_or_newer():
     assert SiteAdminLaunchService.bridge_supports_launch("0.3.61") is False
     assert SiteAdminLaunchService.bridge_supports_launch("0.3.62") is True
     assert SiteAdminLaunchService.bridge_supports_launch("0.4.0") is True
+    assert SiteAdminLaunchService.bridge_supports_plugin_destination("0.3.64") is False
+    assert SiteAdminLaunchService.bridge_supports_plugin_destination("0.3.65") is True
