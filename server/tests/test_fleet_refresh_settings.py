@@ -387,6 +387,7 @@ def test_refresh_site_result_keeps_the_website_and_jet_license_outcomes(monkeypa
             "update_package_ready": True,
             "plugins": [{"plugin_file": "jet-engine/jet-engine.php", "name": "JetEngine"}],
             "provider_versions": [{"plugin_file": "jet-engine/jet-engine.php", "version": "3.8.14.3"}],
+            "dashboard_diagnostic": {},
         },
     )
 
@@ -404,6 +405,7 @@ def test_refresh_site_result_keeps_the_website_and_jet_license_outcomes(monkeypa
             "update_package_ready": True,
             "plugins": [{"plugin_file": "jet-engine/jet-engine.php", "name": "JetEngine"}],
             "provider_versions": [{"plugin_file": "jet-engine/jet-engine.php", "version": "3.8.14.3"}],
+            "dashboard_diagnostic": {},
         }
 
 

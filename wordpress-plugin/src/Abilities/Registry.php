@@ -258,6 +258,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/diagnose-crocoblock-dashboard',
+			array(
+				'label'               => __( 'Diagnose Crocoblock Dashboard', 'kosmos-bridge' ),
+				'description'         => __( 'Inspects the locally available Jet Dashboard bootstrap hooks and manager methods without reading or changing any license data.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::empty_object_input_schema(),
+				'output_schema'       => self::crocoblock_dashboard_diagnostic_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_diagnose_crocoblock_dashboard' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/activate-plugin',
 			array(
 				'label'               => __( 'Activate Plugin', 'kosmos-bridge' ),
@@ -1721,6 +1735,89 @@ class Registry {
 	}
 
 	/**
+	 * Inspect the embedded Jet Dashboard runtime without contacting Crocoblock,
+	 * reading a license key, or writing a WordPress option. Older Jet plugins
+	 * expose different bootstrap and manager APIs, so the Hub needs this small
+	 * capability report when the normal activation path is unavailable.
+	 *
+	 * @return array
+	 */
+	public static function execute_diagnose_crocoblock_dashboard() {
+		$bootstrap                    = self::initialize_embedded_jet_dashboard();
+		$dashboard_class_available    = class_exists( '\\Jet_Dashboard\\Dashboard' );
+		$utils_class_available        = class_exists( '\\Jet_Dashboard\\Utils' );
+		$dashboard                    = null;
+		$dashboard_instance_available = false;
+		$init_managers_available      = false;
+		$init_managers_called         = false;
+		$init_managers_failed         = false;
+		$license_manager              = null;
+		$plugin_manager               = null;
+
+		if ( $dashboard_class_available ) {
+			try {
+				$dashboard                    = \Jet_Dashboard\Dashboard::get_instance();
+				$dashboard_instance_available = is_object( $dashboard );
+				$init_managers_available      = $dashboard_instance_available && method_exists( $dashboard, 'init_managers' );
+
+				if ( $dashboard_instance_available && ! isset( $dashboard->license_manager ) && $init_managers_available ) {
+					$init_managers_called = true;
+					$dashboard->init_managers();
+				}
+
+				if ( $dashboard_instance_available ) {
+					$license_manager = isset( $dashboard->license_manager ) && is_object( $dashboard->license_manager )
+						? $dashboard->license_manager
+						: null;
+					$plugin_manager = isset( $dashboard->plugin_manager ) && is_object( $dashboard->plugin_manager )
+						? $dashboard->plugin_manager
+						: null;
+				}
+			} catch ( \Throwable $exception ) {
+				$init_managers_failed = true;
+			}
+		}
+
+		$license_manager_methods = self::available_crocoblock_manager_methods(
+			$license_manager,
+			array( 'license_action_query', 'update_license_list' )
+		);
+		$plugin_manager_methods  = self::available_crocoblock_manager_methods(
+			$plugin_manager,
+			array( 'get_remote_jet_plugin_list' )
+		);
+
+		if ( ! $dashboard_class_available || ! $utils_class_available ) {
+			$message = 'Jet Dashboard classes were unavailable after inspecting the embedded Jet initialization hooks.';
+		} elseif ( ! $dashboard_instance_available ) {
+			$message = 'Jet Dashboard classes are loaded, but no Dashboard instance could be obtained.';
+		} elseif ( ! is_object( $license_manager ) ) {
+			$message = 'Jet Dashboard initialized, but it did not expose a license manager.';
+		} elseif ( count( $license_manager_methods ) < 2 ) {
+			$message = 'Jet Dashboard exposed a license manager, but it is missing one or more required activation methods.';
+		} else {
+			$message = 'Jet Dashboard exposed the license manager methods required by the Crocoblock activation workflow.';
+		}
+
+		return array(
+			'bootstrap_hooks_found'        => (int) $bootstrap['hooks_found'],
+			'bootstrap_hooks_invoked'      => (int) $bootstrap['hooks_invoked'],
+			'bootstrap_hook_errors'        => (int) $bootstrap['hook_errors'],
+			'dashboard_class_available'    => $dashboard_class_available,
+			'utils_class_available'        => $utils_class_available,
+			'dashboard_instance_available' => $dashboard_instance_available,
+			'init_managers_available'      => $init_managers_available,
+			'init_managers_called'         => $init_managers_called,
+			'init_managers_failed'         => $init_managers_failed,
+			'license_manager_available'    => is_object( $license_manager ),
+			'license_manager_methods'      => $license_manager_methods,
+			'plugin_manager_available'     => is_object( $plugin_manager ),
+			'plugin_manager_methods'       => $plugin_manager_methods,
+			'message'                      => $message,
+		);
+	}
+
+	/**
 	 * Older Jet plugins bundle Jet Dashboard but only initialize it for wp-admin
 	 * requests. The authenticated Bridge REST request needs that same manager
 	 * without depending on a separate Jet Dashboard plugin.
@@ -1807,13 +1904,18 @@ class Registry {
 	}
 
 	/**
-	 * @return void
+	 * @return array{hooks_found:int,hooks_invoked:int,hook_errors:int}
 	 */
 	private static function initialize_embedded_jet_dashboard() {
 		global $wp_filter;
+		$bootstrap = array(
+			'hooks_found'   => 0,
+			'hooks_invoked' => 0,
+			'hook_errors'   => 0,
+		);
 
 		if ( ! isset( $wp_filter['init'] ) || ! is_object( $wp_filter['init'] ) || empty( $wp_filter['init']->callbacks ) ) {
-			return;
+			return $bootstrap;
 		}
 
 		foreach ( (array) $wp_filter['init']->callbacks as $callbacks ) {
@@ -1828,18 +1930,46 @@ class Registry {
 				) {
 					continue;
 				}
+				$bootstrap['hooks_found']++;
 
 				try {
 					call_user_func( $callback, true );
+					$bootstrap['hooks_invoked']++;
 				} catch ( \Throwable $exception ) {
+					$bootstrap['hook_errors']++;
 					continue;
 				}
 
 				if ( class_exists( '\\Jet_Dashboard\\Dashboard' ) && class_exists( '\\Jet_Dashboard\\Utils' ) ) {
-					return;
+					return $bootstrap;
 				}
 			}
 		}
+
+		return $bootstrap;
+	}
+
+	/**
+	 * Return only the fixed set of integration methods relevant to the Hub.
+	 * This avoids exposing arbitrary third-party object internals in a report.
+	 *
+	 * @param mixed $manager Candidate Jet Dashboard manager.
+	 * @param array $method_names Allowed integration methods.
+	 * @return array
+	 */
+	private static function available_crocoblock_manager_methods( $manager, $method_names ) {
+		if ( ! is_object( $manager ) ) {
+			return array();
+		}
+
+		$available = array();
+		foreach ( $method_names as $method_name ) {
+			if ( is_string( $method_name ) && method_exists( $manager, $method_name ) ) {
+				$available[] = $method_name;
+			}
+		}
+
+		return $available;
 	}
 
 	/**
@@ -2243,6 +2373,15 @@ class Registry {
 				'meta'          => self::readonly_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/diagnose-crocoblock-dashboard',
+				'label'         => __( 'Diagnose Crocoblock Dashboard', 'kosmos-bridge' ),
+				'description'   => __( 'Inspects the locally available Jet Dashboard bootstrap hooks and manager methods without reading or changing any license data.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::empty_object_input_schema(),
+				'output_schema' => self::crocoblock_dashboard_diagnostic_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/get-updraftplus-backup-status',
 				'label'         => __( 'Get UpdraftPlus Backup Status', 'kosmos-bridge' ),
 				'description'   => __( 'Returns read-only metadata about the latest complete UpdraftPlus backup or one requested backup.', 'kosmos-bridge' ),
@@ -2473,6 +2612,8 @@ class Registry {
 				return self::execute_list_installed_plugins();
 			case 'kosmos-bridge/get-available-updates':
 				return self::execute_get_available_updates();
+			case 'kosmos-bridge/diagnose-crocoblock-dashboard':
+				return self::execute_diagnose_crocoblock_dashboard();
 			case 'kosmos-bridge/get-updraftplus-backup-status':
 				return self::execute_get_updraftplus_backup_status( $input );
 			case 'kosmos-bridge/list-updraftplus-backups':
@@ -2869,6 +3010,47 @@ class Registry {
 				'message'              => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'activated', 'site_activated', 'license_was_already_active', 'update_package_ready', 'plugins', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function crocoblock_dashboard_diagnostic_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'bootstrap_hooks_found'        => array( 'type' => 'integer' ),
+				'bootstrap_hooks_invoked'      => array( 'type' => 'integer' ),
+				'bootstrap_hook_errors'        => array( 'type' => 'integer' ),
+				'dashboard_class_available'    => array( 'type' => 'boolean' ),
+				'utils_class_available'        => array( 'type' => 'boolean' ),
+				'dashboard_instance_available' => array( 'type' => 'boolean' ),
+				'init_managers_available'      => array( 'type' => 'boolean' ),
+				'init_managers_called'         => array( 'type' => 'boolean' ),
+				'init_managers_failed'         => array( 'type' => 'boolean' ),
+				'license_manager_available'    => array( 'type' => 'boolean' ),
+				'license_manager_methods'      => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'plugin_manager_available'     => array( 'type' => 'boolean' ),
+				'plugin_manager_methods'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
+				'message'                      => array( 'type' => 'string' ),
+			),
+			'required'   => array(
+				'bootstrap_hooks_found',
+				'bootstrap_hooks_invoked',
+				'bootstrap_hook_errors',
+				'dashboard_class_available',
+				'utils_class_available',
+				'dashboard_instance_available',
+				'init_managers_available',
+				'init_managers_called',
+				'init_managers_failed',
+				'license_manager_available',
+				'license_manager_methods',
+				'plugin_manager_available',
+				'plugin_manager_methods',
+				'message',
+			),
 		);
 	}
 

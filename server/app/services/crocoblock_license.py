@@ -16,10 +16,15 @@ from app.services.site_updates import SiteUpdateService
 
 CROCOBLOCK_PROVIDER = "crocoblock"
 CROCOBLOCK_ACTIVATE_ABILITY = "kosmos-bridge/activate-crocoblock-license"
+CROCOBLOCK_DASHBOARD_DIAGNOSTIC_ABILITY = "kosmos-bridge/diagnose-crocoblock-dashboard"
+CROCOBLOCK_DASHBOARD_UNAVAILABLE_CODE = "KOSMOS_BRIDGE_CROCOBLOCK_DASHBOARD_UNAVAILABLE"
 
 
 class CrocoblockLicenseError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = "", dashboard_diagnostic: dict[str, object] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.dashboard_diagnostic = dashboard_diagnostic or {}
 
 
 class CrocoblockLicenseService:
@@ -62,7 +67,17 @@ class CrocoblockLicenseService:
 
     def activate_for_plugin_update(self, *, actor: str, site_id: int) -> dict[str, object]:
         """Make a stored license available for one pending Jet plugin update."""
-        return self._activate_for_site(actor=actor, site_id=site_id, purpose="plugin update")
+        try:
+            return self._activate_for_site(actor=actor, site_id=site_id, purpose="plugin update")
+        except CrocoblockLicenseError as exc:
+            if exc.code != CROCOBLOCK_DASHBOARD_UNAVAILABLE_CODE:
+                raise
+            dashboard_diagnostic = self._diagnose_crocoblock_dashboard(site_id)
+            raise CrocoblockLicenseError(
+                self._activation_failure_detail(exc, dashboard_diagnostic),
+                code=exc.code,
+                dashboard_diagnostic=dashboard_diagnostic,
+            ) from exc
 
     def refresh_version_evidence(
         self,
@@ -116,15 +131,21 @@ class CrocoblockLicenseService:
             except CrocoblockLicenseError as exc:
                 summary["failed"] += 1
                 summary["completed"] += 1
+                dashboard_diagnostic = (
+                    self._diagnose_crocoblock_dashboard(site_id)
+                    if exc.code == CROCOBLOCK_DASHBOARD_UNAVAILABLE_CODE
+                    else {}
+                )
                 if site_result_callback is not None:
                     site_result_callback(
                         {
                             "site_id": site_id,
                             "status": "activation-failed",
-                            "detail": str(exc),
+                            "detail": self._activation_failure_detail(exc, dashboard_diagnostic),
                             "license_was_already_active": None,
                             "update_package_ready": None,
                             "provider_versions": [],
+                            "dashboard_diagnostic": dashboard_diagnostic,
                         }
                     )
                 if progress_callback is not None:
@@ -207,7 +228,7 @@ class CrocoblockLicenseService:
                 detail=f"Crocoblock license activation could not run for {site.domain}: {exc.code}.",
             )
             self.db.commit()
-            raise CrocoblockLicenseError(exc.message) from exc
+            raise CrocoblockLicenseError(exc.message, code=exc.code) from exc
 
         result = payload.get("result")
         if not isinstance(result, dict) or result.get("activated") is not True or result.get("site_activated") is not True:
@@ -260,6 +281,79 @@ class CrocoblockLicenseService:
         if activation.get("update_package_ready") is True:
             return f"{detail} An authorized update package is now available."
         return f"{detail} An authorized update package is still unavailable."
+
+    def _diagnose_crocoblock_dashboard(self, site_id: int) -> dict[str, object]:
+        """Collect a fixed, read-only compatibility report after manager setup failed."""
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                site_id,
+                CROCOBLOCK_DASHBOARD_DIAGNOSTIC_ABILITY,
+                None,
+                timeout_seconds=30,
+            )
+        except SiteMcpProxyError as exc:
+            if exc.code == "KOSMOS_BRIDGE_ABILITY_NOT_FOUND":
+                return {
+                    "status": "bridge-upgrade-required",
+                    "message": (
+                        "This site has an older Kosmos Bridge without the read-only Jet Dashboard diagnostic. "
+                        "Update Kosmos Bridge to 0.3.57 and run the automatic refresh again."
+                    ),
+                    "error_code": exc.code,
+                }
+            return {
+                "status": "unavailable",
+                "message": f"The Jet Dashboard diagnostic could not be read: {exc.message}",
+                "error_code": exc.code,
+            }
+
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return {
+                "status": "invalid-response",
+                "message": "The Jet Dashboard diagnostic returned no compatible report.",
+            }
+
+        boolean_fields = (
+            "dashboard_class_available",
+            "utils_class_available",
+            "dashboard_instance_available",
+            "init_managers_available",
+            "init_managers_called",
+            "init_managers_failed",
+            "license_manager_available",
+            "plugin_manager_available",
+        )
+        numeric_fields = (
+            "bootstrap_hooks_found",
+            "bootstrap_hooks_invoked",
+            "bootstrap_hook_errors",
+        )
+        allowed_methods = {
+            "license_manager_methods": {"license_action_query", "update_license_list"},
+            "plugin_manager_methods": {"get_remote_jet_plugin_list"},
+        }
+        diagnostic: dict[str, object] = {
+            "status": "captured",
+            "message": str(result.get("message", "Jet Dashboard compatibility report was captured."))[:500],
+        }
+        for field in boolean_fields:
+            diagnostic[field] = result.get(field) is True
+        for field in numeric_fields:
+            value = result.get(field)
+            diagnostic[field] = value if isinstance(value, int) and value >= 0 else 0
+        for field, allowed in allowed_methods.items():
+            values = result.get(field)
+            diagnostic[field] = [value for value in values if isinstance(value, str) and value in allowed] if isinstance(values, list) else []
+        return diagnostic
+
+    @staticmethod
+    def _activation_failure_detail(exc: CrocoblockLicenseError, dashboard_diagnostic: dict[str, object]) -> str:
+        detail = str(exc)
+        message = dashboard_diagnostic.get("message")
+        if isinstance(message, str) and message:
+            return f"{detail} Jet Dashboard diagnosis: {message}"
+        return detail
 
     def _require_admin(self, actor: HubUser) -> None:
         if actor.role != "admin":

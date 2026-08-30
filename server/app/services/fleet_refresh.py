@@ -837,6 +837,7 @@ class FleetRefreshService:
                     "license_was_already_active": None,
                     "update_package_ready": None,
                     "provider_versions": [],
+                    "dashboard_diagnostic": {},
                     "plugins": plugins_by_site.get(site_id, []),
                 },
             )
@@ -863,6 +864,7 @@ class FleetRefreshService:
                 "update_package_ready": outcome.get("update_package_ready"),
                 "plugins": plugins,
                 "provider_versions": outcome.get("provider_versions", []),
+                "dashboard_diagnostic": outcome.get("dashboard_diagnostic", {}),
             }
             record.jet_status = str(outcome["status"])
             record.result_json = result

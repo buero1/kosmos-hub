@@ -678,6 +678,65 @@ def test_crocoblock_provider_versions_ignore_invalid_catalog_entries():
     assert versions == [{"plugin_file": "jet-elements/jet-elements.php", "version": "2.7.3"}]
 
 
+def test_crocoblock_dashboard_diagnostic_keeps_only_safe_compatibility_fields():
+    service = object.__new__(CrocoblockLicenseService)
+    service.proxy = SimpleNamespace(
+        execute_readonly_ability=lambda *_args, **_kwargs: {
+            "result": {
+                "bootstrap_hooks_found": 1,
+                "bootstrap_hooks_invoked": 1,
+                "bootstrap_hook_errors": 0,
+                "dashboard_class_available": True,
+                "utils_class_available": True,
+                "dashboard_instance_available": True,
+                "init_managers_available": True,
+                "init_managers_called": True,
+                "init_managers_failed": False,
+                "license_manager_available": False,
+                "license_manager_methods": ["license_action_query", "private_value"],
+                "plugin_manager_available": True,
+                "plugin_manager_methods": ["get_remote_jet_plugin_list"],
+                "message": "Jet Dashboard initialized, but it did not expose a license manager.",
+                "license_key": "must-not-be-stored",
+            }
+        }
+    )
+
+    diagnostic = service._diagnose_crocoblock_dashboard(42)
+
+    assert diagnostic == {
+        "status": "captured",
+        "message": "Jet Dashboard initialized, but it did not expose a license manager.",
+        "dashboard_class_available": True,
+        "utils_class_available": True,
+        "dashboard_instance_available": True,
+        "init_managers_available": True,
+        "init_managers_called": True,
+        "init_managers_failed": False,
+        "license_manager_available": False,
+        "plugin_manager_available": True,
+        "bootstrap_hooks_found": 1,
+        "bootstrap_hooks_invoked": 1,
+        "bootstrap_hook_errors": 0,
+        "license_manager_methods": ["license_action_query"],
+        "plugin_manager_methods": ["get_remote_jet_plugin_list"],
+    }
+
+
+def test_crocoblock_dashboard_diagnostic_reports_when_bridge_update_is_needed():
+    service = object.__new__(CrocoblockLicenseService)
+
+    def missing_ability(*_args, **_kwargs):
+        raise SiteMcpProxyError("KOSMOS_BRIDGE_ABILITY_NOT_FOUND", "Ability not found.", status_code=404)
+
+    service.proxy = SimpleNamespace(execute_readonly_ability=missing_ability)
+
+    diagnostic = service._diagnose_crocoblock_dashboard(42)
+
+    assert diagnostic["status"] == "bridge-upgrade-required"
+    assert "0.3.57" in diagnostic["message"]
+
+
 def test_direct_updates_require_healthy_homepage_and_rest_api():
     assert MaintenanceRunService._plugin_update_health_error(
         {"home_healthy": True, "home_status": 200, "rest_healthy": True, "rest_status": 200}
