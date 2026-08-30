@@ -19,7 +19,7 @@
     </label>
 
     <div class="site-selector-selection-tools">
-      <span>Select: <button type="button" data-site-selector-all>All</button> · <button type="button" data-site-selector-none>None</button></span>
+      <span title="Mit Shift und einem weiteren Klick wird der Bereich dazwischen ausgewählt.">Select: <button type="button" data-site-selector-all>All</button> · <button type="button" data-site-selector-none>None</button> · Shift: Bereich</span>
       <strong data-site-selector-count>All sites</strong>
     </div>
 
@@ -166,7 +166,7 @@
     });
 
     siteChecks.forEach(function (checkbox) {
-      checkbox.addEventListener("change", function (event) {
+      checkbox.addEventListener("click", function (event) {
         if (event.shiftKey && lastSiteCheck) {
           var start = siteChecks.indexOf(lastSiteCheck);
           var end = siteChecks.indexOf(checkbox);
