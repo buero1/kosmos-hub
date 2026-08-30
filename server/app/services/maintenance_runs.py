@@ -68,6 +68,7 @@ class MaintenanceRunService:
     VERIFY_BACKUP_DELETION_ABILITY = "kosmos-bridge/verify-updraftplus-backup-deletion"
     LIST_INSTALLED_PLUGINS_ABILITY = "kosmos-bridge/list-installed-plugins"
     PLUGIN_UPDATE_ABILITY = "kosmos-bridge/update-plugin"
+    PLUGIN_ACTIVATION_ABILITY = "kosmos-bridge/activate-plugin"
     PLUGIN_INSTALLATION_ABILITY = "kosmos-bridge/install-plugin"
     THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
     WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
@@ -1554,7 +1555,7 @@ class MaintenanceRunService:
         self._complete_plugin_update_step(
             run,
             update_step,
-            self._direct_update_verification_detail(details),
+            self._direct_update_verification_detail(details, result),
             result,
         )
 
@@ -1834,7 +1835,18 @@ class MaintenanceRunService:
             except SiteMcpProxyError as exc:
                 resolution = self._bridge_update_preflight_resolution(details, exc)
                 if resolution is None:
-                    self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
+                    recovered_result, recovery_detail = self._recover_active_plugin_after_failed_update_request(
+                        run,
+                        details,
+                        update_step,
+                        exc,
+                    )
+                    if recovered_result is not None:
+                        return "updated", recovered_result
+                    message = f"{details['update_name']} update request failed: {exc.message}"
+                    if recovery_detail:
+                        message = f"{message} Activation recovery did not succeed: {recovery_detail}"
+                    self._fail_plugin_update_run(run, message)
                     return "failed", None
 
                 if resolution["action"] == "activate-crocoblock":
@@ -1876,6 +1888,94 @@ class MaintenanceRunService:
                     update_step=update_step,
                 )
                 return str(resolution["outcome"]), None
+
+    def _recover_active_plugin_after_failed_update_request(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        update_step: MaintenanceRunStep | None,
+        update_error: SiteMcpProxyError,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Recover an active plugin only after the Bridge proves the planned target exists."""
+        if (
+            details["update_kind"] != "plugin"
+            or details["expected_active"] is not True
+            or update_error.status_code < 500
+        ):
+            return None, ""
+
+        self._start_plugin_update_step(
+            run,
+            update_step,
+            (
+                "The Bridge update request returned an error. Verifying the planned target version "
+                "and restoring the approved active state if WordPress installed it."
+            ),
+        )
+        recovery = {
+            "attempted": True,
+            "original_error": update_error.message,
+            "plugin_file": details["update_identifier"],
+            "target_version": details["target_version"],
+        }
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.PLUGIN_ACTIVATION_ABILITY,
+                {
+                    "plugin_file": details["update_identifier"],
+                    "expected_installed_version": details["target_version"],
+                },
+                timeout_seconds=60,
+            )
+        except SiteMcpProxyError as recovery_error:
+            run.result_json = {
+                **(run.result_json or {}),
+                "activation_recovery": {
+                    **recovery,
+                    "recovered": False,
+                    "error": recovery_error.message,
+                },
+            }
+            self.db.commit()
+            return None, recovery_error.message
+
+        activation_result = self._result_from_payload(payload)
+        recovered = (
+            activation_result.get("plugin_file") == details["update_identifier"]
+            and activation_result.get("installed_version") == details["target_version"]
+            and activation_result.get("active") is True
+        )
+        if not recovered:
+            run.result_json = {
+                **(run.result_json or {}),
+                "activation_recovery": {
+                    **recovery,
+                    "recovered": False,
+                    "error": "The Bridge did not confirm the planned version and active state.",
+                    "result": activation_result,
+                },
+            }
+            self.db.commit()
+            return None, "The Bridge did not confirm the planned version and active state."
+
+        run.result_json = {
+            **(run.result_json or {}),
+            "activation_recovery": {
+                **recovery,
+                "recovered": True,
+                "activated": activation_result.get("activated") is True,
+            },
+        }
+        self.db.commit()
+        return {
+            "updated": True,
+            "plugin_file": details["update_identifier"],
+            "previous_version": details["current_version"],
+            "installed_version": details["target_version"],
+            "active": True,
+            "recovered_after_update_error": True,
+        }, ""
 
     @classmethod
     def _bridge_update_preflight_resolution(
@@ -2429,12 +2529,16 @@ class MaintenanceRunService:
         return None
 
     @staticmethod
-    def _direct_update_verification_detail(details: dict[str, Any]) -> str:
+    def _direct_update_verification_detail(details: dict[str, Any], result: dict[str, Any] | None = None) -> str:
+        recovered = isinstance(result, dict) and result.get("recovered_after_update_error") is True
         if details["update_kind"] == "plugin":
-            return (
+            detail = (
                 f"Bridge verified {details['update_name']} {details['target_version']} "
                 f"{'active' if details['expected_active'] else 'inactive'}."
             )
+            if recovered:
+                return f"{detail} The Hub recovered the approved active state after the update error."
+            return detail
         if details["update_kind"] == "theme":
             return f"Bridge verified theme {details['update_name']} {details['target_version']}."
         return f"Bridge verified WordPress {details['target_version']} on disk."

@@ -1112,14 +1112,14 @@ class Registry {
 		$upgrader = new \Plugin_Upgrader( new \Automatic_Upgrader_Skin() );
 		$result   = $upgrader->upgrade( $plugin_file, array( 'clear_update_cache' => true ) );
 		if ( is_wp_error( $result ) ) {
-			return $result;
+			return self::recover_expected_plugin_activation_after_update_error( $plugin_file, $expected_active, $result );
 		}
 		if ( true !== $result ) {
-			return new \WP_Error(
+			return self::recover_expected_plugin_activation_after_update_error( $plugin_file, $expected_active, new \WP_Error(
 				'kosmos_bridge_update_failed',
 				'WordPress did not confirm the plugin update.',
 				array( 'status' => 500 )
-			);
+			) );
 		}
 
 		if ( function_exists( 'wp_clean_plugins_cache' ) ) {
@@ -1128,11 +1128,11 @@ class Registry {
 		$plugins         = get_plugins();
 		$installed_after = isset( $plugins[ $plugin_file ]['Version'] ) ? (string) $plugins[ $plugin_file ]['Version'] : '';
 		if ( $installed_after !== $expected_target ) {
-			return new \WP_Error(
+			return self::recover_expected_plugin_activation_after_update_error( $plugin_file, $expected_active, new \WP_Error(
 				'kosmos_bridge_update_verification_failed',
 				'WordPress completed the update but the installed plugin version could not be verified.',
 				array( 'status' => 500 )
-			);
+			) );
 		}
 
 		$active_after = self::is_plugin_active( $plugin_file );
@@ -1145,11 +1145,11 @@ class Registry {
 		}
 
 		if ( $active_after !== $expected_active ) {
-			return new \WP_Error(
+			return self::recover_expected_plugin_activation_after_update_error( $plugin_file, $expected_active, new \WP_Error(
 				'kosmos_bridge_activation_state_verification_failed',
 				'The plugin update completed but WordPress did not preserve the approved activation state.',
 				array( 'status' => 500 )
-			);
+			) );
 		}
 
 		return array(
@@ -4287,6 +4287,50 @@ class Registry {
 		}
 
 		return true;
+	}
+
+	/**
+	 * A WordPress updater can deactivate a plugin before reporting its own error.
+	 * Preserve the approved active state without claiming the update succeeded.
+	 *
+	 * @param string    $plugin_file Plugin file relative to WP_PLUGIN_DIR.
+	 * @param bool      $expected_active Approved state before the update.
+	 * @param \WP_Error $update_error Original updater error.
+	 * @return \WP_Error
+	 */
+	private static function recover_expected_plugin_activation_after_update_error( $plugin_file, $expected_active, $update_error ) {
+		if ( ! $expected_active ) {
+			return $update_error;
+		}
+
+		$activation = self::activate_plugin_and_verify( $plugin_file );
+		if ( ! is_wp_error( $activation ) ) {
+			return new \WP_Error(
+				'kosmos_bridge_update_failed_reactivated',
+				'WordPress reported the plugin update as failed, but the previously active plugin was reactivated.',
+				array(
+					'status'                 => 500,
+					'plugin_file'            => $plugin_file,
+					'update_error_code'      => $update_error->get_error_code(),
+					'update_error_message'   => $update_error->get_error_message(),
+					'reactivation_attempted' => true,
+					'reactivated'            => true,
+				)
+			);
+		}
+
+		return new \WP_Error(
+			'kosmos_bridge_update_failed_reactivation_failed',
+			'WordPress reported the plugin update as failed and the previously active plugin could not be reactivated: ' . $activation->get_error_message(),
+			array(
+				'status'                 => 500,
+				'plugin_file'            => $plugin_file,
+				'update_error_code'      => $update_error->get_error_code(),
+				'update_error_message'   => $update_error->get_error_message(),
+				'reactivation_attempted' => true,
+				'reactivated'            => false,
+			)
+		);
 	}
 
 	/**

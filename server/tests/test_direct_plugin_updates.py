@@ -280,6 +280,120 @@ def test_final_bridge_preflight_is_enabled_only_after_the_bridge_release_is_inst
     assert MaintenanceRunService._bridge_enforces_final_update_preflight(SimpleNamespace(bridge_version="0.3.59")) is True
 
 
+def test_active_plugin_update_500_recovers_only_after_bridge_confirms_target_and_activation():
+    run = SimpleNamespace(site_id=42, result_json={})
+    details = {
+        "update_name": "JetReviews For Elementor",
+        "update_kind": "plugin",
+        "update_identifier": "jet-reviews/jet-reviews.php",
+        "current_version": "2.3.6",
+        "target_version": "3.1.1",
+        "expected_active": True,
+    }
+    service = object.__new__(MaintenanceRunService)
+    service.db = SimpleNamespace(commit=lambda: None)
+    service._start_plugin_update_step = lambda *_args: None
+    service.proxy = SimpleNamespace(
+        execute_ability=lambda site_id, ability_name, payload, **_kwargs: {
+            "result": {
+                "activated": True,
+                "plugin_file": payload["plugin_file"],
+                "installed_version": payload["expected_installed_version"],
+                "active": True,
+            }
+        }
+    )
+
+    result, detail = service._recover_active_plugin_after_failed_update_request(
+        run,
+        details,
+        None,
+        SiteMcpProxyError("REMOTE_ERROR", "HTTP Error 500: Internal Server Error", status_code=500),
+    )
+
+    assert detail == ""
+    assert result == {
+        "updated": True,
+        "plugin_file": "jet-reviews/jet-reviews.php",
+        "previous_version": "2.3.6",
+        "installed_version": "3.1.1",
+        "active": True,
+        "recovered_after_update_error": True,
+    }
+    assert run.result_json["activation_recovery"]["recovered"] is True
+
+
+def test_active_plugin_update_500_remains_failed_when_bridge_cannot_confirm_the_target_version():
+    run = SimpleNamespace(site_id=42, result_json={})
+    details = {
+        "update_name": "JetReviews For Elementor",
+        "update_kind": "plugin",
+        "update_identifier": "jet-reviews/jet-reviews.php",
+        "current_version": "2.3.6",
+        "target_version": "3.1.1",
+        "expected_active": True,
+    }
+    service = object.__new__(MaintenanceRunService)
+    service.db = SimpleNamespace(commit=lambda: None)
+    service._start_plugin_update_step = lambda *_args: None
+
+    def target_mismatch(*_args, **_kwargs):
+        raise SiteMcpProxyError(
+            "KOSMOS_BRIDGE_ACTIVATION_VERSION_MISMATCH",
+            "The approved plugin is at version 2.3.6, not the expected version 3.1.1.",
+            status_code=409,
+        )
+
+    service.proxy = SimpleNamespace(execute_ability=target_mismatch)
+
+    result, detail = service._recover_active_plugin_after_failed_update_request(
+        run,
+        details,
+        None,
+        SiteMcpProxyError("REMOTE_ERROR", "HTTP Error 500: Internal Server Error", status_code=500),
+    )
+
+    assert result is None
+    assert "not the expected version" in detail
+    assert run.result_json["activation_recovery"]["recovered"] is False
+
+
+def test_active_plugin_recovery_is_not_attempted_for_inactive_plugins_or_client_errors():
+    service = object.__new__(MaintenanceRunService)
+    service.db = SimpleNamespace(commit=lambda: None)
+    service._start_plugin_update_step = lambda *_args: None
+    service.proxy = SimpleNamespace(execute_ability=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()))
+    details = {
+        "update_name": "Example Plugin",
+        "update_kind": "plugin",
+        "update_identifier": "example/example.php",
+        "current_version": "1.0.0",
+        "target_version": "1.1.0",
+        "expected_active": False,
+    }
+
+    result, detail = service._recover_active_plugin_after_failed_update_request(
+        SimpleNamespace(site_id=42, result_json={}),
+        details,
+        None,
+        SiteMcpProxyError("UPDATE_OFFER_CHANGED", "The offer changed.", status_code=409),
+    )
+
+    assert result is None
+    assert detail == ""
+
+    details["expected_active"] = True
+    result, detail = service._recover_active_plugin_after_failed_update_request(
+        SimpleNamespace(site_id=42, result_json={}),
+        details,
+        None,
+        SiteMcpProxyError("UPDATE_OFFER_CHANGED", "The offer changed.", status_code=409),
+    )
+
+    assert result is None
+    assert detail == ""
+
+
 def test_direct_update_failure_streak_stops_after_five_consecutive_failures():
     failed = lambda position: SimpleNamespace(
         id=position,
