@@ -683,6 +683,56 @@
         border-radius: 18px;
         background: rgba(255, 250, 242, 0.82);
       }
+      .account-page-layout {
+        display: grid;
+        grid-template-columns: minmax(11.5rem, 14rem) minmax(0, 1fr);
+        align-items: start;
+        gap: 1.25rem;
+        margin: 1.5rem 0 2.5rem;
+      }
+      .account-page-content { min-width: 0; }
+      .account-page-content .section-heading { margin-top: 0; }
+      .account-page-sidebar {
+        position: sticky;
+        top: 1rem;
+        padding: 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 250, 242, 0.82);
+      }
+      .account-page-sidebar .eyebrow { margin: 0.15rem 0 0.55rem; }
+      .account-section-nav {
+        display: grid;
+        gap: 0.3rem;
+      }
+      .account-section-nav a {
+        margin-right: 0;
+        border-radius: 10px;
+        color: var(--ink);
+        font: 700 0.8rem "Trebuchet MS", sans-serif;
+        padding: 0.6rem 0.7rem;
+      }
+      .account-section-nav a:hover,
+      .account-section-nav a:focus-visible {
+        background: var(--accent-soft);
+        color: #075f4e;
+      }
+      .account-section-nav a[aria-current="page"] {
+        background: var(--accent);
+        color: #fffdf8;
+      }
+      .account-section { scroll-margin-top: 1rem; }
+      .account-session {
+        display: grid;
+        gap: 0.75rem;
+        max-width: 42rem;
+        margin: 2.5rem 0 0;
+        padding: 1.15rem;
+        border-top: 1px solid var(--border);
+      }
+      .account-session h3,
+      .account-session p { margin: 0; }
+      .account-session form { margin: 0; }
       .account-panel.account-panel-wide { max-width: 72rem; }
       .account-panel label {
         display: grid;
@@ -1364,6 +1414,15 @@
         .workbench-page-layout {
           grid-template-columns: 1fr;
           margin-top: 1rem;
+        }
+        .account-page-layout {
+          grid-template-columns: 1fr;
+          gap: 0.75rem;
+          margin-top: 1rem;
+        }
+        .account-page-sidebar { position: static; }
+        .account-section-nav {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .workbench-site-selector {
           position: static;

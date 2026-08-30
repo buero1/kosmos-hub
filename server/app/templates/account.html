@@ -1,7 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Account · kosmos-hub{% endblock %}
 {% block content %}
-  <section>
+  <div class="account-page-layout" data-account-navigation>
+    <aside class="account-page-sidebar">
+      <p class="eyebrow">Account</p>
+      <nav class="account-section-nav" aria-label="Account sections">
+        <a href="#account-security" aria-current="page">Security</a>
+        <a href="#account-mcp">MCP access</a>
+        <a href="#account-openai">OpenAI</a>
+        <a href="#account-provider-licenses">Provider licenses</a>
+        <a href="#account-zoho">Zoho CRM</a>
+        {% if user.role == "admin" %}<a href="#account-refresh-settings">Refresh settings</a>{% endif %}
+        <a href="#account-session">Session</a>
+      </nav>
+    </aside>
+    <section class="account-page-content">
     <div class="section-heading">
       <div>
         <p class="eyebrow">Account security</p>
@@ -49,7 +62,7 @@
       <p class="notice-error">{{ zoho_status.last_error or "The Zoho action could not be completed." }}</p>
     {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
-    <form class="account-panel" method="post" action="/account/password">
+    <form id="account-security" class="account-panel account-section" data-account-section method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <h3>Change password</h3>
       <label>
@@ -66,7 +79,7 @@
       </label>
       <button class="button" type="submit">Change password</button>
     </form>
-    <section class="account-panel">
+    <section id="account-mcp" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">MCP access</p>
         <h3>Personal MCP tokens</h3>
@@ -114,7 +127,7 @@
         </table>
       </div>
     </section>
-    <section class="account-panel">
+    <section id="account-openai" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">AI provider</p>
         <h3>OpenAI for Kosmos Assistant</h3>
@@ -141,7 +154,7 @@
         </form>
       {% endif %}
     </section>
-    <section class="account-panel account-panel-wide">
+    <section id="account-provider-licenses" class="account-panel account-panel-wide account-section" data-account-section>
       <div>
         <p class="eyebrow">Update provider</p>
         <h3>Provider licenses</h3>
@@ -196,7 +209,7 @@
         </table>
       </div>
     </section>
-    <section class="account-panel account-panel-wide">
+    <section id="account-zoho" class="account-panel account-panel-wide account-section" data-account-section>
       <div>
         <p class="eyebrow">CRM integration</p>
         <h3>Zoho CRM Accounts</h3>
@@ -271,7 +284,7 @@
       {% endif %}
     </section>
     {% if user.role == "admin" %}
-      <section class="account-panel account-panel-wide">
+      <section id="account-refresh-settings" class="account-panel account-panel-wide account-section" data-account-section>
         <div>
           <p class="eyebrow">Fleet refresh</p>
           <h3>Refresh settings</h3>
@@ -309,9 +322,47 @@
         </form>
       </section>
     {% endif %}
-    <form method="post" action="/account/logout">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="button button-secondary" type="submit">Sign out</button>
-    </form>
-  </section>
+    <section id="account-session" class="account-session account-section" data-account-section>
+      <p class="eyebrow">Session</p>
+      <h3>Sign out</h3>
+      <p class="subtle">End the current Hub session on this device.</p>
+      <form method="post" action="/account/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-secondary" type="submit">Sign out</button>
+      </form>
+    </section>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const page = document.querySelector("[data-account-navigation]");
+      if (!page) return;
+
+      const links = Array.from(page.querySelectorAll(".account-section-nav a"));
+      const sections = Array.from(page.querySelectorAll("[data-account-section]"));
+      const selectSection = (id, { updateHash = false } = {}) => {
+        const selected = sections.find((section) => section.id === id) || sections[0];
+        if (!selected) return;
+
+        sections.forEach((section) => {
+          section.hidden = section !== selected;
+        });
+        links.forEach((link) => {
+          const current = link.getAttribute("href") === `#${selected.id}`;
+          if (current) link.setAttribute("aria-current", "page");
+          else link.removeAttribute("aria-current");
+        });
+        if (updateHash) history.replaceState(null, "", `#${selected.id}`);
+      };
+
+      links.forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          selectSection(link.getAttribute("href").slice(1), { updateHash: true });
+        });
+      });
+      window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));
+      selectSection(window.location.hash.slice(1) || "account-security");
+    })();
+  </script>
 {% endblock %}
