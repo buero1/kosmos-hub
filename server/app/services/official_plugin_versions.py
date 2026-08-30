@@ -38,6 +38,9 @@ class OfficialPluginVersionService:
     PAFE_PRO_PLUGIN_FILE = "piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
     PAFE_PRO_CHANGELOG_URL = "https://pafe.piotnet.com/change-log/"
     PAFE_PRO_SOURCE = "PAFE Pro Changelog"
+    KOSMOS_BRIDGE_PLUGIN_FILE = "kosmos-bridge/kosmos-bridge.php"
+    KOSMOS_BRIDGE_METADATA_URL = "https://plugins.kosmos-medien.de/kosmos-bridge/metadata.json"
+    KOSMOS_BRIDGE_SOURCE = "Kosmos Bridge update metadata"
     CROCOBLOCK_CHANGELOG_URL = "https://crocoblock.com/wp-content/uploads/jet-changelog/last-updates.json"
     CROCOBLOCK_CHANGELOG_SOURCE = "Crocoblock Changelog"
     CROCOBLOCK_CHANGELOG_SLUGS = {
@@ -46,7 +49,13 @@ class OfficialPluginVersionService:
         "jet-style-manager": "jet-styles-manager",
     }
     PROVIDER_CATALOG_SOURCES = frozenset(
-        {"Crocoblock Jet Dashboard", CROCOBLOCK_CHANGELOG_SOURCE, ELEMENTOR_PRO_SOURCE, PAFE_PRO_SOURCE}
+        {
+            "Crocoblock Jet Dashboard",
+            CROCOBLOCK_CHANGELOG_SOURCE,
+            ELEMENTOR_PRO_SOURCE,
+            PAFE_PRO_SOURCE,
+            KOSMOS_BRIDGE_SOURCE,
+        }
     )
     REQUEST_TIMEOUT_SECONDS = 8
     MAX_CONCURRENT_REQUESTS = 6
@@ -80,6 +89,7 @@ class OfficialPluginVersionService:
                 "wordpress_org": 0,
                 "elementor_pro": 0,
                 "pafe_pro": 0,
+                "kosmos_bridge": 0,
                 "provider_offer": 0,
                 "unavailable": 0,
                 "failed": 0,
@@ -96,6 +106,7 @@ class OfficialPluginVersionService:
             "wordpress_org": 0,
             "elementor_pro": 0,
             "pafe_pro": 0,
+            "kosmos_bridge": 0,
             "provider_offer": 0,
             "unavailable": 0,
             "failed": 0,
@@ -147,11 +158,33 @@ class OfficialPluginVersionService:
                 if progress_callback is not None:
                     progress_callback(summary.copy())
 
+        kosmos_bridge_candidates = [
+            candidate
+            for candidate in candidates.values()
+            if self._is_kosmos_bridge_plugin(candidate.plugin_file)
+        ]
+        if kosmos_bridge_candidates and not cancellation_requested:
+            version, error = self._fetch_kosmos_bridge_version()
+            for candidate in kosmos_bridge_candidates:
+                catalog_results[candidate.plugin_file] = (version, error)
+                summary["completed"] += 1
+                if version:
+                    summary["kosmos_bridge"] += 1
+                elif self._has_provider_catalog(existing.get(candidate.plugin_file)):
+                    summary["provider_offer"] += 1
+                else:
+                    summary["unavailable"] += 1
+                    if error and error != "kosmos_bridge_version_missing":
+                        summary["failed"] += 1
+                if progress_callback is not None:
+                    progress_callback(summary.copy())
+
         wordpress_org_candidates = [
             candidate
             for candidate in candidates.values()
             if not self._is_elementor_pro_plugin(candidate.plugin_file)
             and not self._is_pafe_pro_plugin(candidate.plugin_file)
+            and not self._is_kosmos_bridge_plugin(candidate.plugin_file)
         ]
         with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT_REQUESTS) as executor:
             candidates_iter = iter(wordpress_org_candidates)
@@ -200,6 +233,8 @@ class OfficialPluginVersionService:
                     source = self.ELEMENTOR_PRO_SOURCE
                 elif self._is_pafe_pro_plugin(plugin_file):
                     source = self.PAFE_PRO_SOURCE
+                elif self._is_kosmos_bridge_plugin(plugin_file):
+                    source = self.KOSMOS_BRIDGE_SOURCE
                 else:
                     source = "WordPress.org"
                 last_error = None
@@ -471,6 +506,24 @@ class OfficialPluginVersionService:
         version = self._parse_pafe_pro_version(changelog)
         return (version, None) if version else (None, "pafe_pro_version_missing")
 
+    def _fetch_kosmos_bridge_version(self) -> tuple[str | None, str | None]:
+        request = Request(
+            self.KOSMOS_BRIDGE_METADATA_URL,
+            headers={"User-Agent": "Kosmos-Hub/0.1 (+https://kosmos-hub.31-70-92-95.sslip.io)"},
+        )
+        try:
+            with urlopen(request, timeout=self.REQUEST_TIMEOUT_SECONDS) as response:  # nosec B310: fixed Kosmos Bridge endpoint.
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            return None, f"kosmos_bridge_http_{exc.code}"
+        except (URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError):
+            return None, "kosmos_bridge_request_failed"
+
+        version = str(payload.get("version", "")).strip() if isinstance(payload, dict) else ""
+        if re.fullmatch(r"\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?", version):
+            return version, None
+        return None, "kosmos_bridge_version_missing"
+
     @staticmethod
     def _parse_elementor_pro_version(changelog: str) -> str | None:
         for heading in re.findall(r"<h[1-6][^>]*>(.*?)</h[1-6]>", changelog, flags=re.IGNORECASE | re.DOTALL):
@@ -508,6 +561,10 @@ class OfficialPluginVersionService:
     @classmethod
     def _is_pafe_pro_plugin(cls, plugin_file: str) -> bool:
         return plugin_file.strip().replace("\\", "/").casefold() == cls.PAFE_PRO_PLUGIN_FILE
+
+    @classmethod
+    def _is_kosmos_bridge_plugin(cls, plugin_file: str) -> bool:
+        return plugin_file.strip().replace("\\", "/").casefold() == cls.KOSMOS_BRIDGE_PLUGIN_FILE
 
     @staticmethod
     def _wordpress_org_slug(plugin_file: str) -> str:

@@ -154,6 +154,7 @@ class UpdateWorkbenchEntry:
 
 
 class FleetInventoryService:
+    KOSMOS_BRIDGE_PLUGIN_FILE = OfficialPluginVersionService.KOSMOS_BRIDGE_PLUGIN_FILE
     THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
     WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
 
@@ -351,6 +352,7 @@ class FleetInventoryService:
 
         entries = self._attach_fleet_observed_versions(entries)
         entries = self._attach_official_plugin_versions(entries)
+        entries = self._offer_kosmos_bridge_updates(entries)
         kind_order = {"wordpress": 0, "plugin": 1, "theme": 2}
         return sorted(entries, key=lambda entry: (entry.site.domain.casefold(), kind_order[entry.kind], entry.name.casefold()))
 
@@ -499,6 +501,95 @@ class FleetInventoryService:
                 )
             )
 
+        return enriched
+
+    @classmethod
+    def _offer_kosmos_bridge_updates(cls, entries: list[UpdateWorkbenchEntry]) -> list[UpdateWorkbenchEntry]:
+        """Use the Bridge's own published metadata as its fleet-wide update offer."""
+        enriched: list[UpdateWorkbenchEntry] = []
+        for entry in entries:
+            if (
+                entry.kind != "plugin"
+                or entry.identifier != cls.KOSMOS_BRIDGE_PLUGIN_FILE
+                or entry.official_source != OfficialPluginVersionService.KOSMOS_BRIDGE_SOURCE
+                or not entry.official_version
+                or not entry.current_version
+            ):
+                enriched.append(entry)
+                continue
+
+            catalog_version = entry.official_version
+            current_key = OfficialPluginVersionService._version_key(entry.current_version)
+            catalog_key = OfficialPluginVersionService._version_key(catalog_version)
+            if current_key < catalog_key:
+                execution_note = (
+                    "Kosmos Bridge publishes this package directly. The website rechecks the "
+                    "published package immediately before installation."
+                )
+                mismatch, official_note = OfficialPluginVersionService.comparison(
+                    current_version=entry.current_version,
+                    reported_version=catalog_version,
+                    official_version=catalog_version,
+                )
+                diagnosis_status, diagnosis_label, diagnosis_note = OfficialPluginVersionService.diagnosis(
+                    current_version=entry.current_version,
+                    reported_version=catalog_version,
+                    official_version=catalog_version,
+                    official_source=entry.official_source,
+                    execution_ready=True,
+                    execution_note=execution_note,
+                    is_jet_plugin=False,
+                )
+                enriched.append(
+                    replace(
+                        entry,
+                        target_version=catalog_version,
+                        update_available=True,
+                        update_checked=True,
+                        execution_ready=True,
+                        execution_note=execution_note,
+                        official_mismatch=mismatch,
+                        official_note=official_note,
+                        diagnosis_status=diagnosis_status,
+                        diagnosis_label=diagnosis_label,
+                        diagnosis_note=diagnosis_note,
+                    )
+                )
+                continue
+
+            if current_key == catalog_key and entry.update_available:
+                mismatch, official_note = OfficialPluginVersionService.comparison(
+                    current_version=entry.current_version,
+                    reported_version="",
+                    official_version=catalog_version,
+                )
+                diagnosis_status, diagnosis_label, diagnosis_note = OfficialPluginVersionService.diagnosis(
+                    current_version=entry.current_version,
+                    reported_version="",
+                    official_version=catalog_version,
+                    official_source=entry.official_source,
+                    execution_ready=False,
+                    execution_note="",
+                    is_jet_plugin=False,
+                )
+                enriched.append(
+                    replace(
+                        entry,
+                        target_version="",
+                        update_available=False,
+                        update_checked=True,
+                        execution_ready=False,
+                        execution_note="",
+                        official_mismatch=mismatch,
+                        official_note=official_note,
+                        diagnosis_status=diagnosis_status,
+                        diagnosis_label=diagnosis_label,
+                        diagnosis_note=diagnosis_note,
+                    )
+                )
+                continue
+
+            enriched.append(entry)
         return enriched
 
     def refresh_verified_site_states(self, *, limit: int = 25) -> dict[str, list[dict[str, Any]]]:

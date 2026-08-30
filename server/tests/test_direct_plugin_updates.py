@@ -654,6 +654,60 @@ def test_official_version_refresh_uses_pafe_pro_changelog_once_per_catalogue_che
     assert pafe_record.source == "PAFE Pro Changelog"
 
 
+def test_official_version_refresh_uses_kosmos_bridge_metadata_once_per_catalogue_check():
+    records = []
+    service = object.__new__(OfficialPluginVersionService)
+    service.db = SimpleNamespace(add=records.append, flush=lambda: None)
+    service._collect_candidates = lambda _items: {
+        "kosmos-bridge/kosmos-bridge.php": SimpleNamespace(plugin_file="kosmos-bridge/kosmos-bridge.php"),
+        "wordpress-seo/wp-seo.php": SimpleNamespace(plugin_file="wordpress-seo/wp-seo.php"),
+    }
+    service.get_cached = lambda _candidates: {}
+    wordpress_org_requests = []
+    service._fetch_wordpress_org_version = lambda plugin_file: (wordpress_org_requests.append(plugin_file) or ("25.1", None))
+    service._fetch_kosmos_bridge_version = lambda: ("0.3.58", None)
+
+    summary = service.refresh_for_inventory([])
+
+    assert summary["checked"] == 2
+    assert summary["completed"] == 2
+    assert summary["kosmos_bridge"] == 1
+    assert wordpress_org_requests == ["wordpress-seo/wp-seo.php"]
+    bridge_record = next(record for record in records if record.plugin_file == "kosmos-bridge/kosmos-bridge.php")
+    assert bridge_record.official_version == "0.3.58"
+    assert bridge_record.source == "Kosmos Bridge update metadata"
+
+
+def test_kosmos_bridge_catalogue_offer_replaces_an_older_site_offer():
+    captured_at = datetime.now(UTC)
+    entry = UpdateWorkbenchEntry(
+        site=SimpleNamespace(id=1, domain="example.test"),
+        kind="plugin",
+        name="Kosmos Bridge",
+        identifier="kosmos-bridge/kosmos-bridge.php",
+        current_version="0.3.52",
+        target_version="0.3.56",
+        is_active=True,
+        update_available=True,
+        update_checked=True,
+        execution_ready=True,
+        execution_note="",
+        captured_at=captured_at,
+        official_version="0.3.58",
+        official_source="Kosmos Bridge update metadata",
+        official_checked_at=captured_at,
+        official_mismatch=True,
+    )
+
+    offered = FleetInventoryService._offer_kosmos_bridge_updates([entry])[0]
+
+    assert offered.target_version == "0.3.58"
+    assert offered.update_available is True
+    assert offered.direct_update_selectable is True
+    assert offered.official_mismatch is False
+    assert offered.diagnosis_status == "update-ready"
+
+
 def test_provider_license_normalization_keeps_elementor_in_one_row():
     assert ProviderCredentialService.normalize_provider("Elementor Pro") == "elementor"
     assert ProviderCredentialService.normalize_provider(" Elementor ") == "elementor"
