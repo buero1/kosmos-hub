@@ -18,5 +18,6 @@ class FleetRefreshSettings(TimestampMixin, Base):
     auto_refresh_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_refresh_interval_hours: Mapped[int] = mapped_column(Integer, default=24)
     auto_refresh_time: Mapped[str] = mapped_column(String(5), default="03:00")
+    auto_refresh_next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     configured_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id"), nullable=True)
     configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

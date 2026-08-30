@@ -133,12 +133,16 @@ def test_refresh_settings_store_berlin_schedule():
             auto_refresh_enabled=True,
             auto_refresh_interval_hours=48,
             auto_refresh_time="02:30",
+            now=datetime(2026, 8, 27, 0, 0, tzinfo=UTC),
         )
         db.commit()
 
         assert settings.auto_refresh_enabled is True
         assert FleetRefreshSettingsService(db=db).get_runtime_settings().auto_refresh_time == "02:30"
         assert FleetRefreshSettingsService(db=db).get_runtime_settings().auto_refresh_interval_hours == 48
+        assert FleetRefreshSettingsService._as_utc(settings.auto_refresh_next_run_at) == datetime(
+            2026, 8, 27, 0, 30, tzinfo=UTC
+        )
 
 
 def test_refresh_schedule_requires_whole_days():
@@ -152,53 +156,93 @@ def test_refresh_schedule_requires_whole_days():
         )
 
 
-def test_automatic_schedule_uses_berlin_calendar_days():
-    class EmptyDatabase:
-        def scalar(self, *_args, **_kwargs):
-            return None
-
-    settings = FleetRefreshRuntimeSettings(auto_refresh_time="03:00")
+def test_automatic_schedule_uses_persisted_berlin_due_time():
+    settings = FleetRefreshRuntimeSettings(
+        auto_refresh_next_run_at=datetime(2026, 8, 27, 1, 0, tzinfo=UTC),
+    )
     assert FleetRefreshService._is_scheduled_run_due(
-        db=EmptyDatabase(),
         runtime_settings=settings,
         now=datetime(2026, 8, 27, 1, 0, tzinfo=UTC),
     ) is True
     assert FleetRefreshService._is_scheduled_run_due(
-        db=EmptyDatabase(),
         runtime_settings=settings,
         now=datetime(2026, 8, 27, 0, 59, tzinfo=UTC),
     ) is False
 
 
-def test_automatic_schedule_keeps_its_fixed_time_after_a_manual_refresh():
+def test_changing_automatic_schedule_takes_effect_at_the_next_selected_time():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
-        scheduled = FleetRefreshRun(
-            mode=FleetRefreshService.MODE_NORMAL,
-            status=FleetRefreshRunStatus.succeeded.value,
-            requested_by=FleetRefreshService.LEGACY_SCHEDULED_REQUESTED_BY,
-            started_at=datetime(2026, 8, 27, 0, 0, tzinfo=UTC),
-            completed_at=datetime(2026, 8, 27, 0, 5, tzinfo=UTC),
-            result_json={},
-        )
-        manual = FleetRefreshRun(
-            mode=FleetRefreshService.MODE_NORMAL,
-            status=FleetRefreshRunStatus.succeeded.value,
-            requested_by="operator",
-            started_at=datetime(2026, 8, 28, 21, 30, tzinfo=UTC),
-            completed_at=datetime(2026, 8, 28, 21, 35, tzinfo=UTC),
-            result_json={},
-        )
-        db.add_all((scheduled, manual))
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(user)
         db.commit()
+        service = FleetRefreshSettingsService(db=db)
+        service.configure(
+            actor=user,
+            site_status_max_age_minutes=15,
+            max_parallel_site_checks=5,
+            max_parallel_direct_updates=5,
+            auto_refresh_enabled=True,
+            auto_refresh_interval_hours=24,
+            auto_refresh_time="00:00",
+            now=datetime(2026, 8, 30, 3, 0, tzinfo=UTC),
+        )
+        settings = service.configure(
+            actor=user,
+            site_status_max_age_minutes=15,
+            max_parallel_site_checks=5,
+            max_parallel_direct_updates=5,
+            auto_refresh_enabled=True,
+            auto_refresh_interval_hours=24,
+            auto_refresh_time="06:35",
+            now=datetime(2026, 8, 30, 4, 33, tzinfo=UTC),
+        )
 
+        assert settings.auto_refresh_next_run_at == datetime(2026, 8, 30, 4, 35, tzinfo=UTC)
         assert FleetRefreshService._is_scheduled_run_due(
-            db=db,
-            runtime_settings=FleetRefreshRuntimeSettings(auto_refresh_time="00:00"),
-            now=datetime(2026, 8, 28, 22, 5, tzinfo=UTC),
+            runtime_settings=service.get_runtime_settings(),
+            now=datetime(2026, 8, 30, 4, 34, tzinfo=UTC),
+        ) is False
+        assert FleetRefreshService._is_scheduled_run_due(
+            runtime_settings=service.get_runtime_settings(),
+            now=datetime(2026, 8, 30, 4, 35, tzinfo=UTC),
         ) is True
+
+
+def test_changing_parallel_limits_does_not_reschedule_automatic_refresh():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(user)
+        db.commit()
+        service = FleetRefreshSettingsService(db=db)
+        initial = service.configure(
+            actor=user,
+            site_status_max_age_minutes=15,
+            max_parallel_site_checks=5,
+            max_parallel_direct_updates=5,
+            auto_refresh_enabled=True,
+            auto_refresh_interval_hours=24,
+            auto_refresh_time="06:35",
+            now=datetime(2026, 8, 30, 4, 33, tzinfo=UTC),
+        )
+        first_next_run_at = initial.auto_refresh_next_run_at
+        updated = service.configure(
+            actor=user,
+            site_status_max_age_minutes=15,
+            max_parallel_site_checks=4,
+            max_parallel_direct_updates=3,
+            auto_refresh_enabled=True,
+            auto_refresh_interval_hours=24,
+            auto_refresh_time="06:35",
+            now=datetime(2026, 8, 30, 4, 34, tzinfo=UTC),
+        )
+
+        assert updated.auto_refresh_next_run_at == first_next_run_at
 
 
 def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
@@ -218,10 +262,11 @@ def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
             auto_refresh_enabled=True,
             auto_refresh_interval_hours=24,
             auto_refresh_time="00:00",
+            now=datetime(2026, 8, 28, 21, 55, tzinfo=UTC),
         )
         db.commit()
 
-    run_id = FleetRefreshService.queue_scheduled_run()
+    run_id = FleetRefreshService.queue_scheduled_run(now=datetime(2026, 8, 28, 22, 5, tzinfo=UTC))
 
     with Session(engine) as db:
         run = db.get(FleetRefreshRun, run_id)

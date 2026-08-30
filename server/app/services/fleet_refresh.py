@@ -160,9 +160,11 @@ class FleetRefreshService:
         return run, True
 
     @classmethod
-    def queue_scheduled_run(cls) -> int | None:
+    def queue_scheduled_run(cls, *, now: datetime | None = None) -> int | None:
         with SessionLocal() as db:
-            runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
+            settings_service = FleetRefreshSettingsService(db=db)
+            now = now or datetime.now(UTC)
+            runtime_settings = settings_service.ensure_auto_refresh_schedule(now=now)
             if not runtime_settings.auto_refresh_enabled:
                 return None
 
@@ -183,8 +185,7 @@ class FleetRefreshService:
             if active_run is not None:
                 return None
 
-            now = datetime.now(UTC)
-            if not cls._is_scheduled_run_due(db=db, runtime_settings=runtime_settings, now=now):
+            if not cls._is_scheduled_run_due(runtime_settings=runtime_settings, now=now):
                 return None
 
             # A scheduled cycle keeps its independent operational domains separate.
@@ -200,6 +201,7 @@ class FleetRefreshService:
                 )
                 db.add(run)
                 runs.append(run)
+            settings_service.advance_auto_refresh_schedule(now=now)
             db.commit()
             return runs[0].id
 
@@ -207,30 +209,13 @@ class FleetRefreshService:
     def _is_scheduled_run_due(
         cls,
         *,
-        db: Session,
         runtime_settings: FleetRefreshRuntimeSettings,
         now: datetime,
     ) -> bool:
-        berlin_now = now.astimezone(cls.BERLIN_TIMEZONE)
-        scheduled_time = datetime.strptime(runtime_settings.auto_refresh_time, "%H:%M").time()
-        if berlin_now.time().replace(tzinfo=None) < scheduled_time:
+        next_run_at = runtime_settings.auto_refresh_next_run_at
+        if next_run_at is None:
             return False
-
-        latest_scheduled = db.scalar(
-            select(FleetRefreshRun)
-            .where(
-                FleetRefreshRun.requested_by.in_(
-                    (cls.SCHEDULED_REQUESTED_BY, cls.LEGACY_SCHEDULED_REQUESTED_BY)
-                )
-            )
-            .order_by(FleetRefreshRun.created_at.desc())
-            .limit(1)
-        )
-        if latest_scheduled is not None:
-            last_scheduled_day = cls._run_timestamp_utc(latest_scheduled).astimezone(cls.BERLIN_TIMEZONE).date()
-            interval_days = runtime_settings.auto_refresh_interval_hours // 24
-            return (berlin_now.date() - last_scheduled_day).days >= interval_days
-        return True
+        return cls._as_utc(now) >= cls._as_utc(next_run_at)
 
     @classmethod
     def process_next_queued_run(cls) -> int | None:
@@ -980,17 +965,6 @@ class FleetRefreshService:
             for site_id in scope.get("site_ids", [])
             if str(site_id).strip().isdigit()
         }
-
-    @classmethod
-    def _run_timestamp_utc(cls, run: FleetRefreshRun) -> datetime:
-        """Use application-written UTC timestamps before falling back to a DB-local creation time."""
-        for value in (run.completed_at, run.started_at):
-            if value is not None:
-                return cls._as_utc(value)
-        created_at = run.created_at
-        if created_at.tzinfo is not None:
-            return created_at.astimezone(UTC)
-        return created_at.replace(tzinfo=cls.BERLIN_TIMEZONE).astimezone(UTC)
 
     @staticmethod
     def _bridge_supports_updates(version: str | None) -> bool:

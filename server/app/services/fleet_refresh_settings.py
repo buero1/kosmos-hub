@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ class FleetRefreshRuntimeSettings:
     auto_refresh_enabled: bool = True
     auto_refresh_interval_hours: int = 24
     auto_refresh_time: str = "03:00"
+    auto_refresh_next_run_at: datetime | None = None
 
 
 class FleetRefreshSettingsService:
@@ -32,6 +34,7 @@ class FleetRefreshSettingsService:
     MAX_PARALLEL_DIRECT_UPDATES = 10
     MIN_AUTO_REFRESH_INTERVAL_HOURS = 24
     MAX_AUTO_REFRESH_INTERVAL_HOURS = 168
+    BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
 
     def __init__(self, *, db: Session):
         self.db = db
@@ -47,6 +50,7 @@ class FleetRefreshSettingsService:
             auto_refresh_enabled=config.auto_refresh_enabled,
             auto_refresh_interval_hours=config.auto_refresh_interval_hours,
             auto_refresh_time=config.auto_refresh_time,
+            auto_refresh_next_run_at=config.auto_refresh_next_run_at,
         )
 
     def configure(
@@ -59,6 +63,7 @@ class FleetRefreshSettingsService:
         auto_refresh_enabled: bool,
         auto_refresh_interval_hours: int,
         auto_refresh_time: str,
+        now: datetime | None = None,
     ) -> FleetRefreshSettings:
         if actor.role != "admin":
             raise FleetRefreshSettingsError("Only Hub administrators can change fleet refresh settings.")
@@ -71,6 +76,13 @@ class FleetRefreshSettingsService:
         )
 
         config = self.db.get(FleetRefreshSettings, 1)
+        schedule_changed = config is None or any(
+            (
+                config.auto_refresh_enabled != auto_refresh_enabled,
+                config.auto_refresh_interval_hours != auto_refresh_interval_hours,
+                config.auto_refresh_time != auto_refresh_time,
+            )
+        )
         if config is None:
             config = FleetRefreshSettings(id=1)
             self.db.add(config)
@@ -81,9 +93,73 @@ class FleetRefreshSettingsService:
         config.auto_refresh_interval_hours = auto_refresh_interval_hours
         config.auto_refresh_time = auto_refresh_time
         config.configured_by_user_id = actor.id
-        config.configured_at = datetime.now(UTC)
+        configured_at = self._as_utc(now or datetime.now(UTC))
+        config.configured_at = configured_at
+        if not auto_refresh_enabled:
+            config.auto_refresh_next_run_at = None
+        elif schedule_changed:
+            config.auto_refresh_next_run_at = self._next_scheduled_run_at(
+                auto_refresh_time=auto_refresh_time,
+                now=configured_at,
+            )
         self.db.flush()
         return config
+
+    def ensure_auto_refresh_schedule(self, *, now: datetime) -> FleetRefreshRuntimeSettings:
+        """Persist an initial due time for older configuration rows exactly once."""
+        config = self.db.get(FleetRefreshSettings, 1)
+        if config is None:
+            config = FleetRefreshSettings(id=1)
+            self.db.add(config)
+            self.db.flush()
+        if config.auto_refresh_enabled and config.auto_refresh_next_run_at is None:
+            config.auto_refresh_next_run_at = self._next_scheduled_run_at(
+                auto_refresh_time=config.auto_refresh_time,
+                now=now,
+            )
+            self.db.flush()
+        return self.get_runtime_settings()
+
+    def advance_auto_refresh_schedule(self, *, now: datetime) -> None:
+        """Move the persisted due time forward without drifting the Berlin wall-clock time."""
+        config = self.db.get(FleetRefreshSettings, 1)
+        if config is None or not config.auto_refresh_enabled or config.auto_refresh_next_run_at is None:
+            return
+
+        next_run_at = self._as_utc(config.auto_refresh_next_run_at)
+        interval_days = config.auto_refresh_interval_hours // 24
+        now_utc = self._as_utc(now)
+        while next_run_at <= now_utc:
+            next_date = next_run_at.astimezone(self.BERLIN_TIMEZONE).date() + timedelta(days=interval_days)
+            next_run_at = self._scheduled_datetime_for_date(
+                date_value=next_date,
+                auto_refresh_time=config.auto_refresh_time,
+            )
+        config.auto_refresh_next_run_at = next_run_at
+        self.db.flush()
+
+    @classmethod
+    def _next_scheduled_run_at(cls, *, auto_refresh_time: str, now: datetime) -> datetime:
+        berlin_now = cls._as_utc(now).astimezone(cls.BERLIN_TIMEZONE)
+        candidate = cls._scheduled_datetime_for_date(
+            date_value=berlin_now.date(),
+            auto_refresh_time=auto_refresh_time,
+        )
+        if candidate <= berlin_now.astimezone(UTC):
+            candidate = cls._scheduled_datetime_for_date(
+                date_value=berlin_now.date() + timedelta(days=1),
+                auto_refresh_time=auto_refresh_time,
+            )
+        return candidate
+
+    @classmethod
+    def _scheduled_datetime_for_date(cls, *, date_value, auto_refresh_time: str) -> datetime:
+        scheduled_time = datetime.strptime(auto_refresh_time, "%H:%M").time()
+        return datetime.combine(date_value, scheduled_time, tzinfo=cls.BERLIN_TIMEZONE).astimezone(UTC)
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
     @classmethod
     def _validate(

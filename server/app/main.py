@@ -59,6 +59,7 @@ def _ensure_phase_one_schema() -> None:
             "auto_refresh_enabled": "TINYINT(1) NOT NULL DEFAULT 1 AFTER max_parallel_direct_updates",
             "auto_refresh_interval_hours": "INT NOT NULL DEFAULT 24 AFTER auto_refresh_enabled",
             "auto_refresh_time": "VARCHAR(5) NOT NULL DEFAULT '03:00' AFTER auto_refresh_interval_hours",
+            "auto_refresh_next_run_at": "DATETIME NULL AFTER auto_refresh_time",
         }
         missing = [(name, definition) for name, definition in additions.items() if name not in columns]
         if missing:
