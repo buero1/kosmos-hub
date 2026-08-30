@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -121,6 +122,88 @@ class SiteInventoryService:
             "capabilities_refreshed": not capability_refresh_error and site.bridge_version != previous_bridge_version,
             "capability_refresh_error": capability_refresh_error,
         }
+
+    def record_confirmed_direct_update(
+        self,
+        *,
+        site_id: int,
+        update_kind: str,
+        identifier: str,
+        installed_version: str,
+        active: bool | None,
+    ) -> None:
+        """Store the Bridge-confirmed component change without another full site scan."""
+        site = self.repository.get_site(site_id)
+        if site is None:
+            return
+
+        snapshot = self.repository.get_latest_site_snapshot(site_id)
+        if update_kind == "wordpress":
+            site.wordpress_version = installed_version
+
+        if snapshot is None:
+            self.db.flush()
+            return
+
+        plugins = [dict(plugin) for plugin in snapshot.plugins_json if isinstance(plugin, dict)]
+        themes = [dict(theme) for theme in snapshot.themes_json if isinstance(theme, dict)]
+        changed = False
+        if update_kind == "plugin":
+            plugins, changed = self._replace_confirmed_component(
+                plugins,
+                identifier_field="plugin_file",
+                identifier=identifier,
+                installed_version=installed_version,
+                active=active,
+            )
+        elif update_kind == "theme":
+            themes, changed = self._replace_confirmed_component(
+                themes,
+                identifier_field="stylesheet",
+                identifier=identifier,
+                installed_version=installed_version,
+                active=None,
+            )
+        elif update_kind == "wordpress":
+            changed = True
+
+        if not changed:
+            self.db.flush()
+            return
+
+        captured_at = datetime.now(UTC)
+        self.repository.create_site_snapshot(
+            site=site,
+            captured_at=captured_at,
+            wordpress_version=installed_version if update_kind == "wordpress" else snapshot.wordpress_version,
+            php_version=snapshot.php_version,
+            plugins_json=plugins,
+            themes_json=themes,
+            environment_json=dict(snapshot.environment_json) if isinstance(snapshot.environment_json, dict) else {},
+        )
+        self.db.flush()
+
+    @staticmethod
+    def _replace_confirmed_component(
+        components: list[dict[str, Any]],
+        *,
+        identifier_field: str,
+        identifier: str,
+        installed_version: str,
+        active: bool | None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Copy a stored component list and change only the verified component."""
+        changed = False
+        updated_components: list[dict[str, Any]] = []
+        for component in components:
+            updated = dict(component)
+            if str(updated.get(identifier_field, "")).strip() == identifier:
+                updated["version"] = installed_version
+                if active is not None:
+                    updated["active"] = active
+                changed = True
+            updated_components.append(updated)
+        return updated_components, changed
 
     def _string_or_none(self, value: object) -> str | None:
         if isinstance(value, str) and value.strip():

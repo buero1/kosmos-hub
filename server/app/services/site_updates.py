@@ -72,6 +72,79 @@ class SiteUpdateService:
             "snapshot": snapshot,
         }
 
+    def record_confirmed_direct_update(
+        self,
+        *,
+        site_id: int,
+        update_kind: str,
+        identifier: str,
+    ) -> None:
+        """Remove one completed update from the stored offer without fetching new offers."""
+        site = self.repository.get_site(site_id)
+        snapshot = self.repository.get_latest_site_update_snapshot(site_id)
+        if site is None or snapshot is None:
+            return
+
+        core_updates = [dict(update) for update in snapshot.core_updates_json if isinstance(update, dict)]
+        plugin_updates = [dict(update) for update in snapshot.plugin_updates_json if isinstance(update, dict)]
+        theme_updates = [dict(update) for update in snapshot.theme_updates_json if isinstance(update, dict)]
+        if update_kind == "wordpress":
+            updated_core = []
+            changed = bool(core_updates)
+        elif update_kind == "plugin":
+            updated_core = core_updates
+            plugin_updates, changed = self._without_confirmed_update(
+                plugin_updates,
+                identifier_field="plugin_file",
+                identifier=identifier,
+            )
+        elif update_kind == "theme":
+            updated_core = core_updates
+            theme_updates, changed = self._without_confirmed_update(
+                theme_updates,
+                identifier_field="stylesheet",
+                identifier=identifier,
+            )
+        else:
+            return
+
+        if not changed:
+            return
+
+        summary = dict(snapshot.summary_json) if isinstance(snapshot.summary_json, dict) else {}
+        summary.update(
+            {
+                "wordpress": len(updated_core),
+                "plugins": len(plugin_updates),
+                "themes": len(theme_updates),
+                "total": len(updated_core) + len(plugin_updates) + len(theme_updates),
+                "locally_reconciled": True,
+            }
+        )
+        self.repository.create_site_update_snapshot(
+            site=site,
+            captured_at=datetime.now(UTC),
+            core_updates_json=updated_core,
+            plugin_updates_json=plugin_updates,
+            theme_updates_json=theme_updates,
+            summary_json=summary,
+        )
+        self.db.flush()
+
+    @staticmethod
+    def _without_confirmed_update(
+        updates: list[dict[str, Any]],
+        *,
+        identifier_field: str,
+        identifier: str,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        remaining = [
+            update
+            for update in updates
+            if str(update.get(identifier_field, "")).strip() != identifier
+        ]
+        return remaining, len(remaining) != len(updates)
+
     def _updates_from(self, value: object) -> list[dict[str, Any]]:
         if not isinstance(value, dict):
             return []

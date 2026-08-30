@@ -17,7 +17,9 @@ from app.services.maintenance_runs import MaintenanceRunService
 from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.provider_credentials import ProviderCredentialService
 from app.services.crocoblock_license import CrocoblockLicenseService
+from app.services.site_inventory import SiteInventoryService
 from app.services.site_mcp_proxy import SiteMcpProxyError
+from app.services.site_updates import SiteUpdateService
 
 
 def plugin_entry(**overrides):
@@ -92,6 +94,41 @@ def test_direct_update_details_accept_theme_and_wordpress_core_scopes():
     assert theme["update_identifier"] == "hello-elementor"
     assert core is not None
     assert core["update_identifier"] == "wordpress-core"
+
+
+def test_confirmed_plugin_update_reconciles_only_the_matching_inventory_entry():
+    plugins, changed = SiteInventoryService._replace_confirmed_component(
+        [
+            {"plugin_file": "akismet/akismet.php", "version": "5.4.1", "active": True},
+            {"plugin_file": "hello-dolly/hello.php", "version": "1.7.2", "active": False},
+        ],
+        identifier_field="plugin_file",
+        identifier="akismet/akismet.php",
+        installed_version="5.4.2",
+        active=True,
+    )
+
+    assert changed is True
+    assert plugins == [
+        {"plugin_file": "akismet/akismet.php", "version": "5.4.2", "active": True},
+        {"plugin_file": "hello-dolly/hello.php", "version": "1.7.2", "active": False},
+    ]
+
+
+def test_confirmed_plugin_update_removes_only_its_stored_offer():
+    updates, changed = SiteUpdateService._without_confirmed_update(
+        [
+            {"plugin_file": "akismet/akismet.php", "current_version": "5.4.1", "new_version": "5.4.2"},
+            {"plugin_file": "hello-dolly/hello.php", "current_version": "1.7.2", "new_version": "1.7.3"},
+        ],
+        identifier_field="plugin_file",
+        identifier="akismet/akismet.php",
+    )
+
+    assert changed is True
+    assert updates == [
+        {"plugin_file": "hello-dolly/hello.php", "current_version": "1.7.2", "new_version": "1.7.3"}
+    ]
 
 
 def test_direct_update_preflight_adopts_a_newer_target_version_without_losing_the_original_selection():

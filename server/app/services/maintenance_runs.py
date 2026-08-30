@@ -694,27 +694,6 @@ class MaintenanceRunService:
             self._fail_plugin_update_run(run, result_error)
             return "failed"
 
-        if details["update_kind"] == "wordpress":
-            self._start_plugin_update_step(
-                run,
-                update_step,
-                "WordPress core files were updated. Verifying the version through a fresh Bridge request.",
-            )
-            try:
-                SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
-            except SiteMcpProxyError as exc:
-                self._fail_plugin_update_run(run, f"WordPress core was updated, but fresh version verification failed: {exc.message}")
-                return "failed"
-            verified_site = self.repository.get_site(run.site_id)
-            if verified_site is None or verified_site.wordpress_version != details["target_version"]:
-                observed_version = verified_site.wordpress_version if verified_site is not None else "not reported"
-                self._fail_plugin_update_run(
-                    run,
-                    f"WordPress core was updated, but the fresh Bridge check reported {observed_version} instead of {details['target_version']}.",
-                )
-                return "failed"
-            result = {**result, "fresh_wordpress_version": verified_site.wordpress_version}
-
         self._complete_plugin_update_step(
             run,
             update_step,
@@ -737,12 +716,7 @@ class MaintenanceRunService:
             return "failed"
 
         self._complete_plugin_update_step(run, health_step, health_detail, health_result)
-        refresh_note = ""
-        try:
-            SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
-            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
-        except SiteMcpProxyError as exc:
-            refresh_note = f" The update succeeded, but the follow-up scan failed: {exc.message}"
+        self._record_confirmed_direct_update(run, details, result)
 
         completed_at = datetime.now(UTC)
         run.status = MaintenanceRunStatus.succeeded.value
@@ -751,7 +725,7 @@ class MaintenanceRunService:
         run.result_json = {
             **(run.result_json or {}),
             "stage": "completed",
-            "stage_message": f"{details['update_name']} was updated and verified.{refresh_note}",
+            "stage_message": f"{details['update_name']} was updated and verified. Stored inventory and update offers were reconciled locally.",
             "installed_version": details["target_version"],
         }
         write_audit_log(
@@ -763,12 +737,35 @@ class MaintenanceRunService:
             result="succeeded",
             detail=(
                 f"Direct update run {run.id} updated {details['update_name']} "
-                f"{details['current_version']} -> {details['target_version']}. {health_detail}{refresh_note}"
+                f"{details['current_version']} -> {details['target_version']}. {health_detail} "
+                "Stored inventory and update offers were reconciled locally."
             ),
             request_id=self._plugin_update_batch_id(run),
         )
         self.db.commit()
         return "succeeded"
+
+    def _record_confirmed_direct_update(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        """Persist the Bridge-confirmed change without issuing full post-update scans."""
+        installed_version = str(result.get("installed_version", "")).strip()
+        active = result.get("active") if isinstance(result.get("active"), bool) else None
+        SiteInventoryService(db=self.db, cipher=self.cipher).record_confirmed_direct_update(
+            site_id=run.site_id,
+            update_kind=details["update_kind"],
+            identifier=details["update_identifier"],
+            installed_version=installed_version,
+            active=active,
+        )
+        SiteUpdateService(db=self.db, cipher=self.cipher).record_confirmed_direct_update(
+            site_id=run.site_id,
+            update_kind=details["update_kind"],
+            identifier=details["update_identifier"],
+        )
 
     def _poll_plugin_installation(self, run: MaintenanceRun) -> str:
         details = self._plugin_installation_details(run)
@@ -1353,7 +1350,7 @@ class MaintenanceRunService:
             )
         if details["update_kind"] == "theme":
             return f"Bridge verified theme {details['update_name']} {details['target_version']}."
-        return f"Bridge and a fresh follow-up request verified WordPress {details['target_version']}."
+        return f"Bridge verified WordPress {details['target_version']} on disk."
 
     @staticmethod
     def _update_step_key(update_kind: str) -> str:
