@@ -59,6 +59,61 @@ def test_site_maintenance_history_includes_all_runs_and_groups_by_berlin_day():
         assert len(service.list_site_runs(site.id)) == 11
 
 
+def test_site_maintenance_history_nests_complete_workflow_children_under_the_parent_run():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="bbbbbb12-56ef-78ab-90cd-12ef34ab56cd",
+            domain="workflow-history.example",
+            home_url="https://workflow-history.example/",
+            site_url="https://workflow-history.example/",
+            status=SiteStatus.verified.value,
+        )
+        parent_run = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.COMPLETE_SITE_UPDATE_KIND,
+            status=MaintenanceRunStatus.succeeded.value,
+            requested_by="operator",
+            started_at=datetime(2026, 8, 29, 22, 0, tzinfo=UTC),
+            result_json={},
+        )
+        db.add(parent_run)
+        db.flush()
+        db.add_all(
+            [
+                MaintenanceRun(
+                    site=site,
+                    kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+                    status=MaintenanceRunStatus.succeeded.value,
+                    requested_by="operator",
+                    started_at=datetime(2026, 8, 29, 22, 2, tzinfo=UTC),
+                    result_json={"workflow_run_id": parent_run.id},
+                ),
+                MaintenanceRun(
+                    site=site,
+                    kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+                    status=MaintenanceRunStatus.succeeded.value,
+                    requested_by="operator",
+                    started_at=datetime(2026, 8, 29, 22, 4, tzinfo=UTC),
+                    result_json={"workflow_run_id": parent_run.id},
+                ),
+            ]
+        )
+        db.commit()
+
+        history = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32)).list_site_run_history(site.id)
+
+        assert len(history) == 1
+        assert history[0].runs == [parent_run]
+        assert history[0].run_count == 3
+        assert [run.id for run in history[0].workflow_child_runs[parent_run.id]] == [
+            parent_run.id + 1,
+            parent_run.id + 2,
+        ]
+
+
 def test_updraftplus_backup_run_is_started_and_verified(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

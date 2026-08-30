@@ -1,5 +1,6 @@
 import re
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -55,6 +56,8 @@ class SiteMaintenanceHistoryDay:
     key: str
     label: str
     runs: list[MaintenanceRun]
+    workflow_child_runs: dict[int, list[MaintenanceRun]]
+    run_count: int
 
 
 class MaintenanceRunService:
@@ -115,12 +118,30 @@ class MaintenanceRunService:
         return list(self.db.scalars(statement))
 
     def list_site_run_history(self, site_id: int) -> list[SiteMaintenanceHistoryDay]:
-        """Return the complete site history grouped by the operator's calendar day."""
+        """Return complete history grouped by day, keeping workflow children under their parent."""
+        all_runs = self.list_site_runs(site_id)
+        runs_by_id = {run.id: run for run in all_runs}
+        child_runs_by_workflow_run_id: dict[int, list[MaintenanceRun]] = defaultdict(list)
+        workflow_child_run_ids: set[int] = set()
+
+        for run in all_runs:
+            workflow_run_id = (run.result_json or {}).get("workflow_run_id")
+            workflow_run = runs_by_id.get(workflow_run_id) if isinstance(workflow_run_id, int) else None
+            if workflow_run is None or workflow_run.kind != self.COMPLETE_SITE_UPDATE_KIND:
+                continue
+            child_runs_by_workflow_run_id[workflow_run_id].append(run)
+            workflow_child_run_ids.add(run.id)
+
+        for child_runs in child_runs_by_workflow_run_id.values():
+            child_runs.sort(key=lambda run: (self._as_utc(run.started_at), run.id))
+
         history: list[SiteMaintenanceHistoryDay] = []
         current_day_key: str | None = None
         current_day_runs: list[MaintenanceRun] = []
 
-        for run in self.list_site_runs(site_id):
+        for run in all_runs:
+            if run.id in workflow_child_run_ids:
+                continue
             local_started_at = self._as_utc(run.started_at).astimezone(BERLIN_TIMEZONE)
             day_key = local_started_at.strftime("%Y-%m-%d")
             if current_day_key is None:
@@ -131,6 +152,15 @@ class MaintenanceRunService:
                         key=current_day_key,
                         label=self._maintenance_history_day_label(current_day_key),
                         runs=current_day_runs,
+                        workflow_child_runs={
+                            run.id: child_runs_by_workflow_run_id[run.id]
+                            for run in current_day_runs
+                            if run.id in child_runs_by_workflow_run_id
+                        },
+                        run_count=sum(
+                            1 + len(child_runs_by_workflow_run_id.get(run.id, []))
+                            for run in current_day_runs
+                        ),
                     )
                 )
                 current_day_key = day_key
@@ -143,6 +173,15 @@ class MaintenanceRunService:
                     key=current_day_key,
                     label=self._maintenance_history_day_label(current_day_key),
                     runs=current_day_runs,
+                    workflow_child_runs={
+                        run.id: child_runs_by_workflow_run_id[run.id]
+                        for run in current_day_runs
+                        if run.id in child_runs_by_workflow_run_id
+                    },
+                    run_count=sum(
+                        1 + len(child_runs_by_workflow_run_id.get(run.id, []))
+                        for run in current_day_runs
+                    ),
                 )
             )
         return history

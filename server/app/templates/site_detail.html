@@ -501,7 +501,7 @@
           <div>
             <p class="eyebrow">Maintenance record</p>
             <h2 id="protocol-heading">Protokoll</h2>
-            <p class="subtle">Alle Wartungsläufe sind nach dem Startdatum gruppiert. Vollständige Website-Läufe und ihre einzelnen Schritte bleiben getrennt erkennbar.</p>
+            <p class="subtle">Alle Wartungsläufe sind nach dem Startdatum gruppiert. Die Schritte eines vollständigen Website-Laufs stehen direkt unter diesem Lauf.</p>
           </div>
         </div>
         {% if maintenance_run_history %}
@@ -515,7 +515,7 @@
                 aria-selected="{{ 'true' if loop.first else 'false' }}"
                 aria-controls="maintenance-history-panel-{{ day.key }}"
                 data-maintenance-history-tab="{{ day.key }}"
-              >{{ day.label }} <span>{{ day.runs | length }}</span></button>
+              >{{ day.label }} <span>{{ day.run_count }}</span></button>
             {% endfor %}
           </div>
           {% for day in maintenance_run_history %}
@@ -527,7 +527,7 @@
               data-maintenance-history-panel="{{ day.key }}"
               {% if not loop.first %}hidden{% endif %}
             >
-              <p class="subtle maintenance-history-day-summary">{{ day.runs | length }} {{ "Eintrag" if day.runs | length == 1 else "Einträge" }}</p>
+              <p class="subtle maintenance-history-day-summary">{{ day.run_count }} {{ "Eintrag" if day.run_count == 1 else "Einträge" }}</p>
               <div class="table-scroll">
                 <table>
                   <thead>
@@ -543,15 +543,12 @@
                   </thead>
                   <tbody>
                     {% for run in day.runs %}
-                      {% set workflow_run_id = run.result_json.workflow_run_id if run.result_json else none %}
+                      {% set child_runs = day.workflow_child_runs.get(run.id, []) %}
                       <tr>
                         <td>#{{ run.id }}</td>
                         <td>
                           {% if run.kind == "complete-site-update" %}
                             <span class="pill pill-system">Vollständiger Lauf</span>
-                          {% elif workflow_run_id %}
-                            <span class="pill pill-system">Teil eines vollständigen Laufs</span>
-                            <p class="subtle table-note">Workflow #{{ workflow_run_id }} · {{ run.result_json.workflow_phase | title }} · Welle {{ run.result_json.workflow_wave }}</p>
                           {% else %}
                             {{ run.kind | replace("-", " ") | title }}
                           {% endif %}
@@ -575,6 +572,27 @@
                         <td>{% if run.completed_at %}{{ run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</td>
                         <td>{{ run.error_message or run.result_json.stage_message or "Abgeschlossen" }}</td>
                       </tr>
+                      {% for child_run in child_runs %}
+                        <tr class="maintenance-history-child-row">
+                          <td><span aria-hidden="true">↳</span> #{{ child_run.id }}</td>
+                          <td>
+                            <span class="pill pill-system">Schritt des vollständigen Laufs</span>
+                            <p class="subtle table-note">{{ child_run.result_json.workflow_phase | title }} · Welle {{ child_run.result_json.workflow_wave }}</p>
+                          </td>
+                          <td>
+                            {% if child_run.kind == "direct-plugin-update" %}
+                              <strong>{{ child_run.result_json.update_name or child_run.result_json.plugin_name }}</strong>
+                              <p class="subtle table-note">{{ child_run.result_json.current_version }} → {{ child_run.result_json.target_version }}</p>
+                            {% else %}
+                              <span class="subtle">{{ child_run.kind | replace("-", " ") | title }}</span>
+                            {% endif %}
+                          </td>
+                          <td><span class="pill pill-{{ child_run.status }}">{{ child_run.status }}</span></td>
+                          <td>{{ child_run.started_at | berlin_time }}</td>
+                          <td>{% if child_run.completed_at %}{{ child_run.completed_at | berlin_time }}{% else %}Läuft noch{% endif %}</td>
+                          <td>{{ child_run.error_message or child_run.result_json.stage_message or "Abgeschlossen" }}</td>
+                        </tr>
+                      {% endfor %}
                     {% endfor %}
                   </tbody>
                 </table>
