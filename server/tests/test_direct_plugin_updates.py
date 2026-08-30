@@ -280,7 +280,7 @@ def test_final_bridge_preflight_is_enabled_only_after_the_bridge_release_is_inst
     assert MaintenanceRunService._bridge_enforces_final_update_preflight(SimpleNamespace(bridge_version="0.3.59")) is True
 
 
-def test_active_plugin_update_500_recovers_only_after_bridge_confirms_target_and_activation():
+def test_plugin_update_error_reconciles_a_client_error_after_wordpress_confirms_target_and_activation():
     run = SimpleNamespace(site_id=42, result_json={})
     details = {
         "update_name": "JetReviews For Elementor",
@@ -294,21 +294,24 @@ def test_active_plugin_update_500_recovers_only_after_bridge_confirms_target_and
     service.db = SimpleNamespace(commit=lambda: None)
     service._start_plugin_update_step = lambda *_args: None
     service.proxy = SimpleNamespace(
-        execute_ability=lambda site_id, ability_name, payload, **_kwargs: {
+        execute_readonly_ability=lambda site_id, ability_name, payload, **_kwargs: {
             "result": {
-                "activated": True,
-                "plugin_file": payload["plugin_file"],
-                "installed_version": payload["expected_installed_version"],
-                "active": True,
+                "plugins": [
+                    {
+                        "plugin_file": details["update_identifier"],
+                        "version": details["target_version"],
+                        "active": True,
+                    }
+                ]
             }
         }
     )
 
-    result, detail = service._recover_active_plugin_after_failed_update_request(
+    result, detail = service._reconcile_plugin_after_failed_update_request(
         run,
         details,
         None,
-        SiteMcpProxyError("REMOTE_ERROR", "HTTP Error 500: Internal Server Error", status_code=500),
+        SiteMcpProxyError("REST_NO_ROUTE", "No route was found for the request.", status_code=404),
     )
 
     assert detail == ""
@@ -318,12 +321,26 @@ def test_active_plugin_update_500_recovers_only_after_bridge_confirms_target_and
         "previous_version": "2.3.6",
         "installed_version": "3.1.1",
         "active": True,
-        "recovered_after_update_error": True,
+        "reconciled_after_update_error": True,
+        "post_update_error": "No route was found for the request.",
     }
-    assert run.result_json["activation_recovery"]["recovered"] is True
+    assert run.result_json["post_update_reconciliation"] == {
+        "attempted": True,
+        "original_error": "No route was found for the request.",
+        "original_error_code": "REST_NO_ROUTE",
+        "original_error_status": 404,
+        "plugin_file": "jet-reviews/jet-reviews.php",
+        "target_version": "3.1.1",
+        "expected_active": True,
+        "confirmed": True,
+        "installed_version": "3.1.1",
+        "installed_active": True,
+        "activation_recovery_attempted": False,
+        "activated": False,
+    }
 
 
-def test_active_plugin_update_500_remains_failed_when_bridge_cannot_confirm_the_target_version():
+def test_plugin_update_error_remains_failed_when_wordpress_cannot_confirm_the_target_version():
     run = SimpleNamespace(site_id=42, result_json={})
     details = {
         "update_name": "JetReviews For Elementor",
@@ -336,17 +353,21 @@ def test_active_plugin_update_500_remains_failed_when_bridge_cannot_confirm_the_
     service = object.__new__(MaintenanceRunService)
     service.db = SimpleNamespace(commit=lambda: None)
     service._start_plugin_update_step = lambda *_args: None
+    service.proxy = SimpleNamespace(
+        execute_readonly_ability=lambda *_args, **_kwargs: {
+            "result": {
+                "plugins": [
+                    {
+                        "plugin_file": details["update_identifier"],
+                        "version": "2.3.6",
+                        "active": True,
+                    }
+                ]
+            }
+        }
+    )
 
-    def target_mismatch(*_args, **_kwargs):
-        raise SiteMcpProxyError(
-            "KOSMOS_BRIDGE_ACTIVATION_VERSION_MISMATCH",
-            "The approved plugin is at version 2.3.6, not the expected version 3.1.1.",
-            status_code=409,
-        )
-
-    service.proxy = SimpleNamespace(execute_ability=target_mismatch)
-
-    result, detail = service._recover_active_plugin_after_failed_update_request(
+    result, detail = service._reconcile_plugin_after_failed_update_request(
         run,
         details,
         None,
@@ -354,15 +375,64 @@ def test_active_plugin_update_500_remains_failed_when_bridge_cannot_confirm_the_
     )
 
     assert result is None
-    assert "not the expected version" in detail
-    assert run.result_json["activation_recovery"]["recovered"] is False
+    assert detail == "WordPress did not confirm the planned target version."
+    assert run.result_json["post_update_reconciliation"]["confirmed"] is False
+    assert run.result_json["post_update_reconciliation"]["installed_version"] == "2.3.6"
 
 
-def test_active_plugin_recovery_is_not_attempted_for_inactive_plugins_or_client_errors():
+def test_plugin_update_error_restores_an_active_plugin_only_after_target_version_confirmation():
+    run = SimpleNamespace(site_id=42, result_json={})
+    details = {
+        "update_name": "JetReviews For Elementor",
+        "update_kind": "plugin",
+        "update_identifier": "jet-reviews/jet-reviews.php",
+        "current_version": "2.3.6",
+        "target_version": "3.1.1",
+        "expected_active": True,
+    }
     service = object.__new__(MaintenanceRunService)
     service.db = SimpleNamespace(commit=lambda: None)
     service._start_plugin_update_step = lambda *_args: None
-    service.proxy = SimpleNamespace(execute_ability=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()))
+    service.proxy = SimpleNamespace(
+        execute_readonly_ability=lambda *_args, **_kwargs: {
+            "result": {
+                "plugins": [
+                    {
+                        "plugin_file": details["update_identifier"],
+                        "version": details["target_version"],
+                        "active": False,
+                    }
+                ]
+            }
+        },
+        execute_ability=lambda _site_id, _ability_name, payload, **_kwargs: {
+            "result": {
+                "activated": True,
+                "plugin_file": payload["plugin_file"],
+                "installed_version": payload["expected_installed_version"],
+                "active": True,
+            }
+        },
+    )
+
+    result, detail = service._reconcile_plugin_after_failed_update_request(
+        run,
+        details,
+        None,
+        SiteMcpProxyError("REMOTE_ERROR", "The update callback failed.", status_code=500),
+    )
+
+    assert detail == ""
+    assert result is not None
+    assert result["active"] is True
+    assert run.result_json["post_update_reconciliation"]["activation_recovery_attempted"] is True
+    assert run.result_json["post_update_reconciliation"]["activated"] is True
+
+
+def test_plugin_update_error_reconciles_an_inactive_plugin_when_wordpress_preserved_its_state():
+    service = object.__new__(MaintenanceRunService)
+    service.db = SimpleNamespace(commit=lambda: None)
+    service._start_plugin_update_step = lambda *_args: None
     details = {
         "update_name": "Example Plugin",
         "update_kind": "plugin",
@@ -371,19 +441,48 @@ def test_active_plugin_recovery_is_not_attempted_for_inactive_plugins_or_client_
         "target_version": "1.1.0",
         "expected_active": False,
     }
+    service.proxy = SimpleNamespace(
+        execute_readonly_ability=lambda *_args, **_kwargs: {
+            "result": {
+                "plugins": [
+                    {
+                        "plugin_file": details["update_identifier"],
+                        "version": "1.1.0",
+                        "active": False,
+                    }
+                ]
+            }
+        }
+    )
 
-    result, detail = service._recover_active_plugin_after_failed_update_request(
+    result, detail = service._reconcile_plugin_after_failed_update_request(
         SimpleNamespace(site_id=42, result_json={}),
         details,
         None,
         SiteMcpProxyError("UPDATE_OFFER_CHANGED", "The offer changed.", status_code=409),
     )
 
-    assert result is None
     assert detail == ""
+    assert result is not None
+    assert result["installed_version"] == "1.1.0"
+    assert result["active"] is False
 
-    details["expected_active"] = True
-    result, detail = service._recover_active_plugin_after_failed_update_request(
+
+def test_failed_theme_update_is_not_reconciled_as_a_plugin():
+    service = object.__new__(MaintenanceRunService)
+    service.db = SimpleNamespace(commit=lambda: None)
+    service._start_plugin_update_step = lambda *_args: (_ for _ in ()).throw(AssertionError())
+    service.proxy = SimpleNamespace(execute_readonly_ability=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()))
+    details = {
+        "update_name": "Example Theme",
+        "update_kind": "theme",
+        "update_identifier": "example-theme",
+        "current_version": "1.0.0",
+        "target_version": "1.1.0",
+        "expected_active": None,
+    }
+
+    result, detail = service._reconcile_plugin_after_failed_update_request(
         SimpleNamespace(site_id=42, result_json={}),
         details,
         None,

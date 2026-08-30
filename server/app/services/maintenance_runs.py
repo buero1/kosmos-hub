@@ -1733,8 +1733,19 @@ class MaintenanceRunService:
             try:
                 payload = self._execute_direct_update(run.site_id, details)
             except SiteMcpProxyError as exc:
-                self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
-                return "failed"
+                reconciled_result, reconciliation_detail = self._reconcile_plugin_after_failed_update_request(
+                    run,
+                    details,
+                    update_step,
+                    exc,
+                )
+                if reconciled_result is None:
+                    message = f"{details['update_name']} update request failed: {exc.message}"
+                    if reconciliation_detail:
+                        message = f"{message} Post-update reconciliation did not succeed: {reconciliation_detail}"
+                    self._fail_plugin_update_run(run, message)
+                    return "failed"
+                payload = reconciled_result
 
         result = self._result_from_payload(payload)
         result_error = self._direct_update_result_error(details, result)
@@ -1779,6 +1790,7 @@ class MaintenanceRunService:
             health_step,
             health_detail,
             health_result,
+            recovery_note=self._direct_update_reconciliation_note(result),
         )
 
     def _wait_for_post_update_framework_stabilization(
@@ -2091,17 +2103,17 @@ class MaintenanceRunService:
             except SiteMcpProxyError as exc:
                 resolution = self._bridge_update_preflight_resolution(details, exc)
                 if resolution is None:
-                    recovered_result, recovery_detail = self._recover_active_plugin_after_failed_update_request(
+                    reconciled_result, reconciliation_detail = self._reconcile_plugin_after_failed_update_request(
                         run,
                         details,
                         update_step,
                         exc,
                     )
-                    if recovered_result is not None:
-                        return "updated", recovered_result
+                    if reconciled_result is not None:
+                        return "updated", reconciled_result
                     message = f"{details['update_name']} update request failed: {exc.message}"
-                    if recovery_detail:
-                        message = f"{message} Activation recovery did not succeed: {recovery_detail}"
+                    if reconciliation_detail:
+                        message = f"{message} Post-update reconciliation did not succeed: {reconciliation_detail}"
                     self._fail_plugin_update_run(run, message)
                     return "failed", None
 
@@ -2145,82 +2157,158 @@ class MaintenanceRunService:
                 )
                 return str(resolution["outcome"]), None
 
-    def _recover_active_plugin_after_failed_update_request(
+    def _reconcile_plugin_after_failed_update_request(
         self,
         run: MaintenanceRun,
         details: dict[str, Any],
         update_step: MaintenanceRunStep | None,
         update_error: SiteMcpProxyError,
     ) -> tuple[dict[str, Any] | None, str]:
-        """Recover an active plugin only after the Bridge proves the planned target exists."""
-        if (
-            details["update_kind"] != "plugin"
-            or details["expected_active"] is not True
-            or update_error.status_code < 500
-        ):
+        """Reconcile a plugin update error with the state WordPress actually reports."""
+        if details["update_kind"] != "plugin":
             return None, ""
 
         self._start_plugin_update_step(
             run,
             update_step,
             (
-                "The Bridge update request returned an error. Verifying the planned target version "
-                "and restoring the approved active state if WordPress installed it."
+                "The Bridge update request returned an error. Reading the installed plugin state "
+                "before classifying the update result."
             ),
         )
-        recovery = {
+        reconciliation = {
             "attempted": True,
             "original_error": update_error.message,
+            "original_error_code": update_error.code,
+            "original_error_status": update_error.status_code,
             "plugin_file": details["update_identifier"],
             "target_version": details["target_version"],
+            "expected_active": details["expected_active"],
         }
         try:
-            payload = self.proxy.execute_ability(
+            payload = self.proxy.execute_readonly_ability(
                 run.site_id,
-                self.PLUGIN_ACTIVATION_ABILITY,
-                {
-                    "plugin_file": details["update_identifier"],
-                    "expected_installed_version": details["target_version"],
-                },
-                timeout_seconds=60,
+                self.LIST_INSTALLED_PLUGINS_ABILITY,
+                None,
+                timeout_seconds=45,
             )
         except SiteMcpProxyError as recovery_error:
             run.result_json = {
                 **(run.result_json or {}),
-                "activation_recovery": {
-                    **recovery,
-                    "recovered": False,
+                "post_update_reconciliation": {
+                    **reconciliation,
+                    "confirmed": False,
                     "error": recovery_error.message,
                 },
             }
             self.db.commit()
             return None, recovery_error.message
 
-        activation_result = self._result_from_payload(payload)
-        recovered = (
-            activation_result.get("plugin_file") == details["update_identifier"]
-            and activation_result.get("installed_version") == details["target_version"]
-            and activation_result.get("active") is True
+        available_plugins = self._result_from_payload(payload).get("plugins", [])
+        plugins = available_plugins if isinstance(available_plugins, list) else []
+        installed = next(
+            (
+                plugin
+                for plugin in plugins
+                if isinstance(plugin, dict) and plugin.get("plugin_file") == details["update_identifier"]
+            ),
+            None,
         )
-        if not recovered:
+        installed_version = str(installed.get("version", "")).strip() if isinstance(installed, dict) else ""
+        installed_active = installed.get("active") if isinstance(installed, dict) and isinstance(installed.get("active"), bool) else None
+        if installed_version != details["target_version"]:
             run.result_json = {
                 **(run.result_json or {}),
-                "activation_recovery": {
-                    **recovery,
-                    "recovered": False,
-                    "error": "The Bridge did not confirm the planned version and active state.",
-                    "result": activation_result,
+                "post_update_reconciliation": {
+                    **reconciliation,
+                    "confirmed": False,
+                    "installed_version": installed_version,
+                    "installed_active": installed_active,
+                    "error": "WordPress did not confirm the planned target version.",
                 },
             }
             self.db.commit()
-            return None, "The Bridge did not confirm the planned version and active state."
+            return None, "WordPress did not confirm the planned target version."
+
+        if installed_active != details["expected_active"]:
+            if details["expected_active"] is not True:
+                run.result_json = {
+                    **(run.result_json or {}),
+                    "post_update_reconciliation": {
+                        **reconciliation,
+                        "confirmed": False,
+                        "installed_version": installed_version,
+                        "installed_active": installed_active,
+                        "error": "WordPress did not preserve the approved inactive state.",
+                    },
+                }
+                self.db.commit()
+                return None, "WordPress did not preserve the approved inactive state."
+
+            activation_recovery_attempted = True
+            self._start_plugin_update_step(
+                run,
+                update_step,
+                "WordPress confirmed the target version but not its active state. Restoring the approved active state.",
+            )
+            try:
+                payload = self.proxy.execute_ability(
+                    run.site_id,
+                    self.PLUGIN_ACTIVATION_ABILITY,
+                    {
+                        "plugin_file": details["update_identifier"],
+                        "expected_installed_version": details["target_version"],
+                    },
+                    timeout_seconds=60,
+                )
+            except SiteMcpProxyError as activation_error:
+                run.result_json = {
+                    **(run.result_json or {}),
+                    "post_update_reconciliation": {
+                        **reconciliation,
+                        "confirmed": False,
+                        "installed_version": installed_version,
+                        "installed_active": installed_active,
+                        "activation_recovery_attempted": True,
+                        "error": activation_error.message,
+                    },
+                }
+                self.db.commit()
+                return None, activation_error.message
+
+            activation_result = self._result_from_payload(payload)
+            installed_active = activation_result.get("active") if isinstance(activation_result.get("active"), bool) else None
+            if (
+                activation_result.get("plugin_file") != details["update_identifier"]
+                or activation_result.get("installed_version") != details["target_version"]
+                or installed_active is not True
+            ):
+                run.result_json = {
+                    **(run.result_json or {}),
+                    "post_update_reconciliation": {
+                        **reconciliation,
+                        "confirmed": False,
+                        "installed_version": installed_version,
+                        "installed_active": installed_active,
+                        "activation_recovery_attempted": True,
+                        "error": "The Bridge did not confirm the planned version and active state.",
+                        "result": activation_result,
+                    },
+                }
+                self.db.commit()
+                return None, "The Bridge did not confirm the planned version and active state."
+        else:
+            activation_recovery_attempted = False
 
         run.result_json = {
             **(run.result_json or {}),
-            "activation_recovery": {
-                **recovery,
-                "recovered": True,
-                "activated": activation_result.get("activated") is True,
+            "post_update_reconciliation": {
+                **reconciliation,
+                "confirmed": True,
+                "installed_version": details["target_version"],
+                "installed_active": details["expected_active"],
+                "activation_recovery_attempted": activation_recovery_attempted,
+                "activated": activation_recovery_attempted and activation_result.get("activated") is True,
             },
         }
         self.db.commit()
@@ -2229,8 +2317,9 @@ class MaintenanceRunService:
             "plugin_file": details["update_identifier"],
             "previous_version": details["current_version"],
             "installed_version": details["target_version"],
-            "active": True,
-            "recovered_after_update_error": True,
+            "active": details["expected_active"],
+            "reconciled_after_update_error": True,
+            "post_update_error": update_error.message,
         }, ""
 
     @classmethod
@@ -2786,18 +2875,30 @@ class MaintenanceRunService:
 
     @staticmethod
     def _direct_update_verification_detail(details: dict[str, Any], result: dict[str, Any] | None = None) -> str:
-        recovered = isinstance(result, dict) and result.get("recovered_after_update_error") is True
+        reconciled = isinstance(result, dict) and result.get("reconciled_after_update_error") is True
         if details["update_kind"] == "plugin":
             detail = (
                 f"Bridge verified {details['update_name']} {details['target_version']} "
                 f"{'active' if details['expected_active'] else 'inactive'}."
             )
-            if recovered:
-                return f"{detail} The Hub recovered the approved active state after the update error."
+            if reconciled:
+                return (
+                    f"{detail} The Bridge reported an update error after the package operation; "
+                    "the Hub confirmed the planned version and activation state directly from WordPress."
+                )
             return detail
         if details["update_kind"] == "theme":
             return f"Bridge verified theme {details['update_name']} {details['target_version']}."
         return f"Bridge verified WordPress {details['target_version']} on disk."
+
+    @staticmethod
+    def _direct_update_reconciliation_note(result: dict[str, Any]) -> str:
+        if result.get("reconciled_after_update_error") is not True:
+            return ""
+        return (
+            "The Bridge reported an error after the package operation; the Hub confirmed the selected "
+            "version and activation state directly from WordPress. The original Bridge error remains in this run record."
+        )
 
     @staticmethod
     def _update_step_key(update_kind: str) -> str:
