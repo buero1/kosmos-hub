@@ -86,6 +86,7 @@ def sites_page(
             "items": items,
             "can_launch_wordpress_admin": getattr(request.state, "hub_user", None) is not None
             and request.state.hub_user.role == "admin",
+            "csrf_token": get_csrf_token(request),
             "inventory_summary": inventory_service.summarize(all_items),
             "filters": {
                 "q": q,
