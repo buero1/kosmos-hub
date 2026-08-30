@@ -1376,7 +1376,19 @@ class MaintenanceRunService:
     ) -> str:
         completed_at = datetime.now(UTC)
         result = dict(run.result_json or {})
-        result.update({"stage": stage, "stage_message": message})
+        terminal_phase = {
+            MaintenanceRunStatus.succeeded.value: "completed",
+            MaintenanceRunStatus.failed.value: "failed",
+            MaintenanceRunStatus.skipped.value: "cancelled",
+        }.get(status, stage)
+        result.update(
+            {
+                "stage": stage,
+                "stage_message": message,
+                # Do not leave the last active phase visible after the workflow has ended.
+                "workflow_phase": terminal_phase,
+            }
+        )
         run.status = status
         run.completed_at = completed_at
         run.last_checked_at = completed_at

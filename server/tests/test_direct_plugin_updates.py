@@ -469,6 +469,7 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
         completed = service.get_complete_site_update_run(run.id)
         assert completed is not None
         assert completed.status == MaintenanceRunStatus.succeeded.value
+        assert completed.result_json["workflow_phase"] == "completed"
         assert fresh_phases == [("wordpress", 1), ("theme", 1), ("plugin", 1), ("verification", 1)]
         assert child_runs == [
             ("wordpress", 1, "WordPress core"),

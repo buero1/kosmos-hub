@@ -579,7 +579,17 @@
           {% endif %}
         </div>
         <div class="complete-site-update-progress-meta">
-          <span data-complete-site-update-phase>Welle {{ complete_result.get("wave", 0) }}/{{ complete_result.get("max_waves", 3) }} · {{ complete_result.get("workflow_phase", "queued") | replace("-", " ") | title }}</span>
+          <span data-complete-site-update-phase>
+            {% if complete_site_update_running %}
+              Welle {{ complete_result.get("wave", 0) }}/{{ complete_result.get("max_waves", 3) }} · {{ complete_result.get("workflow_phase", "queued") | replace("-", " ") | title }}
+            {% elif complete_site_update_run.status == "succeeded" %}
+              Abgeschlossen
+            {% elif complete_site_update_run.status == "skipped" %}
+              Abgebrochen
+            {% else %}
+              Fehlgeschlagen
+            {% endif %}
+          </span>
           <span data-complete-site-update-counts>{{ complete_result.get("successful_updates", 0) }} erfolgreich · {{ complete_result.get("failed_updates", 0) }} fehlgeschlagen · {{ complete_result.get("skipped_updates", 0) }} übersprungen</span>
         </div>
         <div class="direct-update-progress-track" role="progressbar" aria-label="Fortschritt der vollständigen Website-Aktualisierung" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" data-complete-site-update-progress-track>
@@ -629,6 +639,9 @@
           function value(selector) { return container.querySelector(selector); }
           function label(value) {
             return String(value || "workflow").replace(/-/g, " ").replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
+          }
+          function terminalPhaseLabel(status) {
+            return { succeeded: "Abgeschlossen", skipped: "Abgebrochen", failed: "Fehlgeschlagen" }[status] || "Beendet";
           }
           function eventPresentation(event) {
             if (event.status === "succeeded" || event.status === "refreshed") { return "pill-active"; }
@@ -694,7 +707,11 @@
             var cancelForm = value("[data-complete-site-update-cancel-form]");
             var completed = Number(payload.successful_updates || 0) + Number(payload.failed_updates || 0) + Number(payload.skipped_updates || 0);
             if (summary) { summary.textContent = payload.stage_message || ""; }
-            if (phase) { phase.textContent = "Welle " + (payload.wave || 0) + "/" + (payload.max_waves || 0) + " · " + label(payload.workflow_phase); }
+            if (phase) {
+              phase.textContent = payload.completed
+                ? terminalPhaseLabel(payload.status)
+                : "Welle " + (payload.wave || 0) + "/" + (payload.max_waves || 0) + " · " + label(payload.workflow_phase);
+            }
             if (counts) { counts.textContent = payload.successful_updates + " erfolgreich · " + payload.failed_updates + " fehlgeschlagen · " + payload.skipped_updates + " übersprungen"; }
             var phaseOrder = { queued: 0, wordpress: 1, theme: 2, plugin: 3, verification: 4 };
             var phaseProgress = phaseOrder[payload.workflow_phase] || 0;
