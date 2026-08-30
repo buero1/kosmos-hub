@@ -556,6 +556,206 @@
       </script>
     {% endif %}
 
+    {% if complete_site_update_run %}
+      {% set complete_result = complete_site_update_run.result_json or {} %}
+      <section
+        class="maintenance-batch complete-site-update-status-card"
+        data-complete-site-update-progress
+        data-status-url="/updates/complete-site-update-runs/{{ complete_site_update_run.id }}/status"
+        aria-labelledby="complete-site-update-progress-heading"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Vollständige Aktualisierung</p>
+            <h3 id="complete-site-update-progress-heading">{{ complete_site_update_run.site.domain }}</h3>
+            <p class="subtle" data-complete-site-update-summary>{{ complete_result.get("stage_message") or "Workflow wird vorbereitet." }}</p>
+          </div>
+          {% if complete_site_update_running and not complete_result.get("cancellation") %}
+            <form method="post" action="/updates/complete-site-update-runs/{{ complete_site_update_run.id }}/cancel" data-complete-site-update-cancel-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="return_to" value="{{ direct_update_cancel_return_url }}">
+              <button class="button button-secondary" type="submit">Abbrechen</button>
+            </form>
+          {% endif %}
+        </div>
+        <div class="complete-site-update-progress-meta">
+          <span data-complete-site-update-phase>Welle {{ complete_result.get("wave", 0) }}/{{ complete_result.get("max_waves", 3) }} · {{ complete_result.get("workflow_phase", "queued") | replace("-", " ") | title }}</span>
+          <span data-complete-site-update-counts>{{ complete_result.get("successful_updates", 0) }} erfolgreich · {{ complete_result.get("failed_updates", 0) }} fehlgeschlagen · {{ complete_result.get("skipped_updates", 0) }} übersprungen</span>
+        </div>
+        <div class="direct-update-progress-track" role="progressbar" aria-label="Fortschritt der vollständigen Website-Aktualisierung" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" data-complete-site-update-progress-track>
+          <span class="direct-update-progress-fill" data-complete-site-update-progress-fill></span>
+        </div>
+        <div class="table-scroll">
+          <table class="direct-update-run-table">
+            <thead>
+              <tr>
+                <th>Welle</th>
+                <th>Phase</th>
+                <th>Vorgang</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody data-complete-site-update-events>
+              {% for event in complete_result.get("events", []) %}
+                {% set update = event.get("update", {}) %}
+                <tr>
+                  <td>{{ event.get("wave", "-") }}</td>
+                  <td>{{ event.get("phase", "workflow") | replace("-", " ") | title }}</td>
+                  <td>
+                    {% if update %}
+                      <strong>{{ update.get("name") }}</strong> {{ update.get("current_version") }} → {{ update.get("target_version") }}
+                    {% else %}
+                      {{ event.get("detail", "") }}
+                      {% for blocked_update in event.get("updates", []) %}
+                        <br><span class="subtle">{{ blocked_update.get("name") }} {{ blocked_update.get("current_version") }} → {{ blocked_update.get("target_version") }}</span>
+                      {% endfor %}
+                    {% endif %}
+                  </td>
+                  <td><span class="pill pill-{{ "active" if event.get("status") in ["succeeded", "refreshed"] else "missing" if event.get("status") == "failed" else "unknown" }}">{{ event.get("status", "waiting") | replace("-", " ") | title }}</span></td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4" class="subtle">Der Workflow startet mit einer frischen Update-Prüfung.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <script>
+        (function () {
+          var container = document.querySelector("[data-complete-site-update-progress]");
+          if (!container || !container.dataset.statusUrl) { return; }
+          var timer;
+
+          function value(selector) { return container.querySelector(selector); }
+          function label(value) {
+            return String(value || "workflow").replace(/-/g, " ").replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
+          }
+          function eventPresentation(event) {
+            if (event.status === "succeeded" || event.status === "refreshed") { return "pill-active"; }
+            if (event.status === "failed") { return "pill-missing"; }
+            if (event.status === "blocked") { return "pill-missing"; }
+            return "pill-unknown";
+          }
+          function renderEvents(events) {
+            var body = value("[data-complete-site-update-events]");
+            if (!body) { return; }
+            body.textContent = "";
+            (events || []).forEach(function (event) {
+              var row = document.createElement("tr");
+              var wave = document.createElement("td");
+              wave.textContent = event.wave || "-";
+              var phase = document.createElement("td");
+              phase.textContent = label(event.phase);
+              var detail = document.createElement("td");
+              var update = event.update || null;
+              if (update) {
+                var name = document.createElement("strong");
+                name.textContent = update.name || "Update";
+                detail.appendChild(name);
+                detail.appendChild(document.createTextNode(" " + (update.current_version || "-") + " -> " + (update.target_version || "-")));
+              } else {
+                detail.textContent = event.detail || "";
+                (event.updates || []).forEach(function (blockedUpdate) {
+                  var line = document.createElement("span");
+                  line.className = "subtle";
+                  line.textContent = (blockedUpdate.name || "Update") + " "
+                    + (blockedUpdate.current_version || "-") + " -> " + (blockedUpdate.target_version || "-");
+                  detail.appendChild(document.createElement("br"));
+                  detail.appendChild(line);
+                });
+              }
+              var statusCell = document.createElement("td");
+              var status = document.createElement("span");
+              status.className = "pill " + eventPresentation(event);
+              status.textContent = label(event.status);
+              statusCell.appendChild(status);
+              row.appendChild(wave);
+              row.appendChild(phase);
+              row.appendChild(detail);
+              row.appendChild(statusCell);
+              body.appendChild(row);
+            });
+            if (!body.children.length) {
+              var empty = document.createElement("tr");
+              var emptyCell = document.createElement("td");
+              emptyCell.colSpan = 4;
+              emptyCell.className = "subtle";
+              emptyCell.textContent = "Der Workflow startet mit einer frischen Update-Prüfung.";
+              empty.appendChild(emptyCell);
+              body.appendChild(empty);
+            }
+          }
+          function render(payload) {
+            var summary = value("[data-complete-site-update-summary]");
+            var phase = value("[data-complete-site-update-phase]");
+            var counts = value("[data-complete-site-update-counts]");
+            var track = value("[data-complete-site-update-progress-track]");
+            var fill = value("[data-complete-site-update-progress-fill]");
+            var cancelForm = value("[data-complete-site-update-cancel-form]");
+            var completed = Number(payload.successful_updates || 0) + Number(payload.failed_updates || 0) + Number(payload.skipped_updates || 0);
+            if (summary) { summary.textContent = payload.stage_message || ""; }
+            if (phase) { phase.textContent = "Welle " + (payload.wave || 0) + "/" + (payload.max_waves || 0) + " · " + label(payload.workflow_phase); }
+            if (counts) { counts.textContent = payload.successful_updates + " erfolgreich · " + payload.failed_updates + " fehlgeschlagen · " + payload.skipped_updates + " übersprungen"; }
+            var phaseOrder = { queued: 0, wordpress: 1, theme: 2, plugin: 3, verification: 4 };
+            var phaseProgress = phaseOrder[payload.workflow_phase] || 0;
+            var totalPhases = Math.max(Number(payload.max_waves || 0) * 4, 1);
+            var completedPhases = Math.max(Number(payload.wave || 0) - 1, 0) * 4 + phaseProgress;
+            var percentage = payload.completed ? 100 : Math.max(4, Math.min(96, Math.round((completedPhases / totalPhases) * 100)));
+            if (track) {
+              track.setAttribute("aria-valuemax", "100");
+              track.setAttribute("aria-valuenow", String(percentage));
+              track.setAttribute("aria-valuetext", percentage + "% - " + completed + " Komponenten verarbeitet");
+            }
+            if (fill) { fill.style.width = percentage + "%"; }
+            if (cancelForm) { cancelForm.hidden = Boolean(payload.cancellation_requested) || Boolean(payload.completed); }
+            renderEvents(payload.events);
+            if (payload.completed && timer) { window.clearInterval(timer); timer = undefined; }
+          }
+          function poll() {
+            window.fetch(container.dataset.statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
+              .then(function (response) {
+                if (!response.ok) { throw new Error("Complete update status could not be loaded."); }
+                return response.json();
+              })
+              .then(render);
+          }
+          poll();
+          timer = window.setInterval(poll, 2000);
+        }());
+      </script>
+    {% elif not batch_runs and view != "refresh-protocol" %}
+      <section class="maintenance-batch complete-site-update-launch" aria-labelledby="complete-site-update-launch-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Vollständige Aktualisierung</p>
+            <h3 id="complete-site-update-launch-heading">Eine Website vollständig aktualisieren</h3>
+            <p class="subtle">Führt WordPress, Themes und Plugins in dieser Reihenfolge aus. Nach jeder Phase werden die Update-Angebote frisch geprüft.</p>
+          </div>
+        </div>
+        <form id="complete-site-update-form" method="post" action="/updates/complete-site-update" data-complete-site-update-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
+          <span data-site-selector-target-sites>
+            {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
+          </span>
+          <div class="direct-update-controls">
+            <p class="subtle" data-complete-site-update-selection-summary>{% if site_selector.selected_site_ids | length == 1 %}1 Website ausgewählt.{% else %}Für diesen ersten Schritt genau eine Website auswählen.{% endif %}</p>
+            <button class="button" type="button" data-complete-site-update-start {% if site_selector.selected_site_ids | length != 1 %}disabled{% endif %}>Website vollständig aktualisieren</button>
+          </div>
+        </form>
+      </section>
+      <dialog class="update-confirmation-dialog" data-complete-site-update-confirmation aria-labelledby="complete-site-update-confirmation-heading">
+        <form method="dialog">
+          <h3 id="complete-site-update-confirmation-heading">Website vollständig aktualisieren?</h3>
+          <p data-complete-site-update-confirmation-text>Die Website wird in der Reihenfolge WordPress, Themes und Plugins aktualisiert. Nach jeder Phase erfolgt eine frische Update-Prüfung.</p>
+          <div class="dialog-actions">
+            <button class="button button-secondary" value="cancel">Abbrechen</button>
+            <button class="button" value="confirm" data-complete-site-update-confirm>Workflow starten</button>
+          </div>
+        </form>
+      </dialog>
+    {% endif %}
+
     {% if show_update_selection %}
     <form id="direct-update-form" method="post" action="/updates/apply-action" data-direct-update-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -713,6 +913,12 @@
       var largeBatchConfirmationValue = document.querySelector("[data-large-batch-confirmation-value]");
       var largeBatchConfirmationFeedback = document.querySelector("[data-large-batch-confirmation-feedback]");
       var largeBatchPluginThreshold = 100;
+      var completeSiteUpdateForm = document.querySelector("[data-complete-site-update-form]");
+      var completeSiteUpdateStart = document.querySelector("[data-complete-site-update-start]");
+      var completeSiteUpdateSummary = document.querySelector("[data-complete-site-update-selection-summary]");
+      var completeSiteUpdateDialog = document.querySelector("[data-complete-site-update-confirmation]");
+      var completeSiteUpdateText = document.querySelector("[data-complete-site-update-confirmation-text]");
+      var completeSiteUpdateConfirm = document.querySelector("[data-complete-site-update-confirm]");
 
       if (autoFilterPanel && siteSelectorForm) {
         autoFilterPanel.querySelectorAll("select").forEach(function (filter) {
@@ -721,6 +927,54 @@
           });
         });
       }
+
+      function completeSiteUpdateSelection() {
+        if (!completeSiteUpdateForm) { return []; }
+        return Array.prototype.slice.call(completeSiteUpdateForm.querySelectorAll('input[name="site_id"]'));
+      }
+
+      function completeSiteUpdateSiteName() {
+        var selected = document.querySelector("[data-site-selector] input[name='site_id']:checked");
+        var label = selected && selected.closest("label");
+        var name = label && label.querySelector("span");
+        return name ? name.textContent.trim() : "die ausgewählte Website";
+      }
+
+      function syncCompleteSiteUpdateStart() {
+        var selected = completeSiteUpdateSelection();
+        var valid = selected.length === 1;
+        if (completeSiteUpdateStart) { completeSiteUpdateStart.disabled = !valid; }
+        if (completeSiteUpdateSummary) {
+          completeSiteUpdateSummary.textContent = valid
+            ? "1 Website ausgewählt: " + completeSiteUpdateSiteName() + "."
+            : "Für diesen ersten Schritt genau eine Website auswählen.";
+        }
+      }
+
+      if (completeSiteUpdateForm && completeSiteUpdateStart && completeSiteUpdateDialog && completeSiteUpdateConfirm) {
+        document.addEventListener("site-selector-change", syncCompleteSiteUpdateStart);
+        completeSiteUpdateStart.addEventListener("click", function () {
+          if (completeSiteUpdateSelection().length !== 1) { return; }
+          if (completeSiteUpdateText) {
+            completeSiteUpdateText.textContent = completeSiteUpdateSiteName()
+              + " wird in der Reihenfolge WordPress, Themes und Plugins aktualisiert. "
+              + "Nach jeder Phase erfolgt eine frische Update-Prüfung.";
+          }
+          completeSiteUpdateDialog.showModal();
+        });
+        completeSiteUpdateConfirm.addEventListener("click", function (event) {
+          event.preventDefault();
+          if (completeSiteUpdateSelection().length !== 1) {
+            completeSiteUpdateDialog.close();
+            syncCompleteSiteUpdateStart();
+            return;
+          }
+          completeSiteUpdateDialog.close();
+          completeSiteUpdateForm.requestSubmit();
+        });
+        syncCompleteSiteUpdateStart();
+      }
+
       if (!selectAll) {
         return;
       }

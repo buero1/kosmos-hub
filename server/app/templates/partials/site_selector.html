@@ -110,6 +110,10 @@
       count.textContent = selectedCount && selectedCount === siteChecks.length ? "All selectable sites" : selectedCount + " selected";
       syncCustomerChecks();
       syncTargetForm();
+      selector.dispatchEvent(new CustomEvent("site-selector-change", {
+        bubbles: true,
+        detail: { selectedSiteIds: selectedIds() }
+      }));
     }
 
     function syncTargetForm() {

@@ -20,7 +20,7 @@ from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.site_users import SiteUserService
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.maintenance_worker import schedule_pending_direct_updates
+from app.services.maintenance_worker import schedule_pending_complete_site_updates, schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
@@ -504,6 +504,7 @@ def update_workbench_page(
         "not-checked",
     ] = "all",
     update_batch: str = "",
+    complete_update_run_id: Annotated[int | None, Query(ge=1)] = None,
     direct_update: str = "",
     fresh_updates: str = "",
     message: str = "",
@@ -551,6 +552,17 @@ def update_workbench_page(
     if batch_running:
         # Resume a user-started batch if a process restart interrupted polling.
         schedule_pending_direct_updates()
+    complete_site_update_run = (
+        maintenance_service.get_complete_site_update_run(complete_update_run_id)
+        if complete_update_run_id is not None
+        else None
+    )
+    complete_site_update_running = (
+        complete_site_update_run is not None
+        and complete_site_update_run.status == "running"
+    )
+    if complete_site_update_running:
+        schedule_pending_complete_site_updates()
     fleet_refresh_service = FleetRefreshService(db=db)
     active_fleet_refresh_run = fleet_refresh_service.get_active_run(modes=FleetRefreshService.update_modes())
     progress_refresh_run = (
@@ -608,6 +620,7 @@ def update_workbench_page(
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
                 submit_label="Start",
+                target_form_id="complete-site-update-form",
                 csrf_token=get_csrf_token(request),
                 secondary_submit_action="/updates/fresh-show",
                 secondary_primary_label="Gespeicherte Updates anzeigen",
@@ -623,9 +636,11 @@ def update_workbench_page(
             "batch_running": batch_running,
             "batch_cancellable": maintenance_service.direct_update_batch_can_be_cancelled(batch_runs),
             "batch_cancellation_requested": maintenance_service.direct_update_batch_cancellation_requested(batch_runs),
+            "complete_site_update_run": complete_site_update_run,
+            "complete_site_update_running": complete_site_update_running,
             "direct_update_cancel_return_url": str(request.url.path)
             + (f"?{request.url.query}" if request.url.query else ""),
-            "show_update_selection": not batch_runs and view != "refresh-protocol",
+            "show_update_selection": not batch_runs and complete_site_update_run is None and view != "refresh-protocol",
             "direct_update": direct_update,
             "fresh_updates": fresh_updates,
             "active_fleet_refresh_run": active_fleet_refresh_run,
@@ -771,6 +786,53 @@ def cancel_direct_update_batch(
     )
 
 
+@router.get("/updates/complete-site-update-runs/{run_id}/status", response_class=JSONResponse)
+def complete_site_update_run_status(
+    run_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    run = service.get_complete_site_update_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="The complete update workflow no longer exists.")
+    return _complete_site_update_status_payload(run, service.complete_site_update_child_runs(run.id))
+
+
+@router.post("/updates/complete-site-update-runs/{run_id}/cancel")
+def cancel_complete_site_update_run(
+    run_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/updates",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    return_url = _safe_updates_return_url(return_to)
+    try:
+        cancelled = MaintenanceRunService(db=db, cipher=get_secret_cipher()).cancel_complete_site_update(
+            run_id=run_id,
+            actor=user.username,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(
+            url=_updates_return_url_with_message(return_url, str(exc)),
+            status_code=303,
+        )
+    message = (
+        "Cancellation was requested. The current component update will finish safely."
+        if cancelled
+        else "This complete update workflow had already finished or was already being cancelled."
+    )
+    return RedirectResponse(
+        url=_updates_return_url_with_message(return_url, message),
+        status_code=303,
+    )
+
+
 @router.get("/plugin-installations", response_class=HTMLResponse)
 def plugin_installations_page(
     request: Request,
@@ -896,6 +958,54 @@ def apply_update_workbench_action(
     schedule_pending_direct_updates()
     return RedirectResponse(
         url=f"/updates?{urlencode(scope_query + [('update_batch', outcome.batch_id), ('direct_update', 'started'), ('message', outcome.message)])}",
+        status_code=303,
+    )
+
+
+@router.post("/updates/complete-site-update")
+def start_complete_site_update(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
+    site_id: Annotated[list[int] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    selected_site_ids = sorted(set(site_id or [])) if site_scope == "selected" else []
+    if len(selected_site_ids) != 1:
+        return RedirectResponse(
+            url=(
+                "/updates?"
+                + urlencode(
+                    [
+                        ("site_scope", "selected"),
+                        ("complete_update", "error"),
+                        ("message", "Select exactly one website to start the complete update workflow."),
+                    ]
+                )
+            ),
+            status_code=303,
+        )
+
+    site_id_value = selected_site_ids[0]
+    scope_query: list[tuple[str, str | int]] = [("site_scope", "selected"), ("site_id", site_id_value)]
+    try:
+        outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_complete_site_update(
+            site_id=site_id_value,
+            actor=user.username,
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/updates?{urlencode(scope_query + [('complete_update', 'error'), ('message', str(exc))])}",
+            status_code=303,
+        )
+
+    schedule_pending_complete_site_updates()
+    return RedirectResponse(
+        url=(
+            f"/updates?{urlencode(scope_query + [('complete_update_run_id', outcome.run.id), ('complete_update', 'started'), ('message', outcome.message)])}"
+        ),
         status_code=303,
     )
 
@@ -1687,6 +1797,51 @@ def _direct_update_batch_status_payload(batch_id: str, runs: list) -> dict:
         "cancelled": sum(row["stage"] == "cancelled" for row in rows),
         "cancellation_requested": any(isinstance((run.result_json or {}).get("cancellation"), dict) for run in runs),
         "runs": rows,
+    }
+
+
+def _complete_site_update_status_payload(run, child_runs: list) -> dict:
+    result = run.result_json or {}
+    events = result.get("events", [])
+    events = [event for event in events if isinstance(event, dict)]
+    steps = [
+        {
+            "key": step.step_key,
+            "status": step.status,
+            "detail": step.detail or "",
+        }
+        for step in run.steps
+    ]
+    return {
+        "run_id": run.id,
+        "site_id": run.site.id,
+        "site_domain": run.site.domain,
+        "status": run.status,
+        "stage": result.get("stage", "queued"),
+        "stage_message": result.get("stage_message", ""),
+        "workflow_phase": result.get("workflow_phase", "queued"),
+        "wave": result.get("wave", 0),
+        "max_waves": result.get("max_waves", 0),
+        "successful_updates": result.get("successful_updates", 0),
+        "failed_updates": result.get("failed_updates", 0),
+        "skipped_updates": result.get("skipped_updates", 0),
+        "cancellation_requested": isinstance(result.get("cancellation"), dict),
+        "completed": run.status in {"succeeded", "failed", "skipped"},
+        "events": events,
+        "steps": steps,
+        "child_updates": [
+            {
+                "id": child.id,
+                "status": child.status,
+                "stage": (child.result_json or {}).get("stage", "queued"),
+                "update_kind": (child.result_json or {}).get("update_kind", "plugin"),
+                "update_name": (child.result_json or {}).get("update_name", "Unknown update"),
+                "current_version": (child.result_json or {}).get("current_version", "-"),
+                "target_version": (child.result_json or {}).get("target_version", "-"),
+                "error_message": child.error_message or "",
+            }
+            for child in child_runs
+        ],
     }
 
 

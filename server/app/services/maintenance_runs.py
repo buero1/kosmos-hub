@@ -55,8 +55,10 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
     PLUGIN_INSTALLATION_KIND = "plugin-installation"
+    COMPLETE_SITE_UPDATE_KIND = "complete-site-update"
     DIRECT_UPDATE_FAILURE_STREAK_LIMIT = 5
     LARGE_DIRECT_PLUGIN_BATCH_THRESHOLD = 100
+    COMPLETE_SITE_UPDATE_MAX_WAVES = 3
     FINAL_BRIDGE_PREFLIGHT_MIN_VERSION = "0.3.59"
     FINAL_BRIDGE_PREFLIGHT_RETRY_LIMIT = 2
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
@@ -246,7 +248,7 @@ class MaintenanceRunService:
         selected_site_ids = {entry.site.id for entry in selected_entries}
         active_runs = self.db.scalars(
             select(MaintenanceRun).where(
-                MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+                MaintenanceRun.kind.in_((self.PLUGIN_UPDATE_KIND, self.COMPLETE_SITE_UPDATE_KIND)),
                 MaintenanceRun.status == MaintenanceRunStatus.running.value,
                 MaintenanceRun.site_id.in_(selected_site_ids),
             )
@@ -332,6 +334,169 @@ class MaintenanceRunService:
                 "Each update will recheck the current available version and run a health check afterwards."
             ),
         )
+
+    def start_complete_site_update(self, *, site_id: int, actor: str) -> MaintenanceRunOutcome:
+        """Queue one website for a fresh, ordered WordPress/theme/plugin update workflow."""
+        site = self.repository.get_site(site_id)
+        if site is None:
+            raise ValueError("Site not found.")
+        if site.status != SiteStatus.verified.value:
+            raise ValueError("Only verified sites can start a complete update workflow.")
+
+        active_run = self.db.scalar(
+            select(MaintenanceRun)
+            .where(
+                MaintenanceRun.site_id == site_id,
+                MaintenanceRun.kind.in_(
+                    (
+                        self.PLUGIN_UPDATE_KIND,
+                        self.PLUGIN_INSTALLATION_KIND,
+                        self.COMPLETE_SITE_UPDATE_KIND,
+                    )
+                ),
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.started_at.desc())
+            .limit(1)
+        )
+        if active_run is not None:
+            raise ValueError("This website already has queued or running maintenance.")
+
+        now = datetime.now(UTC)
+        run = MaintenanceRun(
+            site=site,
+            kind=self.COMPLETE_SITE_UPDATE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by=actor,
+            started_at=now,
+            result_json={
+                "stage": "queued",
+                "stage_message": "Queued for a fresh WordPress, theme, and plugin update workflow.",
+                "workflow_phase": "queued",
+                "wave": 0,
+                "max_waves": self.COMPLETE_SITE_UPDATE_MAX_WAVES,
+                "successful_updates": 0,
+                "failed_updates": 0,
+                "skipped_updates": 0,
+                "events": [],
+            },
+        )
+        run.steps.append(
+            MaintenanceRunStep(
+                step_key="workflow",
+                status=MaintenanceRunStepStatus.waiting.value,
+                started_at=now,
+                detail="Waiting to start the full website update workflow.",
+                result_json={},
+            )
+        )
+        self.db.add(run)
+        self.db.flush()
+        write_audit_log(
+            self.db,
+            site=site,
+            actor=actor,
+            source="hub-web",
+            action="start-complete-site-update-run",
+            result="queued",
+            detail=(
+                f"Queued complete site update run {run.id} for {site.domain}: "
+                "WordPress, themes, plugins, and fresh follow-up checks."
+            ),
+            request_id=str(run.id),
+        )
+        self.db.commit()
+        return MaintenanceRunOutcome(
+            run=run,
+            result="started",
+            message=(
+                f"The complete update workflow for {site.domain} was queued. "
+                "Live progress is shown below."
+            ),
+        )
+
+    def get_complete_site_update_run(self, run_id: int) -> MaintenanceRun | None:
+        return self.db.scalar(
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.id == run_id,
+                MaintenanceRun.kind == self.COMPLETE_SITE_UPDATE_KIND,
+            )
+        )
+
+    def complete_site_update_child_runs(self, workflow_run_id: int) -> list[MaintenanceRun]:
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.site))
+            .where(MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND)
+            .order_by(MaintenanceRun.id.asc())
+        )
+        return [
+            run
+            for run in self.db.scalars(statement)
+            if isinstance(run.result_json, dict) and run.result_json.get("workflow_run_id") == workflow_run_id
+        ]
+
+    def next_complete_site_update_run_ids(self, *, limit: int = 1) -> list[int]:
+        """Return queued complete-site workflows; one site is intentionally serial for now."""
+        if limit < 1:
+            return []
+        stale_before = datetime.now(UTC) - timedelta(minutes=10)
+        statement = (
+            select(MaintenanceRun)
+            .where(
+                MaintenanceRun.kind == self.COMPLETE_SITE_UPDATE_KIND,
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.started_at.asc(), MaintenanceRun.id.asc())
+        )
+        run_ids: list[int] = []
+        for run in self.db.scalars(statement):
+            details = run.result_json if isinstance(run.result_json, dict) else {}
+            if details.get("workflow_run_id"):
+                # Complete-site workflows execute their child updates synchronously themselves.
+                continue
+            stage = details.get("stage", "queued")
+            stale_processing = (
+                stage == "processing"
+                and (run.last_checked_at is None or self._as_utc(run.last_checked_at) <= stale_before)
+            )
+            if stage != "queued" and not stale_processing:
+                continue
+            run_ids.append(run.id)
+            if len(run_ids) >= limit:
+                break
+        return run_ids
+
+    def cancel_complete_site_update(self, *, run_id: int, actor: str) -> bool:
+        run = self.get_complete_site_update_run(run_id)
+        if run is None:
+            raise ValueError("The complete update workflow no longer exists.")
+        if run.status != MaintenanceRunStatus.running.value:
+            return False
+        result = dict(run.result_json or {})
+        if isinstance(result.get("cancellation"), dict):
+            return False
+        result["cancellation"] = {
+            "requested_by": actor,
+            "requested_at": datetime.now(UTC).isoformat(),
+        }
+        result["stage_message"] = "Cancellation was requested. The current update will finish safely."
+        run.result_json = result
+        run.last_checked_at = datetime.now(UTC)
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor=actor,
+            source="hub-web",
+            action="cancel-complete-site-update-run",
+            result="requested",
+            detail=f"Cancellation requested for complete site update run {run.id}.",
+            request_id=str(run.id),
+        )
+        self.db.commit()
+        return True
 
     def start_plugin_updates(
         self,
@@ -738,9 +903,533 @@ class MaintenanceRunService:
                 )
         return outcome
 
+    def poll_complete_site_update_run(self, run_id: int) -> str:
+        """Run one complete website workflow while preserving every component outcome."""
+        run = self.db.scalar(
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.id == run_id,
+                MaintenanceRun.kind == self.COMPLETE_SITE_UPDATE_KIND,
+            )
+            .with_for_update()
+        )
+        if run is None or run.status != MaintenanceRunStatus.running.value:
+            return "skipped"
+
+        result = dict(run.result_json or {})
+        result["stage"] = "processing"
+        result["stage_message"] = "Starting the complete website update workflow."
+        run.result_json = result
+        run.last_checked_at = datetime.now(UTC)
+        self._start_complete_site_update_step(
+            run,
+            "workflow",
+            "Running fresh WordPress, theme, and plugin update waves.",
+        )
+        return self._poll_complete_site_update(run)
+
+    def _poll_complete_site_update(self, run: MaintenanceRun) -> str:
+        site = self.repository.get_site(run.site_id)
+        if site is None or site.status != SiteStatus.verified.value:
+            return self._finish_complete_site_update(
+                run,
+                status=MaintenanceRunStatus.failed.value,
+                stage="failed",
+                message="The site is no longer verified for a complete update workflow.",
+            )
+
+        state = dict(run.result_json or {})
+        start_wave = max(1, int(state.get("wave", 0) or 0))
+        failure_streak = 0
+        for wave in range(start_wave, self.COMPLETE_SITE_UPDATE_MAX_WAVES + 1):
+            if self._complete_site_update_cancellation_requested(run):
+                return self._finish_complete_site_update(
+                    run,
+                    status=MaintenanceRunStatus.skipped.value,
+                    stage="cancelled",
+                    message="The complete update workflow was cancelled. Already completed updates remain documented.",
+                )
+
+            self._update_complete_site_update_state(
+                run,
+                workflow_phase="wordpress",
+                wave=wave,
+                stage="processing",
+                stage_message=f"Starting update wave {wave} of {self.COMPLETE_SITE_UPDATE_MAX_WAVES}.",
+            )
+            for phase in ("wordpress", "theme", "plugin"):
+                if self._complete_site_update_cancellation_requested(run):
+                    return self._finish_complete_site_update(
+                        run,
+                        status=MaintenanceRunStatus.skipped.value,
+                        stage="cancelled",
+                        message="The complete update workflow was cancelled. Already completed updates remain documented.",
+                    )
+
+                entries, refresh_error = self._fresh_complete_site_update_entries(run, phase=phase, wave=wave)
+                if refresh_error:
+                    return self._finish_complete_site_update(
+                        run,
+                        status=MaintenanceRunStatus.failed.value,
+                        stage="refresh-failed",
+                        message=refresh_error,
+                    )
+
+                offered_entries = [entry for entry in entries if entry.update_available]
+                executable_entries, blocked_entries = self._complete_site_update_entries_by_readiness(offered_entries)
+                self._update_complete_site_update_state(
+                    run,
+                    workflow_phase=phase,
+                    wave=wave,
+                    stage="processing",
+                    stage_message=(
+                        f"{self._complete_site_update_phase_label(phase)}: "
+                        f"{len(executable_entries)} executable update"
+                        f"{'s' if len(executable_entries) != 1 else ''} found."
+                    ),
+                )
+                if blocked_entries:
+                    self._append_complete_site_update_event(
+                        run,
+                        phase=phase,
+                        wave=wave,
+                        status="blocked",
+                        detail=(
+                            f"{len(blocked_entries)} offered {self._complete_site_update_phase_label(phase).lower()} "
+                            "update(s) are not currently executable."
+                        ),
+                        updates=[self._complete_site_update_entry_summary(entry) for entry in blocked_entries],
+                    )
+
+                for position, entry in enumerate(executable_entries, start=1):
+                    if self._complete_site_update_cancellation_requested(run):
+                        return self._finish_complete_site_update(
+                            run,
+                            status=MaintenanceRunStatus.skipped.value,
+                            stage="cancelled",
+                            message="The complete update workflow was cancelled. Already completed updates remain documented.",
+                        )
+
+                    self._update_complete_site_update_state(
+                        run,
+                        workflow_phase=phase,
+                        wave=wave,
+                        stage="processing",
+                        stage_message=(
+                            f"{self._complete_site_update_phase_label(phase)}: updating {entry.name} "
+                            f"({position}/{len(executable_entries)})."
+                        ),
+                    )
+                    self._append_complete_site_update_event(
+                        run,
+                        phase=phase,
+                        wave=wave,
+                        status="processing",
+                        detail=f"Updating {entry.name} from {entry.current_version} to {entry.target_version}.",
+                        update=self._complete_site_update_entry_summary(entry),
+                    )
+                    child_run = self._create_complete_site_update_child_run(run, entry, phase=phase, wave=wave)
+                    outcome = self._poll_plugin_update(child_run)
+                    child_result = dict(child_run.result_json or {})
+                    child_message = child_run.error_message or child_result.get("stage_message") or "Completed."
+                    self._record_complete_site_update_component_outcome(
+                        run,
+                        phase=phase,
+                        wave=wave,
+                        entry=entry,
+                        outcome=outcome,
+                        detail=str(child_message),
+                        child_run_id=child_run.id,
+                    )
+
+                    if outcome == "failed":
+                        failure_streak += 1
+                        if phase == "wordpress":
+                            return self._finish_complete_site_update(
+                                run,
+                                status=MaintenanceRunStatus.failed.value,
+                                stage="core-update-failed",
+                                message=(
+                                    "The WordPress core update failed, so the complete workflow stopped before "
+                                    "theme and plugin updates."
+                                ),
+                            )
+                        if failure_streak >= self.DIRECT_UPDATE_FAILURE_STREAK_LIMIT:
+                            return self._finish_complete_site_update(
+                                run,
+                                status=MaintenanceRunStatus.failed.value,
+                                stage="failure-limit-reached",
+                                message=(
+                                    f"Stopped after {self.DIRECT_UPDATE_FAILURE_STREAK_LIMIT} consecutive "
+                                    "theme or plugin update failures."
+                                ),
+                            )
+                    else:
+                        failure_streak = 0
+
+            final_entries, refresh_error = self._fresh_complete_site_update_entries(run, phase="verification", wave=wave)
+            if refresh_error:
+                return self._finish_complete_site_update(
+                    run,
+                    status=MaintenanceRunStatus.failed.value,
+                    stage="refresh-failed",
+                    message=refresh_error,
+                )
+            remaining_entries = [entry for entry in final_entries if entry.update_available]
+            executable_remaining, blocked_remaining = self._complete_site_update_entries_by_readiness(remaining_entries)
+            if not remaining_entries:
+                return self._finish_complete_site_update(
+                    run,
+                    status=MaintenanceRunStatus.succeeded.value,
+                    stage="completed",
+                    message="No further WordPress, theme, or plugin updates are currently offered by this website.",
+                )
+            if not executable_remaining:
+                self._append_complete_site_update_event(
+                    run,
+                    phase="verification",
+                    wave=wave,
+                    status="blocked",
+                    detail="Fresh verification still reports offered updates that are not executable.",
+                    updates=[self._complete_site_update_entry_summary(entry) for entry in blocked_remaining],
+                )
+                return self._finish_complete_site_update(
+                    run,
+                    status=MaintenanceRunStatus.failed.value,
+                    stage="updates-blocked",
+                    message="Fresh verification found updates that are currently not executable. Review the recorded blockers.",
+                )
+            if wave == self.COMPLETE_SITE_UPDATE_MAX_WAVES:
+                return self._finish_complete_site_update(
+                    run,
+                    status=MaintenanceRunStatus.failed.value,
+                    stage="wave-limit-reached",
+                    message=(
+                        f"Fresh verification still found updates after {self.COMPLETE_SITE_UPDATE_MAX_WAVES} waves. "
+                        "The remaining offers are documented for review."
+                    ),
+                )
+        return self._finish_complete_site_update(
+            run,
+            status=MaintenanceRunStatus.failed.value,
+            stage="wave-limit-reached",
+            message="The complete update workflow ended before reaching a stable update state.",
+        )
+
+    def _fresh_complete_site_update_entries(
+        self,
+        run: MaintenanceRun,
+        *,
+        phase: str,
+        wave: int,
+    ) -> tuple[list[UpdateWorkbenchEntry], str | None]:
+        label = "final verification" if phase == "verification" else self._complete_site_update_phase_label(phase)
+        step_key = f"wave-{wave}-{phase}-refresh"
+        self._start_complete_site_update_step(run, step_key, f"Refreshing available updates before {label}.")
+        try:
+            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+        except SiteMcpProxyError as exc:
+            self._complete_complete_site_update_step(run, step_key, "failed", f"Fresh update check failed: {exc.message}")
+            return [], f"Fresh update check before {label} failed: {exc.message}"
+
+        inventory = FleetInventoryService(db=self.db, cipher=self.cipher)
+        entries = [
+            entry
+            for entry in inventory.build_update_workbench(inventory.list_items(limit=1000))
+            if entry.site.id == run.site_id
+        ]
+        if phase != "verification":
+            entries = [entry for entry in entries if entry.kind == phase]
+        available_count = sum(entry.update_available for entry in entries)
+        self._complete_complete_site_update_step(
+            run,
+            step_key,
+            "succeeded",
+            f"Fresh update check found {available_count} available {label.lower()} update(s).",
+            result={"available_updates": available_count},
+        )
+        self._append_complete_site_update_event(
+            run,
+            phase=phase,
+            wave=wave,
+            status="refreshed",
+            detail=f"Fresh update check found {available_count} available {label.lower()} update(s).",
+        )
+        return entries, None
+
+    def _create_complete_site_update_child_run(
+        self,
+        workflow_run: MaintenanceRun,
+        entry: UpdateWorkbenchEntry,
+        *,
+        phase: str,
+        wave: int,
+    ) -> MaintenanceRun:
+        now = datetime.now(UTC)
+        update_step_key = self._update_step_key(entry.kind)
+        run = MaintenanceRun(
+            site=workflow_run.site,
+            kind=self.PLUGIN_UPDATE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by=workflow_run.requested_by,
+            started_at=now,
+            result_json={
+                "workflow_run_id": workflow_run.id,
+                "workflow_phase": phase,
+                "workflow_wave": wave,
+                "update_kind": entry.kind,
+                "update_identifier": entry.identifier,
+                "update_name": entry.name,
+                "current_version": entry.current_version,
+                "target_version": entry.target_version,
+                "expected_active": entry.is_active,
+                # The workflow owns this run synchronously; the direct-update worker must not pick it up.
+                "stage": "workflow-processing",
+                "stage_message": "Running as part of the complete website update workflow.",
+            },
+        )
+        run.steps.extend(
+            (
+                MaintenanceRunStep(
+                    step_key="preflight",
+                    status=MaintenanceRunStepStatus.waiting.value,
+                    started_at=now,
+                    detail="Waiting for the final on-site Bridge update check.",
+                    result_json={},
+                ),
+                MaintenanceRunStep(
+                    step_key=update_step_key,
+                    status=MaintenanceRunStepStatus.waiting.value,
+                    started_at=now,
+                    detail="Waiting for the preflight to pass.",
+                    result_json={},
+                ),
+                MaintenanceRunStep(
+                    step_key="postflight-health",
+                    status=MaintenanceRunStepStatus.waiting.value,
+                    started_at=now,
+                    detail="Waiting for the selected update to complete.",
+                    result_json={},
+                ),
+            )
+        )
+        self.db.add(run)
+        self.db.flush()
+        self.db.commit()
+        return run
+
+    def _complete_site_update_entries_by_readiness(
+        self,
+        entries: list[UpdateWorkbenchEntry],
+    ) -> tuple[list[UpdateWorkbenchEntry], list[UpdateWorkbenchEntry]]:
+        has_stored_crocoblock_license = self._has_stored_crocoblock_license()
+        executable: list[UpdateWorkbenchEntry] = []
+        blocked: list[UpdateWorkbenchEntry] = []
+        for entry in entries:
+            scope_error = self._direct_plugin_update_scope_error(
+                entry,
+                allow_stored_crocoblock_license=True,
+                has_stored_crocoblock_license=has_stored_crocoblock_license,
+            )
+            if entry.direct_update_selectable and scope_error is None:
+                executable.append(entry)
+            else:
+                blocked.append(entry)
+        return executable, blocked
+
+    def _record_complete_site_update_component_outcome(
+        self,
+        run: MaintenanceRun,
+        *,
+        phase: str,
+        wave: int,
+        entry: UpdateWorkbenchEntry,
+        outcome: str,
+        detail: str,
+        child_run_id: int,
+    ) -> None:
+        result = dict(run.result_json or {})
+        counter_key = {
+            "succeeded": "successful_updates",
+            "failed": "failed_updates",
+            "skipped": "skipped_updates",
+        }.get(outcome, "failed_updates")
+        result[counter_key] = int(result.get(counter_key, 0) or 0) + 1
+        run.result_json = result
+        self._append_complete_site_update_event(
+            run,
+            phase=phase,
+            wave=wave,
+            status=outcome,
+            detail=detail,
+            update={**self._complete_site_update_entry_summary(entry), "run_id": child_run_id},
+        )
+
+    @staticmethod
+    def _complete_site_update_entry_summary(entry: UpdateWorkbenchEntry) -> dict[str, str]:
+        return {
+            "kind": entry.kind,
+            "name": entry.name,
+            "identifier": entry.identifier,
+            "current_version": entry.current_version,
+            "target_version": entry.target_version,
+        }
+
+    @staticmethod
+    def _complete_site_update_phase_label(phase: str) -> str:
+        return {
+            "wordpress": "WordPress",
+            "theme": "Themes",
+            "plugin": "Plugins",
+            "verification": "Final verification",
+        }.get(phase, "Workflow")
+
+    def _complete_site_update_cancellation_requested(self, run: MaintenanceRun) -> bool:
+        # A cancellation is written by a separate request/session while this worker is running.
+        self.db.refresh(run, attribute_names=["result_json"])
+        return isinstance((run.result_json or {}).get("cancellation"), dict)
+
+    def _update_complete_site_update_state(self, run: MaintenanceRun, **updates: Any) -> None:
+        result = dict(run.result_json or {})
+        result.update(updates)
+        run.result_json = result
+        run.last_checked_at = datetime.now(UTC)
+        self.db.commit()
+
+    def _append_complete_site_update_event(
+        self,
+        run: MaintenanceRun,
+        *,
+        phase: str,
+        wave: int,
+        status: str,
+        detail: str,
+        update: dict[str, Any] | None = None,
+        updates: list[dict[str, Any]] | None = None,
+    ) -> None:
+        result = dict(run.result_json or {})
+        events = list(result.get("events", []))
+        event: dict[str, Any] = {
+            "phase": phase,
+            "wave": wave,
+            "status": status,
+            "detail": detail,
+            "recorded_at": datetime.now(UTC).isoformat(),
+        }
+        if update is not None:
+            event["update"] = update
+        if updates is not None:
+            event["updates"] = updates
+        events.append(event)
+        result["events"] = events[-150:]
+        run.result_json = result
+        run.last_checked_at = datetime.now(UTC)
+        self.db.commit()
+
+    def _start_complete_site_update_step(self, run: MaintenanceRun, step_key: str, detail: str) -> None:
+        now = datetime.now(UTC)
+        step = self._find_step(run, step_key)
+        if step is None:
+            step = MaintenanceRunStep(
+                step_key=step_key,
+                status=MaintenanceRunStepStatus.running.value,
+                started_at=now,
+                detail=detail,
+                result_json={},
+            )
+            run.steps.append(step)
+        else:
+            step.status = MaintenanceRunStepStatus.running.value
+            step.started_at = now
+            step.completed_at = None
+            step.detail = detail
+        run.last_checked_at = now
+        self.db.commit()
+
+    def _complete_complete_site_update_step(
+        self,
+        run: MaintenanceRun,
+        step_key: str,
+        status: str,
+        detail: str,
+        *,
+        result: dict[str, Any] | None = None,
+    ) -> None:
+        step = self._find_step(run, step_key)
+        if step is None:
+            return
+        step.status = status
+        step.completed_at = datetime.now(UTC)
+        step.detail = detail
+        step.result_json = dict(result or {})
+        run.last_checked_at = step.completed_at
+        self.db.commit()
+
+    def _finish_complete_site_update(
+        self,
+        run: MaintenanceRun,
+        *,
+        status: str,
+        stage: str,
+        message: str,
+    ) -> str:
+        completed_at = datetime.now(UTC)
+        result = dict(run.result_json or {})
+        result.update({"stage": stage, "stage_message": message})
+        run.status = status
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.error_message = message if status == MaintenanceRunStatus.failed.value else None
+        run.result_json = result
+        workflow_step = self._find_step(run, "workflow")
+        if workflow_step is not None:
+            workflow_step.status = (
+                MaintenanceRunStepStatus.succeeded.value
+                if status == MaintenanceRunStatus.succeeded.value
+                else MaintenanceRunStepStatus.skipped.value
+                if status == MaintenanceRunStatus.skipped.value
+                else MaintenanceRunStepStatus.failed.value
+            )
+            workflow_step.completed_at = completed_at
+            workflow_step.detail = message
+        for step in run.steps:
+            if step is workflow_step:
+                continue
+            if step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}:
+                step.status = MaintenanceRunStepStatus.skipped.value
+                step.completed_at = completed_at
+                step.detail = "Not run because the complete workflow finished."
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-site-update-run",
+            result=status,
+            detail=f"Complete site update run {run.id}: {message}",
+            request_id=str(run.id),
+        )
+        self.db.commit()
+        return "succeeded" if status == MaintenanceRunStatus.succeeded.value else "skipped" if status == MaintenanceRunStatus.skipped.value else "failed"
+
     def fail_direct_update_worker_run(self, run_id: int) -> None:
         """Persist an unexpected worker failure instead of leaving a run stuck."""
         self.fail_direct_maintenance_worker_run(run_id)
+
+    def fail_complete_site_update_worker_run(self, run_id: int) -> None:
+        run = self.get_complete_site_update_run(run_id)
+        if run is None or run.status != MaintenanceRunStatus.running.value:
+            return
+        self._finish_complete_site_update(
+            run,
+            status=MaintenanceRunStatus.failed.value,
+            stage="worker-failed",
+            message=(
+                "The Hub complete-update worker stopped unexpectedly. "
+                "Already completed component updates remain documented."
+            ),
+        )
 
     def fail_direct_maintenance_worker_run(self, run_id: int) -> None:
         statement = (

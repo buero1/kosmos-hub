@@ -9,6 +9,7 @@ from app.services.maintenance_runs import MaintenanceRunService
 
 
 _direct_update_poll_lock = Lock()
+_complete_site_update_poll_lock = Lock()
 logger = logging.getLogger(__name__)
 
 
@@ -65,10 +66,60 @@ def _process_direct_update_run(run_id: int) -> str:
         return "failed"
 
 
+def process_pending_complete_site_updates() -> dict[str, int]:
+    """Run one full website workflow at a time while its component updates stay serial."""
+    empty_result = {"checked": 0, "succeeded": 0, "failed": 0, "waiting": 0, "skipped": 0}
+    if not _complete_site_update_poll_lock.acquire(blocking=False):
+        return empty_result
+
+    try:
+        summary = dict(empty_result)
+        while True:
+            with SessionLocal() as db:
+                service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+                run_ids = service.next_complete_site_update_run_ids(limit=1)
+            if not run_ids:
+                return summary
+
+            for run_id in run_ids:
+                summary["checked"] += 1
+                outcome = _process_complete_site_update_run(run_id)
+                if outcome not in summary:
+                    outcome = "failed"
+                summary[outcome] += 1
+    finally:
+        _complete_site_update_poll_lock.release()
+
+
+def _process_complete_site_update_run(run_id: int) -> str:
+    try:
+        with SessionLocal() as db:
+            service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+            return service.poll_complete_site_update_run(run_id)
+    except Exception:
+        logger.exception("Complete site update worker failed for maintenance run %s.", run_id)
+        try:
+            with SessionLocal() as db:
+                service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+                service.fail_complete_site_update_worker_run(run_id)
+        except Exception:
+            logger.exception("Could not persist complete site update worker failure for maintenance run %s.", run_id)
+        return "failed"
+
+
 def schedule_pending_direct_updates() -> None:
     """Start processing without holding the originating web request open."""
     Thread(
         target=process_pending_direct_updates,
         name="kosmos-direct-update-worker",
+        daemon=True,
+    ).start()
+
+
+def schedule_pending_complete_site_updates() -> None:
+    """Start the single-site complete workflow without holding the web request open."""
+    Thread(
+        target=process_pending_complete_site_updates,
+        name="kosmos-complete-site-update-worker",
         daemon=True,
     ).start()

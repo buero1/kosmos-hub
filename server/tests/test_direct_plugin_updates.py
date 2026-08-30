@@ -375,6 +375,111 @@ def test_direct_update_batch_cancellation_stops_queued_updates_but_keeps_process
         assert queued.steps[0].status == MaintenanceRunStepStatus.skipped.value
 
 
+def test_complete_site_update_starts_with_a_single_live_parent_run_and_can_be_cancelled():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="f23dcd24-56ef-78ab-90cd-12ef34ab56cd",
+            domain="complete-workflow.example",
+            home_url="https://complete-workflow.example",
+            site_url="https://complete-workflow.example",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=None)
+        outcome = service.start_complete_site_update(site_id=site.id, actor="operator")
+
+        assert outcome.result == "started"
+        assert outcome.run.kind == MaintenanceRunService.COMPLETE_SITE_UPDATE_KIND
+        assert outcome.run.result_json["stage"] == "queued"
+        assert outcome.run.result_json["max_waves"] == 3
+        assert [step.step_key for step in outcome.run.steps] == ["workflow"]
+        assert service.next_complete_site_update_run_ids() == [outcome.run.id]
+
+        assert service.cancel_complete_site_update(run_id=outcome.run.id, actor="operator") is True
+        cancelled = service.get_complete_site_update_run(outcome.run.id)
+        assert cancelled is not None
+        assert cancelled.result_json["cancellation"]["requested_by"] == "operator"
+
+
+def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_stable(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    def entry(kind, name, identifier, current, target):
+        return SimpleNamespace(
+            kind=kind,
+            name=name,
+            identifier=identifier,
+            current_version=current,
+            target_version=target,
+            update_available=True,
+        )
+
+    phase_entries = {
+        "wordpress": [entry("wordpress", "WordPress core", "wordpress-core", "6.8.8", "7.1")],
+        "theme": [entry("theme", "Hello Elementor", "hello-elementor", "3.2.0", "3.2.1")],
+        "plugin": [entry("plugin", "Elementor", "elementor/elementor.php", "3.30.0", "3.30.1")],
+        "verification": [],
+    }
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="c23dcd24-56ef-78ab-90cd-12ef34ab56cd",
+            domain="workflow-phases.example",
+            home_url="https://workflow-phases.example",
+            site_url="https://workflow-phases.example",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=None)
+        outcome = service.start_complete_site_update(site_id=site.id, actor="operator")
+        run = service.get_complete_site_update_run(outcome.run.id)
+        assert run is not None
+
+        fresh_phases = []
+        child_runs = []
+
+        def fresh_entries(_run, *, phase, wave):
+            fresh_phases.append((phase, wave))
+            return phase_entries[phase], None
+
+        def create_child(_run, update, *, phase, wave):
+            child = SimpleNamespace(id=len(child_runs) + 1, result_json={}, error_message=None)
+            child_runs.append((phase, wave, update.name))
+            return child
+
+        def complete_child(child):
+            child.result_json = {"stage_message": "Updated and verified."}
+            return "succeeded"
+
+        monkeypatch.setattr(service, "_fresh_complete_site_update_entries", fresh_entries)
+        monkeypatch.setattr(service, "_complete_site_update_entries_by_readiness", lambda entries: (entries, []))
+        monkeypatch.setattr(service, "_create_complete_site_update_child_run", create_child)
+        monkeypatch.setattr(service, "_poll_plugin_update", complete_child)
+
+        assert service.poll_complete_site_update_run(run.id) == "succeeded"
+
+        completed = service.get_complete_site_update_run(run.id)
+        assert completed is not None
+        assert completed.status == MaintenanceRunStatus.succeeded.value
+        assert fresh_phases == [("wordpress", 1), ("theme", 1), ("plugin", 1), ("verification", 1)]
+        assert child_runs == [
+            ("wordpress", 1, "WordPress core"),
+            ("theme", 1, "Hello Elementor"),
+            ("plugin", 1, "Elementor"),
+        ]
+        assert completed.result_json["successful_updates"] == 3
+        assert any(event["status"] == "processing" for event in completed.result_json["events"])
+        assert any(event["status"] == "succeeded" for event in completed.result_json["events"])
+
+
 def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():
     details = {
         "update_name": "Kosmos Bridge",
