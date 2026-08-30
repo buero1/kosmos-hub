@@ -64,6 +64,7 @@ class MaintenanceRunService:
     """Run bounded maintenance tasks and persist evidence for later automation."""
 
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
+    UPDRAFT_BACKUP_DELETE_KIND = "updraftplus-backup-delete"
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
     PLUGIN_INSTALLATION_KIND = "plugin-installation"
     COMPLETE_SITE_UPDATE_KIND = "complete-site-update"
@@ -274,7 +275,13 @@ class MaintenanceRunService:
             reconciled += 1
         return reconciled
 
-    def start_updraftplus_backup(self, *, site_id: int, actor: str) -> MaintenanceRunOutcome:
+    def start_updraftplus_backup(
+        self,
+        *,
+        site_id: int,
+        actor: str,
+        cleanup_oldest: bool = True,
+    ) -> MaintenanceRunOutcome:
         site = self.repository.get_site(site_id)
         if site is None:
             raise ValueError("Site not found.")
@@ -285,7 +292,7 @@ class MaintenanceRunService:
             select(MaintenanceRun)
             .where(
                 MaintenanceRun.site_id == site_id,
-                MaintenanceRun.kind == self.UPDRAFT_BACKUP_KIND,
+                MaintenanceRun.kind.in_((self.UPDRAFT_BACKUP_KIND, self.UPDRAFT_BACKUP_DELETE_KIND)),
                 MaintenanceRun.status == MaintenanceRunStatus.running.value,
             )
             .order_by(MaintenanceRun.started_at.desc())
@@ -295,7 +302,7 @@ class MaintenanceRunService:
             return MaintenanceRunOutcome(
                 run=active_run,
                 result="blocked",
-                message="A fresh UpdraftPlus backup is already running for this site.",
+                message="An UpdraftPlus backup action is already running for this site.",
             )
 
         now = datetime.now(UTC)
@@ -305,7 +312,7 @@ class MaintenanceRunService:
             status=MaintenanceRunStatus.running.value,
             requested_by=actor,
             started_at=now,
-            result_json={},
+            result_json={"cleanup_oldest": cleanup_oldest},
         )
         request_step = MaintenanceRunStep(
             run=run,
@@ -350,6 +357,7 @@ class MaintenanceRunService:
             "provider": "updraftplus",
             "backup_nonce": backup_nonce,
             "retention_protection_requested": True,
+            "cleanup_oldest": cleanup_oldest,
             "bridge_status": bridge_status,
             "bridge_status_message": bridge_message,
             "scheduled_at": self._safe_string(result.get("scheduled_at")),
@@ -382,7 +390,101 @@ class MaintenanceRunService:
         return MaintenanceRunOutcome(
             run=run,
             result="started",
-            message="The protected UpdraftPlus backup was queued for immediate background processing. The Hub will verify it automatically.",
+            message=(
+                "The protected UpdraftPlus backup was queued. The Hub will verify it and remove the oldest eligible backup afterwards."
+                if cleanup_oldest
+                else "The protected UpdraftPlus backup was queued. The Hub will verify it without automatic cleanup."
+            ),
+        )
+
+    def start_updraftplus_backup_deletion(
+        self,
+        *,
+        site_id: int,
+        selections: list[str],
+        actor: str,
+    ) -> MaintenanceRunOutcome:
+        site = self.repository.get_site(site_id)
+        if site is None:
+            raise ValueError("Site not found.")
+        if site.status != SiteStatus.verified.value:
+            raise ValueError("Only verified sites can start a maintenance run.")
+
+        active_run = self.db.scalar(
+            select(MaintenanceRun)
+            .where(
+                MaintenanceRun.site_id == site_id,
+                MaintenanceRun.kind.in_((self.UPDRAFT_BACKUP_KIND, self.UPDRAFT_BACKUP_DELETE_KIND)),
+                MaintenanceRun.status == MaintenanceRunStatus.running.value,
+            )
+            .order_by(MaintenanceRun.started_at.desc())
+            .limit(1)
+        )
+        if active_run is not None:
+            return MaintenanceRunOutcome(
+                run=active_run,
+                result="blocked",
+                message="An UpdraftPlus backup action is already running for this site.",
+            )
+
+        selected_identities = self._selected_backup_identities(selections)
+        if not selected_identities:
+            raise ValueError("Select at least one backup before deleting it.")
+
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                site_id,
+                self.LIST_BACKUPS_ABILITY,
+                {},
+                timeout_seconds=30,
+            )
+        except SiteMcpProxyError as exc:
+            raise ValueError(f"Backups could not be checked before deletion: {exc.message}") from exc
+
+        backup_targets = self._selected_backup_targets(
+            self._result_from_payload(payload).get("backups"),
+            selected_identities,
+        )
+        if len(backup_targets) != len(selected_identities):
+            raise ValueError("One or more selected backups no longer match the current UpdraftPlus history. Check backups and try again.")
+
+        now = datetime.now(UTC)
+        run = MaintenanceRun(
+            site=site,
+            kind=self.UPDRAFT_BACKUP_DELETE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by=actor,
+            started_at=now,
+            result_json={"operation": "delete-selected", "target_count": len(backup_targets)},
+        )
+        self.db.add(run)
+        self.db.flush()
+        for index, target in enumerate(backup_targets, start=1):
+            self.db.add(
+                MaintenanceRunStep(
+                    run=run,
+                    step_key=f"delete-backup-{index}",
+                    status=MaintenanceRunStepStatus.waiting.value,
+                    started_at=now,
+                    detail=f"Queued deletion of the backup from {target['backup_at']}.",
+                    result_json=target,
+                )
+            )
+        write_audit_log(
+            self.db,
+            site=site,
+            actor=actor,
+            source="hub-web",
+            action="start-updraftplus-backup-deletion-run",
+            result="running",
+            detail=f"Queued deletion of {len(backup_targets)} selected UpdraftPlus backup set(s).",
+        )
+        self.db.commit()
+        self.db.refresh(run)
+        return MaintenanceRunOutcome(
+            run=run,
+            result="started",
+            message=f"The deletion of {len(backup_targets)} selected backup set(s) was queued and will be verified against remote storage.",
         )
 
     def start_direct_updates(
@@ -3232,7 +3334,7 @@ class MaintenanceRunService:
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(
-                MaintenanceRun.kind == self.UPDRAFT_BACKUP_KIND,
+                MaintenanceRun.kind.in_((self.UPDRAFT_BACKUP_KIND, self.UPDRAFT_BACKUP_DELETE_KIND)),
                 MaintenanceRun.status == MaintenanceRunStatus.running.value,
             )
             .order_by(MaintenanceRun.started_at.asc())
@@ -3242,7 +3344,11 @@ class MaintenanceRunService:
         summary = {"checked": 0, "succeeded": 0, "failed": 0, "waiting": 0}
         for run in runs:
             summary["checked"] += 1
-            outcome = self._poll_updraftplus_backup(run)
+            outcome = (
+                self._poll_updraftplus_backup_deletion(run)
+                if run.kind == self.UPDRAFT_BACKUP_DELETE_KIND
+                else self._poll_updraftplus_backup(run)
+            )
             summary[outcome] += 1
         return summary
 
@@ -3253,7 +3359,11 @@ class MaintenanceRunService:
             return "failed"
 
         if self._backup_was_verified(run):
-            return self._poll_updraftplus_backup_cleanup(run)
+            return (
+                self._poll_updraftplus_backup_cleanup(run)
+                if self._backup_cleanup_requested(run)
+                else self._complete_updraftplus_backup_after_verification(run)
+            )
 
         if now - self._as_utc(run.started_at) > self.BACKUP_TIMEOUT:
             self._fail_run(
@@ -3313,8 +3423,12 @@ class MaintenanceRunService:
                 "components": snapshot.components_json,
                 "retention_protected": True,
                 "backup_verified": True,
-                "bridge_status": "cleanup",
-                "bridge_status_message": "The protected backup was verified. The Hub is now checking the oldest eligible backup for cleanup.",
+                "bridge_status": "cleanup" if self._backup_cleanup_requested(run) else "completed",
+                "bridge_status_message": (
+                    "The protected backup was verified. The Hub is now checking the oldest eligible backup for cleanup."
+                    if self._backup_cleanup_requested(run)
+                    else "The protected backup was verified without automatic cleanup."
+                ),
             }
             if verification_step is not None:
                 verification_step.status = MaintenanceRunStepStatus.succeeded.value
@@ -3322,7 +3436,11 @@ class MaintenanceRunService:
                 verification_step.detail = "UpdraftPlus recorded the requested complete backup and its protection from automatic deletion."
                 verification_step.result_json = dict(run.result_json)
             self.db.commit()
-            return self._poll_updraftplus_backup_cleanup(run)
+            return (
+                self._poll_updraftplus_backup_cleanup(run)
+                if self._backup_cleanup_requested(run)
+                else self._complete_updraftplus_backup_after_verification(run)
+            )
 
         self._mark_waiting(
             run,
@@ -3330,6 +3448,195 @@ class MaintenanceRunService:
             self._backup_waiting_detail(bridge_status, bridge_message),
         )
         return "waiting"
+
+    def _complete_updraftplus_backup_after_verification(self, run: MaintenanceRun) -> str:
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = datetime.now(UTC)
+        run.last_checked_at = run.completed_at
+        run.result_json = {
+            **(run.result_json or {}),
+            "bridge_status": "completed",
+            "bridge_status_message": "The protected backup was verified without automatic cleanup.",
+            "cleanup": {
+                "status": "not-requested",
+                "message": "Automatic cleanup was not requested for this backup.",
+                "backup_sets_removed": 0,
+                "local_files_deleted": 0,
+                "remote_files_deleted": 0,
+            },
+        }
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-updraftplus-backup-run",
+            result="succeeded",
+            detail=f"Maintenance run {run.id} verified a fresh protected backup without cleanup.",
+        )
+        self.db.commit()
+        return "succeeded"
+
+    def _poll_updraftplus_backup_deletion(self, run: MaintenanceRun) -> str:
+        steps = sorted(run.steps, key=lambda step: step.id)
+        pending_step = next(
+            (
+                step
+                for step in steps
+                if step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}
+            ),
+            None,
+        )
+        if pending_step is None:
+            return self._complete_updraftplus_backup_deletion(run, steps)
+
+        target = dict(pending_step.result_json or {})
+        backup_nonce = target.get("backup_nonce")
+        backup_timestamp = target.get("backup_timestamp")
+        if not self._is_backup_nonce(backup_nonce) or not isinstance(backup_timestamp, int) or backup_timestamp <= 0:
+            self._fail_updraftplus_backup_deletion_step(
+                pending_step,
+                "The selected backup has no valid UpdraftPlus identity.",
+            )
+            return "waiting"
+
+        if pending_step.status == MaintenanceRunStepStatus.waiting.value:
+            pending_step.status = MaintenanceRunStepStatus.running.value
+
+        if datetime.now(UTC) - self._as_utc(pending_step.started_at) > self.BACKUP_TIMEOUT:
+            self._fail_updraftplus_backup_deletion_step(
+                pending_step,
+                "UpdraftPlus did not finish deleting the selected backup within three minutes.",
+            )
+            return "waiting"
+
+        if target.get("deletion_status") == "verifying":
+            return self._verify_updraftplus_backup_deletion_step(run, pending_step, target)
+
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.DELETE_BACKUP_ABILITY,
+                {
+                    "backup_nonce": backup_nonce,
+                    "backup_timestamp": backup_timestamp,
+                    "delete_remote": True,
+                    "allow_protected_delete": True,
+                },
+                timeout_seconds=self.DELETE_BACKUP_TIMEOUT_SECONDS,
+            )
+        except SiteMcpProxyError as exc:
+            self._fail_updraftplus_backup_deletion_step(pending_step, exc.message)
+            return "waiting"
+
+        result = self._result_from_payload(payload)
+        message = self._safe_message(result.get("message"), "UpdraftPlus did not return a deletion result.")
+        target = {
+            **target,
+            "deletion_status": self._safe_string(result.get("status")) or "failed",
+            "backup_sets_removed": self._non_negative_int(result.get("backup_sets_removed")),
+            "local_files_deleted": self._non_negative_int(result.get("local_files_deleted")),
+            "remote_files_deleted": self._non_negative_int(result.get("remote_files_deleted")),
+            "message": message,
+        }
+        pending_step.result_json = target
+        if target["deletion_status"] == "completed" and result.get("completed") is True:
+            pending_step.detail = "UpdraftPlus reported deletion. The Hub is checking remote storage."
+            pending_step.result_json = {**target, "deletion_status": "verifying"}
+            self._mark_waiting(run, pending_step, pending_step.detail)
+            return "waiting"
+        if target["deletion_status"] == "running":
+            pending_step.detail = message
+            self._mark_waiting(run, pending_step, message)
+            return "waiting"
+
+        self._fail_updraftplus_backup_deletion_step(pending_step, message)
+        return "waiting"
+
+    def _verify_updraftplus_backup_deletion_step(
+        self,
+        run: MaintenanceRun,
+        step: MaintenanceRunStep,
+        target: dict[str, Any],
+    ) -> str:
+        try:
+            payload = self.proxy.execute_readonly_ability(
+                run.site_id,
+                self.VERIFY_BACKUP_DELETION_ABILITY,
+                {
+                    "backup_nonce": target["backup_nonce"],
+                    "backup_timestamp": target["backup_timestamp"],
+                },
+                timeout_seconds=self.REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS,
+            )
+        except SiteMcpProxyError as exc:
+            self._mark_waiting(run, step, f"Backup deletion verification will retry: {exc.message}")
+            return "waiting"
+
+        result = self._result_from_payload(payload)
+        message = self._safe_message(result.get("message"), "UpdraftPlus did not return a remote deletion verification result.")
+        if result.get("verified") is True:
+            step.status = MaintenanceRunStepStatus.succeeded.value
+            step.completed_at = datetime.now(UTC)
+            step.detail = message
+            step.result_json = {**target, "deletion_status": "completed", "remote_deletion_verified": True, "message": message}
+            self.db.commit()
+            return "waiting"
+
+        remaining_components = result.get("remaining_components")
+        components = ", ".join(component for component in remaining_components if isinstance(component, str)) if isinstance(remaining_components, list) else ""
+        detail = f" Remaining components: {components}." if components else ""
+        self._fail_updraftplus_backup_deletion_step(
+            step,
+            f"Backup deletion was not confirmed by the UpdraftPlus remote rescan: {message}{detail}",
+        )
+        return "waiting"
+
+    def _fail_updraftplus_backup_deletion_step(self, step: MaintenanceRunStep, message: str) -> None:
+        step.status = MaintenanceRunStepStatus.failed.value
+        step.completed_at = datetime.now(UTC)
+        step.detail = message
+        step.result_json = {**(step.result_json or {}), "deletion_status": "failed", "message": message}
+        self.db.commit()
+
+    def _complete_updraftplus_backup_deletion(
+        self,
+        run: MaintenanceRun,
+        steps: list[MaintenanceRunStep],
+    ) -> str:
+        failed_steps = [step for step in steps if step.status == MaintenanceRunStepStatus.failed.value]
+        completed_at = datetime.now(UTC)
+        run.status = MaintenanceRunStatus.failed.value if failed_steps else MaintenanceRunStatus.succeeded.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        refresh_error = ""
+        try:
+            SiteBackupService(db=self.db, cipher=self.cipher).refresh_site_backup_status(run.site_id)
+        except SiteMcpProxyError as exc:
+            refresh_error = exc.message
+        run.result_json = {
+            **(run.result_json or {}),
+            "completed_count": len(steps) - len(failed_steps),
+            "failed_count": len(failed_steps),
+            "backup_list_refresh_error": refresh_error or None,
+        }
+        if failed_steps:
+            run.error_message = f"{len(failed_steps)} of {len(steps)} selected backup deletion(s) could not be verified."
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-updraftplus-backup-deletion-run",
+            result=run.status,
+            detail=(
+                f"Deleted and verified {len(steps) - len(failed_steps)} of {len(steps)} selected UpdraftPlus backup set(s)."
+                if not failed_steps
+                else f"Verified {len(steps) - len(failed_steps)} of {len(steps)} selected UpdraftPlus backup deletion(s)."
+            ),
+        )
+        self.db.commit()
+        return run.status
 
     def _poll_updraftplus_backup_cleanup(self, run: MaintenanceRun) -> str:
         cleanup_step = self._find_step(run, "prune-oldest-backup")
@@ -3569,6 +3876,59 @@ class MaintenanceRunService:
             and backup["retention_protected"] is True
         ]
         return min(candidates, key=lambda candidate: candidate["backup_timestamp"]) if candidates else None
+
+    @classmethod
+    def _selected_backup_identities(cls, selections: list[str]) -> list[tuple[str, int]]:
+        identities: list[tuple[str, int]] = []
+        for selection in dict.fromkeys(selection for selection in selections if selection):
+            backup_nonce, separator, raw_timestamp = selection.partition(":")
+            try:
+                backup_timestamp = int(raw_timestamp)
+            except (TypeError, ValueError):
+                backup_timestamp = 0
+            if separator != ":" or not cls._is_backup_nonce(backup_nonce) or backup_timestamp <= 0:
+                raise ValueError("One or more selected backups have an invalid identity.")
+            identities.append((backup_nonce, backup_timestamp))
+        return identities
+
+    @classmethod
+    def _selected_backup_targets(
+        cls,
+        backups: object,
+        selected_identities: list[tuple[str, int]],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(backups, list):
+            return []
+
+        available: dict[tuple[str, int], dict[str, Any]] = {}
+        for backup in backups:
+            if not isinstance(backup, dict):
+                continue
+            backup_nonce = backup.get("backup_nonce")
+            backup_timestamp = backup.get("backup_timestamp")
+            backup_at = backup.get("backup_at")
+            if (
+                not cls._is_backup_nonce(backup_nonce)
+                or not isinstance(backup_timestamp, int)
+                or isinstance(backup_timestamp, bool)
+                or backup_timestamp <= 0
+                or not isinstance(backup_at, str)
+                or not backup_at.strip()
+            ):
+                continue
+            available[(backup_nonce, backup_timestamp)] = {
+                "backup_nonce": backup_nonce,
+                "backup_timestamp": backup_timestamp,
+                "backup_at": backup_at,
+                "complete": backup.get("complete") is True,
+                "retention_protected": backup.get("retention_protected") is True,
+            }
+        return [available[identity] for identity in selected_identities if identity in available]
+
+    @staticmethod
+    def _backup_cleanup_requested(run: MaintenanceRun) -> bool:
+        # Older queued runs used cleanup by default before the optional no-prune mode existed.
+        return (run.result_json or {}).get("cleanup_oldest", True) is True
 
     @staticmethod
     def _cleanup_result(run: MaintenanceRun) -> dict[str, Any]:

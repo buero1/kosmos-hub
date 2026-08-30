@@ -22,12 +22,16 @@ def test_backup_refresh_stores_every_updraftplus_backup_set(monkeypatch):
                 "message": "UpdraftPlus backup metadata was read successfully.",
                 "backups": [
                     {
+                        "backup_nonce": "a1b2c3d4e5f6",
+                        "backup_timestamp": 1787824800,
                         "backup_at": "2026-08-27T10:00:00+00:00",
                         "complete": False,
                         "retention_protected": False,
                         "components": ["database"],
                     },
                     {
+                        "backup_nonce": "b1b2c3d4e5f6",
+                        "backup_timestamp": 1787832000,
                         "backup_at": "2026-08-27T12:00:00+00:00",
                         "complete": True,
                         "retention_protected": True,
@@ -56,3 +60,5 @@ def test_backup_refresh_stores_every_updraftplus_backup_set(monkeypatch):
         assert snapshot.backup_at.isoformat() == "2026-08-27T12:00:00"
         assert snapshot.summary_json["backup_list_available"] is True
         assert [backup["complete"] for backup in snapshot.summary_json["backups"]] == [True, False]
+        assert snapshot.summary_json["backups"][0]["backup_nonce"] == "b1b2c3d4e5f6"
+        assert snapshot.summary_json["backups"][0]["backup_timestamp"] == 1787832000

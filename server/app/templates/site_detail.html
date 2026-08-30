@@ -3,7 +3,7 @@
 {% block content %}
   {% set maintenance_runs = maintenance_run_history | map(attribute="runs") | sum(start=[]) %}
   {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
-  {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "equalto", "updraftplus-backup") | list %}
+  {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "in", ["updraftplus-backup", "updraftplus-backup-delete"]) | list %}
   {% set running_update_runs = running_maintenance_runs | selectattr("kind", "equalto", "direct-plugin-update") | list %}
 
   <div class="site-detail-layout">
@@ -36,6 +36,13 @@
         {% endif %}
       {% elif request.query_params.get("backup_refresh") == "error" %}
         <p class="notice-error">Backup check failed: {{ request.query_params.get("message") }}</p>
+      {% endif %}
+      {% if request.query_params.get("backup_action") == "ok" %}
+        <p class="notice-success">{{ request.query_params.get("message") }}</p>
+      {% elif request.query_params.get("backup_action") == "started" %}
+        <p class="notice-success">{{ request.query_params.get("message") }}</p>
+      {% elif request.query_params.get("backup_action") in ["blocked", "failed", "error"] %}
+        <p class="notice-error">{{ request.query_params.get("message") }}</p>
       {% endif %}
       {% if request.query_params.get("maintenance") == "started" %}
         <p class="notice-success">{{ request.query_params.get("message") }}</p>
@@ -161,13 +168,15 @@
           <div>
             <p class="eyebrow">Data protection</p>
             <h2 id="backups-heading">Backups</h2>
-            <p class="subtle">Read all UpdraftPlus backup sets or create one verified protected backup.</p>
+            <p class="subtle">Create, verify, or delete complete UpdraftPlus backup sets using one checked action.</p>
           </div>
         </div>
-        <article class="card backup-status-card">
-          <div>
-            <h3>UpdraftPlus status</h3>
-            {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
+        {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
+        <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <article class="card backup-status-card">
+            <div>
+              <h3>UpdraftPlus status</h3>
             {% if latest_backup %}
               <p><strong>Checked:</strong> {{ latest_backup.captured_at | berlin_time }}</p>
               <p><strong>Provider:</strong> {{ latest_backup.provider }}</p>
@@ -180,43 +189,63 @@
             {% else %}
               <p>No backup status checked yet.</p>
             {% endif %}
-          </div>
-          <div class="backup-actions">
-            <form method="post" action="/sites/{{ site.id }}/backup-refresh">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Check backups</button>
-            </form>
-            <form method="post" action="/sites/{{ site.id }}/maintenance/updraftplus-backup">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup is running" if running_backup_runs else "Start verified backup" }}</button>
-            </form>
-          </div>
-        </article>
-        {% if latest_backup %}
-          {% set backup_sets = latest_backup.summary_json.backups or [] %}
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr><th>Backup time</th><th>Set</th><th>Retention</th><th>Components</th></tr>
-              </thead>
-              <tbody>
-                {% for backup_set in backup_sets %}
+            </div>
+            <div class="backup-actions">
+              <label class="backup-action-picker" for="backup-action">
+                <span>Action</span>
+                <select id="backup-action" name="backup_action" {% if running_backup_runs %}disabled{% endif %}>
+                  <option value="create-and-prune-oldest">Create backup and delete oldest</option>
+                  <option value="create-complete">Create complete backup</option>
+                  <option value="delete-selected">Delete selected backups</option>
+                  <option value="check-backups">Check backups</option>
+                </select>
+              </label>
+              <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup action is running" if running_backup_runs else "Start action" }}</button>
+            </div>
+          </article>
+          {% if latest_backup %}
+            {% set backup_sets = latest_backup.summary_json.backups or [] %}
+            <div class="table-scroll">
+              <table>
+                <thead>
                   <tr>
-                    <td>{{ backup_set.backup_at | berlin_time }}</td>
-                    <td><span class="pill pill-{{ "active" if backup_set.complete else "missing" }}">{{ "Complete" if backup_set.complete else "Partial" }}</span></td>
-                    <td>{{ "Manual deletion only" if backup_set.retention_protected else "Automatic retention" }}</td>
-                    <td>{{ backup_set.components | join(", ") or "-" }}</td>
+                    <th><input type="checkbox" data-backup-select-all aria-label="Select all deletable backups"></th>
+                    <th>Backup time</th>
+                    <th>Set</th>
+                    <th>Retention</th>
+                    <th>Components</th>
                   </tr>
-                {% else %}
-                  <tr><td colspan="4">No UpdraftPlus backup sets are currently reported.</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-          {% if not latest_backup.summary_json.backup_list_available %}
-            <p class="subtle">This Bridge reported only its latest backup. Update it to document the complete UpdraftPlus history.</p>
+                </thead>
+                <tbody>
+                  {% for backup_set in backup_sets %}
+                    {% set selectable_backup = backup_set.backup_nonce is defined and backup_set.backup_timestamp is defined %}
+                    <tr>
+                      <td>
+                        <input
+                          type="checkbox"
+                          name="selected_backup"
+                          value="{{ backup_set.backup_nonce }}:{{ backup_set.backup_timestamp }}"
+                          data-backup-selection
+                          aria-label="Select backup from {{ backup_set.backup_at | berlin_time }}"
+                          {% if not selectable_backup or running_backup_runs %}disabled{% endif %}
+                        >
+                      </td>
+                      <td>{{ backup_set.backup_at | berlin_time }}</td>
+                      <td><span class="pill pill-{{ "active" if backup_set.complete else "missing" }}">{{ "Complete" if backup_set.complete else "Partial" }}</span></td>
+                      <td>{{ "Manual deletion only" if backup_set.retention_protected else "Automatic retention" }}</td>
+                      <td>{{ backup_set.components | join(", ") or "-" }}</td>
+                    </tr>
+                  {% else %}
+                    <tr><td colspan="5">No UpdraftPlus backup sets are currently reported.</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% if not latest_backup.summary_json.backup_list_available %}
+              <p class="subtle">This Bridge reported only its latest backup. Update it to document the complete UpdraftPlus history.</p>
+            {% endif %}
           {% endif %}
-        {% endif %}
+        </form>
       </section>
 
       <section id="updates" class="site-section" aria-labelledby="updates-heading">
@@ -609,6 +638,44 @@
             }
           });
         });
+      });
+    }());
+  </script>
+  <script>
+    (function () {
+      var form = document.getElementById("site-backup-action-form");
+      if (!form) {
+        return;
+      }
+      var action = form.querySelector("[name='backup_action']");
+      var selectAll = form.querySelector("[data-backup-select-all]");
+      var selections = function () {
+        return Array.prototype.slice.call(form.querySelectorAll("[data-backup-selection]:checked"));
+      };
+
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          form.querySelectorAll("[data-backup-selection]").forEach(function (checkbox) {
+            if (!checkbox.disabled) {
+              checkbox.checked = selectAll.checked;
+            }
+          });
+        });
+      }
+
+      form.addEventListener("submit", function (event) {
+        if (!action || action.value !== "delete-selected") {
+          return;
+        }
+        var selected = selections();
+        if (!selected.length) {
+          event.preventDefault();
+          window.alert("Select at least one backup before choosing deletion.");
+          return;
+        }
+        if (!window.confirm("Delete the selected backup set(s) locally and from the configured remote storage? This cannot be undone.")) {
+          event.preventDefault();
+        }
       });
     }());
   </script>

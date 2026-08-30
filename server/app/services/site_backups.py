@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import re
+
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
@@ -16,6 +18,7 @@ class SiteBackupService:
     LIST_ABILITY_NAME = "kosmos-bridge/list-updraftplus-backups"
     PROVIDER = "updraftplus"
     COMPONENTS = {"database", "plugins", "themes", "uploads", "others"}
+    BACKUP_NONCE_PATTERN = re.compile(r"[a-f0-9]{12}")
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -140,14 +143,24 @@ class SiteBackupService:
             backup_at = cls._parse_datetime(raw_backup.get("backup_at"))
             if backup_at is None:
                 continue
-            backup_sets.append(
-                {
-                    "backup_at": backup_at.isoformat(),
-                    "complete": cls._as_bool(raw_backup.get("complete")),
-                    "retention_protected": cls._as_bool(raw_backup.get("retention_protected")),
-                    "components": cls._components_from(raw_backup.get("components")),
-                }
-            )
+            backup_set = {
+                "backup_at": backup_at.isoformat(),
+                "complete": cls._as_bool(raw_backup.get("complete")),
+                "retention_protected": cls._as_bool(raw_backup.get("retention_protected")),
+                "components": cls._components_from(raw_backup.get("components")),
+            }
+            backup_nonce = raw_backup.get("backup_nonce")
+            backup_timestamp = raw_backup.get("backup_timestamp")
+            if (
+                isinstance(backup_nonce, str)
+                and cls.BACKUP_NONCE_PATTERN.fullmatch(backup_nonce)
+                and isinstance(backup_timestamp, int)
+                and not isinstance(backup_timestamp, bool)
+                and backup_timestamp > 0
+            ):
+                backup_set["backup_nonce"] = backup_nonce
+                backup_set["backup_timestamp"] = backup_timestamp
+            backup_sets.append(backup_set)
         return sorted(backup_sets, key=lambda backup: backup["backup_at"], reverse=True)
 
     @staticmethod

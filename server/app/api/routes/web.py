@@ -1388,6 +1388,58 @@ def refresh_site_backup_from_detail(
     return RedirectResponse(url=f"/sites/{site_id}?backup_refresh=ok", status_code=303)
 
 
+@router.post("/sites/{site_id}/backup-actions")
+def execute_site_backup_action_from_detail(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    backup_action: Annotated[
+        Literal["create-and-prune-oldest", "create-complete", "delete-selected", "check-backups"],
+        Form(),
+    ],
+    selected_backup: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+    try:
+        if backup_action == "check-backups":
+            snapshot = SiteBackupService(db=db, cipher=get_secret_cipher()).refresh_site_backup_status(site_id)["snapshot"]
+            message = (
+                f"UpdraftPlus backup list checked: {snapshot.backup_count} backup set(s) are currently reported. "
+                "No backup was created, changed, or deleted."
+            )
+            result = "ok"
+        elif backup_action == "delete-selected":
+            outcome = service.start_updraftplus_backup_deletion(
+                site_id=site_id,
+                selections=selected_backup or [],
+                actor=user.username,
+            )
+            message = outcome.message
+            result = outcome.result
+        else:
+            outcome = service.start_updraftplus_backup(
+                site_id=site_id,
+                actor=user.username,
+                cleanup_oldest=backup_action == "create-and-prune-oldest",
+            )
+            message = outcome.message
+            result = outcome.result
+    except (SiteMcpProxyError, ValueError) as exc:
+        result = "error"
+        message = str(exc)
+
+    return RedirectResponse(
+        url=f"/sites/{site_id}?{urlencode({'backup_action': result, 'message': message})}#backups",
+        status_code=303,
+    )
+
+
 @router.post("/sites/{site_id}/users/refresh")
 def refresh_site_users_from_detail(
     site_id: int,

@@ -247,6 +247,156 @@ def test_second_running_backup_run_is_blocked(monkeypatch):
         assert second.run.id == first.run.id
 
 
+def test_verified_backup_can_skip_automatic_oldest_backup_cleanup(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "a1b2c3d4e5f6"
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert ability_name == "kosmos-bridge/start-updraftplus-backup"
+        return {
+            "result": {
+                "accepted": True,
+                "backup_nonce": backup_nonce,
+                "retention_protection_requested": True,
+                "request_status": "queued",
+                "background_dispatch_requested": True,
+            }
+        }
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert ability_name == "kosmos-bridge/get-updraftplus-backup-status"
+        return {
+            "result": {
+                "installed": True,
+                "active": True,
+                "available": True,
+                "complete": True,
+                "retention_protected": True,
+                "request_status": "completed",
+                "backup_nonce": backup_nonce,
+                "latest_backup_at": "2026-08-30T17:00:00+00:00",
+                "components": ["database", "plugins", "themes", "uploads", "others"],
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="13ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        started = service.start_updraftplus_backup(site_id=site.id, actor="operator", cleanup_oldest=False)
+
+        assert service.poll_active_updraftplus_backups() == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
+        verified = db.get(MaintenanceRun, started.run.id)
+        assert verified is not None
+        assert verified.result_json["cleanup_oldest"] is False
+        assert verified.result_json["cleanup"]["status"] == "not-requested"
+
+
+def test_selected_backup_deletion_is_verified_and_refreshes_the_backup_list(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    backup_nonce = "a1b2c3d4e5f6"
+    backup_timestamp = 1787832000
+    deleted = False
+
+    def backup_list():
+        if deleted:
+            return {"installed": True, "active": True, "backups": []}
+        return {
+            "installed": True,
+            "active": True,
+            "backups": [
+                {
+                    "backup_nonce": backup_nonce,
+                    "backup_timestamp": backup_timestamp,
+                    "backup_at": "2026-08-27T12:00:00+00:00",
+                    "complete": True,
+                    "retention_protected": True,
+                    "components": ["database", "plugins", "themes", "uploads", "others"],
+                }
+            ],
+        }
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        nonlocal deleted
+        if ability_name == "kosmos-bridge/list-updraftplus-backups":
+            return {"result": backup_list()}
+        assert ability_name == "kosmos-bridge/delete-updraftplus-backup"
+        assert ability_input == {
+            "backup_nonce": backup_nonce,
+            "backup_timestamp": backup_timestamp,
+            "delete_remote": True,
+            "allow_protected_delete": True,
+        }
+        deleted = True
+        return {
+            "result": {
+                "status": "completed",
+                "completed": True,
+                "backup_sets_removed": 1,
+                "local_files_deleted": 5,
+                "remote_files_deleted": 5,
+                "message": "UpdraftPlus deleted the requested backup.",
+            }
+        }
+
+    def execute_readonly_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        if ability_name == "kosmos-bridge/list-updraftplus-backups":
+            assert ability_input == {}
+            return {"result": backup_list()}
+        assert ability_name == "kosmos-bridge/verify-updraftplus-backup-deletion"
+        assert ability_input == {"backup_nonce": backup_nonce, "backup_timestamp": backup_timestamp}
+        return {
+            "result": {
+                "verified": True,
+                "message": "UpdraftPlus remote rescan confirmed deletion.",
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+    monkeypatch.setattr(SiteMcpProxyService, "execute_readonly_ability", execute_readonly_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="14ab34cd-56ef-78ab-90cd-12ef34ab56cd",
+            domain="test.example",
+            home_url="https://test.example/",
+            site_url="https://test.example/",
+            status=SiteStatus.verified.value,
+        )
+        db.add(site)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        started = service.start_updraftplus_backup_deletion(
+            site_id=site.id,
+            selections=[f"{backup_nonce}:{backup_timestamp}"],
+            actor="operator",
+        )
+
+        assert service.poll_active_updraftplus_backups() == {"checked": 1, "succeeded": 0, "failed": 0, "waiting": 1}
+        assert service.poll_active_updraftplus_backups() == {"checked": 1, "succeeded": 0, "failed": 0, "waiting": 1}
+        assert service.poll_active_updraftplus_backups() == {"checked": 1, "succeeded": 1, "failed": 0, "waiting": 0}
+        completed = db.get(MaintenanceRun, started.run.id)
+        assert completed is not None
+        assert completed.status == MaintenanceRunStatus.succeeded.value
+        assert completed.result_json["completed_count"] == 1
+        assert completed.result_json["failed_count"] == 0
+        assert site.backup_snapshots[0].backup_count == 0
+
+
 def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
