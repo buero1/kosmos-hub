@@ -1404,8 +1404,13 @@
       }
       .maintenance-history-entry-complete {
         border-color: #8ebdad;
+      }
+      .maintenance-history-entry-complete > summary {
+        border-radius: 13px;
         background: linear-gradient(90deg, rgba(217, 239, 232, 0.72), rgba(255, 250, 242, 0.86));
-        box-shadow: inset 4px 0 0 var(--accent);
+      }
+      .maintenance-history-entry-complete[open] > summary {
+        border-radius: 13px 13px 0 0;
       }
       .maintenance-history-entry > summary {
         display: grid;
