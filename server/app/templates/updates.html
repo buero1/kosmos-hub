@@ -380,6 +380,13 @@
             <h3 id="direct-update-progress-heading"><span data-direct-batch-title>{{ batch_runs | length }} Update{{ "s" if batch_runs | length != 1 else "" }}</span></h3>
             <p class="subtle" data-direct-batch-summary>{{ batch_runs | selectattr("status", "in", ["succeeded", "failed", "skipped"]) | list | length }}/{{ batch_runs | length }} abgeschlossen</p>
           </div>
+          {% if batch_cancellable and not batch_cancellation_requested %}
+            <form class="direct-update-cancel-form" method="post" action="/updates/direct-update-batches/{{ update_batch }}/cancel" data-direct-update-cancel-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="return_to" value="{{ direct_update_cancel_return_url }}">
+              <button class="button button-secondary" type="submit">Abbrechen</button>
+            </form>
+          {% endif %}
         </div>
         <div class="direct-update-progress-track" role="progressbar" aria-label="Fortschritt der ausgewählten Updates" aria-valuemin="0" aria-valuemax="{{ batch_runs | length }}" aria-valuenow="0" data-direct-update-progress-track>
           <span class="direct-update-progress-fill" data-direct-update-progress-fill></span>
@@ -432,6 +439,7 @@
           }
 
           function statusPresentation(run) {
+            if (run.stage === "cancelled") { return { icon: "is-skipped", label: "Abgebrochen", detail: run.stage_message || "" }; }
             if (run.stage === "already-updated") { return { icon: "is-succeeded", label: "Bereits aktualisiert", detail: run.stage_message || "" }; }
             if (run.stage === "update-not-available") { return { icon: "is-skipped", label: "Kein Update verfügbar", detail: run.stage_message || "" }; }
             if (run.stage === "plugin-not-installed") { return { icon: "is-skipped", label: "Nicht installiert", detail: run.stage_message || "" }; }
@@ -504,6 +512,7 @@
             var progressFill = value("[data-direct-update-progress-fill]");
             var title = value("[data-direct-batch-title]");
             var summary = value("[data-direct-batch-summary]");
+            var cancelForm = value("[data-direct-update-cancel-form]");
 
             if (progressTrack) {
               progressTrack.setAttribute("aria-valuemax", String(Math.max(total, 1)));
@@ -513,12 +522,17 @@
             if (progressFill) { progressFill.style.width = percentage + "%"; }
             if (title) { title.textContent = total + " Update" + (total === 1 ? "" : "s"); }
             if (summary) {
-              if (completed === total) {
+              if (payload.cancellation_requested && completed < total) {
+                summary.textContent = "Abbruch vorgemerkt. Laufende Updates werden noch sicher beendet.";
+              } else if (completed === total && Number(payload.cancelled)) {
+                summary.textContent = "Abgebrochen: " + payload.succeeded + " erfolgreich, " + payload.failed + " fehlgeschlagen, " + payload.cancelled + " nicht gestartet.";
+              } else if (completed === total) {
                 summary.textContent = "Abgeschlossen: " + payload.succeeded + " erfolgreich, " + payload.failed + " fehlgeschlagen, " + payload.skipped + " übersprungen.";
               } else {
                 summary.textContent = completed + "/" + total + " abgeschlossen";
               }
             }
+            if (cancelForm) { cancelForm.hidden = Boolean(payload.cancellation_requested) || completed === total; }
             renderRows(payload.runs || []);
 
             if (completed === total && timer) {

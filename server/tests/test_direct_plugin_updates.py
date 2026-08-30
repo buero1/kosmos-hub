@@ -1,8 +1,14 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.db.base import Base
 from app.models.audit_log import AuditLog
 from app.models.customer import Customer
+from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStatus, MaintenanceRunStep, MaintenanceRunStepStatus
+from app.models.site import Site, SiteStatus
 from app.models.site_backup_snapshot import SiteBackupSnapshot
 from app.models.site_capability import SiteCapability
 from app.models.site_connection import SiteConnection
@@ -305,6 +311,59 @@ def test_direct_update_batch_skips_remaining_runs_only_after_the_failure_limit()
     assert skipped_calls[0][0] == (batch_id,)
     assert skipped_calls[0][1]["kind"] == MaintenanceRunService.PLUGIN_UPDATE_KIND
     assert "5 consecutive" in skipped_calls[0][1]["message"]
+
+
+def test_direct_update_batch_cancellation_stops_queued_updates_but_keeps_processing_update_running():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    batch_id = "a" * 32
+    now = datetime.now(UTC)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="12345678-1234-1234-1234-123456789012",
+            domain="example.test",
+            home_url="https://example.test",
+            site_url="https://example.test",
+            status=SiteStatus.verified.value,
+        )
+        processing = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by="operator",
+            started_at=now,
+            result_json={"batch_id": batch_id, "batch_position": 1, "stage": "processing"},
+        )
+        queued = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+            status=MaintenanceRunStatus.running.value,
+            requested_by="operator",
+            started_at=now,
+            result_json={"batch_id": batch_id, "batch_position": 2, "stage": "queued"},
+        )
+        queued.steps.append(
+            MaintenanceRunStep(
+                step_key="preflight",
+                status=MaintenanceRunStepStatus.waiting.value,
+                started_at=now,
+                result_json={},
+            )
+        )
+        db.add_all((processing, queued))
+        db.commit()
+
+        outcome = MaintenanceRunService(db=db, cipher=None).cancel_direct_update_batch(batch_id=batch_id, actor="operator")
+        db.commit()
+
+        assert outcome.cancelled_queued_runs == 1
+        assert outcome.processing_runs == 1
+        assert processing.status == MaintenanceRunStatus.running.value
+        assert processing.result_json["cancellation"]["requested_by"] == "operator"
+        assert queued.status == MaintenanceRunStatus.skipped.value
+        assert queued.result_json["stage"] == "cancelled"
+        assert queued.steps[0].status == MaintenanceRunStepStatus.skipped.value
 
 
 def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():

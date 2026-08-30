@@ -41,6 +41,14 @@ class PluginUpdateBatchOutcome:
     message: str
 
 
+@dataclass(frozen=True)
+class DirectUpdateBatchCancellationOutcome:
+    batch_id: str
+    cancelled_queued_runs: int
+    processing_runs: int
+    cancellation_requested: bool
+
+
 class MaintenanceRunService:
     """Run bounded maintenance tasks and persist evidence for later automation."""
 
@@ -491,6 +499,95 @@ class MaintenanceRunService:
             if isinstance(run.result_json, dict) and run.result_json.get("batch_id") == batch_id
         ]
 
+    @staticmethod
+    def direct_update_batch_cancellation_requested(runs: list[MaintenanceRun]) -> bool:
+        return any(isinstance((run.result_json or {}).get("cancellation"), dict) for run in runs)
+
+    @staticmethod
+    def direct_update_batch_can_be_cancelled(runs: list[MaintenanceRun]) -> bool:
+        return any(run.status == MaintenanceRunStatus.running.value for run in runs)
+
+    def cancel_direct_update_batch(
+        self,
+        *,
+        batch_id: str,
+        actor: str,
+    ) -> DirectUpdateBatchCancellationOutcome:
+        """Stop queued direct updates while allowing an active WordPress request to finish."""
+        batch_runs = self._direct_update_batch_runs(batch_id)
+        if not batch_runs:
+            raise ValueError("The direct update batch no longer exists.")
+
+        now = datetime.now(UTC)
+        cancellation = {"requested_at": now.isoformat(), "requested_by": actor}
+        cancelled_queued_runs = 0
+        processing_runs = 0
+        cancellation_requested = False
+
+        # Lock each run before changing it so a queued job cannot be claimed by a worker at the same time.
+        for batch_run in batch_runs:
+            statement = (
+                select(MaintenanceRun)
+                .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
+                .where(MaintenanceRun.id == batch_run.id)
+                .with_for_update()
+            )
+            run = self.db.scalar(statement)
+            if run is None or self._plugin_update_batch_id(run) != batch_id:
+                continue
+            if run.status != MaintenanceRunStatus.running.value:
+                continue
+
+            result = dict(run.result_json or {})
+            stage = result.get("stage", "queued")
+            existing_cancellation = result.get("cancellation")
+            if isinstance(existing_cancellation, dict):
+                cancellation = existing_cancellation
+            else:
+                cancellation_requested = True
+
+            if stage == "queued":
+                message = "Cancelled before this update started."
+                run.status = MaintenanceRunStatus.skipped.value
+                run.completed_at = now
+                run.last_checked_at = now
+                run.error_message = None
+                run.result_json = {
+                    **result,
+                    "stage": "cancelled",
+                    "stage_message": message,
+                    "cancellation": cancellation,
+                }
+                for step in run.steps:
+                    if step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}:
+                        step.status = MaintenanceRunStepStatus.skipped.value
+                        step.completed_at = now
+                        step.detail = message
+                write_audit_log(
+                    self.db,
+                    site=run.site,
+                    actor=actor,
+                    source="hub-web",
+                    action="cancel-direct-update-run",
+                    result="cancelled",
+                    detail=f"Cancelled queued direct update run {run.id} in batch {batch_id[:12]}.",
+                    request_id=batch_id,
+                )
+                cancelled_queued_runs += 1
+                continue
+
+            # The worker owns an in-progress request. Record the cancellation, but let that request finish safely.
+            run.result_json = {**result, "cancellation": cancellation}
+            processing_runs += 1
+
+        self.db.flush()
+        return DirectUpdateBatchCancellationOutcome(
+            batch_id=batch_id,
+            cancelled_queued_runs=cancelled_queued_runs,
+            processing_runs=processing_runs,
+            cancellation_requested=cancellation_requested or processing_runs > 0,
+        )
+
     def poll_active_plugin_updates(self, *, limit: int = 25) -> dict[str, int]:
         statement = (
             select(MaintenanceRun)
@@ -589,6 +686,7 @@ class MaintenanceRunService:
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
             .where(MaintenanceRun.id == run_id)
+            .with_for_update()
         )
         run = self.db.scalar(statement)
         if run is None or run.kind not in {self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND}:

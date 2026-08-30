@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -621,6 +621,10 @@ def update_workbench_page(
             "update_batch": update_batch if batch_runs else "",
             "batch_runs": batch_runs,
             "batch_running": batch_running,
+            "batch_cancellable": maintenance_service.direct_update_batch_can_be_cancelled(batch_runs),
+            "batch_cancellation_requested": maintenance_service.direct_update_batch_cancellation_requested(batch_runs),
+            "direct_update_cancel_return_url": str(request.url.path)
+            + (f"?{request.url.query}" if request.url.query else ""),
             "show_update_selection": not batch_runs and view != "refresh-protocol",
             "direct_update": direct_update,
             "fresh_updates": fresh_updates,
@@ -723,6 +727,48 @@ def direct_update_batch_status(
     if not runs:
         raise HTTPException(status_code=404, detail="The direct update batch no longer exists.")
     return _direct_update_batch_status_payload(batch_id, runs)
+
+
+@router.post("/updates/direct-update-batches/{batch_id}/cancel")
+def cancel_direct_update_batch(
+    batch_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/updates",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    return_url = _safe_updates_return_url(return_to)
+
+    try:
+        outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).cancel_direct_update_batch(
+            batch_id=batch_id,
+            actor=user.username,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(
+            url=_updates_return_url_with_message(return_url, str(exc)),
+            status_code=303,
+        )
+
+    if outcome.cancelled_queued_runs:
+        message = (
+            f"Cancellation was requested. {outcome.cancelled_queued_runs} queued update"
+            f"{'s were' if outcome.cancelled_queued_runs != 1 else ' was'} cancelled."
+        )
+        if outcome.processing_runs:
+            message += " Already running updates will finish safely."
+    elif outcome.processing_runs:
+        message = "Cancellation was already requested. Already running updates will finish safely."
+    else:
+        message = "This direct update batch had already finished."
+    return RedirectResponse(
+        url=_updates_return_url_with_message(return_url, message),
+        status_code=303,
+    )
 
 
 @router.get("/plugin-installations", response_class=HTMLResponse)
@@ -1636,8 +1682,24 @@ def _direct_update_batch_status_payload(batch_id: str, runs: list) -> dict:
         "succeeded": sum(row["status"] == "succeeded" for row in rows),
         "failed": sum(row["status"] == "failed" for row in rows),
         "skipped": sum(row["status"] == "skipped" for row in rows),
+        "cancelled": sum(row["stage"] == "cancelled" for row in rows),
+        "cancellation_requested": any(isinstance((run.result_json or {}).get("cancellation"), dict) for run in runs),
         "runs": rows,
     }
+
+
+def _safe_updates_return_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.path != "/updates":
+        return "/updates"
+    return f"/updates?{parsed.query}" if parsed.query else "/updates"
+
+
+def _updates_return_url_with_message(return_url: str, message: str) -> str:
+    parsed = urlsplit(return_url)
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "message"]
+    query.append(("message", message))
+    return f"/updates?{urlencode(query)}"
 
 
 def _require_hub_admin(request: Request):

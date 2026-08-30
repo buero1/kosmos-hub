@@ -111,10 +111,36 @@ def test_direct_update_batch_status_payload_exposes_compact_live_rows():
     assert payload["succeeded"] == 1
     assert payload["failed"] == 1
     assert payload["skipped"] == 1
+    assert payload["cancelled"] == 0
+    assert payload["cancellation_requested"] is False
     assert [row["id"] for row in payload["runs"]] == [17, 18, 19, 20]
     assert payload["runs"][0]["stage"] == "processing"
     assert payload["runs"][2]["error_message"] == "The site did not confirm the update."
     assert payload["runs"][3]["update_name"] == "JetFormBuilder"
+
+
+def test_direct_update_batch_status_payload_reports_requested_cancellation():
+    runs = [
+        SimpleNamespace(
+            id=17,
+            status="running",
+            error_message=None,
+            site=SimpleNamespace(id=7, domain="first.example"),
+            result_json={"batch_position": 1, "stage": "processing", "cancellation": {"requested_by": "operator"}},
+        ),
+        SimpleNamespace(
+            id=18,
+            status="skipped",
+            error_message=None,
+            site=SimpleNamespace(id=8, domain="second.example"),
+            result_json={"batch_position": 2, "stage": "cancelled", "cancellation": {"requested_by": "operator"}},
+        ),
+    ]
+
+    payload = _direct_update_batch_status_payload("a" * 32, runs)
+
+    assert payload["cancellation_requested"] is True
+    assert payload["cancelled"] == 1
 
 
 def test_refresh_settings_store_berlin_schedule():
