@@ -112,7 +112,26 @@
           {% for item in items %}
             <tr>
               <td>
-                <a href="/sites/{{ item.site.id }}">{{ item.site.domain }}</a>
+                <div class="site-domain-primary">
+                  <div class="site-quick-actions">
+                    {% if can_launch_wordpress_admin and item.supports_admin_launch %}
+                      <form method="post" action="/sites/{{ item.site.id }}/open-wordpress-admin" target="_blank">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="site-quick-action" type="submit" aria-label="WordPress-Backend von {{ item.site.domain }} öffnen" title="WordPress-Backend öffnen">
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+                        </button>
+                      </form>
+                    {% else %}
+                      <span class="site-quick-action is-disabled" aria-disabled="true" title="{% if not can_launch_wordpress_admin %}WordPress-Backend ist nur für Hub-Administratoren verfügbar{% else %}Kosmos Bridge 0.3.62 oder neuer erforderlich{% endif %}">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16"></path><path d="M6 21V4a1 1 0 0 1 1-1h8l3 3v15"></path><path d="M14 3v4h4"></path><path d="M11 12h8"></path><path d="m16 8 4 4-4 4"></path></svg>
+                      </span>
+                    {% endif %}
+                    <a class="site-quick-action" href="{{ item.site.home_url }}" target="_blank" rel="noopener noreferrer" aria-label="Startseite von {{ item.site.domain }} öffnen" title="Startseite öffnen">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>
+                    </a>
+                  </div>
+                  <a href="/sites/{{ item.site.id }}">{{ item.site.domain }}</a>
+                </div>
                 <p class="subtle table-note">{{ item.site.home_url }}</p>
               </td>
               <td><span class="pill pill-{{ item.site.status }}">{{ item.site.status }}</span></td>

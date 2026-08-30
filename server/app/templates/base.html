@@ -1135,6 +1135,56 @@
         width: 14.25rem;
         max-width: 100%;
       }
+      .site-domain-primary,
+      .site-quick-actions {
+        display: inline-flex;
+        align-items: center;
+      }
+      .site-domain-primary {
+        gap: 0.45rem;
+      }
+      .site-quick-actions {
+        gap: 0.2rem;
+        flex: 0 0 auto;
+      }
+      .site-quick-actions form {
+        display: inline-flex;
+        margin: 0;
+      }
+      .site-quick-action {
+        display: inline-grid;
+        width: 1.85rem;
+        height: 1.85rem;
+        place-items: center;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: #076c58;
+        cursor: pointer;
+      }
+      .site-quick-action:hover,
+      .site-quick-action:focus-visible {
+        border-color: #9ccfbe;
+        background: rgba(215, 239, 232, 0.78);
+      }
+      .site-quick-action:focus-visible {
+        outline: 2px solid rgba(13, 135, 112, 0.45);
+        outline-offset: 2px;
+      }
+      .site-quick-action.is-disabled {
+        color: #9a9b91;
+        cursor: not-allowed;
+      }
+      .site-quick-action svg {
+        width: 1rem;
+        height: 1rem;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.7;
+      }
       .site-user-delete .button-danger {
         width: 14rem;
         max-width: 100%;

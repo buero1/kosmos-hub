@@ -287,6 +287,20 @@ class Registry {
 		);
 
 		wp_register_ability(
+			\KosmosBridge\AdminLaunch::ABILITY_NAME,
+			array(
+				'label'               => __( 'Prepare WordPress Admin Launch', 'kosmos-bridge' ),
+				'description'         => __( 'Creates a single-use, one-minute browser handoff to the dedicated local Kosmos Hub administrator. The Hub never receives a WordPress password or session cookie.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'input_schema'        => self::empty_object_input_schema(),
+				'output_schema'       => self::admin_launch_output_schema(),
+				'execute_callback'    => array( \KosmosBridge\AdminLaunch::class, 'execute_prepare_admin_launch' ),
+				'permission_callback' => array( self::class, 'allow_mutation_access' ),
+				'meta'                => self::mutation_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/list-wp-users',
 			array(
 				'label'               => __( 'List WordPress Users', 'kosmos-bridge' ),
@@ -2624,6 +2638,15 @@ class Registry {
 				'meta'          => self::mutation_meta(),
 			),
 			array(
+				'name'          => \KosmosBridge\AdminLaunch::ABILITY_NAME,
+				'label'         => __( 'Prepare WordPress Admin Launch', 'kosmos-bridge' ),
+				'description'   => __( 'Creates a single-use, one-minute browser handoff to the dedicated local Kosmos Hub administrator.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => self::empty_object_input_schema(),
+				'output_schema' => self::admin_launch_output_schema(),
+				'meta'          => self::mutation_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/list-wp-users',
 				'label'         => __( 'List WordPress Users', 'kosmos-bridge' ),
 				'description'   => __( 'Returns read-only WordPress user metadata without passwords or session data.', 'kosmos-bridge' ),
@@ -2717,6 +2740,9 @@ class Registry {
 		}
 		if ( 'kosmos-bridge/activate-plugin' === $ability_name ) {
 			return self::execute_activate_plugin( $input );
+		}
+		if ( \KosmosBridge\AdminLaunch::ABILITY_NAME === $ability_name ) {
+			return \KosmosBridge\AdminLaunch::execute_prepare_admin_launch();
 		}
 		if ( 'kosmos-bridge/create-wp-user' === $ability_name ) {
 			return self::execute_create_wp_user( $input );
@@ -2916,6 +2942,21 @@ class Registry {
 				'message'   => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'available', 'users', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function admin_launch_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'launch_url'          => array( 'type' => 'string' ),
+				'expires_at'          => array( 'type' => 'string' ),
+				'access_user_created' => array( 'type' => 'boolean' ),
+			),
+			'required'   => array( 'launch_url', 'expires_at', 'access_user_created' ),
 		);
 	}
 

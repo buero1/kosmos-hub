@@ -19,6 +19,7 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.site_users import SiteUserService
+from app.services.site_admin_launch import SiteAdminLaunchService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.maintenance_worker import schedule_pending_complete_site_updates, schedule_pending_direct_updates
 from app.services.fleet_refresh import FleetRefreshService
@@ -83,6 +84,8 @@ def sites_page(
         "sites.html",
         {
             "items": items,
+            "can_launch_wordpress_admin": getattr(request.state, "hub_user", None) is not None
+            and request.state.hub_user.role == "admin",
             "inventory_summary": inventory_service.summarize(all_items),
             "filters": {
                 "q": q,
@@ -115,6 +118,24 @@ def sites_page(
             },
         },
     )
+
+
+@router.post("/sites/{site_id}/open-wordpress-admin")
+def open_site_wordpress_admin(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        launch = SiteAdminLaunchService(db=db, cipher=get_secret_cipher()).open_admin(site_id=site_id, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SiteMcpProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return RedirectResponse(url=launch.launch_url, status_code=303)
 
 
 @router.get("/customers", response_class=HTMLResponse)

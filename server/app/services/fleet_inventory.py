@@ -59,6 +59,18 @@ class FleetInventoryItem:
     def supports_ability(self, ability_name: str) -> bool:
         return ability_name in self.ability_names
 
+    @property
+    def supports_admin_launch(self) -> bool:
+        from app.services.site_admin_launch import SiteAdminLaunchService
+
+        return (
+            self.site.status == "verified"
+            and (
+                self.supports_ability(SiteAdminLaunchService.PREPARE_ABILITY)
+                or SiteAdminLaunchService.bridge_supports_launch(self.site.bridge_version)
+            )
+        )
+
     def matching_update_names(self, query: str) -> list[str]:
         normalized_query = query.strip().casefold()
         if not normalized_query:
