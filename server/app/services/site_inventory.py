@@ -140,6 +140,9 @@ class SiteInventoryService:
         snapshot = self.repository.get_latest_site_snapshot(site_id)
         if update_kind == "wordpress":
             site.wordpress_version = installed_version
+        elif update_kind == "plugin" and identifier == "kosmos-bridge/kosmos-bridge.php":
+            # The direct Bridge update is authoritative for its own version.
+            site.bridge_version = installed_version
 
         if snapshot is None:
             self.db.flush()

@@ -186,6 +186,85 @@ def test_direct_update_preflight_adopts_the_fresh_installed_version():
     assert run.result_json["current_version"] == "0.3.56"
 
 
+def test_final_bridge_preflight_marks_a_newer_installed_version_as_already_updated():
+    details = {
+        "update_name": "Kosmos Bridge",
+        "update_kind": "plugin",
+        "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+        "target_version": "0.3.58",
+    }
+    error = SiteMcpProxyError(
+        "KOSMOS_BRIDGE_UPDATE_VERSION_MISMATCH",
+        "The approved plugin is at version 0.3.59, not the approved version 0.3.58.",
+        status_code=409,
+        details={"installed_version": "0.3.59", "active": True},
+    )
+
+    resolution = MaintenanceRunService._bridge_update_preflight_resolution(details, error)
+
+    assert resolution is not None
+    assert resolution["outcome"] == "succeeded"
+    assert resolution["stage"] == "already-updated"
+    assert resolution["installed_version"] == "0.3.59"
+
+
+def test_final_bridge_preflight_adopts_a_new_target_version_for_one_safe_retry():
+    run = SimpleNamespace(result_json={})
+    details = {
+        "update_name": "Kosmos Bridge",
+        "update_kind": "plugin",
+        "update_identifier": "kosmos-bridge/kosmos-bridge.php",
+        "current_version": "0.3.57",
+        "target_version": "0.3.58",
+    }
+    error = SiteMcpProxyError(
+        "KOSMOS_BRIDGE_UPDATE_OFFER_CHANGED",
+        "The approved plugin update offer is no longer available.",
+        status_code=409,
+        details={
+            "installed_version": "0.3.57",
+            "active": True,
+            "offered_version": "0.3.59",
+            "package_available": True,
+        },
+    )
+
+    resolution = MaintenanceRunService._bridge_update_preflight_resolution(details, error)
+
+    assert resolution is not None
+    assert resolution["action"] == "retry"
+    MaintenanceRunService._adopt_bridge_update_preflight_values(run, details, resolution)
+    assert details["target_version"] == "0.3.59"
+    assert run.result_json["selected_target_version"] == "0.3.58"
+    assert run.result_json["bridge_final_preflight_retries"] == 1
+
+
+def test_final_bridge_preflight_skips_a_missing_package_without_marking_a_failure():
+    details = {
+        "update_name": "Example Plugin",
+        "update_kind": "plugin",
+        "update_identifier": "example/example.php",
+        "target_version": "2.0.0",
+    }
+    error = SiteMcpProxyError(
+        "KOSMOS_BRIDGE_UPDATE_OFFER_CHANGED",
+        "The approved plugin update offer is no longer available.",
+        status_code=409,
+        details={"installed_version": "1.0.0", "offered_version": "", "package_available": False},
+    )
+
+    resolution = MaintenanceRunService._bridge_update_preflight_resolution(details, error)
+
+    assert resolution is not None
+    assert resolution["outcome"] == "skipped"
+    assert resolution["stage"] == "update-not-available"
+
+
+def test_final_bridge_preflight_is_enabled_only_after_the_bridge_release_is_installed():
+    assert MaintenanceRunService._bridge_enforces_final_update_preflight(SimpleNamespace(bridge_version="0.3.58")) is False
+    assert MaintenanceRunService._bridge_enforces_final_update_preflight(SimpleNamespace(bridge_version="0.3.59")) is True
+
+
 def test_direct_update_failure_streak_stops_after_five_consecutive_failures():
     failed = lambda position: SimpleNamespace(
         id=position,

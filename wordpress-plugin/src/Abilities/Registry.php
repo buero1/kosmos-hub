@@ -1024,7 +1024,11 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_plugin_not_installed',
 				'The approved plugin is not installed on this site.',
-				array( 'status' => 409 )
+				array(
+					'status'         => 409,
+					'component_kind' => 'plugin',
+					'plugin_file'    => $plugin_file,
+				)
 			);
 		}
 
@@ -1033,7 +1037,15 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_update_version_mismatch',
 				sprintf( 'The approved plugin is at version %s, not the approved version %s.', $current_version, $expected_current ),
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'plugin',
+					'plugin_file'              => $plugin_file,
+					'installed_version'        => $current_version,
+					'active'                   => self::is_plugin_active( $plugin_file ),
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1051,7 +1063,15 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_plugin_activation_state_changed',
 				'The approved plugin activation state changed since this update was selected.',
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'plugin',
+					'plugin_file'              => $plugin_file,
+					'installed_version'        => $current_version,
+					'active'                   => $current_active,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1066,7 +1086,17 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_update_offer_changed',
 				'The approved plugin update offer is no longer available.',
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'plugin',
+					'plugin_file'              => $plugin_file,
+					'installed_version'        => $current_version,
+					'active'                   => $current_active,
+					'offered_version'          => $offered_version,
+					'package_available'        => '' !== $package,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1453,7 +1483,11 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_theme_not_installed',
 				'The approved theme is not installed on this site.',
-				array( 'status' => 409 )
+				array(
+					'status'         => 409,
+					'component_kind' => 'theme',
+					'stylesheet'     => $stylesheet,
+				)
 			);
 		}
 
@@ -1462,7 +1496,14 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_theme_update_version_mismatch',
 				sprintf( 'The approved theme is at version %s, not the approved version %s.', $current_version, $expected_current ),
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'theme',
+					'stylesheet'               => $stylesheet,
+					'installed_version'        => $current_version,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1481,7 +1522,16 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_theme_update_offer_changed',
 				'The approved theme update offer is no longer available.',
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'theme',
+					'stylesheet'               => $stylesheet,
+					'installed_version'        => $current_version,
+					'offered_version'          => $offered_version,
+					'package_available'        => '' !== $package,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1541,7 +1591,7 @@ class Registry {
 
 	/**
 	 * Update WordPress core from the current core offer and verify the version
-	 * written to disk. The Hub performs a second fresh request before health checks.
+	 * written to disk. The Bridge performs the final on-site offer check itself.
 	 *
 	 * @param mixed $input Expected current and target WordPress versions.
 	 * @return array|\WP_Error
@@ -1562,7 +1612,14 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_core_update_version_mismatch',
 				sprintf( 'WordPress is at version %s, not the approved version %s.', $current_version, $expected_current ),
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'wordpress',
+					'component'                => 'wordpress-core',
+					'installed_version'        => $current_version,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 
@@ -1574,11 +1631,17 @@ class Registry {
 		}
 		delete_site_transient( 'update_core' );
 		wp_version_check();
-		$offer = null;
+		$offer           = null;
+		$offered_version = '';
+		$package_ready   = false;
 		foreach ( (array) get_core_updates() as $candidate ) {
 			$candidate_data = self::to_array( $candidate );
 			$version        = isset( $candidate_data['version'] ) ? (string) $candidate_data['version'] : ( isset( $candidate_data['current'] ) ? (string) $candidate_data['current'] : '' );
 			$package        = isset( $candidate_data['download'] ) ? trim( (string) $candidate_data['download'] ) : '';
+			if ( '' !== $version && '' === $offered_version ) {
+				$offered_version = $version;
+				$package_ready   = '' !== $package;
+			}
 			if ( $version === $expected_target && '' !== $package ) {
 				$offer = $candidate;
 				break;
@@ -1589,7 +1652,16 @@ class Registry {
 			return new \WP_Error(
 				'kosmos_bridge_core_update_offer_changed',
 				'The approved WordPress core update offer is no longer available.',
-				array( 'status' => 409 )
+				array(
+					'status'                   => 409,
+					'component_kind'           => 'wordpress',
+					'component'                => 'wordpress-core',
+					'installed_version'        => $current_version,
+					'offered_version'          => $offered_version,
+					'package_available'        => $package_ready,
+					'expected_current_version' => $expected_current,
+					'expected_target_version'  => $expected_target,
+				)
 			);
 		}
 

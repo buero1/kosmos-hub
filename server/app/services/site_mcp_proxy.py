@@ -15,11 +15,19 @@ from app.services.audit import write_audit_log
 
 
 class SiteMcpProxyError(Exception):
-    def __init__(self, code: str, message: str, *, status_code: int = 500):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 500,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.details = dict(details) if isinstance(details, dict) else {}
 
 
 @dataclass
@@ -155,6 +163,7 @@ class SiteMcpProxyService:
                 parsed.get("code", "REMOTE_HTTP_ERROR").upper(),
                 parsed.get("message", str(exc)),
                 status_code=exc.code,
+                details=parsed.get("data") if isinstance(parsed.get("data"), dict) else None,
             ) from exc
         except error.URLError as exc:
             self._record_error(site, action, str(exc.reason), request_id)

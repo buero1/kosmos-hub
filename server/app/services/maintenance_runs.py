@@ -48,6 +48,8 @@ class MaintenanceRunService:
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
     PLUGIN_INSTALLATION_KIND = "plugin-installation"
     DIRECT_UPDATE_FAILURE_STREAK_LIMIT = 5
+    FINAL_BRIDGE_PREFLIGHT_MIN_VERSION = "0.3.59"
+    FINAL_BRIDGE_PREFLIGHT_RETRY_LIMIT = 2
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
@@ -258,7 +260,7 @@ class MaintenanceRunService:
                     "target_version": entry.target_version,
                     "expected_active": entry.is_active,
                     "stage": "queued",
-                    "stage_message": "Queued for direct update after a fresh selected-update preflight.",
+                    "stage_message": "Queued for direct update with a final on-site Bridge preflight.",
                 },
             )
             run.steps.extend(
@@ -267,7 +269,7 @@ class MaintenanceRunService:
                         step_key="preflight",
                         status=MaintenanceRunStepStatus.waiting.value,
                         started_at=now,
-                        detail="Waiting for a fresh selected-update check.",
+                        detail="Waiting for the final on-site Bridge update check.",
                         result_json={},
                     ),
                     MaintenanceRunStep(
@@ -646,35 +648,58 @@ class MaintenanceRunService:
             return "failed"
 
         preflight_step = self._find_step(run, "preflight")
-        self._start_plugin_update_step(run, preflight_step, "Refreshing available-update evidence.")
-        try:
-            SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
-        except SiteMcpProxyError as exc:
-            self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
-            return "failed"
-
-        crocoblock_error = self._activate_crocoblock_license_if_required(run, details, preflight_step)
-        if crocoblock_error:
-            self._fail_plugin_update_run(run, crocoblock_error)
-            return "failed"
-
-        preflight_error, preflight_note = self._direct_plugin_update_preflight(run, details)
-        if preflight_error:
-            reconciled_outcome = self._reconcile_direct_plugin_preflight_mismatch(
+        bridge_enforces_preflight = self._bridge_enforces_final_update_preflight(site)
+        if bridge_enforces_preflight:
+            self._start_plugin_update_step(
+                run,
+                preflight_step,
+                "The Bridge will validate the installed version and update package immediately before installation.",
+            )
+            crocoblock_error = self._activate_crocoblock_license_if_required(
                 run,
                 details,
                 preflight_step,
-                preflight_error,
+                refresh_authorized_offer=False,
             )
-            if reconciled_outcome is not None:
-                return reconciled_outcome
-            self._fail_plugin_update_run(run, preflight_error)
-            return "failed"
-        self._complete_plugin_update_step(
-            run,
-            preflight_step,
-            f"Fresh selected update checks passed.{preflight_note}",
-        )
+            if crocoblock_error:
+                self._fail_plugin_update_run(run, crocoblock_error)
+                return "failed"
+            self._complete_plugin_update_step(
+                run,
+                preflight_step,
+                "The Bridge will enforce the final installed-version, activation-state, and package checks during the update.",
+            )
+        else:
+            # Older Bridges do not return enough mismatch evidence for safe local reconciliation.
+            self._start_plugin_update_step(run, preflight_step, "Refreshing available-update evidence.")
+            try:
+                SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
+            except SiteMcpProxyError as exc:
+                self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
+                return "failed"
+
+            crocoblock_error = self._activate_crocoblock_license_if_required(run, details, preflight_step)
+            if crocoblock_error:
+                self._fail_plugin_update_run(run, crocoblock_error)
+                return "failed"
+
+            preflight_error, preflight_note = self._direct_plugin_update_preflight(run, details)
+            if preflight_error:
+                reconciled_outcome = self._reconcile_direct_plugin_preflight_mismatch(
+                    run,
+                    details,
+                    preflight_step,
+                    preflight_error,
+                )
+                if reconciled_outcome is not None:
+                    return reconciled_outcome
+                self._fail_plugin_update_run(run, preflight_error)
+                return "failed"
+            self._complete_plugin_update_step(
+                run,
+                preflight_step,
+                f"Fresh selected update checks passed.{preflight_note}",
+            )
 
         update_step = self._find_step(run, self._update_step_key(details["update_kind"]))
         self._start_plugin_update_step(
@@ -682,11 +707,21 @@ class MaintenanceRunService:
             update_step,
             f"Updating {details['update_name']} from {details['current_version']} to {details['target_version']}.",
         )
-        try:
-            payload = self._execute_direct_update(run.site_id, details)
-        except SiteMcpProxyError as exc:
-            self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
-            return "failed"
+        if bridge_enforces_preflight:
+            update_outcome, payload = self._execute_direct_update_with_final_bridge_preflight(
+                run,
+                details,
+                preflight_step,
+                update_step,
+            )
+            if update_outcome != "updated":
+                return update_outcome
+        else:
+            try:
+                payload = self._execute_direct_update(run.site_id, details)
+            except SiteMcpProxyError as exc:
+                self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
+                return "failed"
 
         result = self._result_from_payload(payload)
         result_error = self._direct_update_result_error(details, result)
@@ -954,6 +989,212 @@ class MaintenanceRunService:
             last_result,
         )
 
+    @classmethod
+    def _bridge_enforces_final_update_preflight(cls, site: Site) -> bool:
+        """Only newer Bridges return the evidence needed to reconcile a changed offer safely."""
+        return cls._installed_version_meets_target(
+            str(site.bridge_version or ""),
+            cls.FINAL_BRIDGE_PREFLIGHT_MIN_VERSION,
+        )
+
+    def _execute_direct_update_with_final_bridge_preflight(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        preflight_step: MaintenanceRunStep | None,
+        update_step: MaintenanceRunStep | None,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Let the Bridge enforce the final state, adopting only its structured fresh evidence."""
+        retries = 0
+        while True:
+            try:
+                return "updated", self._execute_direct_update(run.site_id, details)
+            except SiteMcpProxyError as exc:
+                resolution = self._bridge_update_preflight_resolution(details, exc)
+                if resolution is None:
+                    self._fail_plugin_update_run(run, f"{details['update_name']} update request failed: {exc.message}")
+                    return "failed", None
+
+                if resolution["action"] == "activate-crocoblock":
+                    if (run.result_json or {}).get("crocoblock_license_activation_attempted") is True:
+                        resolution = self._bridge_update_unavailable_resolution(details, exc)
+                    else:
+                        crocoblock_error = self._activate_crocoblock_license_if_required(
+                            run,
+                            details,
+                            preflight_step,
+                            force=True,
+                            refresh_authorized_offer=False,
+                        )
+                        if crocoblock_error:
+                            self._fail_plugin_update_run(run, crocoblock_error)
+                            return "failed", None
+                        retries += 1
+                        self._start_plugin_update_step(
+                            run,
+                            update_step,
+                            "Crocoblock license activation completed. Retrying the Bridge update with its fresh package check.",
+                        )
+                        continue
+
+                if resolution["action"] == "retry" and retries < self.FINAL_BRIDGE_PREFLIGHT_RETRY_LIMIT:
+                    retries += 1
+                    self._adopt_bridge_update_preflight_values(run, details, resolution)
+                    self._start_plugin_update_step(run, update_step, str(resolution["message"]))
+                    continue
+
+                if resolution["action"] == "retry":
+                    resolution = self._bridge_update_unavailable_resolution(details, exc, repeated=True)
+
+                self._finish_direct_plugin_preflight_resolution(
+                    run,
+                    preflight_step,
+                    details,
+                    resolution,
+                    update_step=update_step,
+                )
+                return str(resolution["outcome"]), None
+
+    @classmethod
+    def _bridge_update_preflight_resolution(
+        cls,
+        details: dict[str, Any],
+        error: SiteMcpProxyError,
+    ) -> dict[str, Any] | None:
+        """Turn a final Bridge preflight conflict into a safe retry or a documented terminal result."""
+        code = error.code.upper()
+        evidence = error.details
+        installed_version = str(evidence.get("installed_version", "")).strip()
+        installed_active = evidence.get("active") if isinstance(evidence.get("active"), bool) else None
+        target_version = details["target_version"]
+        update_name = details["update_name"]
+        common = {
+            "installed_version": installed_version,
+            "installed_active": installed_active,
+            "preflight_error": error.message,
+        }
+
+        if code.endswith("_NOT_INSTALLED"):
+            return {
+                **common,
+                "action": "complete",
+                "outcome": MaintenanceRunStatus.skipped.value,
+                "stage": "component-not-installed",
+                "message": f"{update_name} is no longer installed on this website. No update was performed.",
+            }
+
+        if code.endswith("_UPDATE_VERSION_MISMATCH"):
+            if installed_version and cls._installed_version_meets_target(installed_version, target_version):
+                return {
+                    **common,
+                    "action": "complete",
+                    "outcome": MaintenanceRunStatus.succeeded.value,
+                    "stage": "already-updated",
+                    "message": (
+                        f"{update_name} is already installed in version {installed_version}, which meets the selected "
+                        f"target {target_version}. No update was required."
+                    ),
+                }
+            if installed_version:
+                return {
+                    **common,
+                    "action": "retry",
+                    "current_version": installed_version,
+                    "message": (
+                        f"Bridge found {update_name} in version {installed_version}; retrying with that current version "
+                        "and its final package check."
+                    ),
+                }
+            return cls._bridge_update_unavailable_resolution(details, error)
+
+        if code.endswith("_UPDATE_OFFER_CHANGED"):
+            if installed_version and cls._installed_version_meets_target(installed_version, target_version):
+                return {
+                    **common,
+                    "action": "complete",
+                    "outcome": MaintenanceRunStatus.succeeded.value,
+                    "stage": "already-updated",
+                    "message": (
+                        f"{update_name} is already installed in version {installed_version}, which meets the selected "
+                        f"target {target_version}. No update was required."
+                    ),
+                }
+            offered_version = str(evidence.get("offered_version", "")).strip()
+            if offered_version and evidence.get("package_available") is True and offered_version != target_version:
+                return {
+                    **common,
+                    "action": "retry",
+                    "target_version": offered_version,
+                    "message": (
+                        f"Bridge found a newer available target for {update_name}: {offered_version}. "
+                        "Retrying with the fresh target."
+                    ),
+                }
+            if details["update_kind"] == "plugin" and details["update_identifier"].startswith("jet-"):
+                return {**common, "action": "activate-crocoblock"}
+            return cls._bridge_update_unavailable_resolution(details, error)
+
+        if code == "KOSMOS_BRIDGE_PLUGIN_ACTIVATION_STATE_CHANGED":
+            return {
+                **common,
+                "action": "complete",
+                "outcome": MaintenanceRunStatus.skipped.value,
+                "stage": "activation-state-changed",
+                "message": (
+                    f"{update_name} changed activation state after it was selected. No update was performed so the "
+                    "current site state remains unchanged."
+                ),
+            }
+        return None
+
+    @staticmethod
+    def _bridge_update_unavailable_resolution(
+        details: dict[str, Any],
+        error: SiteMcpProxyError,
+        *,
+        repeated: bool = False,
+    ) -> dict[str, Any]:
+        installed_version = str(error.details.get("installed_version", "")).strip()
+        installed_active = error.details.get("active") if isinstance(error.details.get("active"), bool) else None
+        retry_note = " after repeated on-site changes" if repeated else ""
+        return {
+            "action": "complete",
+            "outcome": MaintenanceRunStatus.skipped.value,
+            "stage": "update-not-available",
+            "message": (
+                f"{details['update_name']} is currently installed in version {installed_version or 'unknown'}, but its "
+                f"selected update package is no longer available{retry_note}. No update was performed."
+            ),
+            "installed_version": installed_version,
+            "installed_active": installed_active,
+            "preflight_error": error.message,
+        }
+
+    @staticmethod
+    def _adopt_bridge_update_preflight_values(
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        resolution: dict[str, Any],
+    ) -> None:
+        """Keep the original selection while retrying with the version evidence just returned by the Bridge."""
+        refreshed_values: dict[str, Any] = {
+            "bridge_final_preflight": True,
+            "bridge_final_preflight_retries": int((run.result_json or {}).get("bridge_final_preflight_retries", 0)) + 1,
+        }
+        current_version = resolution.get("current_version")
+        if isinstance(current_version, str) and current_version and current_version != details["current_version"]:
+            refreshed_values["selected_current_version"] = details["current_version"]
+            refreshed_values["current_version"] = current_version
+            refreshed_values["current_version_refreshed"] = True
+            details["current_version"] = current_version
+        target_version = resolution.get("target_version")
+        if isinstance(target_version, str) and target_version and target_version != details["target_version"]:
+            refreshed_values["selected_target_version"] = details["target_version"]
+            refreshed_values["target_version"] = target_version
+            refreshed_values["target_version_refreshed"] = True
+            details["target_version"] = target_version
+        run.result_json = {**(run.result_json or {}), **refreshed_values}
+
     def _direct_plugin_update_preflight(self, run: MaintenanceRun, details: dict[str, Any]) -> tuple[str | None, str]:
         """Use the freshly confirmed WordPress offer as the authoritative update scope."""
         current_entry = self._current_plugin_update_entry(run, details)
@@ -1128,19 +1369,29 @@ class MaintenanceRunService:
         preflight_step: MaintenanceRunStep | None,
         details: dict[str, Any],
         resolution: dict[str, Any],
+        *,
+        update_step: MaintenanceRunStep | None = None,
     ) -> None:
-        """Persist a safe terminal result when no plugin update request is needed or possible."""
+        """Persist a safe terminal result without issuing a follow-up full site scan."""
         message = str(resolution["message"])
         observed_version = str(resolution.get("installed_version", "")).strip()
-        inventory_note = ""
-        if observed_version and observed_version != details["current_version"]:
-            try:
-                SiteInventoryService(db=self.db, cipher=self.cipher).refresh_site_state(run.site_id)
-            except SiteMcpProxyError as exc:
-                inventory_note = f" The follow-up inventory scan failed: {exc.message}"
+        observed_active = resolution.get("installed_active")
+        if observed_version:
+            self._record_confirmed_direct_update(
+                run,
+                details,
+                {"installed_version": observed_version, "active": observed_active},
+            )
+        else:
+            # The Bridge proved this stored offer is obsolete even though no component version was returned.
+            SiteUpdateService(db=self.db, cipher=self.cipher).record_confirmed_direct_update(
+                site_id=run.site_id,
+                update_kind=details["update_kind"],
+                identifier=details["update_identifier"],
+            )
 
         completed_at = datetime.now(UTC)
-        final_message = message + inventory_note
+        final_message = message
         run.status = str(resolution["outcome"])
         run.completed_at = completed_at
         run.last_checked_at = completed_at
@@ -1166,7 +1417,7 @@ class MaintenanceRunService:
             elif step.status in {MaintenanceRunStepStatus.waiting.value, MaintenanceRunStepStatus.running.value}:
                 step.status = MaintenanceRunStepStatus.skipped.value
                 step.completed_at = completed_at
-                step.detail = "Not run because the live plugin check resolved this selected update."
+                step.detail = "Not run because the final on-site Bridge check resolved this selected update."
         write_audit_log(
             self.db,
             site=run.site,
@@ -1184,11 +1435,14 @@ class MaintenanceRunService:
         run: MaintenanceRun,
         details: dict[str, Any],
         preflight_step: MaintenanceRunStep | None,
+        *,
+        force: bool = False,
+        refresh_authorized_offer: bool = True,
     ) -> str | None:
-        if details["update_kind"] != "plugin":
+        if details["update_kind"] != "plugin" or not details["update_identifier"].startswith("jet-"):
             return None
         entry = self._current_plugin_update_entry(run, details)
-        if entry is None or not self._is_crocoblock_entry(entry) or entry.execution_ready:
+        if not force and (entry is None or not self._is_crocoblock_entry(entry) or entry.execution_ready):
             return None
 
         self._start_plugin_update_step(
@@ -1204,6 +1458,23 @@ class MaintenanceRunService:
         except CrocoblockLicenseError as exc:
             return f"{details['update_name']} needs Crocoblock license activation: {exc}"
 
+        run.result_json = {
+            **(run.result_json or {}),
+            "crocoblock_license_activation_attempted": True,
+            "crocoblock_license_activated": True,
+            "crocoblock_update_package_ready": activation["update_package_ready"],
+        }
+        if activation["update_package_ready"] is not True:
+            return f"Crocoblock license activation was verified, but {details['update_name']} still has no authorized update package."
+
+        if not refresh_authorized_offer:
+            self._start_plugin_update_step(
+                run,
+                preflight_step,
+                "Crocoblock license activation was verified. The Bridge will now request its authorized package directly.",
+            )
+            return None
+
         self._start_plugin_update_step(
             run,
             preflight_step,
@@ -1213,12 +1484,6 @@ class MaintenanceRunService:
             SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
         except SiteMcpProxyError as exc:
             return f"Crocoblock license activation succeeded, but its update package could not be refreshed: {exc.message}"
-
-        run.result_json = {
-            **(run.result_json or {}),
-            "crocoblock_license_activated": True,
-            "crocoblock_update_package_ready": activation["update_package_ready"],
-        }
         return None
 
     def _current_plugin_update_entry(self, run: MaintenanceRun, details: dict[str, Any]) -> UpdateWorkbenchEntry | None:
