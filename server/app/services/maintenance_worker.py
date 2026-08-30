@@ -25,6 +25,7 @@ def process_pending_direct_updates() -> dict[str, int]:
                 max_workers = FleetRefreshSettingsService(db=db).get_runtime_settings().max_parallel_direct_updates
                 service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
                 run_ids = service.next_parallel_direct_update_run_ids(limit=max_workers)
+                direct_update_batch_ids = service.direct_update_batch_ids_for_run_ids(run_ids)
             if not run_ids:
                 return summary
 
@@ -39,6 +40,10 @@ def process_pending_direct_updates() -> dict[str, int]:
                     if outcome not in summary:
                         outcome = "failed"
                     summary[outcome] += 1
+
+            with SessionLocal() as db:
+                service = MaintenanceRunService(db=db, cipher=get_secret_cipher())
+                summary["skipped"] += service.stop_direct_update_batches_after_failure_streak(direct_update_batch_ids)
     finally:
         _direct_update_poll_lock.release()
 

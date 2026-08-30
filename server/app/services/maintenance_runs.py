@@ -47,6 +47,7 @@ class MaintenanceRunService:
     UPDRAFT_BACKUP_KIND = "updraftplus-backup"
     PLUGIN_UPDATE_KIND = "direct-plugin-update"
     PLUGIN_INSTALLATION_KIND = "plugin-installation"
+    DIRECT_UPDATE_FAILURE_STREAK_LIMIT = 5
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
     BACKUP_STATUS_ABILITY = "kosmos-bridge/get-updraftplus-backup-status"
     LIST_BACKUPS_ABILITY = "kosmos-bridge/list-updraftplus-backups"
@@ -510,15 +511,38 @@ class MaintenanceRunService:
             if outcome == "failed":
                 batch_id = self._plugin_update_batch_id(run)
                 if batch_id:
-                    summary["skipped"] += self._skip_queued_plugin_updates(
-                        batch_id,
-                        failed_run_id=run.id,
-                        message=(
-                            f"Skipped because direct update run {run.id} failed. "
-                            "The batch stops at the first error."
-                        ),
-                    )
+                    summary["skipped"] += self.stop_direct_update_batches_after_failure_streak({batch_id})
         return summary
+
+    def direct_update_batch_ids_for_run_ids(self, run_ids: list[int]) -> set[str]:
+        if not run_ids:
+            return set()
+        statement = select(MaintenanceRun).where(
+            MaintenanceRun.id.in_(run_ids),
+            MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND,
+        )
+        return {
+            batch_id
+            for run in self.db.scalars(statement)
+            if (batch_id := self._plugin_update_batch_id(run)) is not None
+        }
+
+    def stop_direct_update_batches_after_failure_streak(self, batch_ids: set[str]) -> int:
+        """Stop only batches whose completed prefix contains five failed updates in a row."""
+        skipped = 0
+        for batch_id in batch_ids:
+            runs = self._direct_update_batch_runs(batch_id)
+            if not self._has_direct_update_failure_streak(runs):
+                continue
+            skipped += self._skip_queued_maintenance_runs(
+                batch_id,
+                kind=self.PLUGIN_UPDATE_KIND,
+                message=(
+                    f"Stopped after {self.DIRECT_UPDATE_FAILURE_STREAK_LIMIT} consecutive direct update failures. "
+                    "Already running updates will finish."
+                ),
+            )
+        return skipped
 
     def next_parallel_direct_update_run_ids(self, *, limit: int) -> list[int]:
         """Return one queued direct maintenance task per site, with stale runs recoverable."""
@@ -578,13 +602,12 @@ class MaintenanceRunService:
         run.last_checked_at = datetime.now(UTC)
         self.db.commit()
         outcome = self._poll_plugin_update(run) if run.kind == self.PLUGIN_UPDATE_KIND else self._poll_plugin_installation(run)
-        if outcome == "failed":
+        if outcome == "failed" and run.kind == self.PLUGIN_INSTALLATION_KIND:
             batch_id = self._plugin_update_batch_id(run)
             if batch_id:
                 self._skip_queued_maintenance_runs(
                     batch_id,
                     kind=run.kind,
-                    failed_run_id=run.id,
                     message=(
                         f"Skipped because maintenance run {run.id} failed. "
                         "The batch stops at the first error."
@@ -935,22 +958,11 @@ class MaintenanceRunService:
         )
 
     def _direct_plugin_update_preflight(self, run: MaintenanceRun, details: dict[str, Any]) -> tuple[str | None, str]:
-        """Keep the original installed state strict, but use the freshly offered target.
-
-        Providers can publish a newer version between selecting a row and the
-        worker's preflight.  In that case the Bridge is authoritative for the
-        target version.  A changed installed version or activation state still
-        stops the run because it could indicate a competing site change.
-        """
+        """Use the freshly confirmed WordPress offer as the authoritative update scope."""
         current_entry = self._current_plugin_update_entry(run, details)
         if current_entry is None:
             return (
                 f"{details['update_name']} is no longer listed as an available {details['update_kind']} update.",
-                "",
-            )
-        if current_entry.current_version != details["current_version"]:
-            return (
-                f"{details['update_name']} changed installed version since it was selected. Refresh the workbench and start a new run.",
                 "",
             )
         if details["update_kind"] == "plugin" and current_entry.is_active is not details["expected_active"]:
@@ -963,21 +975,39 @@ class MaintenanceRunService:
         if scope_error:
             return scope_error, ""
 
-        if current_entry.target_version == details["target_version"]:
+        refreshed_values: dict[str, Any] = {}
+        notes: list[str] = []
+        if current_entry.current_version != details["current_version"]:
+            selected_current_version = details["current_version"]
+            details["current_version"] = current_entry.current_version
+            refreshed_values.update(
+                {
+                    "selected_current_version": selected_current_version,
+                    "current_version": current_entry.current_version,
+                    "current_version_refreshed": True,
+                }
+            )
+            notes.append(
+                f"The confirmed installed version changed from {selected_current_version} to "
+                f"{current_entry.current_version}"
+            )
+        if current_entry.target_version != details["target_version"]:
+            selected_target_version = details["target_version"]
+            details["target_version"] = current_entry.target_version
+            refreshed_values.update(
+                {
+                    "selected_target_version": selected_target_version,
+                    "target_version": current_entry.target_version,
+                    "target_version_refreshed": True,
+                }
+            )
+            notes.append(
+                f"the available target changed from {selected_target_version} to {current_entry.target_version}"
+            )
+        if not refreshed_values:
             return None, ""
-
-        selected_target_version = details["target_version"]
-        details["target_version"] = current_entry.target_version
-        run.result_json = {
-            **(run.result_json or {}),
-            "selected_target_version": selected_target_version,
-            "target_version": current_entry.target_version,
-            "target_version_refreshed": True,
-        }
-        return (
-            None,
-            f" The current offer changed from {selected_target_version} to {current_entry.target_version}; the newer available version will be installed.",
-        )
+        run.result_json = {**(run.result_json or {}), **refreshed_values}
+        return None, f" {'; '.join(notes)}. The fresh versions will be used."
 
     def _reconcile_direct_plugin_preflight_mismatch(
         self,
@@ -1440,15 +1470,41 @@ class MaintenanceRunService:
         )
         self.db.commit()
 
-    def _skip_queued_plugin_updates(self, batch_id: str, *, failed_run_id: int, message: str) -> int:
-        return self._skip_queued_maintenance_runs(
-            batch_id,
-            kind=self.PLUGIN_UPDATE_KIND,
-            failed_run_id=failed_run_id,
-            message=message,
-        )
+    def _direct_update_batch_runs(self, batch_id: str) -> list[MaintenanceRun]:
+        statement = select(MaintenanceRun).where(MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND)
+        runs = [
+            run
+            for run in self.db.scalars(statement)
+            if self._plugin_update_batch_id(run) == batch_id
+        ]
+        return sorted(runs, key=self._batch_position)
 
-    def _skip_queued_maintenance_runs(self, batch_id: str, *, kind: str, failed_run_id: int, message: str) -> int:
+    @classmethod
+    def _has_direct_update_failure_streak(cls, runs: list[MaintenanceRun]) -> bool:
+        failures = 0
+        for run in runs:
+            if run.status == MaintenanceRunStatus.failed.value:
+                failures += 1
+                if failures >= cls.DIRECT_UPDATE_FAILURE_STREAK_LIMIT:
+                    return True
+                continue
+            if run.status in {MaintenanceRunStatus.succeeded.value, MaintenanceRunStatus.skipped.value}:
+                failures = 0
+                continue
+            # A preceding update is still being processed, so later outcomes do not yet form a sequence.
+            break
+        return False
+
+    @staticmethod
+    def _batch_position(run: MaintenanceRun) -> tuple[int, int]:
+        value = (run.result_json or {}).get("batch_position")
+        try:
+            position = int(value)
+        except (TypeError, ValueError):
+            position = run.id
+        return position, run.id
+
+    def _skip_queued_maintenance_runs(self, batch_id: str, *, kind: str, message: str) -> int:
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
@@ -1461,7 +1517,7 @@ class MaintenanceRunService:
         skipped = 0
         completed_at = datetime.now(UTC)
         for run in self.db.scalars(statement):
-            if run.id == failed_run_id or self._plugin_update_batch_id(run) != batch_id:
+            if self._plugin_update_batch_id(run) != batch_id:
                 continue
             if (run.result_json or {}).get("stage") != "queued":
                 continue

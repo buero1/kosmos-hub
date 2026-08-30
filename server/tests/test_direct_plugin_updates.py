@@ -121,7 +121,7 @@ def test_direct_update_preflight_adopts_a_newer_target_version_without_losing_th
     assert run.result_json["target_version"] == "0.3.56"
 
 
-def test_direct_update_preflight_stops_when_the_installed_version_changed():
+def test_direct_update_preflight_adopts_the_fresh_installed_version():
     run = SimpleNamespace(result_json={})
     details = {
         "update_name": "Kosmos Bridge",
@@ -141,8 +141,54 @@ def test_direct_update_preflight_stops_when_the_installed_version_changed():
 
     error, note = service._direct_plugin_update_preflight(run, details)
 
-    assert error == "Kosmos Bridge changed installed version since it was selected. Refresh the workbench and start a new run."
-    assert note == ""
+    assert error is None
+    assert "installed version changed from 0.3.52 to 0.3.56" in note
+    assert details["current_version"] == "0.3.56"
+    assert details["target_version"] == "0.3.57"
+    assert run.result_json["selected_current_version"] == "0.3.52"
+    assert run.result_json["current_version"] == "0.3.56"
+
+
+def test_direct_update_failure_streak_stops_after_five_consecutive_failures():
+    failed = lambda position: SimpleNamespace(
+        id=position,
+        status="failed",
+        result_json={"batch_position": position},
+    )
+    succeeded = lambda position: SimpleNamespace(
+        id=position,
+        status="succeeded",
+        result_json={"batch_position": position},
+    )
+    running = lambda position: SimpleNamespace(
+        id=position,
+        status="running",
+        result_json={"batch_position": position},
+    )
+
+    assert MaintenanceRunService._has_direct_update_failure_streak([failed(1), failed(2), failed(3), failed(4)]) is False
+    assert MaintenanceRunService._has_direct_update_failure_streak([failed(1), succeeded(2), failed(3), failed(4), failed(5), failed(6)]) is False
+    assert MaintenanceRunService._has_direct_update_failure_streak([failed(1), failed(2), failed(3), failed(4), failed(5)]) is True
+    assert MaintenanceRunService._has_direct_update_failure_streak([failed(1), running(2), failed(3), failed(4), failed(5), failed(6)]) is False
+
+
+def test_direct_update_batch_skips_remaining_runs_only_after_the_failure_limit():
+    batch_id = "a" * 32
+    failed_runs = [
+        SimpleNamespace(id=position, status="failed", result_json={"batch_position": position})
+        for position in range(1, 6)
+    ]
+    service = object.__new__(MaintenanceRunService)
+    service._direct_update_batch_runs = lambda _batch_id: failed_runs
+    skipped_calls = []
+    service._skip_queued_maintenance_runs = lambda *args, **kwargs: (skipped_calls.append((args, kwargs)) or 3)
+
+    skipped = service.stop_direct_update_batches_after_failure_streak({batch_id})
+
+    assert skipped == 3
+    assert skipped_calls[0][0] == (batch_id,)
+    assert skipped_calls[0][1]["kind"] == MaintenanceRunService.PLUGIN_UPDATE_KIND
+    assert "5 consecutive" in skipped_calls[0][1]["message"]
 
 
 def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():
@@ -328,6 +374,43 @@ def test_update_workbench_includes_plugins_without_available_updates():
     assert by_plugin["hello-dolly/hello.php"].update_available is False
     assert by_plugin["hello-dolly/hello.php"].direct_update_selectable is False
     assert by_plugin["hello-dolly/hello.php"].review_note == "No update is currently available."
+
+
+def test_update_workbench_prefers_the_fresh_installed_version_from_an_update_check():
+    captured_at = datetime.now(UTC)
+    item = FleetInventoryItem(
+        site=SimpleNamespace(id=17, domain="example.test"),
+        snapshot=SimpleNamespace(captured_at=captured_at),
+        update_snapshot=SimpleNamespace(
+            captured_at=captured_at,
+            core_updates_json=[],
+            plugin_updates_json=[
+                {
+                    "plugin_file": "kosmos-bridge/kosmos-bridge.php",
+                    "name": "Kosmos Bridge",
+                    "current_version": "0.3.56",
+                    "new_version": "0.3.58",
+                    "execution_ready": True,
+                }
+            ],
+            theme_updates_json=[],
+        ),
+        plugins=(
+            {
+                "plugin_file": "kosmos-bridge/kosmos-bridge.php",
+                "name": "Kosmos Bridge",
+                "version": "0.3.52",
+                "active": True,
+            },
+        ),
+    )
+
+    service = object.__new__(FleetInventoryService)
+    service._attach_official_plugin_versions = lambda entries: entries
+    entry = service.build_update_workbench([item])[0]
+
+    assert entry.current_version == "0.3.56"
+    assert entry.target_version == "0.3.58"
 
 
 def test_fleet_observed_versions_are_informational_and_ignore_lower_offers():

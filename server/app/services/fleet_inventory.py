@@ -265,6 +265,7 @@ class FleetInventoryService:
                 if not plugin_file:
                     continue
                 update = plugin_updates_by_file.pop(plugin_file, None)
+                fresh_current_version = str(update.get("current_version", "")).strip() if update else ""
                 target_version = str(update.get("new_version", "")).strip() if update else ""
                 update_available = bool(target_version)
                 active = plugin.get("active")
@@ -274,7 +275,11 @@ class FleetInventoryService:
                         kind="plugin",
                         name=str(plugin.get("name", "")).strip() or plugin_file,
                         identifier=plugin_file,
-                        current_version=str(plugin.get("version", plugin.get("current_version", ""))).strip(),
+                        # WordPress reports both sides of an available update together. Prefer that
+                        # fresh installed version over an older state-inventory snapshot.
+                        current_version=fresh_current_version or str(
+                            plugin.get("version", plugin.get("current_version", ""))
+                        ).strip(),
                         target_version=target_version,
                         is_active=active if isinstance(active, bool) else True,
                         update_available=update_available,
