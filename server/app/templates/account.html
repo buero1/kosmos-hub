@@ -275,17 +275,13 @@
         <div>
           <p class="eyebrow">Fleet refresh</p>
           <h3>Refresh settings</h3>
-          <p class="subtle">These limits control background status checks and direct updates on the Update Workbench. A normal status run reuses recent data; a full refresh always ignores these cache limits.</p>
+          <p class="subtle">These limits control background status checks and direct updates on the Update Workbench. Each automatic update refresh checks the official plugin catalogues again.</p>
         </div>
         <form method="post" action="/account/fleet-refresh-settings">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>
             <span>Reuse site status for (minutes)</span>
             <input type="number" name="site_status_max_age_minutes" value="{{ fleet_refresh_settings.site_status_max_age_minutes }}" min="1" max="180" required>
-          </label>
-          <label>
-            <span>Reuse official versions for (hours)</span>
-            <input type="number" name="official_version_max_age_hours" value="{{ fleet_refresh_settings.official_version_max_age_hours }}" min="1" max="168" required>
           </label>
           <label>
             <span>Parallel website checks</span>

@@ -249,12 +249,6 @@
     {% elif fresh_updates == "error" %}
       <p class="notice-error">{{ message }}</p>
     {% endif %}
-    {% if official_versions == "refreshed" and not progress_refresh_run %}
-      <p class="notice-success">{{ message }}</p>
-    {% elif official_versions == "error" %}
-      <p class="notice-error">{{ message }}</p>
-    {% endif %}
-
     {% if show_refresh_protocol %}
     <section class="maintenance-batch maintenance-history" aria-labelledby="refresh-history-heading">
       <div class="section-heading">

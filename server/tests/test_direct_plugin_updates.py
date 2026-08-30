@@ -1,5 +1,4 @@
-from datetime import UTC, datetime, timedelta
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.models.audit_log import AuditLog
@@ -15,7 +14,7 @@ from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryServi
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.official_plugin_versions import OfficialPluginVersionService, OfficialVersionCandidate
+from app.services.official_plugin_versions import OfficialPluginVersionService
 from app.services.provider_credentials import ProviderCredentialService
 from app.services.crocoblock_license import CrocoblockLicenseService
 from app.services.site_mcp_proxy import SiteMcpProxyError
@@ -386,16 +385,6 @@ def test_fleet_observed_versions_are_informational_and_ignore_lower_offers():
     assert enriched[2].fleet_observed_version == ""
 
 
-def test_legacy_site_update_provider_version_is_never_reused_as_official_cache():
-    record = SimpleNamespace(source="Site update provider: wordpress", checked_at=datetime.now(UTC))
-
-    assert OfficialPluginVersionService._is_fresh(
-        record,
-        now=datetime.now(UTC),
-        max_age=timedelta(hours=24),
-    ) is False
-
-
 def test_status_refresh_combines_installed_state_and_update_checks():
     service = object.__new__(FleetInventoryService)
     service.refresh_verified_site_states = lambda *, limit: {"refreshed": [{"site_id": 1}], "failed": [], "skipped": []}
@@ -626,23 +615,6 @@ def test_official_version_refresh_uses_elementor_pro_changelog_once_per_catalogu
     assert elementor_record.source == "Elementor Pro Changelog"
 
 
-def test_elementor_pro_replaces_legacy_unavailable_catalog_entries_without_waiting_for_the_cache():
-    now = datetime.now(UTC)
-    legacy_record = SimpleNamespace(
-        official_version=None,
-        source="No public or provider catalog available",
-        checked_at=now,
-    )
-
-    assert OfficialPluginVersionService._needs_catalog_refresh(
-        candidate=OfficialVersionCandidate(plugin_file="elementor-pro/elementor-pro.php"),
-        record=legacy_record,
-        force=False,
-        now=now,
-        max_age=timedelta(hours=24),
-    ) is True
-
-
 def test_pafe_pro_changelog_parser_returns_the_newest_version():
     changelog = """
         <h2>[PRO] 7.1.73 (2026/06/23)</h2>
@@ -680,25 +652,6 @@ def test_official_version_refresh_uses_pafe_pro_changelog_once_per_catalogue_che
     )
     assert pafe_record.official_version == "7.1.73"
     assert pafe_record.source == "PAFE Pro Changelog"
-
-
-def test_pafe_pro_replaces_legacy_unavailable_catalog_entries_without_waiting_for_the_cache():
-    now = datetime.now(UTC)
-    legacy_record = SimpleNamespace(
-        official_version=None,
-        source="No public or provider catalog available",
-        checked_at=now,
-    )
-
-    assert OfficialPluginVersionService._needs_catalog_refresh(
-        candidate=OfficialVersionCandidate(
-            plugin_file="piotnet-addons-for-elementor-pro/piotnet-addons-for-elementor-pro.php"
-        ),
-        record=legacy_record,
-        force=False,
-        now=now,
-        max_age=timedelta(hours=24),
-    ) is True
 
 
 def test_provider_license_normalization_keeps_elementor_in_one_row():
@@ -813,16 +766,37 @@ def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
         FleetRefreshService.MODE_NORMAL,
         runtime_settings=FleetRefreshRuntimeSettings(
             site_status_max_age_minutes=20,
-            official_version_max_age_hours=36,
             max_parallel_site_checks=4,
         ),
     )
 
     assert result["settings"] == {
         "site_status_max_age_minutes": 20,
-        "official_version_max_age_hours": 36,
         "max_parallel_site_checks": 4,
     }
+
+
+def test_official_version_refresh_rechecks_catalogues_even_when_a_previous_result_exists():
+    existing = SimpleNamespace(
+        plugin_file="akismet/akismet.php",
+        official_version="5.3",
+        source="WordPress.org",
+        checked_at=datetime.now(UTC),
+        last_error=None,
+    )
+    service = object.__new__(OfficialPluginVersionService)
+    service.db = SimpleNamespace(add=lambda _record: None, flush=lambda: None)
+    service._collect_candidates = lambda _items: {
+        "akismet/akismet.php": SimpleNamespace(plugin_file="akismet/akismet.php"),
+    }
+    service.get_cached = lambda _candidates: {existing.plugin_file: existing}
+    service._fetch_wordpress_org_version = lambda _plugin_file: ("5.4", None)
+
+    summary = service.refresh_for_inventory([])
+
+    assert summary["checked"] == 1
+    assert summary["cached"] == 0
+    assert existing.official_version == "5.4"
 
 
 def test_official_version_refresh_reports_each_completed_catalogue_check():

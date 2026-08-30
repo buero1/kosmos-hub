@@ -13,7 +13,6 @@ class FleetRefreshSettings(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     site_status_max_age_minutes: Mapped[int] = mapped_column(Integer, default=15)
-    official_version_max_age_hours: Mapped[int] = mapped_column(Integer, default=24)
     max_parallel_site_checks: Mapped[int] = mapped_column(Integer, default=5)
     max_parallel_direct_updates: Mapped[int] = mapped_column(Integer, default=5)
     auto_refresh_enabled: Mapped[bool] = mapped_column(Boolean, default=True)

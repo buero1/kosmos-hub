@@ -128,7 +128,6 @@ def test_refresh_settings_store_berlin_schedule():
         settings = FleetRefreshSettingsService(db=db).configure(
             actor=user,
             site_status_max_age_minutes=15,
-            official_version_max_age_hours=24,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -146,7 +145,6 @@ def test_refresh_schedule_requires_whole_days():
     with pytest.raises(FleetRefreshSettingsError, match="whole number of days"):
         FleetRefreshSettingsService._validate(
             site_status_max_age_minutes=15,
-            official_version_max_age_hours=24,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_interval_hours=25,
@@ -215,7 +213,6 @@ def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
         FleetRefreshSettingsService(db=db).configure(
             actor=user,
             site_status_max_age_minutes=15,
-            official_version_max_age_hours=24,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -296,7 +293,7 @@ def test_cancel_running_fleet_refresh_keeps_it_exclusive_until_worker_stops():
 
         assert stopped is True
         assert stopped_run.status == FleetRefreshRunStatus.cancelling.value
-        existing_run, created = service.create_run(actor=user, mode=FleetRefreshService.MODE_FULL)
+        existing_run, created = service.create_run(actor=user, mode=FleetRefreshService.MODE_FRESH_UPDATES)
 
         assert created is False
         assert existing_run.id == run.id
@@ -313,7 +310,7 @@ def test_selected_refresh_scope_is_persisted_for_the_background_worker():
 
         run, created = FleetRefreshService(db=db).create_run(
             actor=user,
-            mode=FleetRefreshService.MODE_NORMAL,
+            mode=FleetRefreshService.MODE_FRESH_UPDATES,
             site_ids={19, 7, 11},
         )
 
@@ -326,7 +323,20 @@ def test_selected_refresh_scope_is_persisted_for_the_background_worker():
             "label": "3 selected site(s)",
         }
         assert FleetRefreshService._target_site_ids(run.result_json) == {7, 11, 19}
-        assert FleetRefreshService._target_site_ids(FleetRefreshService._initial_result(FleetRefreshService.MODE_NORMAL)) is None
+        assert FleetRefreshService._target_site_ids(FleetRefreshService._initial_result(FleetRefreshService.MODE_FRESH_UPDATES)) is None
+
+
+def test_manual_normal_refresh_is_not_available():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(user)
+        db.commit()
+
+        with pytest.raises(ValueError, match="available fresh checks"):
+            FleetRefreshService(db=db).create_run(actor=user, mode=FleetRefreshService.MODE_NORMAL)
 
 
 def test_refresh_site_result_keeps_the_website_and_jet_license_outcomes(monkeypatch):

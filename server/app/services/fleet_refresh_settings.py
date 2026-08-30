@@ -14,7 +14,6 @@ class FleetRefreshSettingsError(ValueError):
 @dataclass(frozen=True)
 class FleetRefreshRuntimeSettings:
     site_status_max_age_minutes: int = 15
-    official_version_max_age_hours: int = 24
     max_parallel_site_checks: int = 5
     max_parallel_direct_updates: int = 5
     auto_refresh_enabled: bool = True
@@ -27,8 +26,6 @@ class FleetRefreshSettingsService:
 
     MIN_STATUS_MAX_AGE_MINUTES = 1
     MAX_STATUS_MAX_AGE_MINUTES = 180
-    MIN_OFFICIAL_VERSION_MAX_AGE_HOURS = 1
-    MAX_OFFICIAL_VERSION_MAX_AGE_HOURS = 168
     MIN_PARALLEL_SITE_CHECKS = 1
     MAX_PARALLEL_SITE_CHECKS = 6
     MIN_PARALLEL_DIRECT_UPDATES = 1
@@ -45,7 +42,6 @@ class FleetRefreshSettingsService:
             return FleetRefreshRuntimeSettings()
         return FleetRefreshRuntimeSettings(
             site_status_max_age_minutes=config.site_status_max_age_minutes,
-            official_version_max_age_hours=config.official_version_max_age_hours,
             max_parallel_site_checks=config.max_parallel_site_checks,
             max_parallel_direct_updates=config.max_parallel_direct_updates,
             auto_refresh_enabled=config.auto_refresh_enabled,
@@ -58,7 +54,6 @@ class FleetRefreshSettingsService:
         *,
         actor: HubUser,
         site_status_max_age_minutes: int,
-        official_version_max_age_hours: int,
         max_parallel_site_checks: int,
         max_parallel_direct_updates: int,
         auto_refresh_enabled: bool,
@@ -69,7 +64,6 @@ class FleetRefreshSettingsService:
             raise FleetRefreshSettingsError("Only Hub administrators can change fleet refresh settings.")
         self._validate(
             site_status_max_age_minutes=site_status_max_age_minutes,
-            official_version_max_age_hours=official_version_max_age_hours,
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
             auto_refresh_interval_hours=auto_refresh_interval_hours,
@@ -81,7 +75,6 @@ class FleetRefreshSettingsService:
             config = FleetRefreshSettings(id=1)
             self.db.add(config)
         config.site_status_max_age_minutes = site_status_max_age_minutes
-        config.official_version_max_age_hours = official_version_max_age_hours
         config.max_parallel_site_checks = max_parallel_site_checks
         config.max_parallel_direct_updates = max_parallel_direct_updates
         config.auto_refresh_enabled = auto_refresh_enabled
@@ -97,7 +90,6 @@ class FleetRefreshSettingsService:
         cls,
         *,
         site_status_max_age_minutes: int,
-        official_version_max_age_hours: int,
         max_parallel_site_checks: int,
         max_parallel_direct_updates: int,
         auto_refresh_interval_hours: int,
@@ -106,11 +98,6 @@ class FleetRefreshSettingsService:
         if not cls.MIN_STATUS_MAX_AGE_MINUTES <= site_status_max_age_minutes <= cls.MAX_STATUS_MAX_AGE_MINUTES:
             raise FleetRefreshSettingsError(
                 f"Site status cache must be between {cls.MIN_STATUS_MAX_AGE_MINUTES} and {cls.MAX_STATUS_MAX_AGE_MINUTES} minutes."
-            )
-        if not cls.MIN_OFFICIAL_VERSION_MAX_AGE_HOURS <= official_version_max_age_hours <= cls.MAX_OFFICIAL_VERSION_MAX_AGE_HOURS:
-            raise FleetRefreshSettingsError(
-                "Official version cache must be between "
-                f"{cls.MIN_OFFICIAL_VERSION_MAX_AGE_HOURS} and {cls.MAX_OFFICIAL_VERSION_MAX_AGE_HOURS} hours."
             )
         if not cls.MIN_PARALLEL_SITE_CHECKS <= max_parallel_site_checks <= cls.MAX_PARALLEL_SITE_CHECKS:
             raise FleetRefreshSettingsError(

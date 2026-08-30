@@ -505,7 +505,6 @@ def update_workbench_page(
     ] = "all",
     update_batch: str = "",
     direct_update: str = "",
-    official_versions: str = "",
     fresh_updates: str = "",
     message: str = "",
     view: Literal["updates", "refresh-protocol"] = "updates",
@@ -579,7 +578,7 @@ def update_workbench_page(
             ("message", "Fresh update checks completed. The table now shows the current results."),
         ]
         fresh_completion_url = f"/updates?{urlencode(completion_scope_query + completion_filter_query)}"
-    refresh_runs = fleet_refresh_service.list_recent_runs(limit=20, modes=FleetRefreshService.update_modes())
+    refresh_runs = fleet_refresh_service.list_recent_runs(limit=20, modes=FleetRefreshService.update_history_modes())
     selected_refresh_run = next((run for run in refresh_runs if run.id == refresh_run_id), None)
     refresh_site_results = (
         fleet_refresh_service.list_site_results(run_id=selected_refresh_run.id)
@@ -624,7 +623,6 @@ def update_workbench_page(
             "batch_running": batch_running,
             "show_update_selection": not batch_runs and view != "refresh-protocol",
             "direct_update": direct_update,
-            "official_versions": official_versions,
             "fresh_updates": fresh_updates,
             "active_fleet_refresh_run": active_fleet_refresh_run,
             "progress_refresh_run": progress_refresh_run,
@@ -817,52 +815,11 @@ async def queue_plugin_installation(
     )
 
 
-@router.post("/updates/refresh-official-plugin-versions")
-def refresh_official_plugin_versions(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: Annotated[Session, Depends(get_db)],
-    mode: Annotated[Literal["normal", "full"], Form()] = "normal",
-    site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
-    site_id: Annotated[list[int] | None, Form()] = None,
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = getattr(request.state, "hub_user", None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    selected_site_ids = set(site_id or []) if site_scope == "selected" else None
-    if selected_site_ids is not None and not selected_site_ids:
-        return RedirectResponse(
-            url=f"/updates?{urlencode({'official_versions': 'error', 'message': 'Select at least one site in the side panel, or choose All.'})}",
-            status_code=303,
-        )
-
-    fleet_refresh_service = FleetRefreshService(db=db)
-    run, created = fleet_refresh_service.create_run(actor=user, mode=mode, site_ids=selected_site_ids)
-    db.commit()
-    if created:
-        background_tasks.add_task(FleetRefreshService.process_run, run.id)
-        scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
-        message = f"The background refresh for {scope_label} was queued. Live progress is shown below."
-    else:
-        message = "A fleet refresh is already running. Its live progress is shown below."
-    return RedirectResponse(
-        url=f"/updates?{urlencode({'active_refresh_run_id': run.id, 'message': message})}",
-        status_code=303,
-    )
-
-
 @router.post("/updates/apply-action")
 def apply_update_workbench_action(
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
-    maintenance_action: Annotated[
-        Literal["direct-updates", "refresh-stale", "refresh-full", "cancel-refresh", "refresh-protocol"],
-        Form(),
-    ],
+    maintenance_action: Annotated[Literal["direct-updates"], Form()],
     selected: Annotated[list[str] | None, Form()] = None,
     site_scope: Annotated[Literal["all", "selected"], Form()] = "selected",
     site_id: Annotated[list[int] | None, Form()] = None,
@@ -878,62 +835,19 @@ def apply_update_workbench_action(
     if selected_site_ids is not None:
         scope_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids))
 
-    if maintenance_action == "refresh-protocol":
+    try:
+        outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_direct_updates(
+            selected_keys=selected or [],
+            actor=user.username,
+        )
+    except ValueError as exc:
         return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + [('view', 'refresh-protocol')])}",
+            url=f"/updates?{urlencode(scope_query + [('direct_update', 'error'), ('message', str(exc))])}",
             status_code=303,
         )
-
-    if maintenance_action == "direct-updates":
-        try:
-            outcome = MaintenanceRunService(db=db, cipher=get_secret_cipher()).start_direct_updates(
-                selected_keys=selected or [],
-                actor=user.username,
-            )
-        except ValueError as exc:
-            return RedirectResponse(
-                url=f"/updates?{urlencode(scope_query + [('direct_update', 'error'), ('message', str(exc))])}",
-                status_code=303,
-            )
-        schedule_pending_direct_updates()
-        return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + [('update_batch', outcome.batch_id), ('direct_update', 'started'), ('message', outcome.message)])}",
-            status_code=303,
-        )
-
-    refresh_service = FleetRefreshService(db=db)
-    if maintenance_action == "cancel-refresh":
-        active_run = refresh_service.get_active_run()
-        if active_run is None:
-            return RedirectResponse(
-                url=f"/updates?{urlencode(scope_query + [('official_versions', 'error'), ('message', 'There is no active fleet refresh to cancel.')])}",
-                status_code=303,
-            )
-        run, cancelled = refresh_service.cancel_run(actor=user, run_id=active_run.id)
-        db.commit()
-        message = "Cancellation was requested. Current site checks will finish, but no further checks will start." if cancelled else "This fleet refresh had already finished."
-        return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + [('active_refresh_run_id', run.id), ('message', message)])}",
-            status_code=303,
-        )
-
-    if selected_site_ids is not None and not selected_site_ids:
-        return RedirectResponse(
-            url=f"/updates?{urlencode(scope_query + [('official_versions', 'error'), ('message', 'Select at least one site in the side panel before refreshing.')])}",
-            status_code=303,
-        )
-
-    mode = FleetRefreshService.MODE_FULL if maintenance_action == "refresh-full" else FleetRefreshService.MODE_NORMAL
-    run, created = refresh_service.create_run(actor=user, mode=mode, site_ids=selected_site_ids)
-    db.commit()
-    if created:
-        background_tasks.add_task(FleetRefreshService.process_run, run.id)
-        scope_label = "all sites" if selected_site_ids is None else f"{len(selected_site_ids)} selected site(s)"
-        message = f"The background refresh for {scope_label} was queued. Live progress is shown below."
-    else:
-        message = "A fleet refresh is already running. Its live progress is shown below."
+    schedule_pending_direct_updates()
     return RedirectResponse(
-        url=f"/updates?{urlencode(scope_query + [('active_refresh_run_id', run.id), ('official_versions', 'refreshed'), ('message', message)])}",
+        url=f"/updates?{urlencode(scope_query + [('update_batch', outcome.batch_id), ('direct_update', 'started'), ('message', outcome.message)])}",
         status_code=303,
     )
 

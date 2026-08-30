@@ -359,7 +359,6 @@ def configure_fleet_refresh_settings(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     site_status_max_age_minutes: Annotated[int, Form()] = 15,
-    official_version_max_age_hours: Annotated[int, Form()] = 24,
     max_parallel_site_checks: Annotated[int, Form()] = 5,
     max_parallel_direct_updates: Annotated[int, Form()] = 5,
     auto_refresh_enabled: Annotated[bool, Form()] = False,
@@ -374,7 +373,6 @@ def configure_fleet_refresh_settings(
         config = service.configure(
             actor=user,
             site_status_max_age_minutes=site_status_max_age_minutes,
-            official_version_max_age_hours=official_version_max_age_hours,
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
             auto_refresh_enabled=auto_refresh_enabled,
@@ -397,8 +395,7 @@ def configure_fleet_refresh_settings(
         action="configure-fleet-refresh-settings",
         result="success",
         detail=(
-            f"Set status cache to {config.site_status_max_age_minutes} minutes, official version cache to "
-            f"{config.official_version_max_age_hours} hours, and parallel site checks to "
+            f"Set status cache to {config.site_status_max_age_minutes} minutes, parallel site checks to "
             f"{config.max_parallel_site_checks} and parallel direct updates to "
             f"{config.max_parallel_direct_updates}. Automatic refresh is "
             f"{'enabled' if config.auto_refresh_enabled else 'disabled'} at "

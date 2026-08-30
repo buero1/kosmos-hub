@@ -2,7 +2,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -67,8 +67,6 @@ class OfficialPluginVersionService:
         self,
         items: Iterable[Any],
         *,
-        force: bool = False,
-        max_age: timedelta | None = None,
         progress_callback: Callable[[dict[str, int]], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, int]:
@@ -89,23 +87,12 @@ class OfficialPluginVersionService:
 
         existing = self.get_cached(candidates)
         now = datetime.now(UTC)
-        stale_candidates = {
-            plugin_file: candidate
-            for plugin_file, candidate in candidates.items()
-            if self._needs_catalog_refresh(
-                candidate=candidate,
-                record=existing.get(plugin_file),
-                force=force,
-                now=now,
-                max_age=max_age,
-            )
-        }
 
         summary = {
             "total": len(candidates),
-            "checked": len(stale_candidates),
+            "checked": len(candidates),
             "completed": 0,
-            "cached": len(candidates) - len(stale_candidates),
+            "cached": 0,
             "wordpress_org": 0,
             "elementor_pro": 0,
             "pafe_pro": 0,
@@ -119,7 +106,7 @@ class OfficialPluginVersionService:
         catalog_results: dict[str, tuple[str | None, str | None]] = {}
         elementor_candidates = [
             candidate
-            for candidate in stale_candidates.values()
+            for candidate in candidates.values()
             if self._is_elementor_pro_plugin(candidate.plugin_file)
         ]
         cancellation_requested = bool(should_cancel and should_cancel())
@@ -141,7 +128,7 @@ class OfficialPluginVersionService:
 
         pafe_candidates = [
             candidate
-            for candidate in stale_candidates.values()
+            for candidate in candidates.values()
             if self._is_pafe_pro_plugin(candidate.plugin_file)
         ]
         if pafe_candidates and not cancellation_requested:
@@ -162,7 +149,7 @@ class OfficialPluginVersionService:
 
         wordpress_org_candidates = [
             candidate
-            for candidate in stale_candidates.values()
+            for candidate in candidates.values()
             if not self._is_elementor_pro_plugin(candidate.plugin_file)
             and not self._is_pafe_pro_plugin(candidate.plugin_file)
         ]
@@ -243,38 +230,6 @@ class OfficialPluginVersionService:
 
         self.db.flush()
         return summary
-
-    @staticmethod
-    def _is_fresh(
-        record: PluginOfficialVersion | None,
-        *,
-        now: datetime,
-        max_age: timedelta | None,
-    ) -> bool:
-        if record is None or record.checked_at is None or max_age is None:
-            return False
-        if record.source.startswith("Site update provider:"):
-            return False
-        checked_at = record.checked_at if record.checked_at.tzinfo is not None else record.checked_at.replace(tzinfo=UTC)
-        return now - checked_at <= max_age
-
-    @classmethod
-    def _needs_catalog_refresh(
-        cls,
-        *,
-        candidate: OfficialVersionCandidate,
-        record: PluginOfficialVersion | None,
-        force: bool,
-        now: datetime,
-        max_age: timedelta | None,
-    ) -> bool:
-        if force:
-            return True
-        if cls._is_elementor_pro_plugin(candidate.plugin_file) and (record is None or record.source != cls.ELEMENTOR_PRO_SOURCE):
-            return True
-        if cls._is_pafe_pro_plugin(candidate.plugin_file) and (record is None or record.source != cls.PAFE_PRO_SOURCE):
-            return True
-        return not cls._is_fresh(record, now=now, max_age=max_age)
 
     @classmethod
     def _has_provider_catalog(cls, record: PluginOfficialVersion | None) -> bool:

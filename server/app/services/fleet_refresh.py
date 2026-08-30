@@ -29,8 +29,8 @@ class FleetRefreshService:
     """Runs bounded, persisted fleet refreshes without blocking the web request."""
 
     MODE_NORMAL = "normal"
-    MODE_FULL = "full"
     MODE_FRESH_UPDATES = "fresh-updates"
+    MODE_LEGACY_FULL = "full"
     MODE_USERS = "users"
     MODE_FRESH_USERS = "fresh-users"
     MODE_BACKUPS = "backups"
@@ -50,7 +50,8 @@ class FleetRefreshService:
     ) -> tuple[FleetRefreshRun, bool]:
         if actor.role != "admin":
             raise ValueError("Only Hub administrators can start a fleet refresh.")
-        self._validate_mode(mode)
+        if mode not in self.manual_modes():
+            raise ValueError("Manual refreshes must use one of the available fresh checks.")
 
         active_run = self.db.scalar(
             select(FleetRefreshRun)
@@ -318,7 +319,6 @@ class FleetRefreshService:
         cls._validate_mode(mode)
         refresh_kind = cls._refresh_kind(mode)
         force = mode in (
-            cls.MODE_FULL,
             cls.MODE_FRESH_UPDATES,
             cls.MODE_FRESH_USERS,
             cls.MODE_FRESH_BACKUPS,
@@ -410,10 +410,8 @@ class FleetRefreshService:
             cls._refresh_provider_evidence(
                 run_id=run_id,
                 result=result,
-                force=force,
                 requested_by=requested_by,
                 allow_provider_activation=allow_provider_activation,
-                runtime_settings=runtime_settings,
                 target_site_ids=target_site_ids,
             )
         else:
@@ -656,10 +654,8 @@ class FleetRefreshService:
         *,
         run_id: int,
         result: dict[str, Any],
-        force: bool,
         requested_by: str,
         allow_provider_activation: bool,
-        runtime_settings: FleetRefreshRuntimeSettings,
         target_site_ids: set[int] | None,
     ) -> None:
         if cls._is_cancellation_requested(run_id):
@@ -749,8 +745,6 @@ class FleetRefreshService:
 
             official = version_service.refresh_for_inventory(
                 items,
-                force=force,
-                max_age=timedelta(hours=runtime_settings.official_version_max_age_hours),
                 progress_callback=report_official_progress,
                 should_cancel=lambda: cls._is_cancellation_requested(run_id),
             )
@@ -935,7 +929,6 @@ class FleetRefreshService:
             },
             "settings": {
                 "site_status_max_age_minutes": runtime_settings.site_status_max_age_minutes,
-                "official_version_max_age_hours": runtime_settings.official_version_max_age_hours,
                 "max_parallel_site_checks": runtime_settings.max_parallel_site_checks,
             },
             "sites": {"total": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "skipped": 0},
@@ -1009,7 +1002,15 @@ class FleetRefreshService:
 
     @classmethod
     def update_modes(cls) -> set[str]:
-        return {cls.MODE_NORMAL, cls.MODE_FULL, cls.MODE_FRESH_UPDATES}
+        return {cls.MODE_NORMAL, cls.MODE_FRESH_UPDATES}
+
+    @classmethod
+    def update_history_modes(cls) -> set[str]:
+        return cls.update_modes() | {cls.MODE_LEGACY_FULL}
+
+    @classmethod
+    def manual_modes(cls) -> set[str]:
+        return {cls.MODE_FRESH_UPDATES, cls.MODE_FRESH_USERS, cls.MODE_FRESH_BACKUPS}
 
     @classmethod
     def user_modes(cls) -> set[str]:
