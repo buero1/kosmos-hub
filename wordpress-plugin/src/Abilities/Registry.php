@@ -1658,7 +1658,7 @@ class Registry {
 			);
 		}
 
-		$license_was_already_active = \Jet_Dashboard\Utils::is_site_activated();
+		$license_was_already_active = self::crocoblock_site_activation_state();
 
 		try {
 			if (
@@ -1702,7 +1702,7 @@ class Registry {
 			}
 			$plugins = get_plugins();
 			self::refresh_update_transients( $plugins );
-			$site_activated = \Jet_Dashboard\Utils::is_site_activated();
+			$site_activated = self::crocoblock_site_activation_state();
 			$provider_versions = self::get_crocoblock_remote_plugin_versions( $plugins );
 		} catch ( \Throwable $exception ) {
 			return new \WP_Error(
@@ -1722,15 +1722,25 @@ class Registry {
 			}
 		}
 
+		$activation_verified_by = is_bool( $site_activated ) ? 'jet-dashboard' : 'provider-response';
+		$site_activated         = is_bool( $site_activated ) ? $site_activated : true;
+		if ( $site_activated && 'provider-response' === $activation_verified_by ) {
+			$message = 'Crocoblock accepted and stored the license. This older Jet Dashboard does not expose its newer local activation helper.';
+		} elseif ( $site_activated ) {
+			$message = 'Crocoblock license activation was verified. Update availability was refreshed.';
+		} else {
+			$message = 'Crocoblock accepted the license, but Jet Dashboard did not confirm this site as activated.';
+		}
+
 		return array(
-			'activated'            => true,
-			'site_activated'       => (bool) $site_activated,
-			'license_was_already_active' => (bool) $license_was_already_active,
-			'update_package_ready' => $package_ready,
-			'plugins'              => $provider_versions,
-			'message'              => $site_activated
-				? 'Crocoblock license activation was verified. Update availability was refreshed.'
-				: 'Crocoblock accepted the license, but Jet Dashboard did not confirm this site as activated.',
+			'activated'                   => true,
+			'site_activated'              => (bool) $site_activated,
+			'license_was_already_active'  => true === $license_was_already_active,
+			'license_prior_state_known'   => is_bool( $license_was_already_active ),
+			'activation_verified_by'      => $activation_verified_by,
+			'update_package_ready'        => $package_ready,
+			'plugins'                     => $provider_versions,
+			'message'                     => $message,
 		);
 	}
 
@@ -1787,7 +1797,7 @@ class Registry {
 			array( 'get_remote_jet_plugin_list' )
 		);
 
-		if ( ! $dashboard_class_available || ! $utils_class_available ) {
+		if ( ! $dashboard_class_available ) {
 			$message = 'Jet Dashboard classes were unavailable after inspecting the embedded Jet initialization hooks.';
 		} elseif ( ! $dashboard_instance_available ) {
 			$message = 'Jet Dashboard classes are loaded, but no Dashboard instance could be obtained.';
@@ -1795,6 +1805,8 @@ class Registry {
 			$message = 'Jet Dashboard initialized, but it did not expose a license manager.';
 		} elseif ( count( $license_manager_methods ) < 2 ) {
 			$message = 'Jet Dashboard exposed a license manager, but it is missing one or more required activation methods.';
+		} elseif ( ! $utils_class_available ) {
+			$message = 'Jet Dashboard exposed the required license manager, but this older version does not include the newer Utils helper class.';
 		} else {
 			$message = 'Jet Dashboard exposed the license manager methods required by the Crocoblock activation workflow.';
 		}
@@ -1827,7 +1839,7 @@ class Registry {
 	private static function get_crocoblock_license_manager() {
 		self::initialize_embedded_jet_dashboard();
 
-		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) || ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
+		if ( ! class_exists( '\\Jet_Dashboard\\Dashboard' ) ) {
 			return null;
 		}
 
@@ -2304,19 +2316,48 @@ class Registry {
 	 * @return bool
 	 */
 	private static function has_crocoblock_update_package( $plugin_file ) {
-		if ( ! class_exists( '\\Jet_Dashboard\\Utils' ) ) {
-			return false;
+		if ( class_exists( '\\Jet_Dashboard\\Utils' ) && method_exists( '\\Jet_Dashboard\\Utils', 'package_url' ) ) {
+			try {
+				if ( true === self::crocoblock_site_activation_state() && \Jet_Dashboard\Utils::package_url( $plugin_file ) ) {
+					return true;
+				}
+			} catch ( \Throwable $exception ) {
+				// Older dashboards can expose the provider offer only through WordPress.
+			}
+		}
+
+		return self::has_wordpress_plugin_update_package( $plugin_file );
+	}
+
+	/**
+	 * Newer Jet Dashboard releases expose this convenience helper. Legacy
+	 * releases can still activate through their compatible license manager, but
+	 * they do not provide an equivalent local state check.
+	 *
+	 * @return bool|null
+	 */
+	private static function crocoblock_site_activation_state() {
+		if ( ! class_exists( '\\Jet_Dashboard\\Utils' ) || ! method_exists( '\\Jet_Dashboard\\Utils', 'is_site_activated' ) ) {
+			return null;
 		}
 
 		try {
-			if ( ! \Jet_Dashboard\Utils::is_site_activated() ) {
-				return false;
-			}
-
-			return (bool) \Jet_Dashboard\Utils::package_url( $plugin_file );
+			return (bool) \Jet_Dashboard\Utils::is_site_activated();
 		} catch ( \Throwable $exception ) {
-			return false;
+			return null;
 		}
+	}
+
+	/**
+	 * @param string $plugin_file Plugin file relative to WP_PLUGIN_DIR.
+	 * @return bool
+	 */
+	private static function has_wordpress_plugin_update_package( $plugin_file ) {
+		$transient = self::to_array( get_site_transient( 'update_plugins' ) );
+		$responses = isset( $transient['response'] ) ? self::to_array( $transient['response'] ) : array();
+		$offer     = isset( $responses[ $plugin_file ] ) ? self::to_array( $responses[ $plugin_file ] ) : array();
+
+		return ! empty( $offer['package'] ) && is_string( $offer['package'] );
 	}
 
 	/**
@@ -3005,11 +3046,13 @@ class Registry {
 				'activated'            => array( 'type' => 'boolean' ),
 				'site_activated'       => array( 'type' => 'boolean' ),
 				'license_was_already_active' => array( 'type' => 'boolean' ),
+				'license_prior_state_known' => array( 'type' => 'boolean' ),
+				'activation_verified_by' => array( 'type' => 'string' ),
 				'update_package_ready' => array( 'type' => 'boolean' ),
 				'plugins'              => array( 'type' => 'array', 'items' => $plugin_item ),
 				'message'              => array( 'type' => 'string' ),
 			),
-			'required'   => array( 'activated', 'site_activated', 'license_was_already_active', 'update_package_ready', 'plugins', 'message' ),
+			'required'   => array( 'activated', 'site_activated', 'license_was_already_active', 'license_prior_state_known', 'activation_verified_by', 'update_package_ready', 'plugins', 'message' ),
 		);
 	}
 

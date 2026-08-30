@@ -263,7 +263,7 @@ class CrocoblockLicenseService:
         return {
             "site": site,
             "license_was_already_active": result.get("license_was_already_active")
-            if isinstance(result.get("license_was_already_active"), bool)
+            if result.get("license_prior_state_known") is not False and isinstance(result.get("license_was_already_active"), bool)
             else None,
             "update_package_ready": result.get("update_package_ready") is True,
             "provider_versions": self._provider_versions(result),
