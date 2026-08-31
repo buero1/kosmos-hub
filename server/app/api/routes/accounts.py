@@ -358,7 +358,6 @@ def remove_crocoblock(
 def configure_fleet_refresh_settings(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    site_status_max_age_minutes: Annotated[int, Form()] = 15,
     max_parallel_site_checks: Annotated[int, Form()] = 5,
     max_parallel_direct_updates: Annotated[int, Form()] = 5,
     auto_refresh_enabled: Annotated[bool, Form()] = False,
@@ -372,7 +371,6 @@ def configure_fleet_refresh_settings(
     try:
         config = service.configure(
             actor=user,
-            site_status_max_age_minutes=site_status_max_age_minutes,
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
             auto_refresh_enabled=auto_refresh_enabled,
@@ -395,8 +393,7 @@ def configure_fleet_refresh_settings(
         action="configure-fleet-refresh-settings",
         result="success",
         detail=(
-            f"Set status cache to {config.site_status_max_age_minutes} minutes, parallel site checks to "
-            f"{config.max_parallel_site_checks} and parallel direct updates to "
+            f"Set parallel site checks to {config.max_parallel_site_checks} and parallel direct updates to "
             f"{config.max_parallel_direct_updates}. Automatic refresh is "
             f"{'enabled' if config.auto_refresh_enabled else 'disabled'} at "
             f"{config.auto_refresh_time} Europe/Berlin every {config.auto_refresh_interval_hours} hours."

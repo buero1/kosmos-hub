@@ -1683,13 +1683,11 @@ def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
     result = FleetRefreshService._initial_result(
         FleetRefreshService.MODE_NORMAL,
         runtime_settings=FleetRefreshRuntimeSettings(
-            site_status_max_age_minutes=20,
             max_parallel_site_checks=4,
         ),
     )
 
     assert result["settings"] == {
-        "site_status_max_age_minutes": 20,
         "max_parallel_site_checks": 4,
     }
 

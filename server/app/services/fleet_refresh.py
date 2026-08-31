@@ -1,6 +1,6 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -305,11 +305,6 @@ class FleetRefreshService:
     ) -> dict[str, Any]:
         cls._validate_mode(mode)
         refresh_kind = cls._refresh_kind(mode)
-        force = mode in (
-            cls.MODE_FRESH_UPDATES,
-            cls.MODE_FRESH_USERS,
-            cls.MODE_FRESH_BACKUPS,
-        )
         with SessionLocal() as db:
             runtime_settings = FleetRefreshSettingsService(db=db).get_runtime_settings()
         result = cls._initial_result(
@@ -317,24 +312,17 @@ class FleetRefreshService:
             runtime_settings=runtime_settings,
             target_site_ids=target_site_ids,
         )
-        targets, cached_targets, skipped_targets = cls._site_targets(
-            force=force,
-            refresh_kind=refresh_kind,
-            runtime_settings=runtime_settings,
+        targets, skipped_targets = cls._site_targets(
             target_site_ids=target_site_ids,
         )
         result["sites"].update(
             {
-                "total": len(targets) + len(cached_targets),
+                "total": len(targets),
                 "skipped": len(skipped_targets),
             }
         )
         result["backups"]["skipped"] = len(skipped_targets)
         result["users"]["skipped"] = len(skipped_targets)
-        for target in cached_targets:
-            outcome = cls._cached_site_outcome(target, refresh_kind=refresh_kind)
-            cls._record_site_outcome(result, outcome)
-            cls._store_site_result(run_id=run_id, outcome=outcome)
         for target in skipped_targets:
             cls._store_site_result(run_id=run_id, outcome=cls._skipped_site_outcome(target))
         result["phase"] = {
@@ -415,23 +403,14 @@ class FleetRefreshService:
     def _site_targets(
         cls,
         *,
-        force: bool,
-        refresh_kind: str,
-        runtime_settings: FleetRefreshRuntimeSettings,
         target_site_ids: set[int] | None,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         with SessionLocal() as db:
             repository = SiteRepository(db)
             sites = repository.list_sites(limit=1000)
             if target_site_ids is not None:
                 sites = [site for site in sites if site.id in target_site_ids]
-            snapshots = repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
-            update_snapshots = repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])
-            backup_snapshots = repository.get_latest_backup_snapshots_by_site_ids([site.id for site in sites])
-            user_snapshots = repository.get_latest_user_snapshots_by_site_ids([site.id for site in sites])
-            now = datetime.now(UTC)
             targets: list[dict[str, Any]] = []
-            cached_targets: list[dict[str, Any]] = []
             skipped_targets: list[dict[str, Any]] = []
             for site in sites:
                 if site.status != SiteStatus.verified.value:
@@ -443,24 +422,8 @@ class FleetRefreshService:
                         }
                     )
                     continue
-                max_age = timedelta(minutes=runtime_settings.site_status_max_age_minutes)
-                fresh_by_kind = {
-                    "updates": cls._is_fresh(snapshots.get(site.id), now=now, max_age=max_age)
-                    and cls._is_fresh(update_snapshots.get(site.id), now=now, max_age=max_age),
-                    "backups": cls._is_fresh(backup_snapshots.get(site.id), now=now, max_age=max_age),
-                    "users": cls._is_fresh(user_snapshots.get(site.id), now=now, max_age=max_age),
-                }
-                if not force and fresh_by_kind[refresh_kind]:
-                    cached_targets.append(
-                        {
-                            "site_id": site.id,
-                            "domain": site.domain,
-                            "detail": f"The stored {refresh_kind} data was still fresh and was reused from the cache.",
-                        }
-                    )
-                    continue
                 targets.append({"site_id": site.id, "domain": site.domain})
-            return targets, cached_targets, skipped_targets
+            return targets, skipped_targets
 
     @classmethod
     def _refresh_one_site(cls, target: dict[str, Any], *, refresh_kind: str) -> dict[str, Any]:
@@ -541,8 +504,6 @@ class FleetRefreshService:
         if outcome.get("state") == "refreshed":
             result["state"]["refreshed"] += 1
             result["sites"]["refreshed"] += 1
-        elif outcome.get("state") == "cached":
-            result["sites"]["cached"] += 1
         else:
             result["state"]["failed"] += 1
             result["sites"]["failed"] += 1
@@ -550,39 +511,20 @@ class FleetRefreshService:
             result["updates"]["refreshed"] += 1
         elif outcome.get("updates") == "failed":
             result["updates"]["failed"] += 1
-        elif outcome.get("updates") == "cached":
-            result["updates"]["cached"] += 1
         else:
             result["updates"]["skipped"] += 1
         if outcome.get("backups") == "refreshed":
             result["backups"]["refreshed"] += 1
         elif outcome.get("backups") == "failed":
             result["backups"]["failed"] += 1
-        elif outcome.get("backups") == "cached":
-            result["backups"]["cached"] += 1
         if outcome.get("users") == "refreshed":
             result["users"]["refreshed"] += 1
         elif outcome.get("users") == "failed":
             result["users"]["failed"] += 1
         elif outcome.get("users") == "unsupported":
             result["users"]["unsupported"] += 1
-        elif outcome.get("users") == "cached":
-            result["users"]["cached"] += 1
         for error in outcome.get("errors", []):
             result["errors"].append({"site": outcome.get("domain", "unknown"), "detail": str(error)[:240]})
-
-    @staticmethod
-    def _cached_site_outcome(target: dict[str, Any], *, refresh_kind: str) -> dict[str, Any]:
-        return {
-            "site_id": target["site_id"],
-            "domain": target["domain"],
-            "state": "cached",
-            "updates": "cached" if refresh_kind == "updates" else "skipped",
-            "backups": "cached" if refresh_kind == "backups" else "skipped",
-            "users": "cached" if refresh_kind == "users" else "skipped",
-            "detail": target["detail"],
-            "errors": [],
-        }
 
     @staticmethod
     def _skipped_site_outcome(target: dict[str, Any]) -> dict[str, Any]:
@@ -917,14 +859,13 @@ class FleetRefreshService:
                 "label": "All sites" if target_site_ids is None else f"{len(selected_site_ids)} selected site(s)",
             },
             "settings": {
-                "site_status_max_age_minutes": runtime_settings.site_status_max_age_minutes,
                 "max_parallel_site_checks": runtime_settings.max_parallel_site_checks,
             },
-            "sites": {"total": 0, "completed": 0, "refreshed": 0, "cached": 0, "failed": 0, "skipped": 0},
+            "sites": {"total": 0, "completed": 0, "refreshed": 0, "failed": 0, "skipped": 0},
             "state": {"refreshed": 0, "failed": 0},
-            "updates": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
-            "backups": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0},
-            "users": {"refreshed": 0, "failed": 0, "cached": 0, "skipped": 0, "unsupported": 0},
+            "updates": {"refreshed": 0, "failed": 0, "skipped": 0},
+            "backups": {"refreshed": 0, "failed": 0, "skipped": 0},
+            "users": {"refreshed": 0, "failed": 0, "skipped": 0, "unsupported": 0},
             "crocoblock": {
                 "eligible": 0,
                 "completed": 0,
@@ -944,14 +885,6 @@ class FleetRefreshService:
             "last_site": "",
             "errors": [],
         }
-
-    @staticmethod
-    def _is_fresh(snapshot: Any, *, now: datetime, max_age: timedelta) -> bool:
-        captured_at = getattr(snapshot, "captured_at", None)
-        if captured_at is None:
-            return False
-        timestamp = captured_at if captured_at.tzinfo is not None else captured_at.replace(tzinfo=UTC)
-        return now - timestamp <= max_age
 
     @staticmethod
     def _as_utc(value: datetime) -> datetime:

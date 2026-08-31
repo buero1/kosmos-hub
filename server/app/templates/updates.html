@@ -190,7 +190,7 @@
                 completion.hidden = false;
                 completion.textContent = container.dataset.refreshMode === "fresh-updates"
                   ? "Frischprüfung abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft."
-                  : "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert und " + number(sites.cached) + " aus dem Cache übernommen.";
+                  : "Refresh abgeschlossen: " + siteCompleted + "/" + siteTotal + " Websites geprüft, " + number(sites.refreshed) + " aktualisiert.";
               }
               if (container.dataset.refreshCompletionUrl && !redirectScheduled) {
                 redirectScheduled = true;
@@ -293,7 +293,7 @@
                 <td>Jet {{ run_jet.get("completed", run_jet.get("refreshed", 0)) }}/{{ run_jet.get("eligible", 0) }} · Official {{ run_official.get("completed", run_official.get("checked", 0)) }}/{{ run_official.get("checked", 0) }}</td>
                 <td>
                   {% if run.status == "succeeded" %}
-                    {{ run_sites.get("refreshed", 0) }} refreshed · {{ run_sites.get("cached", 0) }} cached · {{ run_progress.get("mismatches", 0) }} mismatches
+                    {{ run_sites.get("refreshed", 0) }} refreshed · {{ run_progress.get("mismatches", 0) }} mismatches
                   {% else %}
                     {{ run.error_message or run_progress.get("phase", {}).get("label", "Waiting") }}
                   {% endif %}

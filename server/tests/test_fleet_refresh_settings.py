@@ -164,7 +164,6 @@ def test_refresh_settings_store_berlin_schedule():
 
         settings = FleetRefreshSettingsService(db=db).configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -185,7 +184,6 @@ def test_refresh_settings_store_berlin_schedule():
 def test_refresh_schedule_requires_whole_days():
     with pytest.raises(FleetRefreshSettingsError, match="whole number of days"):
         FleetRefreshSettingsService._validate(
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_interval_hours=25,
@@ -218,7 +216,6 @@ def test_changing_automatic_schedule_takes_effect_at_the_next_selected_time():
         service = FleetRefreshSettingsService(db=db)
         service.configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -228,7 +225,6 @@ def test_changing_automatic_schedule_takes_effect_at_the_next_selected_time():
         )
         settings = service.configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -259,7 +255,6 @@ def test_changing_parallel_limits_does_not_reschedule_automatic_refresh():
         service = FleetRefreshSettingsService(db=db)
         initial = service.configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,
@@ -270,7 +265,6 @@ def test_changing_parallel_limits_does_not_reschedule_automatic_refresh():
         first_next_run_at = initial.auto_refresh_next_run_at
         updated = service.configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=4,
             max_parallel_direct_updates=3,
             auto_refresh_enabled=True,
@@ -320,7 +314,6 @@ def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
         db.commit()
         FleetRefreshSettingsService(db=db).configure(
             actor=user,
-            site_status_max_age_minutes=15,
             max_parallel_site_checks=5,
             max_parallel_direct_updates=5,
             auto_refresh_enabled=True,

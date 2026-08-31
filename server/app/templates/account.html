@@ -293,10 +293,6 @@
         <form method="post" action="/account/fleet-refresh-settings">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>
-            <span>Reuse site status for (minutes)</span>
-            <input type="number" name="site_status_max_age_minutes" value="{{ fleet_refresh_settings.site_status_max_age_minutes }}" min="1" max="180" required>
-          </label>
-          <label>
             <span>Parallel website checks</span>
             <input type="number" name="max_parallel_site_checks" value="{{ fleet_refresh_settings.max_parallel_site_checks }}" min="1" max="6" required>
           </label>
