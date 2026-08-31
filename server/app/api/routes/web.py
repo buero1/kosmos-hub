@@ -487,15 +487,11 @@ def delete_selected_users(
     db: Annotated[Session, Depends(get_db)],
     selected: Annotated[list[str] | None, Form()] = None,
     reassign_to_user_id: Annotated[list[int] | None, Form()] = None,
-    confirmation: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
     selection = selected or []
-    expected_confirmation = f"DELETE {len(selection)} USERS"
-    if confirmation.strip() != expected_confirmation:
-        return _render_user_workbench(request, db, error=f'Enter "{expected_confirmation}" to confirm the selected deletion.')
     try:
         outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).delete_users_bulk(
             selected_keys=selection,

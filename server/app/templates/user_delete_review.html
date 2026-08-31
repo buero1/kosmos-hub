@@ -8,7 +8,7 @@
       <div>
         <p class="eyebrow">Destructive action review</p>
         <h2>Review selected user deletion</h2>
-        <p class="subtle">Choose a different recipient for each user's content. The selected users are deleted only after the exact confirmation below.</p>
+        <p class="subtle">Choose a different recipient for each user's content before deleting the selected users.</p>
       </div>
       <div class="inventory-totals"><span><strong>{{ review_items | length }}</strong> selected users</span></div>
     </div>
@@ -42,10 +42,6 @@
           </tbody>
         </table>
       </div>
-      <label>
-        <span>Confirmation</span>
-        <input name="confirmation" required autocomplete="off" placeholder="Type DELETE {{ review_items | length }} USERS">
-      </label>
       {% if deletion_ready %}
         <button class="button button-danger" type="submit">Delete {{ review_items | length }} selected user{{ "s" if review_items | length != 1 else "" }}</button>
       {% else %}
