@@ -210,52 +210,29 @@
       </div>
     </section>
     <section id="account-zoho" class="account-panel account-panel-wide account-section" data-account-section>
-      <div>
-        <p class="eyebrow">CRM integration</p>
-        <h3>Zoho CRM Accounts</h3>
-        <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
-        {% if zoho_status.configured %}
-          <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
-          {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
-          {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
-        {% else %}
-          <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
+      <div class="zoho-section-heading">
+        <div>
+          <p class="eyebrow">CRM integration</p>
+          <h3>Zoho CRM Accounts</h3>
+          <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
+          {% if zoho_status.configured %}
+            <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
+            {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
+            {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
+          {% else %}
+            <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
+          {% endif %}
+        </div>
+        {% if zoho_status.connected and not zoho_status.requires_scope_reconnect %}
+          <form class="zoho-sync-heading-action" method="post" action="/account/zoho/sync">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button" type="submit">Sync all Zoho Accounts now</button>
+          </form>
         {% endif %}
       </div>
-      <form class="zoho-credentials-form" method="post" action="/account/zoho">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="zoho-data-center-field">
-          <span>Zoho data center</span>
-          <select name="data_center" required>
-            {% for data_center in zoho_data_centers %}
-              <option value="{{ data_center.key }}" {% if data_center.key == zoho_status.data_center.key %}selected{% endif %}>{{ data_center.label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="zoho-client-id-field">
-          <span>{% if zoho_status.configured %}Replace Zoho client ID{% else %}Zoho client ID{% endif %}</span>
-          <input type="password" name="client_id" autocomplete="new-password" minlength="8" maxlength="1024" required>
-        </label>
-        <label class="zoho-client-secret-field">
-          <span>{% if zoho_status.configured %}Replace Zoho client secret{% else %}Zoho client secret{% endif %}</span>
-          <input type="password" name="client_secret" autocomplete="new-password" minlength="8" maxlength="1024" required>
-        </label>
-        <p class="subtle">Use this exact redirect URI when creating the Zoho OAuth client: <code>{{ zoho_status.redirect_uri }}</code></p>
-        <button class="button zoho-save-credentials" type="submit">Save Zoho credentials</button>
-      </form>
       {% if zoho_status.configured %}
         <div class="button-row">
           <a class="button" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
-          {% if zoho_status.connected and not zoho_status.requires_scope_reconnect %}
-            <form method="post" action="/account/zoho/mapping">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Refresh field mapping</button>
-            </form>
-            <form method="post" action="/account/zoho/sync">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button" type="submit">Sync all Zoho Accounts now</button>
-            </form>
-          {% endif %}
           <form method="post" action="/account/zoho/remove">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="button button-secondary" type="submit">Remove Zoho connection</button>
@@ -263,8 +240,14 @@
         </div>
       {% endif %}
       {% if zoho_status.connected %}
-        <details class="account-details">
+        <details class="account-details zoho-mapping-details">
           <summary>Account field mapping: {{ zoho_status.mapped_field_count }} of {{ zoho_mapping|length }} fields found</summary>
+          <div class="zoho-mapping-action-row">
+            <form method="post" action="/account/zoho/mapping">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit">Refresh field mapping</button>
+            </form>
+          </div>
           {% if zoho_status.missing_fields %}<p class="notice-error">Not found in Zoho Accounts: {{ zoho_status.missing_fields|join(", ") }}. The Hub will preserve the other fields and report these as unmapped.</p>{% endif %}
           <div class="table-scroll">
             <table>
@@ -282,6 +265,30 @@
           </div>
         </details>
       {% endif %}
+      <details class="account-details zoho-credentials-details">
+        <summary>Zoho credentials</summary>
+        <form class="zoho-credentials-form" method="post" action="/account/zoho">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="zoho-data-center-field">
+            <span>Zoho data center</span>
+            <select name="data_center" required>
+              {% for data_center in zoho_data_centers %}
+                <option value="{{ data_center.key }}" {% if data_center.key == zoho_status.data_center.key %}selected{% endif %}>{{ data_center.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="zoho-client-id-field">
+            <span>{% if zoho_status.configured %}Replace Zoho client ID{% else %}Zoho client ID{% endif %}</span>
+            <input type="password" name="client_id" autocomplete="new-password" minlength="8" maxlength="1024" required>
+          </label>
+          <label class="zoho-client-secret-field">
+            <span>{% if zoho_status.configured %}Replace Zoho client secret{% else %}Zoho client secret{% endif %}</span>
+            <input type="password" name="client_secret" autocomplete="new-password" minlength="8" maxlength="1024" required>
+          </label>
+          <p class="subtle">Use this exact redirect URI when creating the Zoho OAuth client: <code>{{ zoho_status.redirect_uri }}</code></p>
+          <button class="button zoho-save-credentials" type="submit">Save Zoho credentials</button>
+        </form>
+      </details>
     </section>
     {% if user.role == "admin" %}
       <section id="account-refresh-settings" class="account-panel account-panel-wide account-section" data-account-section>
