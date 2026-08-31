@@ -776,15 +776,17 @@
         margin: 0;
       }
       .zoho-section-heading {
-        display: flex;
+        display: grid;
         align-items: flex-start;
-        justify-content: space-between;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 1rem;
       }
-      .zoho-section-heading > div { min-width: 0; }
+      .zoho-heading-copy { min-width: 0; }
       .account-panel .zoho-sync-heading-action {
         display: block;
         flex: 0 0 auto;
+        grid-column: 2;
+        grid-row: 1;
         margin: 0;
       }
       .zoho-sync-heading-action .button,
@@ -794,6 +796,7 @@
         display: flex;
         align-items: center;
         flex-wrap: wrap;
+        grid-column: 1 / -1;
         gap: 0.65rem;
       }
       .zoho-connection-status .subtle { margin: 0; }
@@ -1657,7 +1660,8 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .account-panel .zoho-credentials-form { grid-template-columns: 1fr; }
-        .zoho-section-heading { flex-direction: column; }
+        .zoho-section-heading { grid-template-columns: 1fr; }
+        .account-panel .zoho-sync-heading-action { grid-column: auto; grid-row: auto; }
         .zoho-connection-status { align-items: flex-start; flex-direction: column; }
         .zoho-credentials-form .zoho-data-center-field,
         .zoho-credentials-form .zoho-client-id-field,
