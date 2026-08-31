@@ -36,7 +36,10 @@
               <button class="button button-secondary" type="button" data-plugin-catalog-browse="new">Neu</button>
             </div>
           </div>
-          <p class="plugin-catalog-selection" data-plugin-catalog-selection hidden></p>
+          <div class="plugin-catalog-selection" data-plugin-catalog-selection hidden>
+            <span data-plugin-catalog-selection-label></span>
+            <button class="button button-secondary" type="button" data-plugin-catalog-clear>Auswahl aufheben</button>
+          </div>
           <p class="subtle plugin-catalog-status" aria-live="polite" data-plugin-catalog-status>Plugin-Katalog wird geladen...</p>
           <div class="plugin-catalog-grid" data-plugin-catalog-results></div>
           <div class="plugin-catalog-pagination" data-plugin-catalog-pagination hidden>
@@ -123,6 +126,8 @@
       var catalogStatus = form.querySelector("[data-plugin-catalog-status]");
       var catalogResults = form.querySelector("[data-plugin-catalog-results]");
       var catalogSelection = form.querySelector("[data-plugin-catalog-selection]");
+      var catalogSelectionLabel = form.querySelector("[data-plugin-catalog-selection-label]");
+      var clearCatalogSelection = form.querySelector("[data-plugin-catalog-clear]");
       var catalogPagination = form.querySelector("[data-plugin-catalog-pagination]");
       var catalogPage = form.querySelector("[data-plugin-catalog-page]");
       var previousPage = form.querySelector("[data-plugin-catalog-previous]");
@@ -164,11 +169,23 @@
       }
 
       function selectPlugin(plugin) {
+        if (selectedPlugin && selectedPlugin.slug === plugin.slug) {
+          clearPluginSelection();
+          return;
+        }
         selectedPlugin = plugin;
         slugInput.value = plugin.slug;
-        catalogSelection.textContent = "Ausgewählt: " + plugin.name + " " + (plugin.version ? "(" + plugin.version + ")" : "");
+        catalogSelectionLabel.textContent = "Ausgewählt: " + plugin.name + " " + (plugin.version ? "(" + plugin.version + ")" : "");
         catalogSelection.hidden = false;
         catalogStatus.textContent = "";
+        feedback.hidden = true;
+        renderCatalogSelection();
+      }
+
+      function clearPluginSelection() {
+        selectedPlugin = null;
+        slugInput.value = "";
+        catalogSelection.hidden = true;
         feedback.hidden = true;
         renderCatalogSelection();
       }
@@ -310,6 +327,7 @@
         window.clearTimeout(searchTimer);
         searchTimer = window.setTimeout(function () { loadCatalog(1); }, 250);
       });
+      clearCatalogSelection.addEventListener("click", clearPluginSelection);
       previousPage.addEventListener("click", function () { if (currentPage > 1) { loadCatalog(currentPage - 1); } });
       nextPage.addEventListener("click", function () { if (currentPage < totalPages) { loadCatalog(currentPage + 1); } });
       document.addEventListener("site-selector-install-request", openInstallDialog);

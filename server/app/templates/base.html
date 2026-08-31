@@ -597,6 +597,10 @@
       .plugin-catalog-browse .button { margin: 0; }
       .plugin-catalog-browse .button.is-active { background: var(--accent); color: #fff; }
       .plugin-catalog-selection {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
         margin: 1rem 0 0;
         padding: 0.65rem 0.8rem;
         border-radius: 10px;
@@ -604,6 +608,7 @@
         color: #075f4e;
         font-weight: 700;
       }
+      .plugin-catalog-selection .button { margin: 0; }
       .plugin-catalog-status { min-height: 1.35rem; margin: 0.85rem 0; }
       .plugin-catalog-grid {
         display: grid;
@@ -1769,6 +1774,7 @@
         .direct-update-controls { align-items: stretch; flex-direction: column; }
         .plugin-source-tabs,
         .plugin-catalog-controls { grid-template-columns: 1fr; }
+        .plugin-catalog-selection { align-items: stretch; flex-direction: column; }
         .plugin-catalog-pagination,
         .plugin-install-dialog-actions { align-items: stretch; flex-direction: column; }
         .plugin-catalog-pagination .button,
