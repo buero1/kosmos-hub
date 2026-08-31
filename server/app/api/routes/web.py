@@ -1398,6 +1398,7 @@ def execute_site_backup_action_from_detail(
         Form(),
     ],
     selected_backup: Annotated[list[str] | None, Form()] = None,
+    deletion_confirmation: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -1419,6 +1420,7 @@ def execute_site_backup_action_from_detail(
                 site_id=site_id,
                 selections=selected_backup or [],
                 actor=user.username,
+                deletion_confirmation=deletion_confirmation,
             )
             message = outcome.message
             result = outcome.result

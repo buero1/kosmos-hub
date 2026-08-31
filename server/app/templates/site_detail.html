@@ -174,6 +174,7 @@
         {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
         <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="deletion_confirmation" value="">
           <article class="card backup-status-card">
             <div>
               <h3>UpdraftPlus status</h3>
@@ -194,10 +195,10 @@
               <label class="backup-action-picker" for="backup-action">
                 <span>Action</span>
                 <select id="backup-action" name="backup_action" {% if running_backup_runs %}disabled{% endif %}>
-                  <option value="create-and-prune-oldest">Create backup and delete oldest</option>
+                  <option value="check-backups">Check backups</option>
                   <option value="create-complete">Create complete backup</option>
                   <option value="delete-selected">Delete selected backups</option>
-                  <option value="check-backups">Check backups</option>
+                  <option value="create-and-prune-oldest">Create backup and delete oldest</option>
                 </select>
               </label>
               <button class="button" type="submit" {% if running_backup_runs %}disabled{% endif %}>{{ "Backup action is running" if running_backup_runs else "Start action" }}</button>
@@ -209,7 +210,7 @@
               <table>
                 <thead>
                   <tr>
-                    <th><input type="checkbox" data-backup-select-all aria-label="Select all deletable backups"></th>
+                    <th><input type="checkbox" data-backup-select-all aria-label="Select all deletable backups" {% if running_backup_runs %}disabled{% endif %}></th>
                     <th>Backup time</th>
                     <th>Set</th>
                     <th>Retention</th>
@@ -649,6 +650,7 @@
       }
       var action = form.querySelector("[name='backup_action']");
       var selectAll = form.querySelector("[data-backup-select-all]");
+      var deletionConfirmation = form.querySelector("[name='deletion_confirmation']");
       var selections = function () {
         return Array.prototype.slice.call(form.querySelectorAll("[data-backup-selection]:checked"));
       };
@@ -664,6 +666,9 @@
       }
 
       form.addEventListener("submit", function (event) {
+        if (deletionConfirmation) {
+          deletionConfirmation.value = "";
+        }
         if (!action || action.value !== "delete-selected") {
           return;
         }
@@ -672,6 +677,18 @@
           event.preventDefault();
           window.alert("Select at least one backup before choosing deletion.");
           return;
+        }
+        var backupCount = form.querySelectorAll("[data-backup-selection]:not([disabled])").length;
+        var needsTextConfirmation = selected.length > 5 || (backupCount > 0 && selected.length === backupCount);
+        if (needsTextConfirmation) {
+          var typedConfirmation = window.prompt("This deletion removes more than five backups or the final remaining backup. Type delete to continue.");
+          if (typedConfirmation !== "delete") {
+            event.preventDefault();
+            return;
+          }
+          if (deletionConfirmation) {
+            deletionConfirmation.value = typedConfirmation;
+          }
         }
         if (!window.confirm("Delete the selected backup set(s) locally and from the configured remote storage? This cannot be undone.")) {
           event.preventDefault();

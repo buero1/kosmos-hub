@@ -403,6 +403,7 @@ class MaintenanceRunService:
         site_id: int,
         selections: list[str],
         actor: str,
+        deletion_confirmation: str = "",
     ) -> MaintenanceRunOutcome:
         site = self.repository.get_site(site_id)
         if site is None:
@@ -441,12 +442,15 @@ class MaintenanceRunService:
         except SiteMcpProxyError as exc:
             raise ValueError(f"Backups could not be checked before deletion: {exc.message}") from exc
 
+        reported_backups = self._result_from_payload(payload).get("backups")
         backup_targets = self._selected_backup_targets(
-            self._result_from_payload(payload).get("backups"),
+            reported_backups,
             selected_identities,
         )
         if len(backup_targets) != len(selected_identities):
             raise ValueError("One or more selected backups no longer match the current UpdraftPlus history. Check backups and try again.")
+        if self._backup_deletion_requires_text_confirmation(reported_backups, selected_identities) and deletion_confirmation.strip() != "delete":
+            raise ValueError("Type delete to confirm deleting more than five backups or the final remaining backup.")
 
         now = datetime.now(UTC)
         run = MaintenanceRun(
@@ -3924,6 +3928,33 @@ class MaintenanceRunService:
                 "retention_protected": backup.get("retention_protected") is True,
             }
         return [available[identity] for identity in selected_identities if identity in available]
+
+    @classmethod
+    def _backup_deletion_requires_text_confirmation(
+        cls,
+        backups: object,
+        selected_identities: list[tuple[str, int]],
+    ) -> bool:
+        if len(selected_identities) > 5:
+            return True
+        if not isinstance(backups, list):
+            return False
+
+        reported_identities: set[tuple[str, int]] = set()
+        for backup in backups:
+            if not isinstance(backup, dict):
+                return False
+            backup_nonce = backup.get("backup_nonce")
+            backup_timestamp = backup.get("backup_timestamp")
+            if (
+                not cls._is_backup_nonce(backup_nonce)
+                or not isinstance(backup_timestamp, int)
+                or isinstance(backup_timestamp, bool)
+                or backup_timestamp <= 0
+            ):
+                return False
+            reported_identities.add((backup_nonce, backup_timestamp))
+        return bool(reported_identities) and reported_identities.issubset(set(selected_identities))
 
     @staticmethod
     def _backup_cleanup_requested(run: MaintenanceRun) -> bool:

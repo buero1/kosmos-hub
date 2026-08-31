@@ -380,10 +380,21 @@ def test_selected_backup_deletion_is_verified_and_refreshes_the_backup_list(monk
         db.commit()
 
         service = MaintenanceRunService(db=db, cipher=SecretCipher("a" * 32))
+        try:
+            service.start_updraftplus_backup_deletion(
+                site_id=site.id,
+                selections=[f"{backup_nonce}:{backup_timestamp}"],
+                actor="operator",
+            )
+        except ValueError as exc:
+            assert "Type delete" in str(exc)
+        else:
+            raise AssertionError("Deleting the final backup must require typed confirmation.")
         started = service.start_updraftplus_backup_deletion(
             site_id=site.id,
             selections=[f"{backup_nonce}:{backup_timestamp}"],
             actor="operator",
+            deletion_confirmation="delete",
         )
 
         assert service.poll_active_updraftplus_backups() == {"checked": 1, "succeeded": 0, "failed": 0, "waiting": 1}
@@ -395,6 +406,38 @@ def test_selected_backup_deletion_is_verified_and_refreshes_the_backup_list(monk
         assert completed.result_json["completed_count"] == 1
         assert completed.result_json["failed_count"] == 0
         assert site.backup_snapshots[0].backup_count == 0
+
+
+def test_backup_deletion_requires_typed_confirmation_for_large_or_final_selection():
+    one_backup = [
+        {
+            "backup_nonce": "a1b2c3d4e5f6",
+            "backup_timestamp": 1787832000,
+        }
+    ]
+    many_backups = [
+        {
+            "backup_nonce": f"a1b2c3d4e5f{i}",
+            "backup_timestamp": 1787832000 + i,
+        }
+        for i in range(6)
+    ]
+
+    assert MaintenanceRunService._backup_deletion_requires_text_confirmation(
+        one_backup,
+        [("a1b2c3d4e5f6", 1787832000)],
+    ) is True
+    assert MaintenanceRunService._backup_deletion_requires_text_confirmation(
+        many_backups,
+        [(backup["backup_nonce"], backup["backup_timestamp"]) for backup in many_backups],
+    ) is True
+    assert MaintenanceRunService._backup_deletion_requires_text_confirmation(
+        [
+            *one_backup,
+            {"backup_nonce": "b1b2c3d4e5f6", "backup_timestamp": 1787832001},
+        ],
+        [("a1b2c3d4e5f6", 1787832000)],
+    ) is False
 
 
 def test_verified_backup_prunes_only_oldest_manually_protected_complete_backup(monkeypatch):
