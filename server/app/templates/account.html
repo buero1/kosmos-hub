@@ -222,9 +222,9 @@
           <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
         {% endif %}
       </div>
-      <form method="post" action="/account/zoho">
+      <form class="zoho-credentials-form" method="post" action="/account/zoho">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>
+        <label class="zoho-data-center-field">
           <span>Zoho data center</span>
           <select name="data_center" required>
             {% for data_center in zoho_data_centers %}
@@ -232,16 +232,16 @@
             {% endfor %}
           </select>
         </label>
-        <label>
+        <label class="zoho-client-id-field">
           <span>{% if zoho_status.configured %}Replace Zoho client ID{% else %}Zoho client ID{% endif %}</span>
           <input type="password" name="client_id" autocomplete="new-password" minlength="8" maxlength="1024" required>
         </label>
-        <label>
+        <label class="zoho-client-secret-field">
           <span>{% if zoho_status.configured %}Replace Zoho client secret{% else %}Zoho client secret{% endif %}</span>
           <input type="password" name="client_secret" autocomplete="new-password" minlength="8" maxlength="1024" required>
         </label>
         <p class="subtle">Use this exact redirect URI when creating the Zoho OAuth client: <code>{{ zoho_status.redirect_uri }}</code></p>
-        <button class="button" type="submit">Save Zoho credentials</button>
+        <button class="button zoho-save-credentials" type="submit">Save Zoho credentials</button>
       </form>
       {% if zoho_status.configured %}
         <div class="button-row">

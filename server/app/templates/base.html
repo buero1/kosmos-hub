@@ -753,6 +753,28 @@
         padding: 0;
         accent-color: var(--accent);
       }
+      .account-panel .zoho-credentials-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .zoho-credentials-form .zoho-data-center-field { grid-column: 1; grid-row: 1; }
+      .zoho-credentials-form .zoho-client-id-field { grid-column: 1; grid-row: 2; }
+      .zoho-credentials-form .zoho-client-secret-field { grid-column: 2; grid-row: 2; }
+      .zoho-credentials-form select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: #fffdf8;
+        color: var(--ink);
+        font: inherit;
+        padding: 0.58rem 0.65rem;
+      }
+      .zoho-credentials-form .subtle { grid-column: 1 / -1; }
+      .zoho-credentials-form .zoho-save-credentials {
+        grid-column: 1;
+        width: 100%;
+        margin: 0;
+      }
       .account-panel .fleet-refresh-settings-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
@@ -1603,6 +1625,14 @@
         .account-page-sidebar { position: static; }
         .account-section-nav {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .account-panel .zoho-credentials-form { grid-template-columns: 1fr; }
+        .zoho-credentials-form .zoho-data-center-field,
+        .zoho-credentials-form .zoho-client-id-field,
+        .zoho-credentials-form .zoho-client-secret-field,
+        .zoho-credentials-form .zoho-save-credentials {
+          grid-column: auto;
+          grid-row: auto;
         }
         .account-panel .fleet-refresh-settings-form { grid-template-columns: 1fr; }
         .workbench-site-selector {
