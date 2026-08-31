@@ -702,6 +702,7 @@ def _account_context(
         "csrf_token": get_csrf_token(request),
         "mcp_tokens": service.list_mcp_access_tokens(user=user),
         "error": error,
+        "error_section": _account_section_for_path(request.url.path),
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
@@ -733,6 +734,20 @@ def _require_admin_user(request: Request):
 
 def _safe_next(value: str) -> str:
     return value if value.startswith("/") and not value.startswith("//") else ""
+
+
+def _account_section_for_path(path: str) -> str:
+    if path.startswith("/account/mcp-tokens"):
+        return "account-mcp"
+    if path.startswith("/account/openai"):
+        return "account-openai"
+    if path.startswith("/account/crocoblock") or path.startswith("/account/provider-licenses"):
+        return "account-provider-licenses"
+    if path == "/account/fleet-refresh-settings":
+        return "account-refresh-settings"
+    if path.startswith("/account/zoho"):
+        return "account-zoho"
+    return "account-security"
 
 
 def _is_direct_local_request(request: Request) -> bool:

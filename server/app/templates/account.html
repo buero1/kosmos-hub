@@ -23,45 +23,45 @@
       </div>
     </div>
     {% if request.query_params.get("password") == "changed" %}
-      <p class="notice-success">Your password was changed. Other active sessions are no longer valid.</p>
+      <p class="notice-success" data-account-notice-section="account-security">Your password was changed. Other active sessions are no longer valid.</p>
     {% endif %}
     {% if request.query_params.get("mcp_token") == "revoked" %}
-      <p class="notice-success">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
+      <p class="notice-success" data-account-notice-section="account-mcp">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
     {% endif %}
     {% if request.query_params.get("openai") == "configured" %}
-      <p class="notice-success">OpenAI is connected. The API key is encrypted and never shown again.</p>
+      <p class="notice-success" data-account-notice-section="account-openai">OpenAI is connected. The API key is encrypted and never shown again.</p>
     {% endif %}
     {% if request.query_params.get("openai") == "removed" %}
-      <p class="notice-success">The stored OpenAI API key was removed.</p>
+      <p class="notice-success" data-account-notice-section="account-openai">The stored OpenAI API key was removed.</p>
     {% endif %}
     {% if request.query_params.get("provider_license") == "configured" %}
-      <p class="notice-success">The provider license was encrypted and saved. It is never displayed again.</p>
+      <p class="notice-success" data-account-notice-section="account-provider-licenses">The provider license was encrypted and saved. It is never displayed again.</p>
     {% endif %}
     {% if request.query_params.get("provider_license") == "removed" %}
-      <p class="notice-success">The provider license was removed.</p>
+      <p class="notice-success" data-account-notice-section="account-provider-licenses">The provider license was removed.</p>
     {% endif %}
     {% if request.query_params.get("fleet_refresh") == "settings-saved" %}
-      <p class="notice-success">Fleet refresh settings were saved. New refresh runs will use them immediately.</p>
+      <p class="notice-success" data-account-notice-section="account-refresh-settings">Fleet refresh settings were saved. New refresh runs will use them immediately.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "configured" %}
-      <p class="notice-success">Zoho client credentials were encrypted and saved. Connect the Zoho account next.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Zoho client credentials were encrypted and saved. Connect the Zoho account next.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "connected" %}
-      <p class="notice-success">Zoho CRM is connected with the Hub's full configured scope. The Account field mapping was retrieved; the currently implemented synchronization remains read-only.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Zoho CRM is connected with the Hub's full configured scope. The Account field mapping was retrieved; the currently implemented synchronization remains read-only.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "mapping-refreshed" %}
-      <p class="notice-success">The technical Zoho field mapping was refreshed.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">The technical Zoho field mapping was refreshed.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "synced" %}
-      <p class="notice-success">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_sites_created", "0") }} customer websites were added for Bridge onboarding and {{ request.query_params.get("zoho_sites_linked", "0") }} existing sites were linked automatically. {{ request.query_params.get("zoho_site_conflicts", "0") }} domain conflicts need review.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_sites_created", "0") }} customer websites were added for Bridge onboarding and {{ request.query_params.get("zoho_sites_linked", "0") }} existing sites were linked automatically. {{ request.query_params.get("zoho_site_conflicts", "0") }} domain conflicts need review.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
-      <p class="notice-success">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
     {% endif %}
     {% if request.query_params.get("zoho") in ["connect-failed", "mapping-failed", "sync-failed", "not-approved"] %}
-      <p class="notice-error">{{ zoho_status.last_error or "The Zoho action could not be completed." }}</p>
+      <p class="notice-error" data-account-notice-section="account-zoho">{{ zoho_status.last_error or "The Zoho action could not be completed." }}</p>
     {% endif %}
-    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if error %}<p class="notice-error" data-account-notice-section="{{ error_section }}">{{ error }}</p>{% endif %}
     <form id="account-security" class="account-panel account-section" data-account-section method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <h3>Change password</h3>
@@ -337,12 +337,16 @@
 
       const links = Array.from(page.querySelectorAll(".account-section-nav a"));
       const sections = Array.from(page.querySelectorAll("[data-account-section]"));
+      const notices = Array.from(page.querySelectorAll("[data-account-notice-section]"));
       const selectSection = (id, { updateHash = false } = {}) => {
         const selected = sections.find((section) => section.id === id) || sections[0];
         if (!selected) return;
 
         sections.forEach((section) => {
           section.hidden = section !== selected;
+        });
+        notices.forEach((notice) => {
+          notice.hidden = notice.dataset.accountNoticeSection !== selected.id;
         });
         links.forEach((link) => {
           const current = link.getAttribute("href") === `#${selected.id}`;
@@ -366,9 +370,10 @@
         if (parameters.has("openai")) return "account-openai";
         if (parameters.has("provider_license") || parameters.has("crocoblock")) return "account-provider-licenses";
         if (parameters.has("zoho")) return "account-zoho";
-        return "account-security";
+        return "";
       };
-      selectSection(window.location.hash.slice(1) || savedActionSection());
+      const noticeSection = notices.length ? notices[0].dataset.accountNoticeSection : "";
+      selectSection(savedActionSection() || noticeSection || window.location.hash.slice(1) || "account-security");
     })();
   </script>
 {% endblock %}
