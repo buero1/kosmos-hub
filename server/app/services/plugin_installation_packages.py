@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import delete, select
@@ -37,6 +37,31 @@ class InspectedPluginPackage:
     package_bytes: bytes
 
 
+@dataclass(frozen=True)
+class WordPressOrgPluginCatalogItem:
+    """Display-safe WordPress.org directory metadata for the Hub catalog."""
+
+    slug: str
+    name: str
+    short_description: str
+    version: str
+    rating: int
+    num_ratings: int
+    active_installs: int
+    last_updated: str
+    requires: str
+    tested: str
+    icon_url: str
+
+
+@dataclass(frozen=True)
+class WordPressOrgPluginCatalogPage:
+    items: tuple[WordPressOrgPluginCatalogItem, ...]
+    page: int
+    pages: int
+    total: int
+
+
 class PluginInstallationPackageService:
     """Fetch and inspect plugin archives before they ever reach a customer site."""
 
@@ -46,6 +71,8 @@ class PluginInstallationPackageService:
     MAX_HEADER_BYTES = 64 * 1024
     RETENTION = timedelta(days=7)
     WORDPRESS_ORG_API = "https://api.wordpress.org/plugins/info/1.2/?{}"
+    WORDPRESS_ORG_CATALOG_BROWSE = frozenset({"popular", "recommended", "new"})
+    WORDPRESS_ORG_CATALOG_PAGE_SIZE = 18
     _SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,199}")
     _PLUGIN_FILE_RE = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*[A-Za-z0-9][A-Za-z0-9._-]*\.php")
     _HEADER_RE = re.compile(r"^\s*(Plugin Name|Version)\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
@@ -68,7 +95,7 @@ class PluginInstallationPackageService:
 
         try:
             info_url = self.WORDPRESS_ORG_API.format(urlencode({"action": "plugin_information", "request[slug]": normalized_slug}))
-            with urlopen(Request(info_url, headers={"Accept": "application/json"}), timeout=30) as response:
+            with urlopen(UrlRequest(info_url, headers={"Accept": "application/json"}), timeout=30) as response:
                 info = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             raise PluginPackageError("WordPress.org could not provide this plugin package.") from exc
@@ -79,7 +106,7 @@ class PluginInstallationPackageService:
             raise PluginPackageError("WordPress.org returned an invalid plugin package URL.")
 
         try:
-            with urlopen(Request(download_url, headers={"Accept": "application/zip"}), timeout=60) as response:
+            with urlopen(UrlRequest(download_url, headers={"Accept": "application/zip"}), timeout=60) as response:
                 package_bytes = self._read_bounded(response)
         except PluginPackageError:
             raise
@@ -91,6 +118,60 @@ class PluginInstallationPackageService:
             original_filename=f"{normalized_slug}.zip",
         )
         return self._store(inspected, source="wordpress-org")
+
+    def search_wordpress_org_plugins(
+        self,
+        *,
+        search: str = "",
+        browse: str = "popular",
+        page: int = 1,
+    ) -> WordPressOrgPluginCatalogPage:
+        """Read a bounded, presentation-only page from the official directory."""
+        normalized_search = " ".join(search.split())[:100]
+        normalized_browse = browse.strip().lower()
+        if normalized_browse not in self.WORDPRESS_ORG_CATALOG_BROWSE:
+            normalized_browse = "popular"
+        normalized_page = max(1, min(page, 100))
+        request_params = {
+            "action": "query_plugins",
+            "request[per_page]": self.WORDPRESS_ORG_CATALOG_PAGE_SIZE,
+            "request[page]": normalized_page,
+            "request[locale]": "de_DE",
+            "request[fields][icons]": "1",
+            "request[fields][active_installs]": "1",
+            "request[fields][last_updated]": "1",
+            "request[fields][short_description]": "1",
+            "request[fields][requires]": "1",
+            "request[fields][tested]": "1",
+        }
+        if normalized_search:
+            request_params["request[search]"] = normalized_search
+        else:
+            request_params["request[browse]"] = normalized_browse
+
+        try:
+            info_url = self.WORDPRESS_ORG_API.format(urlencode(request_params))
+            with urlopen(UrlRequest(info_url, headers={"Accept": "application/json"}), timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise PluginPackageError("WordPress.org could not load the plugin catalog.") from exc
+
+        plugins = payload.get("plugins") if isinstance(payload, dict) else None
+        info = payload.get("info") if isinstance(payload, dict) else None
+        if not isinstance(plugins, list) or not isinstance(info, dict):
+            raise PluginPackageError("WordPress.org returned an invalid plugin catalog response.")
+
+        items = tuple(
+            item
+            for item in (self._catalog_item(plugin) for plugin in plugins)
+            if item is not None
+        )
+        return WordPressOrgPluginCatalogPage(
+            items=items,
+            page=self._catalog_int(info.get("page"), default=normalized_page, minimum=1),
+            pages=self._catalog_int(info.get("pages"), default=1, minimum=1),
+            total=self._catalog_int(info.get("results"), default=len(items), minimum=0),
+        )
 
     def inspect_archive(self, *, package_bytes: bytes, original_filename: str) -> InspectedPluginPackage:
         if not package_bytes:
@@ -151,6 +232,58 @@ class PluginInstallationPackageService:
             sha256=hashlib.sha256(package_bytes).hexdigest(),
             package_bytes=package_bytes,
         )
+
+    @classmethod
+    def _catalog_item(cls, plugin: object) -> WordPressOrgPluginCatalogItem | None:
+        if not isinstance(plugin, dict):
+            return None
+        slug = cls._catalog_text(plugin.get("slug"), limit=200).lower()
+        if cls._SLUG_RE.fullmatch(slug) is None:
+            return None
+        name = cls._catalog_text(plugin.get("name"), limit=255)
+        if not name:
+            return None
+        icons = plugin.get("icons")
+        icon_url = ""
+        if isinstance(icons, dict):
+            icon_url = cls._catalog_url(icons.get("2x")) or cls._catalog_url(icons.get("1x"))
+        return WordPressOrgPluginCatalogItem(
+            slug=slug,
+            name=name,
+            short_description=cls._catalog_text(plugin.get("short_description"), limit=600),
+            version=cls._catalog_text(plugin.get("version"), limit=128),
+            rating=cls._catalog_int(plugin.get("rating"), default=0, minimum=0, maximum=100),
+            num_ratings=cls._catalog_int(plugin.get("num_ratings"), default=0, minimum=0),
+            active_installs=cls._catalog_int(plugin.get("active_installs"), default=0, minimum=0),
+            last_updated=cls._catalog_text(plugin.get("last_updated"), limit=64),
+            requires=cls._catalog_text(plugin.get("requires"), limit=64),
+            tested=cls._catalog_text(plugin.get("tested"), limit=64),
+            icon_url=icon_url,
+        )
+
+    @staticmethod
+    def _catalog_text(value: object, *, limit: int) -> str:
+        return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+    @staticmethod
+    def _catalog_int(value: object, *, default: int, minimum: int, maximum: int | None = None) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return default
+        if number < minimum:
+            return minimum
+        return min(number, maximum) if maximum is not None else number
+
+    @staticmethod
+    def _catalog_url(value: object) -> str:
+        if not isinstance(value, str):
+            return ""
+        parsed = urlparse(value)
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
+        if parsed.scheme != "https" or not hostname.endswith(".w.org"):
+            return ""
+        return value
 
     def _store(self, package: InspectedPluginPackage, *, source: str) -> PluginInstallationPackage:
         stored = PluginInstallationPackage(

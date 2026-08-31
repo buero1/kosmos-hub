@@ -9,11 +9,6 @@
         <div>
           <p class="eyebrow">Direct maintenance</p>
           <h2>Plugin installation</h2>
-          <p class="subtle">Install a checked WordPress.org package or a checked ZIP on the selected websites.</p>
-        </div>
-        <div class="inventory-totals">
-          <span><strong>{{ selected_site_count }}</strong> selected sites</span>
-          <span><strong>20 MB</strong> ZIP limit</span>
         </div>
       </div>
 
@@ -21,37 +16,61 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}" data-site-selector-target-scope>
         <span data-site-selector-target-sites></span>
+        <input type="hidden" name="source" value="wordpress-org" data-plugin-source-input>
+        <input type="hidden" name="wordpress_org_slug" value="" data-plugin-slug-input>
 
-        <fieldset class="plugin-source-options">
-          <legend>Plugin source</legend>
-          <label><input type="radio" name="source" value="wordpress-org" checked data-plugin-source="wordpress-org"> WordPress.org</label>
-          <label><input type="radio" name="source" value="zip-upload" data-plugin-source="zip-upload"> Upload ZIP</label>
-        </fieldset>
-
-        <label data-plugin-source-panel="wordpress-org">
-          <span>WordPress.org plugin slug</span>
-          <input type="text" name="wordpress_org_slug" placeholder="e.g. wordpress-seo" autocomplete="off">
-          <small>The Hub downloads and inspects the current official ZIP before it is queued.</small>
-        </label>
-
-        <label data-plugin-source-panel="zip-upload" hidden>
-          <span>Plugin ZIP</span>
-          <input type="file" name="package_zip" accept=".zip,application/zip,application/x-zip-compressed">
-          <small>The Hub checks archive paths, the WordPress plugin header, version, and SHA-256 before any website receives it.</small>
-        </label>
-
-        <fieldset class="plugin-install-options">
-          <legend>Installation options</legend>
-          <label><input type="checkbox" name="activate" value="true" checked> Activate after installation</label>
-          <label><input type="checkbox" name="replace_existing" value="true"> Replace the same installed plugin</label>
-          <small>Without replacement approval, a site that already has the checked plugin stops before changes are made. An already active plugin remains active when it is replaced.</small>
-        </fieldset>
-
-        <div class="plugin-install-submit">
-          <p class="subtle">Target: <strong data-site-selector-target-summary>{{ selected_site_count }} selected sites</strong>. Every site is checked again immediately before installation; the batch stops if one target fails.</p>
-          <button class="button" type="submit">Check and install plugin</button>
+        <div class="plugin-source-tabs" role="tablist" aria-label="Plugin source">
+          <button class="plugin-source-tab is-active" type="button" role="tab" aria-selected="true" data-plugin-source-tab="wordpress-org">Von WordPress.org</button>
+          <button class="plugin-source-tab" type="button" role="tab" aria-selected="false" data-plugin-source-tab="zip-upload">Über ZIP-Datei</button>
         </div>
+
+        <section class="plugin-source-panel" data-plugin-source-panel="wordpress-org">
+          <div class="plugin-catalog-controls">
+            <label>
+              <span>Plugin suchen</span>
+              <input type="search" placeholder="z. B. Elementor" autocomplete="off" data-plugin-catalog-search>
+            </label>
+            <div class="plugin-catalog-browse" role="tablist" aria-label="WordPress.org categories">
+              <button class="button button-secondary is-active" type="button" data-plugin-catalog-browse="popular">Beliebt</button>
+              <button class="button button-secondary" type="button" data-plugin-catalog-browse="recommended">Empfohlen</button>
+              <button class="button button-secondary" type="button" data-plugin-catalog-browse="new">Neu</button>
+            </div>
+          </div>
+          <p class="plugin-catalog-selection" data-plugin-catalog-selection hidden></p>
+          <p class="subtle plugin-catalog-status" aria-live="polite" data-plugin-catalog-status>Plugin-Katalog wird geladen...</p>
+          <div class="plugin-catalog-grid" data-plugin-catalog-results></div>
+          <div class="plugin-catalog-pagination" data-plugin-catalog-pagination hidden>
+            <button class="button button-secondary" type="button" data-plugin-catalog-previous>Zurück</button>
+            <span data-plugin-catalog-page></span>
+            <button class="button button-secondary" type="button" data-plugin-catalog-next>Weiter</button>
+          </div>
+        </section>
+
+        <section class="plugin-source-panel" data-plugin-source-panel="zip-upload" hidden>
+          <label class="plugin-zip-upload">
+            <span>Plugin-ZIP auswählen</span>
+            <input type="file" name="package_zip" accept=".zip,application/zip,application/x-zip-compressed" disabled>
+          </label>
+        </section>
       </form>
+
+      <dialog class="plugin-install-dialog" data-plugin-install-dialog aria-labelledby="plugin-install-dialog-heading">
+        <div class="plugin-install-dialog-content">
+          <p class="eyebrow">Installation</p>
+          <h3 id="plugin-install-dialog-heading">Plugin installieren</h3>
+          <p data-plugin-install-dialog-package></p>
+          <fieldset class="plugin-install-options">
+            <legend>Installationsoptionen</legend>
+            <label><input form="plugin-install-form" type="checkbox" name="activate" value="true" checked> Nach der Installation aktivieren</label>
+            <label><input form="plugin-install-form" type="checkbox" name="replace_existing" value="true" checked> Bereits vorhandenes Plugin ersetzen</label>
+          </fieldset>
+          <p class="notice-error" data-plugin-install-feedback hidden></p>
+          <div class="plugin-install-dialog-actions">
+            <button class="button button-secondary" type="button" data-plugin-install-cancel>Abbrechen</button>
+            <button class="button" form="plugin-install-form" type="submit">Installieren</button>
+          </div>
+        </div>
+      </dialog>
 
       {% if plugin_install == "started" %}
         <p class="notice-success">{{ message }}</p>
@@ -93,18 +112,212 @@
 
   <script>
     (function () {
-      var controls = document.querySelectorAll("[data-plugin-source]");
+      var form = document.getElementById("plugin-install-form");
+      var sourceInput = form.querySelector("[data-plugin-source-input]");
+      var slugInput = form.querySelector("[data-plugin-slug-input]");
+      var sourceTabs = document.querySelectorAll("[data-plugin-source-tab]");
       var panels = document.querySelectorAll("[data-plugin-source-panel]");
-      function syncSource() {
-        var source = document.querySelector("[data-plugin-source]:checked");
-        var selected = source ? source.value : "wordpress-org";
+      var zipInput = form.querySelector('input[name="package_zip"]');
+      var searchInput = form.querySelector("[data-plugin-catalog-search]");
+      var browseButtons = document.querySelectorAll("[data-plugin-catalog-browse]");
+      var catalogStatus = form.querySelector("[data-plugin-catalog-status]");
+      var catalogResults = form.querySelector("[data-plugin-catalog-results]");
+      var catalogSelection = form.querySelector("[data-plugin-catalog-selection]");
+      var catalogPagination = form.querySelector("[data-plugin-catalog-pagination]");
+      var catalogPage = form.querySelector("[data-plugin-catalog-page]");
+      var previousPage = form.querySelector("[data-plugin-catalog-previous]");
+      var nextPage = form.querySelector("[data-plugin-catalog-next]");
+      var dialog = document.querySelector("[data-plugin-install-dialog]");
+      var dialogPackage = document.querySelector("[data-plugin-install-dialog-package]");
+      var feedback = document.querySelector("[data-plugin-install-feedback]");
+      var activeBrowse = "popular";
+      var currentPage = 1;
+      var totalPages = 1;
+      var selectedPlugin = null;
+      var searchTimer = null;
+      var catalogRequest = null;
+
+      function setSource(selected) {
+        sourceInput.value = selected;
+        sourceTabs.forEach(function (tab) {
+          var active = tab.getAttribute("data-plugin-source-tab") === selected;
+          tab.classList.toggle("is-active", active);
+          tab.setAttribute("aria-selected", active ? "true" : "false");
+        });
         panels.forEach(function (panel) {
           panel.hidden = panel.getAttribute("data-plugin-source-panel") !== selected;
-          panel.querySelectorAll("input").forEach(function (input) { input.disabled = panel.hidden; });
+        });
+        zipInput.disabled = selected !== "zip-upload";
+        if (selected === "wordpress-org" && !catalogResults.childElementCount) { loadCatalog(1); }
+        feedback.hidden = true;
+      }
+
+      function formatNumber(value) {
+        return new Intl.NumberFormat("de-DE").format(value || 0);
+      }
+
+      function cardMeta(label, value) {
+        var item = document.createElement("span");
+        item.textContent = label + ": " + value;
+        return item;
+      }
+
+      function selectPlugin(plugin) {
+        selectedPlugin = plugin;
+        slugInput.value = plugin.slug;
+        catalogSelection.textContent = "Ausgewählt: " + plugin.name + " " + (plugin.version ? "(" + plugin.version + ")" : "");
+        catalogSelection.hidden = false;
+        catalogStatus.textContent = "";
+        feedback.hidden = true;
+        renderCatalogSelection();
+      }
+
+      function renderCatalogSelection() {
+        catalogResults.querySelectorAll("[data-plugin-catalog-card]").forEach(function (card) {
+          var selected = selectedPlugin && card.getAttribute("data-plugin-catalog-card") === selectedPlugin.slug;
+          card.classList.toggle("is-selected", Boolean(selected));
+          card.setAttribute("aria-pressed", selected ? "true" : "false");
         });
       }
-      controls.forEach(function (control) { control.addEventListener("change", syncSource); });
-      syncSource();
+
+      function renderCatalog(items) {
+        while (catalogResults.firstChild) { catalogResults.removeChild(catalogResults.firstChild); }
+        if (!items.length) {
+          catalogStatus.textContent = "Keine Plugins gefunden.";
+          return;
+        }
+        catalogStatus.textContent = "";
+        items.forEach(function (plugin) {
+          var card = document.createElement("button");
+          card.type = "button";
+          card.className = "plugin-catalog-card";
+          card.setAttribute("data-plugin-catalog-card", plugin.slug);
+          card.setAttribute("aria-pressed", "false");
+
+          var heading = document.createElement("div");
+          heading.className = "plugin-catalog-card-heading";
+          if (plugin.icon_url) {
+            var image = document.createElement("img");
+            image.src = plugin.icon_url;
+            image.alt = "";
+            image.loading = "lazy";
+            heading.appendChild(image);
+          } else {
+            var placeholder = document.createElement("span");
+            placeholder.className = "plugin-catalog-icon-placeholder";
+            placeholder.textContent = plugin.name.slice(0, 1).toUpperCase();
+            heading.appendChild(placeholder);
+          }
+          var names = document.createElement("div");
+          var title = document.createElement("strong");
+          title.textContent = plugin.name;
+          names.appendChild(title);
+          var version = document.createElement("span");
+          version.textContent = plugin.version ? "Version " + plugin.version : plugin.slug;
+          names.appendChild(version);
+          heading.appendChild(names);
+          card.appendChild(heading);
+
+          if (plugin.short_description) {
+            var description = document.createElement("p");
+            description.textContent = plugin.short_description;
+            card.appendChild(description);
+          }
+          var metadata = document.createElement("div");
+          metadata.className = "plugin-catalog-card-meta";
+          metadata.appendChild(cardMeta("Bewertung", plugin.rating ? plugin.rating + "%" : "neu"));
+          metadata.appendChild(cardMeta("Installationen", plugin.active_installs ? formatNumber(plugin.active_installs) : "-") );
+          if (plugin.tested) { metadata.appendChild(cardMeta("Getestet bis", plugin.tested)); }
+          card.appendChild(metadata);
+          card.addEventListener("click", function () { selectPlugin(plugin); });
+          catalogResults.appendChild(card);
+        });
+        renderCatalogSelection();
+      }
+
+      function loadCatalog(page) {
+        if (catalogRequest) { catalogRequest.abort(); }
+        catalogRequest = new AbortController();
+        currentPage = page;
+        catalogStatus.textContent = "Plugin-Katalog wird geladen...";
+        var params = new URLSearchParams({ page: String(page), browse: activeBrowse });
+        var query = searchInput.value.trim();
+        if (query) { params.set("search", query); }
+        fetch("/plugin-installations/catalog?" + params.toString(), { signal: catalogRequest.signal })
+          .then(function (response) {
+            if (!response.ok) { throw new Error("catalog-unavailable"); }
+            return response.json();
+          })
+          .then(function (payload) {
+            totalPages = Math.max(1, Number(payload.pages) || 1);
+            currentPage = Math.max(1, Number(payload.page) || 1);
+            renderCatalog(Array.isArray(payload.items) ? payload.items : []);
+            catalogPage.textContent = "Seite " + currentPage + " von " + totalPages;
+            catalogPagination.hidden = totalPages <= 1;
+            previousPage.disabled = currentPage <= 1;
+            nextPage.disabled = currentPage >= totalPages;
+          })
+          .catch(function (error) {
+            if (error.name === "AbortError") { return; }
+            catalogStatus.textContent = "Der Plugin-Katalog ist gerade nicht erreichbar.";
+            catalogPagination.hidden = true;
+          });
+      }
+
+      function selectedPackageLabel() {
+        if (sourceInput.value === "wordpress-org") {
+          return selectedPlugin ? selectedPlugin.name + (selectedPlugin.version ? " " + selectedPlugin.version : "") : "";
+        }
+        return zipInput.files && zipInput.files.length ? zipInput.files[0].name : "";
+      }
+
+      function showFeedback(message) {
+        feedback.textContent = message;
+        feedback.hidden = false;
+        if (!dialog.open && sourceInput.value === "wordpress-org") {
+          catalogStatus.textContent = message;
+        }
+      }
+
+      function openInstallDialog() {
+        var packageLabel = selectedPackageLabel();
+        if (!packageLabel) {
+          var message = sourceInput.value === "wordpress-org" ? "Bitte zuerst ein Plugin aus dem Katalog auswählen." : "Bitte zuerst eine ZIP-Datei auswählen.";
+          showFeedback(message);
+          if (sourceInput.value === "zip-upload") {
+            zipInput.setCustomValidity(message);
+            zipInput.reportValidity();
+            zipInput.setCustomValidity("");
+          }
+          return;
+        }
+        feedback.hidden = true;
+        dialogPackage.textContent = packageLabel;
+        if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", "open"); }
+      }
+
+      sourceTabs.forEach(function (tab) {
+        tab.addEventListener("click", function () { setSource(tab.getAttribute("data-plugin-source-tab")); });
+      });
+      browseButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          activeBrowse = button.getAttribute("data-plugin-catalog-browse");
+          browseButtons.forEach(function (item) { item.classList.toggle("is-active", item === button); });
+          searchInput.value = "";
+          loadCatalog(1);
+        });
+      });
+      searchInput.addEventListener("input", function () {
+        window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(function () { loadCatalog(1); }, 250);
+      });
+      previousPage.addEventListener("click", function () { if (currentPage > 1) { loadCatalog(currentPage - 1); } });
+      nextPage.addEventListener("click", function () { if (currentPage < totalPages) { loadCatalog(currentPage + 1); } });
+      document.addEventListener("site-selector-install-request", openInstallDialog);
+      document.querySelector("[data-plugin-install-cancel]").addEventListener("click", function () { dialog.close(); });
+      zipInput.addEventListener("change", function () { feedback.hidden = true; });
+      setSource("wordpress-org");
+      loadCatalog(1);
     }());
   </script>
 {% endblock %}

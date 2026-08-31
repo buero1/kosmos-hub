@@ -525,43 +525,155 @@
       }
       @keyframes direct-update-spin { to { transform: rotate(360deg); } }
       .plugin-install-form {
+        margin: 1rem 0 1.25rem;
+      }
+      .plugin-source-tabs {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 1rem;
-        margin: 1rem 0 1.25rem;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+      .plugin-source-tab {
+        width: 100%;
+        padding: 0.72rem 1rem;
+        border: 1px solid var(--accent);
+        border-radius: 12px;
+        background: transparent;
+        color: #075f4e;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+      }
+      .plugin-source-tab.is-active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .plugin-source-panel {
         padding: 1rem;
         border: 1px solid var(--border);
         border-radius: 18px;
         background: rgba(255, 250, 242, 0.72);
       }
-      .plugin-install-form > label,
-      .plugin-install-form fieldset {
+      .plugin-catalog-controls {
+        display: grid;
+        grid-template-columns: minmax(15rem, 1fr) auto;
+        align-items: end;
+        gap: 0.75rem;
+      }
+      .plugin-catalog-controls label,
+      .plugin-zip-upload,
+      .plugin-install-options {
         display: grid;
         gap: 0.45rem;
         margin: 0;
         border: 0;
         padding: 0;
       }
-      .plugin-install-form legend,
-      .plugin-install-form > label > span {
+      .plugin-catalog-controls label > span,
+      .plugin-zip-upload > span,
+      .plugin-install-options legend {
         color: var(--muted);
         font-size: 0.84rem;
       }
-      .plugin-install-form small { color: var(--muted); line-height: 1.35; }
-      .plugin-source-options,
-      .plugin-install-options { align-content: start; }
-      .plugin-source-options label,
-      .plugin-install-options label { color: var(--ink); }
-      .plugin-install-submit {
-        grid-column: 1 / -1;
+      .plugin-catalog-browse {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+      }
+      .plugin-catalog-browse .button { margin: 0; }
+      .plugin-catalog-browse .button.is-active { background: var(--accent); color: #fff; }
+      .plugin-catalog-selection {
+        margin: 1rem 0 0;
+        padding: 0.65rem 0.8rem;
+        border-radius: 10px;
+        background: var(--accent-soft);
+        color: #075f4e;
+        font-weight: 700;
+      }
+      .plugin-catalog-status { min-height: 1.35rem; margin: 0.85rem 0; }
+      .plugin-catalog-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+        gap: 0.75rem;
+      }
+      .plugin-catalog-card {
+        display: grid;
+        gap: 0.7rem;
+        min-height: 13rem;
+        padding: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.42);
+        color: var(--ink);
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+      .plugin-catalog-card:hover,
+      .plugin-catalog-card:focus-visible,
+      .plugin-catalog-card.is-selected {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+      .plugin-catalog-card-heading {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--border);
+        gap: 0.7rem;
       }
-      .plugin-install-submit p { margin: 0; }
+      .plugin-catalog-card-heading img,
+      .plugin-catalog-icon-placeholder {
+        flex: 0 0 auto;
+        width: 3rem;
+        height: 3rem;
+        border-radius: 9px;
+      }
+      .plugin-catalog-card-heading img { object-fit: cover; }
+      .plugin-catalog-icon-placeholder {
+        display: grid;
+        place-items: center;
+        background: #d8efe8;
+        color: #075f4e;
+        font-weight: 700;
+      }
+      .plugin-catalog-card-heading strong,
+      .plugin-catalog-card-heading span { display: block; }
+      .plugin-catalog-card-heading span,
+      .plugin-catalog-card p,
+      .plugin-catalog-card-meta { color: var(--muted); }
+      .plugin-catalog-card p { margin: 0; line-height: 1.4; }
+      .plugin-catalog-card-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.6rem;
+        margin-top: auto;
+        font-size: 0.8rem;
+      }
+      .plugin-catalog-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.65rem;
+        margin-top: 1rem;
+      }
+      .plugin-catalog-pagination .button { margin: 0; }
+      .plugin-zip-upload { max-width: 34rem; }
+      .plugin-install-dialog {
+        width: min(34rem, calc(100vw - 2rem));
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: #fffaf2;
+        color: var(--ink);
+      }
+      .plugin-install-dialog::backdrop { background: rgba(25, 35, 34, 0.38); }
+      .plugin-install-dialog-content { display: grid; gap: 1rem; }
+      .plugin-install-dialog-content > p { margin: 0; }
+      .plugin-install-options label { color: var(--ink); }
+      .plugin-install-dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.6rem;
+      }
+      .plugin-install-dialog-actions .button { margin: 0; }
       .user-workbench-create {
         margin: 1.25rem 0;
         padding: 0.9rem 1.15rem;
@@ -1641,8 +1753,12 @@
         }
         .workbench-action-panel { grid-template-columns: 1fr; }
         .direct-update-controls { align-items: stretch; flex-direction: column; }
-        .plugin-install-form { grid-template-columns: 1fr; }
-        .plugin-install-submit { align-items: flex-start; flex-direction: column; }
+        .plugin-source-tabs,
+        .plugin-catalog-controls { grid-template-columns: 1fr; }
+        .plugin-catalog-pagination,
+        .plugin-install-dialog-actions { align-items: stretch; flex-direction: column; }
+        .plugin-catalog-pagination .button,
+        .plugin-install-dialog-actions .button { width: 100%; }
         .user-workbench-create form {
           grid-template-columns: 1fr;
         }

@@ -890,9 +890,9 @@ def plugin_installations_page(
                 sites=site_options,
                 selected_site_ids=selected_site_ids,
                 site_scope=site_scope,
-                submit_label="Show selected sites",
+                submit_label="Installieren",
+                submit_behavior="install",
             ),
-            "selected_site_count": len(site_options) if site_scope == "all" else len(selected_site_ids or set()),
             "install_batch": install_batch if batch_runs else "",
             "batch_runs": batch_runs,
             "plugin_install": plugin_install,
@@ -900,6 +900,45 @@ def plugin_installations_page(
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/plugin-installations/catalog")
+def plugin_installation_catalog(
+    db: Annotated[Session, Depends(get_db)],
+    search: str = "",
+    browse: str = "popular",
+    page: Annotated[int, Query(ge=1, le=100)] = 1,
+):
+    try:
+        catalog = PluginInstallationPackageService(db=db).search_wordpress_org_plugins(
+            search=search,
+            browse=browse,
+            page=page,
+        )
+    except PluginPackageError as exc:
+        return JSONResponse(status_code=502, content={"error": str(exc)})
+
+    return {
+        "items": [
+            {
+                "slug": item.slug,
+                "name": item.name,
+                "short_description": item.short_description,
+                "version": item.version,
+                "rating": item.rating,
+                "num_ratings": item.num_ratings,
+                "active_installs": item.active_installs,
+                "last_updated": item.last_updated,
+                "requires": item.requires,
+                "tested": item.tested,
+                "icon_url": item.icon_url,
+            }
+            for item in catalog.items
+        ],
+        "page": catalog.page,
+        "pages": catalog.pages,
+        "total": catalog.total,
+    }
 
 
 @router.post("/plugin-installations/queue")
