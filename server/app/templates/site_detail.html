@@ -172,7 +172,7 @@
           </div>
         </div>
         {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
-        <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions" onsubmit="return window.kosmosConfirmBackupAction(event, this)">
+        <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="deletion_confirmation" value="">
           <article class="card backup-status-card">
@@ -247,6 +247,22 @@
             {% endif %}
           {% endif %}
         </form>
+        <dialog class="update-confirmation-dialog" data-backup-delete-confirmation aria-labelledby="backup-delete-confirmation-heading">
+          <form method="dialog">
+            <h3 id="backup-delete-confirmation-heading">Delete selected backup set(s)?</h3>
+            <p data-backup-delete-confirmation-text>Selected backup sets are permanently deleted from this WordPress site and configured remote storage. This cannot be undone.</p>
+            <div class="update-confirmation-safeguard" hidden data-backup-delete-safeguard>
+              <label for="backup-delete-confirmation-input">To confirm this high-risk deletion, type <strong>delete</strong>.
+                <input id="backup-delete-confirmation-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" data-backup-delete-confirmation-input>
+              </label>
+              <p class="subtle" data-backup-delete-confirmation-feedback></p>
+            </div>
+            <div class="dialog-actions">
+              <button class="button button-secondary" value="cancel" data-backup-delete-cancel>Cancel</button>
+              <button class="button button-danger" type="button" data-backup-delete-confirm>Delete backups</button>
+            </div>
+          </form>
+        </dialog>
       </section>
 
       <section id="updates" class="site-section" aria-labelledby="updates-heading">
@@ -649,6 +665,16 @@
         return;
       }
       var selectAll = form.querySelector("[data-backup-select-all]");
+      var confirmationDialog = document.querySelector("[data-backup-delete-confirmation]");
+      var confirmationText = document.querySelector("[data-backup-delete-confirmation-text]");
+      var confirmationSafeguard = document.querySelector("[data-backup-delete-safeguard]");
+      var confirmationInput = document.querySelector("[data-backup-delete-confirmation-input]");
+      var confirmationFeedback = document.querySelector("[data-backup-delete-confirmation-feedback]");
+      var confirmationButton = document.querySelector("[data-backup-delete-confirm]");
+      var cancelButton = document.querySelector("[data-backup-delete-cancel]");
+      var pendingDeletionForm = null;
+      var needsTextConfirmation = false;
+      var deletionSubmissionApproved = false;
 
       if (selectAll) {
         selectAll.addEventListener("change", function () {
@@ -660,37 +686,88 @@
         });
       }
 
-      window.kosmosConfirmBackupAction = function (event, submittedForm) {
-        var activeForm = submittedForm || form;
-        var activeAction = activeForm.querySelector("[name='backup_action']");
-        var activeConfirmation = activeForm.querySelector("[name='deletion_confirmation']");
-        if (activeConfirmation) {
-          activeConfirmation.value = "";
+      function openDeletionDialog(selectedCount, availableBackupCount) {
+        if (!confirmationDialog || !confirmationText || !confirmationButton || !cancelButton) {
+          return;
         }
-        if (!activeAction || activeAction.value !== "delete-selected") {
-          return true;
+        needsTextConfirmation = selectedCount > 5 || (availableBackupCount > 0 && selectedCount === availableBackupCount);
+        confirmationInput.value = "";
+        if (confirmationFeedback) {
+          confirmationFeedback.textContent = "";
         }
-        var selected = Array.prototype.slice.call(activeForm.querySelectorAll("[data-backup-selection]:checked"));
-        if (!selected.length) {
-          window.alert("Select at least one backup before choosing deletion.");
-          return false;
-        }
-        if (!window.confirm("Delete the selected backup set(s) locally and from the configured remote storage? This cannot be undone.")) {
-          return false;
-        }
-        var backupCount = activeForm.querySelectorAll("[data-backup-selection]:not([disabled])").length;
-        var needsTextConfirmation = selected.length > 5 || (backupCount > 0 && selected.length === backupCount);
-        if (needsTextConfirmation) {
-          var typedConfirmation = window.prompt("This deletion removes more than five backups or the final remaining backup. Type delete to continue.");
-          if (typedConfirmation !== "delete") {
-            return false;
+
+        if (!selectedCount) {
+          confirmationText.textContent = "Select at least one backup before choosing deletion.";
+          confirmationButton.hidden = true;
+          cancelButton.textContent = "Close";
+          if (confirmationSafeguard) {
+            confirmationSafeguard.hidden = true;
           }
-          if (activeConfirmation) {
-            activeConfirmation.value = typedConfirmation;
-          }
+          confirmationDialog.showModal();
+          return;
         }
-        return true;
-      };
+
+        confirmationText.textContent = selectedCount === 1
+          ? "The selected backup set is permanently deleted from this WordPress site and configured remote storage. This cannot be undone."
+          : selectedCount + " selected backup sets are permanently deleted from this WordPress site and configured remote storage. This cannot be undone.";
+        confirmationButton.hidden = false;
+        cancelButton.textContent = "Cancel";
+        if (confirmationSafeguard) {
+          confirmationSafeguard.hidden = !needsTextConfirmation;
+        }
+        confirmationDialog.showModal();
+        if (needsTextConfirmation && confirmationInput) {
+          confirmationInput.focus();
+        } else {
+          confirmationButton.focus();
+        }
+      }
+
+      if (confirmationDialog && confirmationButton) {
+        form.addEventListener("submit", function (event) {
+          if (deletionSubmissionApproved) {
+            deletionSubmissionApproved = false;
+            return;
+          }
+          var action = form.querySelector("[name='backup_action']");
+          if (!action || action.value !== "delete-selected") {
+            return;
+          }
+          event.preventDefault();
+          pendingDeletionForm = form;
+          var selectedCount = form.querySelectorAll("[data-backup-selection]:checked").length;
+          var availableBackupCount = form.querySelectorAll("[data-backup-selection]:not([disabled])").length;
+          openDeletionDialog(selectedCount, availableBackupCount);
+        });
+
+        confirmationButton.addEventListener("click", function () {
+          if (!pendingDeletionForm) {
+            return;
+          }
+          var confirmationValue = confirmationInput ? confirmationInput.value.trim().toLowerCase() : "";
+          if (needsTextConfirmation && confirmationValue !== "delete") {
+            if (confirmationFeedback) {
+              confirmationFeedback.textContent = "Please type delete to continue.";
+            }
+            if (confirmationInput) {
+              confirmationInput.focus();
+            }
+            return;
+          }
+          var confirmedForm = pendingDeletionForm;
+          var confirmationField = confirmedForm.querySelector("[name='deletion_confirmation']");
+          if (confirmationField) {
+            confirmationField.value = needsTextConfirmation ? "delete" : "";
+          }
+          deletionSubmissionApproved = true;
+          confirmationDialog.close();
+          confirmedForm.requestSubmit();
+        });
+
+        confirmationDialog.addEventListener("close", function () {
+          pendingDeletionForm = null;
+        });
+      }
     }());
   </script>
   <script>
