@@ -362,7 +362,16 @@
         });
       });
       window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));
-      selectSection(window.location.hash.slice(1) || "account-security");
+      const savedActionSection = () => {
+        const parameters = new URLSearchParams(window.location.search);
+        if (parameters.has("fleet_refresh")) return "account-refresh-settings";
+        if (parameters.has("mcp_token")) return "account-mcp";
+        if (parameters.has("openai")) return "account-openai";
+        if (parameters.has("provider_license") || parameters.has("crocoblock")) return "account-provider-licenses";
+        if (parameters.has("zoho")) return "account-zoho";
+        return "account-security";
+      };
+      selectSection(window.location.hash.slice(1) || savedActionSection());
     })();
   </script>
 {% endblock %}
