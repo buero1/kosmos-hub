@@ -753,6 +753,21 @@
         padding: 0;
         accent-color: var(--accent);
       }
+      .fleet-refresh-settings-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .fleet-refresh-settings-divider,
+      .fleet-refresh-settings-form .checkbox-label,
+      .fleet-refresh-settings-form .subtle,
+      .fleet-refresh-settings-form button {
+        grid-column: 1 / -1;
+      }
+      .fleet-refresh-settings-divider {
+        height: 1px;
+        margin: 0;
+        background: var(--border);
+      }
       .assistant-chat-shell {
         display: flex;
         flex-direction: column;
@@ -1589,6 +1604,7 @@
         .account-section-nav {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .fleet-refresh-settings-form { grid-template-columns: 1fr; }
         .workbench-site-selector {
           position: static;
         }

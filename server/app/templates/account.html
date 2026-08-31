@@ -290,7 +290,7 @@
           <h3>Refresh settings</h3>
           <p class="subtle">These limits control background status checks and direct updates on the Update Workbench. Each automatic update refresh checks the official plugin catalogues again.</p>
         </div>
-        <form method="post" action="/account/fleet-refresh-settings">
+        <form class="fleet-refresh-settings-form" method="post" action="/account/fleet-refresh-settings">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>
             <span>Parallel website checks</span>
@@ -300,6 +300,7 @@
             <span>Parallel direct updates</span>
             <input type="number" name="max_parallel_direct_updates" value="{{ fleet_refresh_settings.max_parallel_direct_updates }}" min="1" max="10" required>
           </label>
+          <div class="fleet-refresh-settings-divider" aria-hidden="true"></div>
           <label class="checkbox-label">
             <input type="checkbox" name="auto_refresh_enabled" value="true" {% if fleet_refresh_settings.auto_refresh_enabled %}checked{% endif %}>
             <span>Run the automatic fleet refresh</span>
