@@ -172,7 +172,7 @@
           </div>
         </div>
         {% set latest_backup = site.backup_snapshots[0] if site.backup_snapshots else None %}
-        <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions">
+        <form id="site-backup-action-form" class="backup-management-form" method="post" action="/sites/{{ site.id }}/backup-actions" onsubmit="return window.kosmosConfirmBackupAction(event, this)">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="deletion_confirmation" value="">
           <article class="card backup-status-card">
@@ -648,12 +648,7 @@
       if (!form) {
         return;
       }
-      var action = form.querySelector("[name='backup_action']");
       var selectAll = form.querySelector("[data-backup-select-all]");
-      var deletionConfirmation = form.querySelector("[name='deletion_confirmation']");
-      var selections = function () {
-        return Array.prototype.slice.call(form.querySelectorAll("[data-backup-selection]:checked"));
-      };
 
       if (selectAll) {
         selectAll.addEventListener("change", function () {
@@ -665,35 +660,55 @@
         });
       }
 
-      form.addEventListener("submit", function (event) {
-        if (deletionConfirmation) {
-          deletionConfirmation.value = "";
+      window.kosmosConfirmBackupAction = function (event, submittedForm) {
+        var activeForm = submittedForm || form;
+        var activeAction = activeForm.querySelector("[name='backup_action']");
+        var activeConfirmation = activeForm.querySelector("[name='deletion_confirmation']");
+        if (activeConfirmation) {
+          activeConfirmation.value = "";
         }
-        if (!action || action.value !== "delete-selected") {
-          return;
+        if (!activeAction || activeAction.value !== "delete-selected") {
+          return true;
         }
-        var selected = selections();
+        var selected = Array.prototype.slice.call(activeForm.querySelectorAll("[data-backup-selection]:checked"));
         if (!selected.length) {
-          event.preventDefault();
           window.alert("Select at least one backup before choosing deletion.");
-          return;
+          return false;
         }
-        var backupCount = form.querySelectorAll("[data-backup-selection]:not([disabled])").length;
+        if (!window.confirm("Delete the selected backup set(s) locally and from the configured remote storage? This cannot be undone.")) {
+          return false;
+        }
+        var backupCount = activeForm.querySelectorAll("[data-backup-selection]:not([disabled])").length;
         var needsTextConfirmation = selected.length > 5 || (backupCount > 0 && selected.length === backupCount);
         if (needsTextConfirmation) {
           var typedConfirmation = window.prompt("This deletion removes more than five backups or the final remaining backup. Type delete to continue.");
           if (typedConfirmation !== "delete") {
-            event.preventDefault();
-            return;
+            return false;
           }
-          if (deletionConfirmation) {
-            deletionConfirmation.value = typedConfirmation;
+          if (activeConfirmation) {
+            activeConfirmation.value = typedConfirmation;
           }
         }
-        if (!window.confirm("Delete the selected backup set(s) locally and from the configured remote storage? This cannot be undone.")) {
-          event.preventDefault();
+        return true;
+      };
+    }());
+  </script>
+  <script>
+    (function () {
+      var transientParameters = ["refresh", "backup_refresh", "backup_action", "maintenance", "users", "direct_update", "message"];
+      var url = new URL(window.location.href);
+      var changed = false;
+
+      transientParameters.forEach(function (parameter) {
+        if (url.searchParams.has(parameter)) {
+          url.searchParams.delete(parameter);
+          changed = true;
         }
       });
+
+      if (changed) {
+        window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+      }
     }());
   </script>
   <script>
