@@ -67,7 +67,7 @@
           <p class="notice-error" data-plugin-install-feedback hidden></p>
           <div class="plugin-install-dialog-actions">
             <button class="button button-secondary" type="button" data-plugin-install-cancel>Abbrechen</button>
-            <button class="button" form="plugin-install-form" type="submit">Installieren</button>
+            <button class="button" form="plugin-install-form" type="submit" data-plugin-install-confirm>Installieren</button>
           </div>
         </div>
       </dialog>
@@ -130,6 +130,7 @@
       var dialog = document.querySelector("[data-plugin-install-dialog]");
       var dialogPackage = document.querySelector("[data-plugin-install-dialog-package]");
       var feedback = document.querySelector("[data-plugin-install-feedback]");
+      var confirmInstall = document.querySelector("[data-plugin-install-confirm]");
       var activeBrowse = "popular";
       var currentPage = 1;
       var totalPages = 1;
@@ -283,16 +284,14 @@
         var packageLabel = selectedPackageLabel();
         if (!packageLabel) {
           var message = sourceInput.value === "wordpress-org" ? "Bitte zuerst ein Plugin aus dem Katalog auswählen." : "Bitte zuerst eine ZIP-Datei auswählen.";
+          dialogPackage.textContent = "Noch kein Plugin ausgewählt";
+          confirmInstall.disabled = true;
           showFeedback(message);
-          if (sourceInput.value === "zip-upload") {
-            zipInput.setCustomValidity(message);
-            zipInput.reportValidity();
-            zipInput.setCustomValidity("");
-          }
-          return;
+        } else {
+          feedback.hidden = true;
+          dialogPackage.textContent = packageLabel;
+          confirmInstall.disabled = false;
         }
-        feedback.hidden = true;
-        dialogPackage.textContent = packageLabel;
         if (typeof dialog.showModal === "function") { dialog.showModal(); } else { dialog.setAttribute("open", "open"); }
       }
 
