@@ -57,7 +57,7 @@ def test_wordpress_org_catalog_search_returns_only_safe_display_metadata(monkeyp
             {
                 "slug": "sample-plugin",
                 "name": "Sample Plugin",
-                "short_description": "A safe sample plugin.",
+                "short_description": "A <strong>safe</strong> &amp; clear sample plugin.",
                 "version": "2.0.0",
                 "rating": 94,
                 "num_ratings": 48,
@@ -102,4 +102,5 @@ def test_wordpress_org_catalog_search_returns_only_safe_display_metadata(monkeyp
     assert catalog.total == 121
     assert len(catalog.items) == 1
     assert catalog.items[0].name == "Sample Plugin"
+    assert catalog.items[0].short_description == "A safe & clear sample plugin."
     assert catalog.items[0].icon_url == "https://ps.w.org/sample-plugin/assets/icon-256x256.png"

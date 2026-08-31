@@ -1,4 +1,5 @@
 import hashlib
+import html
 import io
 import json
 import re
@@ -263,7 +264,10 @@ class PluginInstallationPackageService:
 
     @staticmethod
     def _catalog_text(value: object, *, limit: int) -> str:
-        return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+        if not isinstance(value, str):
+            return ""
+        plain_text = re.sub(r"<[^>]*>", "", html.unescape(value))
+        return " ".join(plain_text.split())[:limit]
 
     @staticmethod
     def _catalog_int(value: object, *, default: int, minimum: int, maximum: int | None = None) -> int:
