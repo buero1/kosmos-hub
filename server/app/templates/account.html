@@ -216,7 +216,10 @@
           <h3>Zoho CRM Accounts</h3>
           <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
           {% if zoho_status.configured %}
-            <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
+            <div class="zoho-connection-status">
+              <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
+              <a class="button button-secondary zoho-reconnect-action" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
+            </div>
             {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
             {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
           {% else %}
@@ -230,15 +233,6 @@
           </form>
         {% endif %}
       </div>
-      {% if zoho_status.configured %}
-        <div class="button-row">
-          <a class="button" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
-          <form method="post" action="/account/zoho/remove">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-secondary" type="submit">Remove Zoho connection</button>
-          </form>
-        </div>
-      {% endif %}
       {% if zoho_status.connected %}
         <details class="account-details zoho-mapping-details">
           <summary>Account field mapping: {{ zoho_status.mapped_field_count }} of {{ zoho_mapping|length }} fields found</summary>
@@ -289,6 +283,16 @@
           <button class="button zoho-save-credentials" type="submit">Save Zoho credentials</button>
         </form>
       </details>
+      {% if zoho_status.configured %}
+        <details class="account-details zoho-disconnect-details">
+          <summary>Disconnect Zoho CRM</summary>
+          <p class="subtle">This removes the encrypted OAuth connection and stored Zoho credentials. Previously imported customers and linked sites remain in the Hub.</p>
+          <form class="zoho-disconnect-action" method="post" action="/account/zoho/remove">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">Remove Zoho connection</button>
+          </form>
+        </details>
+      {% endif %}
     </section>
     {% if user.role == "admin" %}
       <section id="account-refresh-settings" class="account-panel account-panel-wide account-section" data-account-section>

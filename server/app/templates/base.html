@@ -790,12 +790,21 @@
       .zoho-sync-heading-action .button,
       .zoho-mapping-action-row .button { margin: 0; }
       .zoho-sync-heading-action .button { white-space: nowrap; }
+      .zoho-connection-status {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+      }
+      .zoho-connection-status .subtle { margin: 0; }
+      .zoho-connection-status .zoho-reconnect-action { margin: 0; }
       .zoho-mapping-action-row {
         display: flex;
         justify-content: flex-end;
         margin: 0.85rem 0;
       }
       .account-panel .zoho-mapping-action-row form { display: block; }
+      .account-panel .zoho-disconnect-action { display: block; }
       .account-panel .fleet-refresh-settings-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
@@ -1649,6 +1658,7 @@
         }
         .account-panel .zoho-credentials-form { grid-template-columns: 1fr; }
         .zoho-section-heading { flex-direction: column; }
+        .zoho-connection-status { align-items: flex-start; flex-direction: column; }
         .zoho-credentials-form .zoho-data-center-field,
         .zoho-credentials-form .zoho-client-id-field,
         .zoho-credentials-form .zoho-client-secret-field,
