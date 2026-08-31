@@ -562,23 +562,6 @@
         border-top: 1px solid var(--border);
       }
       .plugin-install-submit p { margin: 0; }
-      .workbench-action-card {
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        gap: 1rem;
-        min-width: 0;
-        padding: 1.15rem;
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        background: rgba(255, 250, 242, 0.72);
-      }
-      .workbench-action-card .filter-actions {
-        flex-wrap: wrap;
-      }
-      .user-workbench-action-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
       .user-workbench-create {
         margin: 1.25rem 0;
         padding: 0.9rem 1.15rem;
@@ -618,25 +601,7 @@
       .user-workbench-create .password-input { padding-right: 5rem; }
       .user-workbench-create-actions { grid-column: 1 / -1; }
       .user-workbench-create > .subtle { margin: 0.8rem 0 0; }
-      .user-workbench-action-card label {
-        display: grid;
-        gap: 0.3rem;
-        color: var(--muted);
-        font-size: 0.84rem;
-      }
-      .user-workbench-action-card input,
-      .user-workbench-action-card select {
-        width: 100%;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        padding: 0.7rem 0.8rem;
-        background: var(--panel);
-        color: var(--ink);
-        font: inherit;
-      }
-      .user-workbench-action-card .password-input {
-        padding-right: 5rem;
-      }
+      .user-workbench-bulk-action .bulk-action-warning { grid-column: 1 / -1; }
       .bulk-action-warning {
         margin: 0;
         color: var(--muted);

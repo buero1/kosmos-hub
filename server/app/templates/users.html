@@ -86,13 +86,11 @@
       <p class="subtle">Choose up to {{ bulk_limit }} sites in the panel, then apply the site selection before creating the user.</p>
     </details>
 
-    <div class="workbench-action-grid user-workbench-action-grid">
-      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/role" data-user-bulk-form>
+    <details class="user-workbench-create user-workbench-bulk-action">
+      <summary>Set role for selected users</summary>
+      <form method="post" action="/users/bulk/role" data-user-bulk-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div>
-          <p class="eyebrow">Set role</p>
-          <p class="bulk-action-warning">Applies exactly one selected role to every checked user. Sites require Bridge 0.3.54 or newer.</p>
-        </div>
+        <p class="bulk-action-warning">Applies exactly one selected role to every checked user. Sites require Bridge 0.3.54 or newer.</p>
         <label>
           <span>New role</span>
           <select name="role" required>
@@ -101,15 +99,17 @@
             {% endfor %}
           </select>
         </label>
-        <button class="button" type="submit">Apply selected role</button>
-      </form>
-
-      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/password" data-user-bulk-form>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div>
-          <p class="eyebrow">Set password</p>
-          <p class="bulk-action-warning">The same password is set on every selected user. Copy and store it before submitting; it is never displayed again.</p>
+        <div class="user-workbench-create-actions">
+          <button class="button" type="submit">Apply selected role</button>
         </div>
+      </form>
+    </details>
+
+    <details class="user-workbench-create user-workbench-bulk-action">
+      <summary>Set password for selected users</summary>
+      <form method="post" action="/users/bulk/password" data-user-bulk-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <p class="bulk-action-warning">The same password is set on every selected user. Copy and store it before submitting; it is never displayed again.</p>
         <label>
           <span>New shared password</span>
           <span class="password-input-with-copy">
@@ -118,7 +118,7 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 8.7 11.3"></path><path d="M19 3v6h-6"></path><path d="m19 9-2.2-2.2"></path></svg>
             </button>
             <button class="copy-password-icon" type="button" data-user-copy-password aria-label="Copy password" title="Copy password">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4"></path></svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="11" rx="1"></rect><path d="M15 9V5a1 1 0 0 0-1-1H5a1 1 0 0 0 1 1v10a1 1 0 0 0 1 1h4"></path></svg>
             </button>
           </span>
         </label>
@@ -126,18 +126,22 @@
           <input type="checkbox" name="confirm_shared_password" value="true" required>
           <span>I understand that every selected user receives this same password.</span>
         </label>
-        <button class="button" type="submit">Set selected passwords</button>
-      </form>
-
-      <form class="workbench-action-card user-workbench-action-card" method="post" action="/users/bulk/delete/review" data-user-bulk-form>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div>
-          <p class="eyebrow">Delete users</p>
-          <p class="bulk-action-warning">A review screen requires an individual content reassignment for every user. WordPress blocks removal of the last administrator.</p>
+        <div class="user-workbench-create-actions">
+          <button class="button" type="submit">Set selected passwords</button>
         </div>
-        <button class="button button-danger" type="submit">Review selected deletion</button>
       </form>
-    </div>
+    </details>
+
+    <details class="user-workbench-create user-workbench-bulk-action">
+      <summary>Delete selected users</summary>
+      <form method="post" action="/users/bulk/delete/review" data-user-bulk-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <p class="bulk-action-warning">A review screen requires an individual content reassignment for every user. WordPress blocks removal of the last administrator.</p>
+        <div class="user-workbench-create-actions">
+          <button class="button button-danger" type="submit">Review selected deletion</button>
+        </div>
+      </form>
+    </details>
 
     {% if outcomes %}
       {% set succeeded = outcomes | selectattr("status", "equalto", "succeeded") | list | length %}
