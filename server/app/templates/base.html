@@ -608,7 +608,14 @@
         color: #075f4e;
         font-weight: 700;
       }
-      .plugin-catalog-selection .button { margin: 0; }
+      .plugin-catalog-selection[hidden] { display: none; }
+      .plugin-catalog-selection .button {
+        width: 200px;
+        margin: 0;
+        padding-right: 0.75rem;
+        padding-left: 0.75rem;
+        font-size: 0.875rem;
+      }
       .plugin-catalog-status { min-height: 1.35rem; margin: 0.85rem 0; }
       .plugin-catalog-grid {
         display: grid;
@@ -1775,6 +1782,7 @@
         .plugin-source-tabs,
         .plugin-catalog-controls { grid-template-columns: 1fr; }
         .plugin-catalog-selection { align-items: stretch; flex-direction: column; }
+        .plugin-catalog-selection .button { width: 100%; }
         .plugin-catalog-pagination,
         .plugin-install-dialog-actions { align-items: stretch; flex-direction: column; }
         .plugin-catalog-pagination .button,
