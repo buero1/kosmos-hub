@@ -12,6 +12,7 @@ from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.customer_contact import CustomerContact
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.zoho_crm import ZohoCrmError
 
 
 class FakeZohoCommunications:
@@ -22,6 +23,7 @@ class FakeZohoCommunications:
         self.template_detail_requests: list[str] = []
         self.downloaded_attachments: list[tuple[str, str, str, str, str, str]] = []
         self.downloaded_inline_images: list[tuple[str, str, str, str, str]] = []
+        self.email_content_requests: list[str | None] = []
 
     def list_account_notes(self, account_id: str) -> list[dict[str, object]]:
         assert account_id == "zoho-account-1"
@@ -54,8 +56,16 @@ class FakeZohoCommunications:
         assert record_id == "zoho-contact-1"
         return []
 
-    def get_record_email(self, *, module: str, record_id: str, message_id: str) -> dict[str, object]:
+    def get_record_email(
+        self,
+        *,
+        module: str,
+        record_id: str,
+        message_id: str,
+        user_id: str | None = None,
+    ) -> dict[str, object]:
         assert (module, record_id, message_id) == ("Accounts", "zoho-account-1", "zoho-email-account-1")
+        self.email_content_requests.append(user_id)
         return {"id": message_id, "content": "Full imported email body"}
 
     def download_record_email_attachment(
@@ -343,9 +353,55 @@ def test_customer_communications_create_notes_send_mail_and_load_bodies():
         assert imported_email is not None
         load_result = service.load_email_content(customer_id=customer.id, email_id=imported_email.id)
         assert load_result.success is True
+        assert fake_zoho.email_content_requests == ["zoho-owner-1"]
         updated_view = service.get_view(customer_id=customer.id)
         assert "Created from the Hub" in (updated_view.emails[0].preview_html or "")
         assert any("Full imported email body" in (email.preview_html or "") for email in updated_view.emails)
+
+
+def test_customer_communications_keeps_loaded_email_content_during_header_sync():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_customer(customer_id=customer.id)
+        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
+        assert email is not None
+        service.load_email_content(customer_id=customer.id, email_id=email.id)
+        db.commit()
+
+        service.sync_customer(customer_id=customer.id)
+        payload = service._payload(email.encrypted_payload_json)
+
+        assert payload["content"] == "Full imported email body"
+        assert payload["attachments"] == [{"id": "zoho-attachment-1", "name": "Angebot.pdf"}]
+
+
+def test_customer_communications_rejects_an_email_response_without_content():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        fake_zoho = FakeZohoCommunications()
+        service = _service(db, fake_zoho)
+        service.sync_customer(customer_id=customer.id)
+        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
+        assert email is not None
+        fake_zoho.get_record_email = lambda **_kwargs: {"id": "zoho-email-account-1"}  # type: ignore[method-assign]
+
+        with pytest.raises(ZohoCrmError, match="ohne Inhalt"):
+            service.load_email_content(customer_id=customer.id, email_id=email.id)
 
 
 def test_customer_communications_replies_to_the_original_zoho_message():

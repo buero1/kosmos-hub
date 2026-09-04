@@ -497,7 +497,14 @@ class ZohoCrmService:
             raise ZohoCrmError("Zoho returned no matching email template.")
         return template
 
-    def get_record_email(self, *, module: str, record_id: str, message_id: str) -> dict[str, object]:
+    def get_record_email(
+        self,
+        *,
+        module: str,
+        record_id: str,
+        message_id: str,
+        user_id: str | None = None,
+    ) -> dict[str, object]:
         """Load a single email body only when the user asks to view it."""
         if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
             raise ZohoCrmError("Zoho email history is only supported for Accounts and Contacts.")
@@ -505,7 +512,7 @@ class ZohoCrmService:
         response = self._api_get(
             connection,
             f"/crm/v8/{module}/{record_id}/Emails/{message_id}",
-            {},
+            {"user_id": user_id} if user_id else {},
         )
         return self._response_record(response, "email")
 

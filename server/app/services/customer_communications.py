@@ -755,12 +755,15 @@ class CustomerCommunicationService:
         if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
             raise ValueError("Für diese E-Mail ist kein Zoho-Inhalt verfügbar.")
 
+        payload = self._payload(email.encrypted_payload_json)
         record = self.zoho_service.get_record_email(
             module=email.zoho_module,
             record_id=email.zoho_record_id,
             message_id=email.zoho_message_id,
+            user_id=self._email_owner_id(payload),
         )
-        payload = self._payload(email.encrypted_payload_json)
+        if "content" not in record:
+            raise ZohoCrmError("Zoho hat die E-Mail ohne Inhalt geliefert.")
         payload.update(record)
         email.encrypted_payload_json = self._encrypt_payload(payload)
         email.zoho_synced_at = datetime.now(UTC)
@@ -954,7 +957,13 @@ class CustomerCommunicationService:
         email.source = "zoho"
         email.direction = self._email_direction(record)
         email.sync_status = "synced"
-        email.encrypted_payload_json = self._encrypt_payload(record)
+        existing_payload = self._payload(email.encrypted_payload_json)
+        merged_payload = dict(record)
+        # Header refreshes omit the full body and detailed attachments. Keep them once loaded.
+        for key in ("content", "attachments"):
+            if key in existing_payload and key not in merged_payload:
+                merged_payload[key] = existing_payload[key]
+        email.encrypted_payload_json = self._encrypt_payload(merged_payload)
         email.zoho_sent_at = self._email_datetime(record)
         email.zoho_synced_at = synced_at
         email.last_error = None

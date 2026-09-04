@@ -454,6 +454,9 @@ def test_zoho_customer_communication_helpers_follow_notes_email_and_sender_api_s
                     "Emails": [{"message_id": "zoho-mail-1", "subject": "Imported mail"}],
                     "info": {"more_records": False},
                 }
+            if path.endswith("/Emails/zoho-mail-1"):
+                assert params == {"user_id": "zoho-owner-1"}
+                return {"data": [{"message_id": "zoho-mail-1", "content": "Full imported mail"}]}
             if path.endswith("from_addresses"):
                 return {"from_addresses": [{"user_name": "Hub Team", "email": "team@example.de"}]}
             if path.endswith("email_templates"):
@@ -481,6 +484,12 @@ def test_zoho_customer_communication_helpers_follow_notes_email_and_sender_api_s
         assert service.list_record_email_headers("Accounts", "zoho-account-1") == [
             {"message_id": "zoho-mail-1", "subject": "Imported mail"}
         ]
+        assert service.get_record_email(
+            module="Accounts",
+            record_id="zoho-account-1",
+            message_id="zoho-mail-1",
+            user_id="zoho-owner-1",
+        ) == {"message_id": "zoho-mail-1", "content": "Full imported mail"}
         assert service.list_allowed_from_addresses() == [{"user_name": "Hub Team", "email": "team@example.de"}]
         assert service.list_email_templates() == [
             {"id": "zoho-template-1", "name": "Statusvorlage", "subject": "Status"}
