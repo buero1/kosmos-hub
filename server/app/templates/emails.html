@@ -72,6 +72,7 @@
       var shell = document.querySelector('[data-mailbox-shell]');
       var folderCache = new Map();
       var folderRequests = new Map();
+      var folderSelections = new Map();
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
 
       function updateMailboxHeight() {
@@ -277,10 +278,10 @@
         });
       }
 
-      function setMailboxFolder(list, folder, unread, messages) {
+      function setMailboxFolder(list, folder, unread, messages, selectedKey) {
         list.dataset.mailboxFolderName = folder;
         list.dataset.mailboxUnread = unread ? 'true' : 'false';
-        list.dataset.mailboxSelectedKey = '';
+        list.dataset.mailboxSelectedKey = selectedKey || '';
         var title = list.querySelector('[data-mailbox-list-title]');
         if (title) title.textContent = folderTitles[folder] || 'Posteingang';
         var toggle = list.querySelector('.mailbox-list-heading [data-mailbox-folder]');
@@ -295,12 +296,24 @@
       function clearMailboxReadingPane() {
         var pane = document.querySelector('.mailbox-reading-pane');
         if (!pane) return;
-        pane.replaceChildren();
+        var nextPane = document.createElement('div');
+        nextPane.className = 'mailbox-reading-pane';
         var prompt = document.createElement('p');
         prompt.className = 'mailbox-empty';
         prompt.textContent = 'Wähle links eine E-Mail aus.';
-        pane.append(prompt);
-        pane.scrollTop = 0;
+        nextPane.append(prompt);
+        pane.replaceWith(nextPane);
+      }
+
+      function restoreMailboxSelection(list, folder, unread, messages) {
+        var selection = folderSelections.get(mailboxFolderKey(folder, unread));
+        if (!selection || !messages.some(function (message) { return message.key === selection.messageKey; })) {
+          clearMailboxReadingPane();
+          return '';
+        }
+        var currentPane = document.querySelector('.mailbox-reading-pane');
+        if (currentPane) currentPane.replaceWith(selection.pane);
+        return selection.messageKey;
       }
 
       function fetchMailboxFolder(folder, unread) {
@@ -371,9 +384,11 @@
         }
         fetchMailboxFolder(folder, unread)
           .then(function (messages) {
-            setMailboxFolder(currentList, folder, unread, messages);
-            clearMailboxReadingPane();
-            window.history.pushState({}, '', targetUrl.toString());
+            var selection = folderSelections.get(mailboxFolderKey(folder, unread));
+            var selectedKey = selection && messages.some(function (message) { return message.key === selection.messageKey; }) ? selection.messageKey : '';
+            setMailboxFolder(currentList, folder, unread, messages, selectedKey);
+            var restoredKey = restoreMailboxSelection(currentList, folder, unread, messages);
+            window.history.pushState({}, '', restoredKey ? mailboxMessageUrl(currentList, restoredKey) : targetUrl.toString());
             preloadMailboxFolders();
           })
           .catch(function () {
@@ -401,6 +416,9 @@
             currentPane.replaceWith(nextPane);
             window.history.pushState({}, '', messageUrl);
             nextPane.scrollTop = 0;
+            var folder = list.dataset.mailboxFolderName || 'inbox';
+            var unread = list.dataset.mailboxUnread === 'true';
+            folderSelections.set(mailboxFolderKey(folder, unread), { messageKey: messageKey, pane: nextPane });
             var previews = nextPane.querySelectorAll('details[data-email-preview][open]');
             previews.forEach(activatePreview);
             if (previews.length) {
