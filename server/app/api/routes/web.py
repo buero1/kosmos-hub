@@ -334,37 +334,6 @@ def mailbox_selected_pane(
     )
 
 
-@router.get("/emails/list", response_class=HTMLResponse)
-def mailbox_list_segment(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    folder: str = "inbox",
-    unread: bool = False,
-    selected: str = "",
-    offset: Annotated[int, Query(ge=0)] = 0,
-):
-    _require_hub_admin(request)
-    if folder not in MAILBOX_FOLDERS:
-        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
-    page = HubMailboxService(
-        db=db,
-        cipher=get_secret_cipher(),
-        public_base_url=get_settings().public_base_url,
-    ).get_list_page(folder=folder, unread_only=unread, offset=offset)
-    return templates.TemplateResponse(
-        request,
-        "emails_message_list_rows.html",
-        {
-            "messages": page.messages,
-            "offset": page.offset,
-            "selected_key": selected,
-            "folder": folder,
-            "unread": unread,
-            "row_height": page.row_height,
-        },
-    )
-
-
 @router.get("/emails/folder", response_class=HTMLResponse)
 def mailbox_folder_panel(
     request: Request,

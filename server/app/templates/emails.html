@@ -12,11 +12,9 @@
     .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
     .mailbox-folders a:hover, .mailbox-folders a.is-active { background: var(--accent-soft); color: #075f4e; }
     .mailbox-folders small { color: var(--muted); font-size: 0.75rem; }
-    .mailbox-list { --mailbox-row-height: 92px; position: relative; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
+    .mailbox-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
     .mailbox-list-heading { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 0.82rem; }
-    .mailbox-list-canvas { position: relative; min-height: 0; }
     .mailbox-message { display: block; padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); color: var(--ink); text-decoration: none; }
-    .mailbox-list-canvas .mailbox-message { position: absolute; inset-inline: 0; height: var(--mailbox-row-height); box-sizing: border-box; overflow: hidden; }
     .mailbox-message:hover { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
     .mailbox-message.is-selected { background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel)); }
     .mailbox-message.is-unread { border-left: 3px solid #1d63b8; padding-left: calc(1rem - 3px); }
@@ -87,8 +85,6 @@
 
       function attachMessageListeners(scope) {
         scope.querySelectorAll('[data-mailbox-message]').forEach(function (link) {
-          if (link.dataset.mailboxMessageBound === 'true') return;
-          link.dataset.mailboxMessageBound = 'true';
           link.addEventListener('click', function (event) {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -111,106 +107,12 @@
 
       attachMessageListeners(document);
       attachFolderListeners(document);
-      attachMailboxVirtualization(document.querySelector('[data-mailbox-list]'));
 
       function setSelectedMessage(link) {
-        var list = link.closest('[data-mailbox-list]');
-        if (!list) return;
-        list.dataset.mailboxSelectedKey = link.dataset.mailboxKey || '';
-        list.querySelectorAll('[data-mailbox-message]').forEach(function (message) {
+        document.querySelectorAll('[data-mailbox-message]').forEach(function (message) {
           message.classList.toggle('is-selected', message === link);
         });
       }
-
-      function applySelectedMessage(list) {
-        var selectedKey = list.dataset.mailboxSelectedKey || '';
-        list.querySelectorAll('[data-mailbox-message]').forEach(function (message) {
-          message.classList.toggle('is-selected', message.dataset.mailboxKey === selectedKey);
-        });
-      }
-
-      function attachMailboxVirtualization(list) {
-        var canvas = list && list.querySelector('[data-mailbox-list-canvas]');
-        if (!list || !canvas || list.dataset.mailboxVirtualBound === 'true') return;
-        list.dataset.mailboxVirtualBound = 'true';
-        var pageSize = Number(list.dataset.mailboxPageSize || 100);
-        var rowHeight = Number(list.dataset.mailboxRowHeight || 92);
-        var totalCount = Number(list.dataset.mailboxTotalCount || 0);
-        var loadingOffsets = new Set();
-        var animationFrame = 0;
-
-        function hasPage(offset) {
-          return Array.prototype.some.call(
-            canvas.querySelectorAll('[data-mailbox-index]'),
-            function (row) { return Number(row.dataset.mailboxIndex) === offset; }
-          );
-        }
-
-        function loadPage(offset) {
-          if (offset < 0 || offset >= totalCount || loadingOffsets.has(offset) || hasPage(offset)) return;
-          loadingOffsets.add(offset);
-          var pageUrl = new URL('/emails/list', window.location.origin);
-          pageUrl.searchParams.set('folder', list.dataset.mailboxFolderName || 'inbox');
-          if (list.dataset.mailboxUnread === 'true') pageUrl.searchParams.set('unread', 'true');
-          if (list.dataset.mailboxSelectedKey) pageUrl.searchParams.set('selected', list.dataset.mailboxSelectedKey);
-          pageUrl.searchParams.set('offset', String(offset));
-          window.fetch(pageUrl, { credentials: 'same-origin' })
-            .then(function (response) {
-              if (!response.ok) throw new Error('Mailbox segment response failed.');
-              return response.text();
-            })
-            .then(function (html) {
-              if (!document.contains(list)) return;
-              var nextDocument = new DOMParser().parseFromString(html, 'text/html');
-              var rows = nextDocument.querySelectorAll('[data-mailbox-message]');
-              rows.forEach(function (row) {
-                canvas.appendChild(document.importNode(row, true));
-              });
-              attachMessageListeners(canvas);
-              applySelectedMessage(list);
-            })
-            .catch(function () {
-              // The next user click still uses the regular server-rendered fallback.
-            })
-            .finally(function () {
-              loadingOffsets.delete(offset);
-            });
-        }
-
-        function refreshWindow() {
-          animationFrame = 0;
-          var relativeTop = Math.max(0, list.scrollTop - canvas.offsetTop);
-          var firstVisible = Math.max(0, Math.floor(relativeTop / rowHeight));
-          var lastVisible = Math.min(totalCount - 1, Math.ceil((relativeTop + list.clientHeight) / rowHeight));
-          var firstNeeded = Math.max(0, firstVisible - pageSize);
-          var lastNeeded = Math.min(totalCount - 1, lastVisible + pageSize);
-          var firstPage = Math.floor(firstNeeded / pageSize) * pageSize;
-          var lastPage = Math.floor(lastNeeded / pageSize) * pageSize;
-          for (var offset = firstPage; offset <= lastPage; offset += pageSize) loadPage(offset);
-
-          var firstKept = Math.max(0, firstNeeded - pageSize);
-          var lastKept = Math.min(totalCount - 1, lastNeeded + pageSize);
-          canvas.querySelectorAll('[data-mailbox-message]').forEach(function (row) {
-            var index = Number(row.dataset.mailboxIndex);
-            if (index < firstKept || index > lastKept) row.remove();
-          });
-        }
-
-        function scheduleRefresh() {
-          if (!animationFrame) animationFrame = window.requestAnimationFrame(refreshWindow);
-        }
-
-        list.addEventListener('scroll', scheduleRefresh, { passive: true });
-        list._mailboxVirtualRefresh = scheduleRefresh;
-        var initialOffset = Number(list.dataset.mailboxOffset || 0);
-        if (initialOffset) list.scrollTop = canvas.offsetTop + initialOffset * rowHeight;
-        scheduleRefresh();
-      }
-
-      window.addEventListener('resize', function () {
-        var list = document.querySelector('[data-mailbox-list]');
-        if (list && list._mailboxVirtualRefresh) list._mailboxVirtualRefresh();
-      });
 
       function setActiveFolder(link) {
         var selectedUrl = new URL(link.href);
@@ -261,7 +163,6 @@
             nextPane.querySelectorAll('details[data-email-preview][open]').forEach(renderPreview);
             attachMessageListeners(nextList);
             attachFolderListeners(nextList);
-            attachMailboxVirtualization(nextList);
           })
           .catch(function () {
             // Keep the server-rendered navigation as a safe fallback.

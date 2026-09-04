@@ -7,18 +7,15 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, load_only, selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import SecretCipher
-from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.customer_communications import CustomerCommunicationAttachment, CustomerCommunicationService
 
 
 MAILBOX_FOLDERS = frozenset({"inbox", "sent", "unassigned"})
-MAILBOX_VIRTUAL_PAGE_SIZE = 100
-MAILBOX_VIRTUAL_ROW_HEIGHT = 92
 
 
 @dataclass(frozen=True)
@@ -62,32 +59,10 @@ class HubMailboxListItem:
 
 
 @dataclass(frozen=True)
-class HubMailboxListPage:
-    messages: tuple[HubMailboxListItem, ...]
-    total_count: int
-    offset: int
-    row_height: int = MAILBOX_VIRTUAL_ROW_HEIGHT
-
-
-@dataclass(frozen=True)
 class HubMailboxView:
     messages: tuple[HubMailboxListItem, ...]
     selected: HubMailboxMessage | None
     folder_counts: dict[str, int]
-    total_count: int
-    offset: int
-    row_height: int = MAILBOX_VIRTUAL_ROW_HEIGHT
-
-
-@dataclass(frozen=True)
-class _MailboxListSource:
-    key: str
-    kind: str
-    direction: str
-    is_unread: bool
-    occurred_at: datetime | None
-    linked_emails: tuple[CustomerZohoEmail, ...] = ()
-    unassigned_email: HubMailboxEmail | None = None
 
 
 class HubMailboxService:
@@ -106,53 +81,50 @@ class HubMailboxService:
         if folder not in MAILBOX_FOLDERS:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
-        sources = self._list_sources()
+        messages = self._linked_list_messages() + self._unassigned_list_messages()
         folder_counts = {
-            "inbox": sum(source.direction == "inbound" for source in sources),
-            "sent": sum(source.direction == "outbound" for source in sources),
-            "unassigned": sum(source.kind == "unassigned" for source in sources),
+            "inbox": sum(message.direction == "inbound" for message in messages),
+            "sent": sum(message.direction == "outbound" for message in messages),
+            "unassigned": sum(message.kind == "unassigned" for message in messages),
         }
-        sources = self._filter_sources(sources, folder=folder, unread_only=unread_only)
-        return self._view_from_sources(
-            sources=sources,
+        messages = [message for message in messages if self._matches_folder(message, folder)]
+        if unread_only:
+            messages = [message for message in messages if message.is_unread]
+        messages.sort(
+            key=lambda message: (message.occurred_at.timestamp() if message.occurred_at else 0, message.key),
+            reverse=True,
+        )
+        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected = self.get_selected_message(
             folder=folder,
             unread_only=unread_only,
-            selected_key=selected_key,
-            folder_counts=folder_counts,
-        )
+            selected_key=selected_item.key,
+        ) if selected_item else None
+        return HubMailboxView(messages=tuple(messages), selected=selected, folder_counts=folder_counts)
 
     def get_folder_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
         """Load one folder for in-page navigation without rebuilding the other folders."""
         if folder not in MAILBOX_FOLDERS:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
-        return self._view_from_sources(
-            sources=self._folder_sources(folder=folder, unread_only=unread_only),
+        if folder == "unassigned":
+            messages = self._unassigned_list_messages()
+        else:
+            direction = "inbound" if folder == "inbox" else "outbound"
+            messages = self._linked_list_messages(direction=direction) + self._unassigned_list_messages(direction=direction)
+        if unread_only:
+            messages = [message for message in messages if message.is_unread]
+        messages.sort(
+            key=lambda message: (message.occurred_at.timestamp() if message.occurred_at else 0, message.key),
+            reverse=True,
+        )
+        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected = self.get_selected_message(
             folder=folder,
             unread_only=unread_only,
-            selected_key=selected_key,
-            folder_counts={},
-        )
-
-    def get_list_page(
-        self,
-        *,
-        folder: str,
-        unread_only: bool,
-        offset: int,
-    ) -> HubMailboxListPage:
-        """Fetch a thin, scrollable mailbox segment without loading email content."""
-        if folder not in MAILBOX_FOLDERS:
-            raise ValueError("Unbekannter E-Mail-Ordner.")
-
-        sources = self._folder_sources(folder=folder, unread_only=unread_only)
-        safe_offset = max(0, min(offset, len(sources)))
-        page_sources = sources[safe_offset : safe_offset + MAILBOX_VIRTUAL_PAGE_SIZE]
-        return HubMailboxListPage(
-            messages=self._list_items(page_sources),
-            total_count=len(sources),
-            offset=safe_offset,
-        )
+            selected_key=selected_item.key,
+        ) if selected_item else None
+        return HubMailboxView(messages=tuple(messages), selected=selected, folder_counts={})
 
     def get_selected_message(
         self,
@@ -211,61 +183,11 @@ class HubMailboxService:
         email.is_unread = False
         self.db.flush()
 
-    def _view_from_sources(
-        self,
-        *,
-        sources: list[_MailboxListSource],
-        folder: str,
-        unread_only: bool,
-        selected_key: str,
-        folder_counts: dict[str, int],
-    ) -> HubMailboxView:
-        selected_index = next((index for index, source in enumerate(sources) if source.key == selected_key), 0)
-        offset = (selected_index // MAILBOX_VIRTUAL_PAGE_SIZE) * MAILBOX_VIRTUAL_PAGE_SIZE if sources else 0
-        page_sources = sources[offset : offset + MAILBOX_VIRTUAL_PAGE_SIZE]
-        messages = self._list_items(page_sources)
-        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
-        selected = self.get_selected_message(
-            folder=folder,
-            unread_only=unread_only,
-            selected_key=selected_item.key,
-        ) if selected_item else None
-        return HubMailboxView(
-            messages=messages,
-            selected=selected,
-            folder_counts=folder_counts,
-            total_count=len(sources),
-            offset=offset,
-        )
-
-    def _list_sources(self, *, direction: str | None = None) -> list[_MailboxListSource]:
-        sources = self._linked_list_sources(direction=direction) + self._unassigned_list_sources(direction=direction)
-        return self._sort_sources(sources)
-
-    def _folder_sources(self, *, folder: str, unread_only: bool) -> list[_MailboxListSource]:
-        if folder == "unassigned":
-            sources = self._unassigned_list_sources()
-        else:
-            direction = "inbound" if folder == "inbox" else "outbound"
-            sources = self._list_sources(direction=direction)
-        return self._filter_sources(sources, folder=folder, unread_only=unread_only)
-
-    def _linked_list_sources(self, *, direction: str | None = None) -> list[_MailboxListSource]:
-        """Read list metadata first; encrypted headers are fetched only for the requested rows."""
+    def _linked_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
+        """Load headers for the mailbox list without constructing every email preview."""
         statement = (
             select(CustomerZohoEmail)
-            .options(
-                load_only(
-                    CustomerZohoEmail.id,
-                    CustomerZohoEmail.customer_id,
-                    CustomerZohoEmail.zoho_message_id,
-                    CustomerZohoEmail.direction,
-                    CustomerZohoEmail.is_unread,
-                    CustomerZohoEmail.zoho_sent_at,
-                    CustomerZohoEmail.created_at,
-                ),
-                selectinload(CustomerZohoEmail.customer).load_only(Customer.id, Customer.name),
-            )
+            .options(selectinload(CustomerZohoEmail.customer))
             .order_by(CustomerZohoEmail.zoho_sent_at.desc(), CustomerZohoEmail.id.desc())
         )
         if direction is not None:
@@ -276,98 +198,24 @@ class HubMailboxService:
             group_key = email.zoho_message_id or f"local-{email.id}"
             groups.setdefault(group_key, []).append(email)
 
-        sources: list[_MailboxListSource] = []
+        messages: list[HubMailboxListItem] = []
         for emails in groups.values():
-            winner = self._list_winner(emails)
-            sources.append(
-                _MailboxListSource(
-                    key=f"linked-{winner.customer_id}-{winner.id}",
-                    kind="linked",
-                    direction=winner.direction,
-                    is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
-                    occurred_at=winner.zoho_sent_at or winner.created_at,
-                    linked_emails=tuple(emails),
-                )
-            )
-        return sources
+            messages.append(self._linked_list_message(emails))
+        return messages
 
-    def _unassigned_list_sources(self, *, direction: str | None = None) -> list[_MailboxListSource]:
-        statement = (
-            select(HubMailboxEmail)
-            .options(
-                load_only(
-                    HubMailboxEmail.id,
-                    HubMailboxEmail.direction,
-                    HubMailboxEmail.is_unread,
-                    HubMailboxEmail.received_at,
-                )
-            )
-            .order_by(HubMailboxEmail.received_at.desc(), HubMailboxEmail.id.desc())
-        )
+    def _unassigned_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
+        statement = select(HubMailboxEmail).order_by(HubMailboxEmail.received_at.desc(), HubMailboxEmail.id.desc())
         if direction is not None:
             statement = statement.where(HubMailboxEmail.direction == direction)
         return [
-            _MailboxListSource(
-                key=f"unassigned-{email.id}",
-                kind="unassigned",
-                direction=email.direction,
-                is_unread=email.is_unread,
-                occurred_at=email.received_at,
-                unassigned_email=email,
-            )
+            self._unassigned_list_message(email)
             for email in self.db.scalars(statement).all()
         ]
 
-    def _list_items(self, sources: list[_MailboxListSource]) -> tuple[HubMailboxListItem, ...]:
-        linked_winners = [self._list_winner(list(source.linked_emails)) for source in sources if source.kind == "linked"]
-        linked_payloads = dict(
-            self.db.execute(
-                select(CustomerZohoEmail.id, CustomerZohoEmail.encrypted_payload_json).where(
-                    CustomerZohoEmail.id.in_([email.id for email in linked_winners])
-                )
-            ).all()
-        ) if linked_winners else {}
-        unassigned_emails = [source.unassigned_email for source in sources if source.unassigned_email is not None]
-        unassigned_payloads = dict(
-            self.db.execute(
-                select(HubMailboxEmail.id, HubMailboxEmail.encrypted_payload_json).where(
-                    HubMailboxEmail.id.in_([email.id for email in unassigned_emails])
-                )
-            ).all()
-        ) if unassigned_emails else {}
-
-        items: list[HubMailboxListItem] = []
-        for source in sources:
-            if source.kind == "linked":
-                winner = self._list_winner(list(source.linked_emails))
-                items.append(
-                    self._linked_list_message(
-                        list(source.linked_emails),
-                        encrypted_payload_json=linked_payloads[winner.id],
-                    )
-                )
-            elif source.unassigned_email is not None:
-                items.append(
-                    self._unassigned_list_message(
-                        source.unassigned_email,
-                        encrypted_payload_json=unassigned_payloads[source.unassigned_email.id],
-                    )
-                )
-        return tuple(items)
-
-    @staticmethod
-    def _list_winner(emails: list[CustomerZohoEmail]) -> CustomerZohoEmail:
-        return max(emails, key=lambda email: email.id)
-
-    def _linked_list_message(
-        self,
-        emails: list[CustomerZohoEmail],
-        *,
-        encrypted_payload_json: str | None = None,
-    ) -> HubMailboxListItem:
+    def _linked_list_message(self, emails: list[CustomerZohoEmail]) -> HubMailboxListItem:
         # The full view may parse HTML and attachments. A list row only needs its header fields.
-        winner = self._list_winner(emails)
-        payload = self._payload(encrypted_payload_json if encrypted_payload_json is not None else winner.encrypted_payload_json)
+        winner = max(emails, key=lambda email: email.id)
+        payload = self._payload(winner.encrypted_payload_json)
         customers = self._linked_customers(emails)
         return HubMailboxListItem(
             key=f"linked-{winner.customer_id}-{winner.id}",
@@ -381,13 +229,8 @@ class HubMailboxService:
             customers=customers,
         )
 
-    def _unassigned_list_message(
-        self,
-        email: HubMailboxEmail,
-        *,
-        encrypted_payload_json: str | None = None,
-    ) -> HubMailboxListItem:
-        payload = self._payload(encrypted_payload_json if encrypted_payload_json is not None else email.encrypted_payload_json)
+    def _unassigned_list_message(self, email: HubMailboxEmail) -> HubMailboxListItem:
+        payload = self._payload(email.encrypted_payload_json)
         return HubMailboxListItem(
             key=f"unassigned-{email.id}",
             kind="unassigned",
@@ -462,28 +305,8 @@ class HubMailboxService:
             )
         )
 
-    def _filter_sources(
-        self,
-        sources: list[_MailboxListSource],
-        *,
-        folder: str,
-        unread_only: bool,
-    ) -> list[_MailboxListSource]:
-        filtered = [source for source in sources if self._matches_folder(source, folder)]
-        if unread_only:
-            filtered = [source for source in filtered if source.is_unread]
-        return self._sort_sources(filtered)
-
     @staticmethod
-    def _sort_sources(sources: list[_MailboxListSource]) -> list[_MailboxListSource]:
-        return sorted(
-            sources,
-            key=lambda source: (source.occurred_at.timestamp() if source.occurred_at else 0, source.key),
-            reverse=True,
-        )
-
-    @staticmethod
-    def _matches_folder(message: HubMailboxMessage | HubMailboxListItem | _MailboxListSource, folder: str) -> bool:
+    def _matches_folder(message: HubMailboxMessage | HubMailboxListItem, folder: str) -> bool:
         if folder == "unassigned":
             return message.kind == "unassigned"
         if folder == "sent":

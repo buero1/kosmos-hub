@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -76,12 +76,6 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         assert "default-src 'none'" in (inbox.selected.preview_html or "")
         assert inbox.messages[1].customers[0].name == "Example GmbH"
 
-        second_segment = service.get_list_page(folder="inbox", unread_only=False, offset=1)
-        assert second_segment.total_count == 2
-        assert second_segment.offset == 1
-        assert [message.subject for message in second_segment.messages] == ["Bekannte E-Mail"]
-        assert full_view_calls == []
-
         folder_view = service.get_folder_view(folder="inbox", unread_only=False)
         assert [message.subject for message in folder_view.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
         assert folder_view.selected is not None
@@ -112,36 +106,6 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
             )
             is None
         )
-
-        for index in range(101):
-            db.add(
-                CustomerZohoEmail(
-                    customer=customer,
-                    zoho_message_id=f"zoho-sent-{index}",
-                    source="zoho",
-                    direction="outbound",
-                    is_unread=False,
-                    encrypted_payload_json=cipher.encrypt(
-                        json.dumps(
-                            {
-                                "subject": f"Gesendet {index}",
-                                "from": {"email": "team@example.de"},
-                                "to": [{"email": "recipient@example.de"}],
-                            }
-                        )
-                    ),
-                    zoho_sent_at=datetime(2026, 9, 4, tzinfo=UTC) + timedelta(minutes=index),
-                )
-            )
-        db.commit()
-
-        sent_first_segment = service.get_list_page(folder="sent", unread_only=False, offset=0)
-        assert sent_first_segment.total_count == 101
-        assert len(sent_first_segment.messages) == 100
-
-        sent_final_segment = service.get_list_page(folder="sent", unread_only=False, offset=100)
-        assert sent_final_segment.offset == 100
-        assert [message.subject for message in sent_final_segment.messages] == ["Gesendet 0"]
 
         service.mark_unassigned_read(email_id=unassigned_email.id)
         unread = service.get_view(folder="inbox", unread_only=True)
