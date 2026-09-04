@@ -4,6 +4,7 @@
       <div><h3>{{ selected.subject }}</h3><p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}</p></div>
       <div>{% if selected.kind == 'linked' and selected.direction == 'inbound' %}<a class="button button-secondary button-variant-2" href="/customers/{{ selected.customer_id }}?reply_email={{ selected.customer_email_id }}#customer-communications">Antworten</a>{% endif %}{% if selected.is_unread %}<span class="pill" data-mailbox-unread-status>Neu</span>{% endif %}</div>
     </div>
+    <p class="mailbox-preview-timing" data-mailbox-preview-timing aria-live="polite"></p>
     {% if selected.customers %}<div class="mailbox-customer-links">{% for customer in selected.customers %}<a href="/customers/{{ customer.id }}">{{ customer.name }}</a>{% endfor %}</div>{% endif %}
     {% if selected.kind == 'linked' %}
       {% if selected.preview_html %}

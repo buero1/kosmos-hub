@@ -32,6 +32,7 @@
     .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
     .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
     .mailbox-reading-meta { margin: 0.5rem 0 0; color: var(--muted); line-height: 1.45; }
+    .mailbox-preview-timing { min-height: 1.1rem; margin: 0.55rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
     .mailbox-customer-links { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem; }
     .mailbox-customer-links a { color: #075f4e; font-size: 0.82rem; }
     .mailbox-preview { margin-top: 1rem; }
@@ -429,13 +430,23 @@
         }
       }
 
-      function activatePreview(preview) {
+      function activatePreview(preview, onLoad) {
         var frame = preview.querySelector('[data-email-preview-frame]');
         if (frame && !frame.srcdoc) {
+          if (typeof onLoad === 'function') frame.addEventListener('load', onLoad, { once: true });
           frame.srcdoc = frame.dataset.srcdoc || '';
           frame.removeAttribute('data-srcdoc');
         }
         preview.dispatchEvent(new Event('toggle', { bubbles: true }));
+      }
+
+      function formatMailboxTiming(milliseconds) {
+        return Math.max(0, Math.round(milliseconds)) + ' ms';
+      }
+
+      function setMailboxPreviewTiming(pane, text) {
+        var target = pane && pane.querySelector('[data-mailbox-preview-timing]');
+        if (target) target.textContent = text;
       }
 
       function loadFolder(link) {
@@ -471,27 +482,49 @@
       preloadMailboxFolders();
 
       function loadMessage(messageUrl, list, messageKey) {
+        var startedAt = performance.now();
         var paneUrl = new URL(messageUrl);
         paneUrl.pathname = '/emails/selected';
+        setMailboxPreviewTiming(document.querySelector('.mailbox-reading-pane'), 'Vorschau wird geladen ...');
         window.fetch(paneUrl, { credentials: 'same-origin' })
           .then(function (response) {
             if (!response.ok) throw new Error('Mailbox response failed.');
-            return response.text();
+            return response.text().then(function (html) {
+              return { html: html, responseAt: performance.now() };
+            });
           })
-          .then(function (html) {
-            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+          .then(function (result) {
+            var parseStartedAt = performance.now();
+            var nextDocument = new DOMParser().parseFromString(result.html, 'text/html');
             var nextPane = nextDocument.querySelector('.mailbox-reading-pane');
             var currentPane = document.querySelector('.mailbox-reading-pane');
             if (!nextPane || !currentPane) throw new Error('Mailbox pane missing.');
 
             currentPane.replaceWith(nextPane);
+            var paneInsertedAt = performance.now();
             window.history.pushState({}, '', messageUrl);
             nextPane.scrollTop = 0;
             var folder = list.dataset.mailboxFolderName || 'inbox';
             var unread = list.dataset.mailboxUnread === 'true';
             folderSelections.set(mailboxFolderKey(folder, unread), { messageKey: messageKey, pane: nextPane });
             var previews = nextPane.querySelectorAll('details[data-email-preview][open]');
-            previews.forEach(activatePreview);
+            var timingPrefix = 'Vorschau: Antwort ' + formatMailboxTiming(result.responseAt - startedAt) + ' · HTML ' + formatMailboxTiming(paneInsertedAt - parseStartedAt);
+            if (previews.length) {
+              setMailboxPreviewTiming(nextPane, timingPrefix + ' · Iframe lädt ...');
+              var frameLoaded = false;
+              previews.forEach(function (preview) {
+                activatePreview(preview, function () {
+                  if (frameLoaded) return;
+                  frameLoaded = true;
+                  window.requestAnimationFrame(function () {
+                    var completedAt = performance.now();
+                    setMailboxPreviewTiming(nextPane, timingPrefix + ' · Iframe ' + formatMailboxTiming(completedAt - paneInsertedAt) + ' · Gesamt ' + formatMailboxTiming(completedAt - startedAt));
+                  });
+                });
+              });
+            } else {
+              setMailboxPreviewTiming(nextPane, timingPrefix + ' · Gesamt ' + formatMailboxTiming(paneInsertedAt - startedAt));
+            }
             if (previews.length) {
               var message = (list._mailboxMessages || []).find(function (item) { return item.key === messageKey; });
               if (message) {
