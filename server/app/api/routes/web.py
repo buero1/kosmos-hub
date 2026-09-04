@@ -406,11 +406,25 @@ def mailbox_status(
 
 @router.get("/emails/compose")
 def compose_mailbox_email(
-    customer_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    customer_id: int | None = None,
+    options: bool = False,
 ):
     _require_hub_admin(request)
+    if options:
+        return {
+            "customers": [
+                {"id": customer.id, "name": customer.name}
+                for customer in db.scalars(
+                    select(Customer)
+                    .where(Customer.is_visible.is_(True))
+                    .order_by(Customer.name.asc(), Customer.id.asc())
+                ).all()
+            ]
+        }
+    if customer_id is None:
+        return RedirectResponse(url="/emails", status_code=303)
     if db.get(Customer, customer_id) is None:
         raise HTTPException(status_code=404, detail="Customer not found.")
     return RedirectResponse(url=f"/customers/{customer_id}?compose_email=1", status_code=303)
