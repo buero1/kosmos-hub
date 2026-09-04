@@ -418,14 +418,6 @@ def mailbox_compose_options(
         senders = ()
         sender_error = str(exc)
     return {
-        "customers": [
-            {"id": customer.id, "name": customer.name}
-            for customer in db.scalars(
-                select(Customer)
-                .where(Customer.is_visible.is_(True), Customer.zoho_id.is_not(None))
-                .order_by(Customer.name.asc(), Customer.id.asc())
-            ).all()
-        ],
         "senders": [{"name": sender.name, "email": sender.email} for sender in senders],
         "templates": [
             {"id": template.id, "name": template.name, "module": template.module, "subject": template.subject}
@@ -437,17 +429,23 @@ def mailbox_compose_options(
 
 @router.get("/emails/compose/recipients", response_class=JSONResponse)
 def mailbox_compose_recipients(
-    customer_id: int,
+    q: str = "",
     request: Request,
     db: Annotated[Session, Depends(get_db)],
 ):
     _require_hub_admin(request)
-    try:
-        recipients = _customer_communication_service(db).list_recipients(customer_id=customer_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    matches = _customer_communication_service(db).search_recipients(query=q)
     return {
-        "recipients": [{"key": recipient.key, "name": recipient.name, "email": recipient.email} for recipient in recipients]
+        "recipients": [
+            {
+                "customer_id": match.customer_id,
+                "customer_name": match.customer_name,
+                "key": match.recipient.key,
+                "name": match.recipient.name,
+                "email": match.recipient.email,
+            }
+            for match in matches
+        ]
     }
 
 

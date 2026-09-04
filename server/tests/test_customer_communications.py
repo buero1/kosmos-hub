@@ -276,6 +276,29 @@ def test_customer_communications_lists_recipients_without_loading_the_full_view(
         ]
 
 
+def test_customer_communications_searches_known_recipients_across_customers():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        other_customer = Customer(
+            name="Other Customer",
+            zoho_id="zoho-account-2",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Kontakt-E-Mail": "other@example.de"}})),
+        )
+        db.add_all([customer, contact, other_customer])
+        db.commit()
+
+        matches = _service(db, FakeZohoCommunications()).search_recipients(query="anna@example")
+
+        assert [
+            (match.customer_id, match.customer_name, match.recipient.name, match.recipient.email)
+            for match in matches
+        ] == [(customer.id, "Example Customer", "Anna Example", "anna@example.de")]
+
+
 def test_customer_communications_marks_all_shared_email_copies_read():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

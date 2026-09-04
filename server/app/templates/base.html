@@ -2855,6 +2855,7 @@
         if (emailComposerLayer) {
           var emailComposerDrawer = emailComposerLayer.querySelector("[data-email-compose-drawer]");
           var emailComposerRecipient = emailComposerLayer.querySelector("[data-email-compose-recipient]");
+          var emailComposerRecipientKey = emailComposerLayer.querySelector("[data-email-compose-recipient-key]");
           var emailComposerSubject = emailComposerLayer.querySelector("[data-email-compose-subject]");
           var emailComposerReplyTo = emailComposerLayer.querySelector("[data-email-compose-reply-to]");
           var emailComposerContent = emailComposerLayer.querySelector("[data-email-compose-content]");
@@ -2913,8 +2914,11 @@
               }
               setEmailComposerTemplateStatus("Vorlage wird geladen ...");
               var templateUrl = emailComposerLayer.dataset.emailTemplateUrl + "/" + encodeURIComponent(templateId);
-              if (emailComposerRecipient && emailComposerRecipient.value) {
-                templateUrl += "?recipient_key=" + encodeURIComponent(emailComposerRecipient.value);
+              var recipientKey = emailComposerRecipientKey && emailComposerRecipientKey.value
+                ? emailComposerRecipientKey.value
+                : (emailComposerRecipient && emailComposerRecipient.tagName === "SELECT" ? emailComposerRecipient.value : "");
+              if (recipientKey) {
+                templateUrl += "?recipient_key=" + encodeURIComponent(recipientKey);
               }
               window.fetch(templateUrl, {
                 credentials: "same-origin",
@@ -2947,6 +2951,11 @@
           function selectEmailRecipient(email) {
             if (!email || !emailComposerRecipient) { return; }
             var normalizedEmail = email.trim().toLowerCase();
+            if (emailComposerRecipient.tagName === "INPUT") {
+              emailComposerRecipient.value = email;
+              emailComposerRecipient.dispatchEvent(new Event("input", { bubbles: true }));
+              return;
+            }
             Array.prototype.some.call(emailComposerRecipient.options, function (option) {
               if ((option.dataset.recipientEmail || "").toLowerCase() !== normalizedEmail) { return false; }
               emailComposerRecipient.value = option.value;

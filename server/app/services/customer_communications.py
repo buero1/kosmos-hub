@@ -181,6 +181,15 @@ class CustomerCommunicationRecipient:
 
 
 @dataclass(frozen=True)
+class CustomerCommunicationRecipientSearchMatch:
+    """A locally stored recipient together with its Zoho Account context."""
+
+    customer_id: int
+    customer_name: str
+    recipient: CustomerCommunicationRecipient
+
+
+@dataclass(frozen=True)
 class CustomerCommunicationSender:
     name: str
     email: str
@@ -365,6 +374,42 @@ class CustomerCommunicationService:
         """List only the current customer's valid recipient addresses for the mailbox composer."""
         customer = self._require_zoho_customer(customer_id)
         return tuple(self._recipients_for_customer(customer))
+
+    def search_recipients(self, *, query: str, limit: int = 12) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
+        """Find known recipient addresses without sending a new request to Zoho."""
+        normalized_query = " ".join(query.casefold().split())
+        if len(normalized_query) < 2:
+            return ()
+        tokens = tuple(token for token in re.split(r"\s+", normalized_query) if token)
+        matches: list[CustomerCommunicationRecipientSearchMatch] = []
+        for customer in self.db.scalars(
+            select(Customer)
+            .where(Customer.is_visible.is_(True), Customer.zoho_id.is_not(None))
+            .order_by(Customer.name.asc(), Customer.id.asc())
+        ).all():
+            for recipient in self._recipients_for_customer(customer):
+                searchable = " ".join((recipient.name, recipient.email, customer.name)).casefold()
+                if not all(token in searchable for token in tokens):
+                    continue
+                matches.append(
+                    CustomerCommunicationRecipientSearchMatch(
+                        customer_id=customer.id,
+                        customer_name=customer.name,
+                        recipient=recipient,
+                    )
+                )
+
+        def sort_key(match: CustomerCommunicationRecipientSearchMatch) -> tuple[int, int, str, str, int]:
+            recipient = match.recipient
+            return (
+                0 if recipient.email.startswith(normalized_query) else 1,
+                0 if recipient.name.casefold().startswith(normalized_query) else 1,
+                match.customer_name.casefold(),
+                recipient.name.casefold(),
+                match.customer_id,
+            )
+
+        return tuple(sorted(matches, key=sort_key)[:max(1, min(limit, 30))])
 
     def list_email_templates(self) -> tuple[CustomerCommunicationEmailTemplate, ...]:
         """List the local, encrypted Zoho templates without querying Zoho."""
