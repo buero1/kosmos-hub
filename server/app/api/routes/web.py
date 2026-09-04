@@ -366,6 +366,34 @@ def mailbox_folder_panel(
     )
 
 
+@router.get("/emails/list", response_class=HTMLResponse)
+def mailbox_folder_list(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    folder: str = "inbox",
+    unread: bool = False,
+):
+    """Return header-only mailbox data for client-side folder preloading."""
+    _require_hub_admin(request)
+    if folder not in MAILBOX_FOLDERS:
+        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).get_folder_view(folder=folder, unread_only=unread)
+    return templates.TemplateResponse(
+        request,
+        "emails_message_list.html",
+        {
+            "messages": mailbox.messages,
+            "selected": None,
+            "folder": folder,
+            "unread": unread,
+        },
+    )
+
+
 @router.get("/emails/compose")
 def compose_mailbox_email(
     customer_id: int,

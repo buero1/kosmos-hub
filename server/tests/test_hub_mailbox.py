@@ -1,10 +1,13 @@
 import json
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.core.templates import create_templates
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
@@ -75,6 +78,17 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         assert "Neue Anfrage <strong>mit Inhalt</strong>" in (inbox.selected.preview_html or "")
         assert "default-src 'none'" in (inbox.selected.preview_html or "")
         assert inbox.messages[1].customers[0].name == "Example GmbH"
+
+        template = create_templates(directory=str(Path(__file__).resolve().parents[1] / "app" / "templates"))
+        rendered_list = template.get_template("emails_message_list.html").render(
+            messages=inbox.messages,
+            selected=None,
+            folder="inbox",
+            unread=False,
+        )
+        serialized_messages = re.search(r'<script type="application/json" data-mailbox-list-data>(.*?)</script>', rendered_list)
+        assert serialized_messages is not None
+        assert json.loads(serialized_messages.group(1))[0]["subject"] == "Noch unbekannt"
 
         folder_view = service.get_folder_view(folder="inbox", unread_only=False)
         assert [message.subject for message in folder_view.messages] == ["Noch unbekannt", "Bekannte E-Mail"]

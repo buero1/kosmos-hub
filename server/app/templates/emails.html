@@ -70,6 +70,9 @@
   <script>
     (function () {
       var shell = document.querySelector('[data-mailbox-shell]');
+      var folderCache = new Map();
+      var folderRequests = new Map();
+      var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
 
       function updateMailboxHeight() {
         if (!shell) return;
@@ -100,10 +103,6 @@
         });
       }
 
-      function attachMessageListeners(scope) {
-        scope.querySelectorAll('[data-mailbox-message]').forEach(attachMessageListener);
-      }
-
       function attachFolderListeners(scope) {
         scope.querySelectorAll('[data-mailbox-folder]').forEach(function (link) {
           if (link.dataset.mailboxFolderBound) return;
@@ -125,6 +124,38 @@
         if (list.dataset.mailboxUnread === 'true') url.searchParams.set('unread', 'true');
         url.searchParams.set('selected', messageKey);
         return url.toString();
+      }
+
+      function mailboxFolderKey(folder, unread) {
+        return folder + ':' + (unread ? 'unread' : 'all');
+      }
+
+      function mailboxFolderUrl(folder, unread) {
+        var url = new URL('/emails', window.location.origin);
+        url.searchParams.set('folder', folder);
+        if (unread) url.searchParams.set('unread', 'true');
+        return url.toString();
+      }
+
+      function mailboxListMessages(list) {
+        var data = list.querySelector('[data-mailbox-list-data]');
+        if (!data) return [];
+        try {
+          return JSON.parse(data.textContent || '[]');
+        } catch (_) {
+          return [];
+        }
+      }
+
+      function mailboxListCanvas(list) {
+        var canvas = list.querySelector('[data-mailbox-list-canvas]');
+        if (canvas) return canvas;
+        canvas = document.createElement('div');
+        canvas.className = 'mailbox-list-canvas';
+        canvas.dataset.mailboxListCanvas = '';
+        var noScript = list.querySelector('noscript');
+        list.insertBefore(canvas, noScript || null);
+        return canvas;
       }
 
       function createMailboxMessage(list, message, index) {
@@ -169,9 +200,9 @@
       }
 
       function renderMailboxListWindow(list) {
-        var canvas = list.querySelector('[data-mailbox-list-canvas]');
+        var canvas = mailboxListCanvas(list);
         var messages = list._mailboxMessages;
-        if (!canvas || !messages) return;
+        if (!messages) return;
         var rowHeight = parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'));
         var heading = list.querySelector('.mailbox-list-heading');
         var viewportHeight = list.clientHeight;
@@ -186,16 +217,12 @@
       }
 
       function attachMailboxListVirtualization(list) {
-        var canvas = list.querySelector('[data-mailbox-list-canvas]');
-        var data = list.querySelector('[data-mailbox-list-data]');
-        if (!canvas || !data) return;
-        try {
-          list._mailboxMessages = JSON.parse(data.textContent || '[]');
-        } catch (_) {
-          list._mailboxMessages = [];
+        if (!list._mailboxMessages) list._mailboxMessages = mailboxListMessages(list);
+        if (list.dataset.mailboxVirtualized) {
+          updateMailboxList(list, list._mailboxMessages);
+          return;
         }
-        var rowHeight = parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'));
-        canvas.style.height = (list._mailboxMessages.length * rowHeight) + 'px';
+        list.dataset.mailboxVirtualized = 'true';
         var scheduled = false;
         function renderOnAnimationFrame() {
           if (scheduled) return;
@@ -206,10 +233,36 @@
           });
         }
         list.addEventListener('scroll', renderOnAnimationFrame, { passive: true });
+        updateMailboxList(list, list._mailboxMessages);
+      }
+
+      function updateMailboxList(list, messages) {
+        var canvas = mailboxListCanvas(list);
+        var rowHeight = parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'));
+        list._mailboxMessages = messages;
+        canvas.style.height = (messages.length * rowHeight) + 'px';
+        var emptyMessage = list.querySelector('[data-mailbox-list-empty]');
+        if (!messages.length && !emptyMessage) {
+          emptyMessage = document.createElement('p');
+          emptyMessage.className = 'mailbox-empty';
+          emptyMessage.dataset.mailboxListEmpty = '';
+          emptyMessage.textContent = 'In diesem Ordner liegen keine E-Mails.';
+          canvas.after(emptyMessage);
+        }
+        if (emptyMessage) emptyMessage.hidden = messages.length > 0;
         renderMailboxListWindow(list);
       }
 
-      document.querySelectorAll('[data-mailbox-list]').forEach(attachMailboxListVirtualization);
+      function cacheMailboxFolder(list) {
+        var folder = list.dataset.mailboxFolderName || 'inbox';
+        var unread = list.dataset.mailboxUnread === 'true';
+        folderCache.set(mailboxFolderKey(folder, unread), list._mailboxMessages || mailboxListMessages(list));
+      }
+
+      document.querySelectorAll('[data-mailbox-list]').forEach(function (list) {
+        attachMailboxListVirtualization(list);
+        cacheMailboxFolder(list);
+      });
 
       function setSelectedMessage(list, messageKey) {
         list.dataset.mailboxSelectedKey = messageKey;
@@ -224,6 +277,80 @@
         });
       }
 
+      function setMailboxFolder(list, folder, unread, messages) {
+        list.dataset.mailboxFolderName = folder;
+        list.dataset.mailboxUnread = unread ? 'true' : 'false';
+        list.dataset.mailboxSelectedKey = '';
+        var title = list.querySelector('[data-mailbox-list-title]');
+        if (title) title.textContent = folderTitles[folder] || 'Posteingang';
+        var toggle = list.querySelector('.mailbox-list-heading [data-mailbox-folder]');
+        if (toggle) {
+          toggle.href = mailboxFolderUrl(folder, !unread);
+          toggle.textContent = unread ? 'Alle' : 'Nur neu';
+        }
+        list.scrollTop = 0;
+        updateMailboxList(list, messages);
+      }
+
+      function clearMailboxReadingPane() {
+        var pane = document.querySelector('.mailbox-reading-pane');
+        if (!pane) return;
+        pane.replaceChildren();
+        var prompt = document.createElement('p');
+        prompt.className = 'mailbox-empty';
+        prompt.textContent = 'Wähle links eine E-Mail aus.';
+        pane.append(prompt);
+        pane.scrollTop = 0;
+      }
+
+      function fetchMailboxFolder(folder, unread) {
+        var cacheKey = mailboxFolderKey(folder, unread);
+        if (folderCache.has(cacheKey)) return Promise.resolve(folderCache.get(cacheKey));
+        if (folderRequests.has(cacheKey)) return folderRequests.get(cacheKey);
+        var listUrl = new URL('/emails/list', window.location.origin);
+        listUrl.searchParams.set('folder', folder);
+        if (unread) listUrl.searchParams.set('unread', 'true');
+        var request = window.fetch(listUrl, { credentials: 'same-origin' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Mailbox list response failed.');
+            return response.text();
+          })
+          .then(function (html) {
+            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+            var nextList = nextDocument.querySelector('[data-mailbox-list]');
+            if (!nextList) throw new Error('Mailbox list missing.');
+            var messages = mailboxListMessages(nextList);
+            folderCache.set(cacheKey, messages);
+            return messages;
+          })
+          .finally(function () {
+            folderRequests.delete(cacheKey);
+          });
+        folderRequests.set(cacheKey, request);
+        return request;
+      }
+
+      function preloadMailboxFolders() {
+        var list = document.querySelector('[data-mailbox-list]');
+        if (!list) return;
+        var activeFolder = list.dataset.mailboxFolderName || 'inbox';
+        var unread = list.dataset.mailboxUnread === 'true';
+        var queue = ['inbox', 'sent', 'unassigned'].filter(function (folder) { return folder !== activeFolder; });
+        function loadNextFolder() {
+          var folder = queue.shift();
+          if (!folder) return;
+          fetchMailboxFolder(folder, unread).then(loadNextFolder, function () {
+            // A failed preload never blocks the remaining folder preloads.
+            loadNextFolder();
+          });
+        }
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(loadNextFolder, { timeout: 1000 });
+        } else {
+          window.setTimeout(loadNextFolder, 250);
+        }
+      }
+
       function activatePreview(preview) {
         var frame = preview.querySelector('[data-email-preview-frame]');
         if (frame && !frame.srcdoc) {
@@ -233,44 +360,29 @@
         preview.dispatchEvent(new Event('toggle', { bubbles: true }));
       }
 
-      function renderPreview(preview) {
-        var frame = preview.querySelector('[data-email-preview-frame]');
-        if (frame && !frame.srcdoc) {
-          frame.srcdoc = frame.dataset.srcdoc || '';
-          frame.removeAttribute('data-srcdoc');
-        }
-      }
-
       function loadFolder(link) {
-        var panelUrl = new URL(link.href);
-        panelUrl.pathname = '/emails/folder';
-        window.fetch(panelUrl, { credentials: 'same-origin' })
-          .then(function (response) {
-            if (!response.ok) throw new Error('Mailbox folder response failed.');
-            return response.text();
-          })
-          .then(function (html) {
-            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
-            var nextList = nextDocument.querySelector('[data-mailbox-list]');
-            var nextPane = nextDocument.querySelector('.mailbox-reading-pane');
-            var currentList = document.querySelector('[data-mailbox-list]');
-            var currentPane = document.querySelector('.mailbox-reading-pane');
-            if (!nextList || !nextPane || !currentList || !currentPane) throw new Error('Mailbox folder panel missing.');
-
-            currentList.replaceWith(nextList);
-            currentPane.replaceWith(nextPane);
-            window.history.pushState({}, '', link.href);
-            nextList.scrollTop = 0;
-            nextPane.scrollTop = 0;
-            nextPane.querySelectorAll('details[data-email-preview][open]').forEach(renderPreview);
-            attachMailboxListVirtualization(nextList);
-            attachFolderListeners(nextList);
+        var targetUrl = new URL(link.href);
+        var folder = targetUrl.searchParams.get('folder') || 'inbox';
+        var unread = targetUrl.searchParams.get('unread') === 'true';
+        var currentList = document.querySelector('[data-mailbox-list]');
+        if (!currentList) {
+          window.location.assign(link.href);
+          return;
+        }
+        fetchMailboxFolder(folder, unread)
+          .then(function (messages) {
+            setMailboxFolder(currentList, folder, unread, messages);
+            clearMailboxReadingPane();
+            window.history.pushState({}, '', targetUrl.toString());
+            preloadMailboxFolders();
           })
           .catch(function () {
             // Keep the server-rendered navigation as a safe fallback.
             window.location.assign(link.href);
           });
       }
+
+      preloadMailboxFolders();
 
       function loadMessage(messageUrl, list, messageKey) {
         var paneUrl = new URL(messageUrl);
