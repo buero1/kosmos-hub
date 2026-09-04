@@ -257,6 +257,33 @@ def test_customer_communications_marks_webhook_emails_unread_until_opened():
         assert email.is_unread is False
 
 
+def test_customer_communications_auto_loads_new_webhook_email_content_without_marking_it_read():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        fake_zoho = FakeZohoCommunications()
+        service = _service(db, fake_zoho)
+        result = service.sync_customer_email_headers(
+            customer_id=customer.id,
+            mark_new_emails_unread=True,
+            load_new_inbound_content=True,
+        )
+        imported = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.customer_id == customer.id))
+
+        assert result.emails == 1
+        assert result.loaded_contents == 1
+        assert imported is not None
+        assert imported.is_unread is True
+        assert service._payload(imported.encrypted_payload_json)["content"] == "Full imported email body"
+        assert len(fake_zoho.email_content_requests) == 1
+
+
 def test_customer_communications_treats_zoho_unsent_headers_as_inbound():
     assert CustomerCommunicationService._email_direction({"sent": False}) == "inbound"
 

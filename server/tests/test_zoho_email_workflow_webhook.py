@@ -19,10 +19,18 @@ class FakeCommunicationService:
     def __init__(self) -> None:
         self.customer_ids: list[int] = []
         self.mark_new_emails_unread: list[bool] = []
+        self.load_new_inbound_content: list[bool] = []
 
-    def sync_customer(self, *, customer_id: int, mark_new_emails_unread: bool = False) -> None:
+    def sync_customer_email_headers(
+        self,
+        *,
+        customer_id: int,
+        mark_new_emails_unread: bool = False,
+        load_new_inbound_content: bool = False,
+    ) -> None:
         self.customer_ids.append(customer_id)
         self.mark_new_emails_unread.append(mark_new_emails_unread)
+        self.load_new_inbound_content.append(load_new_inbound_content)
 
 
 def test_only_the_generated_webhook_receiver_url_is_public():
@@ -75,6 +83,7 @@ def test_manual_email_webhook_queues_native_zoho_email_fields_before_syncing_the
         assert service.process_next_delivery() == "succeeded"
         assert communications.customer_ids == [customer.id]
         assert communications.mark_new_emails_unread == [True]
+        assert communications.load_new_inbound_content == [True]
         assert delivery.status == "synced"
         assert webhook.last_imported_at is not None
 

@@ -288,6 +288,7 @@ class CustomerCommunicationSyncResult:
 @dataclass(frozen=True)
 class CustomerCommunicationEmailHeaderSyncResult:
     emails: int
+    loaded_contents: int = 0
 
 
 @dataclass(frozen=True)
@@ -486,6 +487,7 @@ class CustomerCommunicationService:
         *,
         customer_id: int,
         mark_new_emails_unread: bool = False,
+        load_new_inbound_content: bool = False,
     ) -> CustomerCommunicationSyncResult:
         customer = self._require_zoho_customer(customer_id)
         synced_at = datetime.now(UTC)
@@ -510,6 +512,7 @@ class CustomerCommunicationService:
             customer=customer,
             synced_at=synced_at,
             mark_new_emails_unread=mark_new_emails_unread,
+            load_new_inbound_content=load_new_inbound_content,
         )
         return CustomerCommunicationSyncResult(notes=note_count, emails=email_result.emails)
 
@@ -518,6 +521,7 @@ class CustomerCommunicationService:
         *,
         customer_id: int,
         mark_new_emails_unread: bool = False,
+        load_new_inbound_content: bool = False,
     ) -> CustomerCommunicationEmailHeaderSyncResult:
         """Synchronize only the Zoho email headers, without reloading notes."""
         customer = self._require_zoho_customer(customer_id)
@@ -525,6 +529,7 @@ class CustomerCommunicationService:
             customer=customer,
             synced_at=datetime.now(UTC),
             mark_new_emails_unread=mark_new_emails_unread,
+            load_new_inbound_content=load_new_inbound_content,
         )
 
     def _sync_customer_email_headers(
@@ -533,8 +538,10 @@ class CustomerCommunicationService:
         customer: Customer,
         synced_at: datetime,
         mark_new_emails_unread: bool,
+        load_new_inbound_content: bool,
     ) -> CustomerCommunicationEmailHeaderSyncResult:
         email_count = 0
+        new_inbound_emails: list[CustomerZohoEmail] = []
         known_emails = {
             (email.customer_id, email.zoho_message_id): email
             for email in self.db.scalars(
@@ -555,7 +562,7 @@ class CustomerCommunicationService:
         )
         for module, record_id in targets:
             for record in self.zoho_service.list_record_email_headers(module, record_id):
-                if self._upsert_zoho_email(
+                created_email = self._upsert_zoho_email(
                     customer=customer,
                     record=record,
                     module=module,
@@ -563,12 +570,34 @@ class CustomerCommunicationService:
                     synced_at=synced_at,
                     known_emails=known_emails,
                     mark_new_emails_unread=mark_new_emails_unread,
-                ):
+                )
+                if created_email is not None:
                     email_count += 1
+                    if load_new_inbound_content and created_email.direction == "inbound":
+                        new_inbound_emails.append(created_email)
 
         self.db.flush()
         duplicate_count = self._deduplicate_customer_emails(customer_id=customer.id)
-        return CustomerCommunicationEmailHeaderSyncResult(emails=max(0, email_count - duplicate_count))
+        loaded_contents = 0
+        if load_new_inbound_content:
+            for created_email in new_inbound_emails:
+                email_id = created_email.id
+                if email_id is None:
+                    continue
+                email = self.db.get(CustomerZohoEmail, email_id)
+                if email is None or email.direction != "inbound" or self.has_loaded_email_content(email):
+                    continue
+                try:
+                    self._load_email_content_for_email(email, mark_as_read=False)
+                    loaded_contents += 1
+                except (ValueError, ZohoCrmError) as exc:
+                    # Keep the unread header visible even when Zoho cannot supply the body yet.
+                    email.last_error = str(exc)[:1000]
+            self.db.flush()
+        return CustomerCommunicationEmailHeaderSyncResult(
+            emails=max(0, email_count - duplicate_count),
+            loaded_contents=loaded_contents,
+        )
 
     def create_note(
         self,
@@ -752,6 +781,10 @@ class CustomerCommunicationService:
         )
         if email is None:
             raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
+        self._load_email_content_for_email(email, mark_as_read=True)
+        return CustomerCommunicationActionResult(True, "E-Mail-Inhalt wurde verschlüsselt aus Zoho geladen.")
+
+    def _load_email_content_for_email(self, email: CustomerZohoEmail, *, mark_as_read: bool) -> None:
         if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
             raise ValueError("Für diese E-Mail ist kein Zoho-Inhalt verfügbar.")
 
@@ -768,10 +801,10 @@ class CustomerCommunicationService:
         email.encrypted_payload_json = self._encrypt_payload(payload)
         email.encrypted_header_json = self._encrypt_email_list_header(payload)
         email.zoho_synced_at = datetime.now(UTC)
-        email.is_unread = False
+        if mark_as_read:
+            email.is_unread = False
         email.last_error = None
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "E-Mail-Inhalt wurde verschlüsselt aus Zoho geladen.")
 
     def mark_email_read(self, *, customer_id: int, email_id: int) -> None:
         email = self.db.scalar(
@@ -896,7 +929,7 @@ class CustomerCommunicationService:
         record: dict[str, object],
         synced_at: datetime,
         known_notes: dict[str, CustomerZohoNote],
-    ) -> bool:
+    ) -> CustomerZohoEmail | None:
         note_id = self._text(record.get("id"))
         if not note_id:
             return False
@@ -936,7 +969,7 @@ class CustomerCommunicationService:
     ) -> bool:
         message_id = self._text(record.get("message_id")) or self._text(record.get("id"))
         if not message_id:
-            return False
+            return None
         key = (customer.id, message_id)
         email = known_emails.get(key)
         created = email is None
@@ -970,7 +1003,7 @@ class CustomerCommunicationService:
         email.zoho_sent_at = self._email_datetime(record)
         email.zoho_synced_at = synced_at
         email.last_error = None
-        return created
+        return email if created else None
 
     def _deduplicate_customer_emails(self, *, customer_id: int) -> int:
         """Merge the same Zoho email when it appears in both Account and Contact histories."""

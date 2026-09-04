@@ -2702,12 +2702,10 @@
         <h1>kosmos-hub</h1>
         <p class="subtle">Phase 1 registry, onboarding and visibility for managed WordPress sites.</p>
         </div>
-        {% if unread_email_count %}
-          <a class="app-email-alert" href="/emails?folder=inbox&amp;unread=true" data-unread-email-alert aria-label="{{ unread_email_count }} ungelesene E-Mails anzeigen">
+          <a class="app-email-alert" href="/emails?folder=inbox&amp;unread=true" data-unread-email-alert aria-label="{{ unread_email_count }} ungelesene E-Mails anzeigen"{% if not unread_email_count %} hidden{% endif %}>
             <span>Neue E-Mails</span>
             <strong class="app-email-alert-count" data-unread-email-count>{{ unread_email_count }}</strong>
           </a>
-        {% endif %}
         <nav class="app-navigation" aria-label="Bereiche">
           <a href="/"{% if request.url.path == "/" %} class="is-active"{% endif %}>Dashboard</a>
           <a href="/sites"{% if request.url.path.startswith("/sites") %} class="is-active"{% endif %}>Sites</a>

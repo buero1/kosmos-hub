@@ -134,7 +134,11 @@ class ZohoEmailWorkflowWebhookService:
             customers = self._customers_for_payload(payload)
             if customers:
                 for customer in customers:
-                    self.communication_service.sync_customer(customer_id=customer.id, mark_new_emails_unread=True)
+                    self.communication_service.sync_customer_email_headers(
+                        customer_id=customer.id,
+                        mark_new_emails_unread=True,
+                        load_new_inbound_content=True,
+                    )
             else:
                 self._store_unassigned_email(payload=payload, received_at=delivery.received_at)
         except (ValueError, ZohoCrmError, json.JSONDecodeError) as exc:

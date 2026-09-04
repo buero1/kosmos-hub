@@ -62,9 +62,9 @@
 
   <section class="card mailbox-shell" data-mailbox-shell>
     <nav class="mailbox-folders" aria-label="E-Mail-Ordner">
-      <a href="/emails?folder=inbox" data-mailbox-folder{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
-      <a href="/emails?folder=sent" data-mailbox-folder{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
-      <a href="/emails?folder=unassigned" data-mailbox-folder{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
+      <a href="/emails?folder=inbox" data-mailbox-folder data-mailbox-folder-count="inbox"{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
+      <a href="/emails?folder=sent" data-mailbox-folder data-mailbox-folder-count="sent"{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
+      <a href="/emails?folder=unassigned" data-mailbox-folder data-mailbox-folder-count="unassigned"{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
     </nav>
 
     {% with messages=mailbox.messages, selected=mailbox.selected %}{% include "emails_message_list.html" %}{% include "emails_reading_pane.html" %}{% endwith %}
@@ -78,6 +78,10 @@
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
+      var mailboxStatus = {
+        folderCounts: {{ mailbox.folder_counts | tojson }},
+        unreadCount: {{ unread_email_count | default(0) | tojson }}
+      };
 
       function updateMailboxHeight() {
         if (!shell) return;
@@ -322,6 +326,14 @@
       document.querySelectorAll('[data-mailbox-list]').forEach(function (list) {
         attachMailboxListVirtualization(list);
         cacheMailboxFolder(list);
+        var selectedKey = list.dataset.mailboxSelectedKey || '';
+        var readingPane = document.querySelector('.mailbox-reading-pane');
+        if (selectedKey && readingPane) {
+          folderSelections.set(mailboxFolderKey(list.dataset.mailboxFolderName || 'inbox', list.dataset.mailboxUnread === 'true'), {
+            messageKey: selectedKey,
+            pane: readingPane
+          });
+        }
       });
 
       function setSelectedMessage(list, messageKey) {
@@ -383,8 +395,9 @@
         return selection.messageKey;
       }
 
-      function fetchMailboxFolder(folder, unread) {
+      function fetchMailboxFolder(folder, unread, forceRefresh) {
         var cacheKey = mailboxFolderKey(folder, unread);
+        if (forceRefresh) folderCache.delete(cacheKey);
         if (folderCache.has(cacheKey)) return Promise.resolve(folderCache.get(cacheKey));
         if (folderRequests.has(cacheKey)) return folderRequests.get(cacheKey);
         var listUrl = new URL('/emails/list', window.location.origin);
@@ -429,6 +442,78 @@
           window.setTimeout(loadNextFolder, 250);
         }
       }
+
+      function updateMailboxFolderCounts(folderCounts) {
+        document.querySelectorAll('[data-mailbox-folder-count]').forEach(function (link) {
+          var count = folderCounts[link.dataset.mailboxFolderCount];
+          var label = link.querySelector('small');
+          if (label && typeof count === 'number') label.textContent = String(count);
+        });
+      }
+
+      function updateUnreadEmailAlert(unreadCount) {
+        var alert = document.querySelector('[data-unread-email-alert]');
+        var count = document.querySelector('[data-unread-email-count]');
+        if (count) count.textContent = String(unreadCount);
+        if (!alert) return;
+        alert.hidden = unreadCount === 0;
+        alert.setAttribute('aria-label', unreadCount + ' ungelesene E-Mails anzeigen');
+      }
+
+      function refreshCurrentMailboxFolder(folder) {
+        var list = document.querySelector('[data-mailbox-list]');
+        if (!list || folder !== (list.dataset.mailboxFolderName || 'inbox')) return;
+        var unread = list.dataset.mailboxUnread === 'true';
+        var cacheKey = mailboxFolderKey(folder, unread);
+        var selectedKey = list.dataset.mailboxSelectedKey || '';
+        var currentPane = document.querySelector('.mailbox-reading-pane');
+        if (selectedKey && currentPane && !folderSelections.has(cacheKey)) {
+          folderSelections.set(cacheKey, { messageKey: selectedKey, pane: currentPane });
+        }
+        rememberMailboxScroll(list);
+        folderCache.delete(mailboxFolderKey(folder, false));
+        folderCache.delete(mailboxFolderKey(folder, true));
+        fetchMailboxFolder(folder, unread, true).then(function (messages) {
+          var selection = folderSelections.get(cacheKey);
+          var nextSelectedKey = selection && messages.some(function (message) { return message.key === selection.messageKey; }) ? selection.messageKey : '';
+          setMailboxFolder(list, folder, unread, messages, nextSelectedKey);
+          restoreMailboxSelection(list, folder, unread, messages);
+        }).catch(function () {
+          // A later poll retries; current list and selection stay usable.
+        });
+      }
+
+      function pollMailboxStatus() {
+        if (document.visibilityState === 'hidden') return;
+        window.fetch('/emails/status', { credentials: 'same-origin' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Mailbox status response failed.');
+            return response.json();
+          })
+          .then(function (status) {
+            var nextCounts = status.folder_counts || {};
+            var changedFolders = Object.keys(folderTitles).filter(function (folder) {
+              return nextCounts[folder] !== mailboxStatus.folderCounts[folder];
+            });
+            mailboxStatus.folderCounts = nextCounts;
+            mailboxStatus.unreadCount = Number(status.unread_count) || 0;
+            updateMailboxFolderCounts(nextCounts);
+            updateUnreadEmailAlert(mailboxStatus.unreadCount);
+            changedFolders.forEach(function (folder) {
+              folderCache.delete(mailboxFolderKey(folder, false));
+              folderCache.delete(mailboxFolderKey(folder, true));
+              refreshCurrentMailboxFolder(folder);
+            });
+          })
+          .catch(function () {
+            // Live updates are optional; navigation and cached lists remain available.
+          });
+      }
+
+      window.setInterval(pollMailboxStatus, 25_000);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') pollMailboxStatus();
+      });
 
       function activatePreview(preview, onLoad) {
         var frame = preview.querySelector('[data-email-preview-frame]');

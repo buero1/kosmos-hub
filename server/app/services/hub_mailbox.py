@@ -91,6 +91,10 @@ class HubMailboxService:
             folder_counts=self._folder_counts(),
         )
 
+    def get_folder_counts(self) -> dict[str, int]:
+        """Return lightweight sidebar counts without loading encrypted email payloads."""
+        return self._folder_counts()
+
     def get_folder_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
         """Load one folder for in-page navigation without rebuilding the other folders."""
         if folder not in MAILBOX_FOLDERS:

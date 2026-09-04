@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.csrf import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
-from app.core.templates import create_templates
+from app.core.templates import _unread_email_count_for_db, create_templates
 from app.db.session import get_db
 from app.repositories.site_repository import SiteRepository
 from app.schemas.dashboard import DashboardSummary
@@ -392,6 +392,24 @@ def mailbox_folder_list(
             "unread": unread,
         },
     )
+
+
+@router.get("/emails/status", response_class=JSONResponse)
+def mailbox_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Provide mailbox counters for a live UI refresh without returning message data."""
+    _require_hub_admin(request)
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    return {
+        "folder_counts": mailbox.get_folder_counts(),
+        "unread_count": _unread_email_count_for_db(db),
+    }
 
 
 @router.get("/emails/compose")
