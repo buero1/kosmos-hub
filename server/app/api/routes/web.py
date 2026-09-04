@@ -282,13 +282,6 @@ def mailbox_page(
         cipher=get_secret_cipher(),
         public_base_url=get_settings().public_base_url,
     ).get_view(folder=folder, unread_only=unread, selected_key=selected)
-    compose_customers = tuple(
-        db.scalars(
-            select(Customer)
-            .where(Customer.is_visible.is_(True))
-            .order_by(Customer.name.asc(), Customer.id.asc())
-        ).all()
-    )
     return templates.TemplateResponse(
         request,
         "emails.html",
@@ -296,7 +289,6 @@ def mailbox_page(
             "mailbox": mailbox,
             "folder": folder,
             "unread": unread,
-            "compose_customers": compose_customers,
             "csrf_token": get_csrf_token(request),
         },
     )

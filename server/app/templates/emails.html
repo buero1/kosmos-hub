@@ -2,11 +2,8 @@
 {% block title %}E-Mails · kosmos-hub{% endblock %}
 {% block content %}
   <style>
-    .mailbox-header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+    .mailbox-header { margin-bottom: 1.25rem; }
     .mailbox-header h2 { margin: 0.18rem 0 0; }
-    .mailbox-compose { display: flex; gap: 0.55rem; align-items: end; }
-    .mailbox-compose label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.8rem; }
-    .mailbox-compose select { width: min(21rem, 36vw); }
     .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
     .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
     .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
@@ -41,23 +38,13 @@
     .mailbox-unassigned { margin-top: 1rem; padding: 1rem; border: 1px dashed var(--border); border-radius: var(--control-v1-radius); background: color-mix(in srgb, var(--accent-soft) 20%, var(--panel)); }
     .mailbox-unassigned h4 { margin: 0; }
     .mailbox-unassigned p { color: var(--muted); line-height: 1.5; }
-    @media (max-width: 780px) { .mailbox-header { align-items: stretch; flex-direction: column; } .mailbox-compose select { width: 100%; } .mailbox-shell { display: block; height: auto; min-height: 0; } .mailbox-folders { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-folders a { flex: 0 0 auto; } .mailbox-list { max-height: 24rem; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-reading-pane { overflow: visible; } }
+    @media (max-width: 780px) { .mailbox-shell { display: block; height: auto; min-height: 0; } .mailbox-folders { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-folders a { flex: 0 0 auto; } .mailbox-list { max-height: 24rem; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-reading-pane { overflow: visible; } }
   </style>
   <section class="mailbox-header">
     <div>
       <p class="eyebrow">Zoho CRM</p>
       <h2>E-Mail-Zentrale</h2>
-      <p class="subtle">Posteingang, gesendete Nachrichten und noch nicht zugeordnete Kontakte.</p>
     </div>
-    <form class="mailbox-compose" method="get" action="/emails/compose">
-      <label>Kunde für neue E-Mail
-        <select name="customer_id" required>
-          <option value="">Kundenkontakt auswählen</option>
-          {% for customer in compose_customers %}<option value="{{ customer.id }}">{{ customer.name }}</option>{% endfor %}
-        </select>
-      </label>
-      <button class="button" type="submit">Neue E-Mail</button>
-    </form>
   </section>
 
   <section class="card mailbox-shell" data-mailbox-shell>
