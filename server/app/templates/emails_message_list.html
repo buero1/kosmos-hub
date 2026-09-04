@@ -1,12 +1,10 @@
-<div class="mailbox-list" data-mailbox-list>
+<div class="mailbox-list" data-mailbox-list data-mailbox-folder-name="{{ folder }}" data-mailbox-unread="{{ 'true' if unread else 'false' }}" data-mailbox-selected-key="{{ selected.key if selected else '' }}" data-mailbox-page-size="100" data-mailbox-row-height="{{ mailbox.row_height }}" data-mailbox-total-count="{{ mailbox.total_count }}" data-mailbox-offset="{{ mailbox.offset }}">
   <div class="mailbox-list-heading"><strong>{% if folder == 'sent' %}Gesendet{% elif folder == 'unassigned' %}Unbekannt{% else %}Posteingang{% endif %}</strong><a href="/emails?folder={{ folder }}{% if not unread %}&amp;unread=true{% endif %}" data-mailbox-folder>{% if unread %}Alle{% else %}Nur neu{% endif %}</a></div>
-  {% for message in messages %}
-    <a class="mailbox-message{% if selected and selected.key == message.key %} is-selected{% endif %}{% if message.is_unread %} is-unread{% endif %}" href="/emails?folder={{ folder }}{% if unread %}&amp;unread=true{% endif %}&amp;selected={{ message.key }}" data-mailbox-message>
-      <div class="mailbox-message-row"><strong>{{ message.sender or message.recipients or 'Unbekannter Kontakt' }}</strong>{% if message.occurred_at %}<time>{{ message.occurred_at | berlin_time }}</time>{% endif %}</div>
-      <strong class="mailbox-message-subject">{{ message.subject }}</strong>
-      <p>{% if message.kind == 'unassigned' %}<span class="pill">Unbekannt</span>{% elif message.customers %}{{ message.customers | map(attribute='name') | join(', ') }}{% endif %}</p>
-    </a>
+  {% if mailbox.total_count %}
+    <div class="mailbox-list-canvas" data-mailbox-list-canvas style="height: {{ mailbox.total_count * mailbox.row_height }}px;">
+      {% with offset=mailbox.offset, selected_key=selected.key if selected else '', row_height=mailbox.row_height %}{% include "emails_message_list_rows.html" %}{% endwith %}
+    </div>
   {% else %}
     <p class="mailbox-empty">In diesem Ordner liegen keine E-Mails.</p>
-  {% endfor %}
+  {% endif %}
 </div>
