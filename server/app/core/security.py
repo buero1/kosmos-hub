@@ -19,6 +19,12 @@ class SecretCipher:
     def decrypt(self, value: str) -> str:
         return self._fernet.decrypt(value.encode("utf-8")).decode("utf-8")
 
+    def encrypt_bytes(self, value: bytes) -> bytes:
+        return self._fernet.encrypt(value)
+
+    def decrypt_bytes(self, value: bytes) -> bytes:
+        return self._fernet.decrypt(value)
+
 
 def calculate_body_sha256(raw_body: bytes) -> str:
     return hashlib.sha256(raw_body).hexdigest()
@@ -37,4 +43,3 @@ def signatures_match(expected: str, provided: str) -> bool:
 def get_secret_cipher() -> SecretCipher:
     settings = get_settings()
     return SecretCipher(settings.app_secret_key)
-

@@ -1,0 +1,102 @@
+import json
+from datetime import UTC, datetime
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.core.security import SecretCipher
+from app.db.base import Base
+from app.models.customer import Customer
+from app.models.customer_communication import CustomerZohoEmail
+from app.models.hub_mailbox_email import HubMailboxEmail
+from app.services.hub_mailbox import HubMailboxService
+
+
+def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Example GmbH", zoho_id="zoho-account-1")
+        linked_email = CustomerZohoEmail(
+            customer=customer,
+            zoho_message_id="zoho-email-1",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Bekannte E-Mail",
+                        "from": {"email": "known@example.de"},
+                        "to": [{"email": "team@example.de"}],
+                    }
+                )
+            ),
+            zoho_sent_at=datetime(2026, 9, 3, 9, 0, tzinfo=UTC),
+        )
+        unassigned_email = HubMailboxEmail(
+            direction="inbound",
+            is_unread=True,
+            fingerprint="a" * 64,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "betreff": "Noch unbekannt",
+                        "absender": "new@example.de",
+                        "empfaenger": "team@example.de",
+                        "content": "<p>Neue Anfrage <strong>mit Inhalt</strong>.</p>",
+                    }
+                )
+            ),
+            received_at=datetime(2026, 9, 3, 10, 0, tzinfo=UTC),
+        )
+        db.add_all([customer, linked_email, unassigned_email])
+        db.commit()
+
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        inbox = service.get_view(folder="inbox", unread_only=False)
+
+        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "unassigned": 1}
+        assert [message.subject for message in inbox.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
+        assert inbox.selected is not None
+        assert inbox.selected.kind == "unassigned"
+        assert "Neue Anfrage <strong>mit Inhalt</strong>" in (inbox.selected.preview_html or "")
+        assert "default-src 'none'" in (inbox.selected.preview_html or "")
+        assert inbox.messages[1].customers[0].name == "Example GmbH"
+
+        folder_view = service.get_folder_view(folder="inbox", unread_only=False)
+        assert [message.subject for message in folder_view.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
+        assert folder_view.selected is not None
+        assert folder_view.selected.subject == "Noch unbekannt"
+
+        linked_selected = service.get_selected_message(
+            folder="inbox",
+            unread_only=False,
+            selected_key=f"linked-{customer.id}-{linked_email.id}",
+        )
+        assert linked_selected is not None
+        assert linked_selected.subject == "Bekannte E-Mail"
+        assert linked_selected.customers[0].name == "Example GmbH"
+
+        unassigned_selected = service.get_selected_message(
+            folder="unassigned",
+            unread_only=False,
+            selected_key=f"unassigned-{unassigned_email.id}",
+        )
+        assert unassigned_selected is not None
+        assert unassigned_selected.subject == "Noch unbekannt"
+        assert "Neue Anfrage <strong>mit Inhalt</strong>" in (unassigned_selected.preview_html or "")
+        assert (
+            service.get_selected_message(
+                folder="sent",
+                unread_only=False,
+                selected_key=f"linked-{customer.id}-{linked_email.id}",
+            )
+            is None
+        )
+
+        service.mark_unassigned_read(email_id=unassigned_email.id)
+        unread = service.get_view(folder="inbox", unread_only=True)
+        assert [message.subject for message in unread.messages] == ["Bekannte E-Mail"]

@@ -1,0 +1,12 @@
+<div class="mailbox-list" data-mailbox-list>
+  <div class="mailbox-list-heading"><strong>{% if folder == 'sent' %}Gesendet{% elif folder == 'unassigned' %}Unbekannt{% else %}Posteingang{% endif %}</strong><a href="/emails?folder={{ folder }}{% if not unread %}&amp;unread=true{% endif %}" data-mailbox-folder>{% if unread %}Alle{% else %}Nur neu{% endif %}</a></div>
+  {% for message in messages %}
+    <a class="mailbox-message{% if selected and selected.key == message.key %} is-selected{% endif %}{% if message.is_unread %} is-unread{% endif %}" href="/emails?folder={{ folder }}{% if unread %}&amp;unread=true{% endif %}&amp;selected={{ message.key }}" data-mailbox-message>
+      <div class="mailbox-message-row"><strong>{{ message.sender or message.recipients or 'Unbekannter Kontakt' }}</strong>{% if message.occurred_at %}<time>{{ message.occurred_at | berlin_time }}</time>{% endif %}</div>
+      <strong class="mailbox-message-subject">{{ message.subject }}</strong>
+      <p>{% if message.kind == 'unassigned' %}<span class="pill">Unbekannt</span>{% elif message.customers %}{{ message.customers | map(attribute='name') | join(', ') }}{% endif %}</p>
+    </a>
+  {% else %}
+    <p class="mailbox-empty">In diesem Ordner liegen keine E-Mails.</p>
+  {% endfor %}
+</div>

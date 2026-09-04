@@ -359,15 +359,25 @@ class SiteUserService:
             actor=actor,
         )
 
-    def selected_workbench_entries(self, selected_keys: list[str]) -> list[UserWorkbenchEntry]:
-        return self._selected_workbench_entries(selected_keys)
+    def selected_workbench_entries(
+        self,
+        selected_keys: list[str],
+        *,
+        limit: int | None = BULK_ACTION_LIMIT,
+    ) -> list[UserWorkbenchEntry]:
+        return self._selected_workbench_entries(selected_keys, limit=limit)
 
-    def _selected_workbench_entries(self, selected_keys: list[str]) -> list[UserWorkbenchEntry]:
+    def _selected_workbench_entries(
+        self,
+        selected_keys: list[str],
+        *,
+        limit: int | None = BULK_ACTION_LIMIT,
+    ) -> list[UserWorkbenchEntry]:
         keys = list(dict.fromkeys(key.strip() for key in selected_keys if key and key.strip()))
         if not keys:
             raise ValueError("Select at least one WordPress user.")
-        if len(keys) > self.BULK_ACTION_LIMIT:
-            raise ValueError(f"Select at most {self.BULK_ACTION_LIMIT} WordPress users per bulk action.")
+        if limit is not None and len(keys) > limit:
+            raise ValueError(f"Select at most {limit} WordPress users per bulk action.")
         entries_by_key = {entry.key: entry for entry in self.list_workbench_entries()}
         missing = [key for key in keys if key not in entries_by_key]
         if missing:

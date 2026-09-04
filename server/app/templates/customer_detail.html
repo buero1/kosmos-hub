@@ -1,60 +1,321 @@
 {% extends "base.html" %}
 {% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% macro communication_email_address(address, prefix="") %}
+  {% if address %}
+    {% if can_manage_communications and communication.recipients and communication_senders %}
+      <button class="email-address-link" type="button" data-email-compose-open data-recipient-email="{{ address | lower }}" aria-label="E-Mail an {{ address }} verfassen">{{ prefix }}{{ address }}</button>
+    {% else %}
+      {{ prefix }}{{ address }}
+    {% endif %}
+  {% endif %}
+{% endmacro %}
 {% block content %}
   <section>
     <a class="button button-secondary" href="/customers">Back to customers</a>
-    <div class="section-heading">
+    <div class="section-heading customer-detail-heading">
       <div>
         <p class="eyebrow">CRM customer</p>
         <h2>{{ detail.entry.customer.name }}</h2>
-        <p class="subtle">Imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
+        <p class="subtle">Customer and linked contact data are imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
       </div>
-      <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
+      <div class="customer-detail-heading-actions">
+        <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
+        {% if can_manage_communications %}
+          {% if communication.recipients and communication_senders %}
+            <button class="button" type="button" data-email-compose-open>E-Mail schreiben</button>
+          {% endif %}
+          <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">Aus Zoho synchronisieren</button>
+          </form>
+        {% endif %}
+      </div>
     </div>
 
-    <section class="detail-list">
-      <article class="card">
-        <h3>Hub data</h3>
-        <dl class="metadata-list">
-          <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
-          <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
-          <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
-          <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
-        </dl>
-      </article>
-      <article class="card">
-        <h3>Linked Hub sites</h3>
-        {% for site in detail.entry.linked_sites %}
-          <p><a href="/sites/{{ site.id }}">{{ site.domain }}</a></p>
-        {% else %}
-          <p class="subtle">No Hub site linked yet.</p>
-        {% endfor %}
-        {% if detail.entry.exact_match_candidate %}
-          <p class="subtle">Exact unlinked match available: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>. It can be linked from the customer directory.</p>
-        {% endif %}
-      </article>
-    </section>
+    {% if communication_state and communication_message %}
+      <p class="notice-{{ communication_state }}">{{ communication_message }}</p>
+    {% endif %}
+    {% if email_reply_error %}
+      <p class="notice-warning">{{ email_reply_error }}</p>
+    {% endif %}
 
-    <section>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Zoho CRM</p>
-          <h3>Customer data</h3>
-          <p class="subtle">All fields imported from this Zoho Account.</p>
-        </div>
+    <div id="customer-communications" class="customer-detail-layout">
+      <div class="customer-detail-main-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Kundenfelder</h3>
+              <p class="subtle">Aktuelle Stammdaten und verknüpfte Hub-Informationen.</p>
+            </div>
+          </div>
+          <div class="customer-section-expandable" data-expandable-section>
+            <div data-expandable-content>
+              <dl class="customer-fields-grid">
+                {% for field in detail.profile_fields if field.value %}
+                  <div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>
+                {% else %}
+                  <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
+                {% endfor %}
+              </dl>
+              <div class="customer-system-details">
+                <p class="eyebrow">Hub-Daten</p>
+                <dl class="customer-fields-grid">
+                  <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
+                  <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
+                  <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
+                  <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
+                </dl>
+                <p class="eyebrow customer-linked-sites-heading">Verknüpfte Hub-Websites</p>
+                <div class="customer-linked-sites">
+                  {% for site in detail.entry.linked_sites %}
+                    <a href="/sites/{{ site.id }}">{{ site.domain }}</a>
+                  {% else %}
+                    <span class="subtle">Noch keine Hub-Website verknüpft.</span>
+                  {% endfor %}
+                </div>
+                {% if detail.entry.exact_match_candidate %}
+                  <p class="subtle">Exakte Zuordnung verfügbar: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>.</p>
+                {% endif %}
+              </div>
+            </div>
+            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+        </article>
+
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>E-Mails</h3>
+              <p class="subtle">Synchronisierte E-Mail-Verläufe. Inhalte werden bei Bedarf verschlüsselt geladen.</p>
+            </div>
+          </div>
+          <div class="customer-section-expandable" data-expandable-section>
+            <div data-expandable-content>
+              {% for email in communication.emails %}
+                <article class="communication-entry">
+                  <div class="communication-entry-heading">
+                    <strong>{{ email.subject }}</strong>
+                    <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
+                    {% if email.is_unread %}<span class="pill">Neu</span>{% endif %}
+                  </div>
+                  <p class="subtle">
+                    {% if email.sender %}Von {{ email.sender }}{% endif %}
+                    {% if email.sender and email.recipients %} · {% endif %}
+                    {% if email.recipients %}An {{ email.recipients }}{% endif %}
+                    {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
+                  </p>
+                  {% if email.direction == "inbound" and can_manage_communications %}
+                    <a class="button button-secondary button-variant-2" href="/customers/{{ detail.entry.customer.id }}?reply_email={{ email.id }}#customer-communications">Antworten</a>
+                  {% endif %}
+                  {% if email.preview_html %}
+                    <details class="communication-content" data-email-preview data-email-unread="{{ 'true' if email.is_unread else 'false' }}" data-email-read-url="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/read" data-email-read-csrf="{{ csrf_token }}"><summary>E-Mail-Vorschau anzeigen</summary><iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe></details>
+                  {% elif email.can_load_content and can_manage_communications %}
+                    <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/load">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-secondary" type="submit">Nachricht laden</button>
+                    </form>
+                  {% else %}
+                    <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
+                  {% endif %}
+                  {% if email.attachments and can_manage_communications %}
+                    <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
+                      {% for attachment in email.attachments %}
+                        <li><a href="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>
+                      {% endfor %}
+                    </ul>
+                  {% endif %}
+                  {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
+                </article>
+              {% else %}
+                <p class="subtle">Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.</p>
+              {% endfor %}
+            </div>
+            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+        </article>
+
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Kontakte</h3>
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Kontakte.</p>
+            </div>
+          </div>
+          <div class="customer-section-expandable" data-expandable-section>
+            <div data-expandable-content>
+              <div class="table-scroll">
+                <table class="customer-contacts-table">
+                <thead><tr><th>Name</th><th>Position</th><th>E-Mail</th><th>Telefon</th></tr></thead>
+                <tbody>
+                  {% for contact in detail.contacts %}
+                    <tr>
+                      <td><a href="/customers/{{ detail.entry.customer.id }}/contacts/{{ contact.id }}">{% if contact.salutation %}{{ contact.salutation }} {% endif %}<strong>{{ contact.name }}</strong></a></td>
+                      <td>{{ contact.title or "-" }}</td>
+                      <td>
+                        {{ communication_email_address(contact.email) }}
+                        {% if contact.email and contact.secondary_email %}<br>{% endif %}
+                        {{ communication_email_address(contact.secondary_email, "2.: ") }}
+                        {% if (contact.email or contact.secondary_email) and contact.third_email %}<br>{% endif %}
+                        {{ communication_email_address(contact.third_email, "3.: ") }}
+                        {% if not contact.email and not contact.secondary_email and not contact.third_email %}-{% endif %}
+                      </td>
+                      <td>
+                        {% if contact.phone %}{{ contact.phone }}{% endif %}
+                        {% if contact.phone and contact.alternate_phone %}<br>{% endif %}
+                        {% if contact.alternate_phone %}Alternativ: {{ contact.alternate_phone }}{% endif %}
+                        {% if (contact.phone or contact.alternate_phone) and contact.private_phone %}<br>{% endif %}
+                        {% if contact.private_phone %}Privat: {{ contact.private_phone }}{% endif %}
+                        {% if (contact.phone or contact.alternate_phone or contact.private_phone) and contact.mobile %}<br>{% endif %}
+                        {% if contact.mobile %}Mobil: {{ contact.mobile }}{% endif %}
+                        {% if not contact.phone and not contact.alternate_phone and not contact.private_phone and not contact.mobile %}-{% endif %}
+                      </td>
+                    </tr>
+                  {% else %}
+                    <tr><td colspan="4">Keine Zoho-Kontakte sind derzeit mit diesem Kunden verknüpft.</td></tr>
+                  {% endfor %}
+                </tbody>
+                </table>
+              </div>
+            </div>
+            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+        </article>
       </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>Field</th><th>Value</th></tr></thead>
-          <tbody>
-            {% for field in detail.profile_fields %}
-              <tr><td><strong>{{ field.label }}</strong></td><td>{{ field.value or "-" }}</td></tr>
-            {% else %}
-              <tr><td colspan="2">No Zoho customer data is available for this record.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
+
+      <aside class="customer-detail-side-column">
+        <article class="card customer-detail-panel customer-notes-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Notizen</h3>
+              <p class="subtle">Notizen aus Zoho und aus dem Hub.</p>
+            </div>
+          </div>
+          {% if can_manage_communications %}
+            <div class="customer-note-composer" data-note-composer>
+              <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
+              <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/notes" class="communication-form" data-note-composer-form hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <textarea name="content" rows="5" maxlength="30000" required aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
+                <div class="customer-note-composer-actions">
+                  <button class="button button-secondary" type="button" data-note-composer-cancel>Abbrechen</button>
+                  <button class="button" type="submit">Senden</button>
+                </div>
+              </form>
+            </div>
+          {% endif %}
+          <div class="customer-section-expandable" data-expandable-section>
+            <div data-expandable-content>
+              {% for note in communication.notes %}
+                <article class="communication-entry">
+                  <div class="communication-entry-heading">
+                    <strong>{{ note.title }}</strong>
+                    <span class="pill">{% if note.source == "hub" %}Hub{% else %}Zoho{% endif %}</span>
+                  </div>
+                  {% if note.author or note.occurred_at %}
+                    <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
+                  {% endif %}
+                  <p class="communication-note-content">{{ note.content }}</p>
+                  {% if note.last_error %}<p class="notice-warning">{{ note.last_error }}</p>{% endif %}
+                </article>
+              {% else %}
+                <p class="subtle">Noch keine Notizen gespeichert.</p>
+              {% endfor %}
+            </div>
+            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+        </article>
+      </aside>
+    </div>
   </section>
+
+  {% if can_manage_communications %}
+    <div class="email-compose-layer" data-email-compose-layer data-email-template-url="/customers/{{ detail.entry.customer.id }}/communications/email-templates"{% if email_reply %} data-email-compose-reply-to-email-id="{{ email_reply.email_id }}" data-email-compose-reply-subject="{{ email_reply.subject }}"{% endif %}{% if open_email_composer %} data-email-compose-autostart{% endif %} hidden>
+      <button class="email-compose-backdrop" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen"></button>
+      <aside class="email-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="email-compose-title" aria-hidden="true" data-email-compose-drawer tabindex="-1">
+        <div class="email-compose-header">
+          <div>
+            <p class="eyebrow">Zoho CRM</p>
+            <h2 id="email-compose-title">E-Mail erstellen</h2>
+            <p class="subtle">Die Nachricht wird über Zoho CRM versendet und dem Kunden zugeordnet.</p>
+          </div>
+          <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
+        </div>
+
+        {% if communication.recipients and communication_senders %}
+          <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails" class="communication-form email-compose-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="template_id" value="" data-email-compose-template-id>
+            <input type="hidden" name="reply_to_email_id" value="{{ email_reply.email_id if email_reply else '' }}" data-email-compose-reply-to>
+            <label>Zoho-Vorlage
+              <select data-email-compose-template>
+                <option value="">Keine Vorlage verwenden</option>
+                {% for template in communication_templates %}
+                  <option value="{{ template.id }}">{{ template.module }} · {{ template.name }}{% if template.subject %} · {{ template.subject }}{% endif %}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <p class="subtle email-compose-template-status" data-email-compose-template-status>{% if not communication_templates %}Noch keine E-Mail-Vorlagen im Hub. Bitte zuerst im Accountbereich aus Zoho synchronisieren.{% endif %}</p>
+            <div class="email-compose-recipient-fields">
+              <label>Absender
+                <select name="sender_email" required>
+                  {% for sender in communication_senders %}
+                    <option value="{{ sender.email }}">{{ sender.name }} · {{ sender.email }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Empfänger
+                <select name="recipient_key" required data-email-compose-recipient>
+                  {% for recipient in communication.recipients %}
+                    <option value="{{ recipient.key }}" data-recipient-email="{{ recipient.email }}"{% if email_reply and recipient.key == email_reply.recipient_key %} selected{% endif %}>{{ recipient.name }} · {{ recipient.email }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+            <label>Betreff<input name="subject" maxlength="500" required value="{{ email_reply.subject if email_reply else '' }}" data-email-compose-subject></label>
+            <label>Nachricht
+              <div class="email-rich-editor" data-email-rich-editor>
+                <div class="email-rich-editor-toolbar" role="toolbar" aria-label="Text formatieren">
+                  <button type="button" data-rich-command="bold" title="Fett" aria-label="Fett"><strong>B</strong></button>
+                  <button type="button" data-rich-command="italic" title="Kursiv" aria-label="Kursiv"><em>I</em></button>
+                  <button type="button" data-rich-command="underline" title="Unterstrichen" aria-label="Unterstrichen"><u>U</u></button>
+                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
+                  <label class="email-rich-editor-select">Schriftgröße
+                    <select data-rich-command="fontSize" aria-label="Schriftgröße">
+                      <option value="2">Klein</option>
+                      <option value="3" selected>Standard</option>
+                      <option value="4">Groß</option>
+                      <option value="5">Sehr groß</option>
+                    </select>
+                  </label>
+                  <label class="email-rich-editor-color">Schriftfarbe<input type="color" value="#1d2a2f" data-rich-color></label>
+                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
+                  <button type="button" data-rich-command="justifyLeft" title="Linksbündig" aria-label="Linksbündig">L</button>
+                  <button type="button" data-rich-command="justifyCenter" title="Zentriert" aria-label="Zentriert">C</button>
+                  <button type="button" data-rich-command="justifyRight" title="Rechtsbündig" aria-label="Rechtsbündig">R</button>
+                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
+                  <button type="button" data-rich-command="insertUnorderedList" title="Aufzählung" aria-label="Aufzählung">UL</button>
+                  <button type="button" data-rich-command="insertOrderedList" title="Nummerierung" aria-label="Nummerierung">OL</button>
+                </div>
+                <div class="email-rich-editor-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Nachricht" data-email-compose-content data-placeholder="Nachricht schreiben ..."></div>
+              </div>
+              <textarea name="content" hidden data-email-compose-content-value></textarea>
+            </label>
+            <label class="bulk-action-confirmation"><input type="checkbox" name="confirmed" value="true" required> Ich bestätige den Versand dieser E-Mail über Zoho CRM.</label>
+            <div class="email-compose-actions">
+              <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
+              <button class="button" type="submit">E-Mail senden</button>
+            </div>
+          </form>
+        {% elif communication_sender_error %}
+          <p class="notice-warning">{{ communication_sender_error }}</p>
+        {% else %}
+          <p class="notice-warning">Für diesen Kunden ist keine gültige, aus Zoho synchronisierte E-Mail-Adresse vorhanden.</p>
+        {% endif %}
+      </aside>
+    </div>
+  {% endif %}
 {% endblock %}

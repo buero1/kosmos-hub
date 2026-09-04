@@ -27,59 +27,6 @@
       </div>
     </div>
 
-    <div class="filter-panel filter-panel-workbench"{% if show_update_selection and entries %} data-update-auto-filter{% endif %}>
-      <label>
-        <span>Search</span>
-        <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="e.g. Elementor">
-      </label>
-      <label>
-        <span>Plugin</span>
-        <select form="{{ site_selector.form_id }}" name="plugin">
-          <option value="">All plugins</option>
-          {% for plugin_identifier, plugin_name in plugin_options %}
-            <option value="{{ plugin_identifier }}" {% if filters.plugin == plugin_identifier %}selected{% endif %}>{{ plugin_name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>
-        <span>Type</span>
-        <select form="{{ site_selector.form_id }}" name="kind">
-          <option value="all" {% if filters.kind == "all" %}selected{% endif %}>All updates</option>
-          <option value="wordpress" {% if filters.kind == "wordpress" %}selected{% endif %}>WordPress</option>
-          <option value="plugin" {% if filters.kind == "plugin" %}selected{% endif %}>Plugins</option>
-          <option value="theme" {% if filters.kind == "theme" %}selected{% endif %}>Themes</option>
-        </select>
-      </label>
-      <label>
-        <span>Plugin state</span>
-        <select form="{{ site_selector.form_id }}" name="activity">
-          <option value="all" {% if filters.activity == "all" %}selected{% endif %}>All states</option>
-          <option value="active" {% if filters.activity == "active" %}selected{% endif %}>Active plugins</option>
-          <option value="inactive" {% if filters.activity == "inactive" %}selected{% endif %}>Inactive plugins</option>
-        </select>
-      </label>
-      <label>
-        <span>Diagnosis</span>
-        <select form="{{ site_selector.form_id }}" name="diagnosis">
-          <option value="all" {% if filters.diagnosis == "all" %}selected{% endif %}>All diagnoses</option>
-          <option value="attention" {% if filters.diagnosis == "attention" %}selected{% endif %}>Needs attention</option>
-          <option value="update-ready" {% if filters.diagnosis == "update-ready" %}selected{% endif %}>Verified update ready</option>
-          <option value="aligned" {% if filters.diagnosis == "aligned" %}selected{% endif %}>Versions match</option>
-          <option value="provider-conflict" {% if filters.diagnosis == "provider-conflict" %}selected{% endif %}>Provider information conflicts</option>
-          <option value="provider-package-unavailable" {% if filters.diagnosis == "provider-package-unavailable" %}selected{% endif %}>Provider package unavailable</option>
-          <option value="site-offer-missing" {% if filters.diagnosis == "site-offer-missing" %}selected{% endif %}>Site update offer missing</option>
-          <option value="crocoblock-license-step" {% if filters.diagnosis == "crocoblock-license-step" %}selected{% endif %}>Crocoblock license step</option>
-          <option value="crocoblock-offer-missing" {% if filters.diagnosis == "crocoblock-offer-missing" %}selected{% endif %}>Crocoblock offer missing</option>
-          <option value="site-newer-than-reference" {% if filters.diagnosis == "site-newer-than-reference" %}selected{% endif %}>Site version is newer</option>
-          <option value="official-unavailable" {% if filters.diagnosis == "official-unavailable" %}selected{% endif %}>Official version unavailable</option>
-          <option value="not-checked" {% if filters.diagnosis == "not-checked" %}selected{% endif %}>Not checked</option>
-        </select>
-      </label>
-      <div class="filter-actions">
-        <a href="/updates">Reset</a>
-      </div>
-    </div>
-
     {% if progress_refresh_run %}
       {% set refresh_progress = progress_refresh_run.result_json or {} %}
       {% set refresh_phase = refresh_progress.get("phase", {}) %}
@@ -759,13 +706,29 @@
         }());
       </script>
     {% elif not batch_runs and view != "refresh-protocol" %}
-      <section class="maintenance-batch complete-site-update-launch" aria-labelledby="complete-site-update-launch-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Vollständige Aktualisierung</p>
-            <h3 id="complete-site-update-launch-heading">Eine Website vollständig aktualisieren</h3>
-            <p class="subtle">Führt WordPress, Themes und Plugins in dieser Reihenfolge aus. Nach jeder Phase werden die Update-Angebote frisch geprüft.</p>
-          </div>
+      <section class="maintenance-batch update-action-launch" aria-label="Aktualisierungsaktion auswählen">
+        <div class="update-action-launch-controls">
+          <label>
+            <span>Aktualisierungsaktion</span>
+            <select data-update-action-select>
+              <option value="">Aktion auswählen</option>
+              <option value="complete">Website vollständig aktualisieren</option>
+              <option value="direct">Ausgewählte Updates ausführen</option>
+            </select>
+          </label>
+          <button class="button" type="button" disabled data-update-action-start>Starten</button>
+        </div>
+        <div class="update-action-explanation" hidden data-update-action-panel="complete">
+          <p class="eyebrow">Vollständige Aktualisierung</p>
+          <h3>Eine Website vollständig aktualisieren</h3>
+          <p class="subtle">Führt WordPress, Themes und Plugins in dieser Reihenfolge aus. Nach jeder Phase werden die Update-Angebote frisch geprüft.</p>
+          <p class="subtle" data-complete-site-update-selection-summary>{% if site_selector.selected_site_ids | length == 1 %}1 Website ausgewählt.{% else %}Für diesen ersten Schritt genau eine Website auswählen.{% endif %}</p>
+        </div>
+        <div class="update-action-explanation" hidden data-update-action-panel="direct">
+          <p class="eyebrow">Ausgewählte Updates</p>
+          <h3>Updates gezielt ausführen</h3>
+          <p class="subtle">In der Tabelle die Updates markieren, die ausgeführt werden sollen.</p>
+          <p class="subtle" data-direct-update-selection-summary>Keine Updates ausgewählt.</p>
         </div>
         <form id="complete-site-update-form" method="post" action="/updates/complete-site-update" data-complete-site-update-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -773,10 +736,6 @@
           <span data-site-selector-target-sites>
             {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
           </span>
-          <div class="direct-update-controls">
-            <p class="subtle" data-complete-site-update-selection-summary>{% if site_selector.selected_site_ids | length == 1 %}1 Website ausgewählt.{% else %}Für diesen ersten Schritt genau eine Website auswählen.{% endif %}</p>
-            <button class="button" type="button" data-complete-site-update-start {% if site_selector.selected_site_ids | length != 1 %}disabled{% endif %}>Website vollständig aktualisieren</button>
-          </div>
         </form>
       </section>
       <dialog class="update-confirmation-dialog" data-complete-site-update-confirmation aria-labelledby="complete-site-update-confirmation-heading">
@@ -798,9 +757,52 @@
       <input type="hidden" name="large_batch_confirmation" value="" data-large-batch-confirmation-value>
       <input type="hidden" name="site_scope" value="{{ site_selector.site_scope }}">
       {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
-      <div class="direct-update-controls">
-        <p class="subtle" data-direct-update-selection-summary>Keine Updates ausgewählt.</p>
-        <button class="button" type="submit" disabled data-direct-update-submit>Ausgewählte Updates ausführen</button>
+      <div class="filter-panel filter-panel-workbench filter-panel-update-workbench"{% if entries %} data-update-auto-filter{% endif %}>
+        <label>
+          <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="Search e.g. Elementor" aria-label="Search updates">
+        </label>
+        <label>
+          <select form="{{ site_selector.form_id }}" name="plugin" aria-label="Plugin">
+            <option value="">All plugins</option>
+            {% for plugin_identifier, plugin_name in plugin_options %}
+              <option value="{{ plugin_identifier }}" {% if filters.plugin == plugin_identifier %}selected{% endif %}>{{ plugin_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <select form="{{ site_selector.form_id }}" name="kind" aria-label="Type">
+            <option value="all" {% if filters.kind == "all" %}selected{% endif %}>All updates</option>
+            <option value="wordpress" {% if filters.kind == "wordpress" %}selected{% endif %}>WordPress</option>
+            <option value="plugin" {% if filters.kind == "plugin" %}selected{% endif %}>Plugins</option>
+            <option value="theme" {% if filters.kind == "theme" %}selected{% endif %}>Themes</option>
+          </select>
+        </label>
+        <label>
+          <select form="{{ site_selector.form_id }}" name="activity" aria-label="Plugin state">
+            <option value="all" {% if filters.activity == "all" %}selected{% endif %}>All states</option>
+            <option value="active" {% if filters.activity == "active" %}selected{% endif %}>Active plugins</option>
+            <option value="inactive" {% if filters.activity == "inactive" %}selected{% endif %}>Inactive plugins</option>
+          </select>
+        </label>
+        <label>
+          <select form="{{ site_selector.form_id }}" name="diagnosis" aria-label="Diagnosis">
+            <option value="all" {% if filters.diagnosis == "all" %}selected{% endif %}>All diagnoses</option>
+            <option value="attention" {% if filters.diagnosis == "attention" %}selected{% endif %}>Needs attention</option>
+            <option value="update-ready" {% if filters.diagnosis == "update-ready" %}selected{% endif %}>Verified update ready</option>
+            <option value="aligned" {% if filters.diagnosis == "aligned" %}selected{% endif %}>Versions match</option>
+            <option value="provider-conflict" {% if filters.diagnosis == "provider-conflict" %}selected{% endif %}>Provider information conflicts</option>
+            <option value="provider-package-unavailable" {% if filters.diagnosis == "provider-package-unavailable" %}selected{% endif %}>Provider package unavailable</option>
+            <option value="site-offer-missing" {% if filters.diagnosis == "site-offer-missing" %}selected{% endif %}>Site update offer missing</option>
+            <option value="crocoblock-license-step" {% if filters.diagnosis == "crocoblock-license-step" %}selected{% endif %}>Crocoblock license step</option>
+            <option value="crocoblock-offer-missing" {% if filters.diagnosis == "crocoblock-offer-missing" %}selected{% endif %}>Crocoblock offer missing</option>
+            <option value="site-newer-than-reference" {% if filters.diagnosis == "site-newer-than-reference" %}selected{% endif %}>Site version is newer</option>
+            <option value="official-unavailable" {% if filters.diagnosis == "official-unavailable" %}selected{% endif %}>Official version unavailable</option>
+            <option value="not-checked" {% if filters.diagnosis == "not-checked" %}selected{% endif %}>Not checked</option>
+          </select>
+        </label>
+        <div class="filter-actions">
+          <a href="/updates">Reset</a>
+        </div>
       </div>
       <div class="table-scroll">
         <table class="update-workbench-table update-workbench-table-updates">
@@ -937,7 +939,6 @@
       var siteSelectorForm = document.getElementById("{{ site_selector.form_id }}");
       var selectAll = document.getElementById("select-all-filtered-updates");
       var directUpdateForm = document.querySelector("[data-direct-update-form]");
-      var directUpdateSubmit = document.querySelector("[data-direct-update-submit]");
       var selectionSummary = document.querySelector("[data-direct-update-selection-summary]");
       var confirmationDialog = document.querySelector("[data-direct-update-confirmation]");
       var confirmationText = document.querySelector("[data-direct-update-confirmation-text]");
@@ -948,8 +949,10 @@
       var largeBatchConfirmationValue = document.querySelector("[data-large-batch-confirmation-value]");
       var largeBatchConfirmationFeedback = document.querySelector("[data-large-batch-confirmation-feedback]");
       var largeBatchPluginThreshold = 100;
+      var updateActionSelect = document.querySelector("[data-update-action-select]");
+      var updateActionStart = document.querySelector("[data-update-action-start]");
+      var updateActionPanels = Array.prototype.slice.call(document.querySelectorAll("[data-update-action-panel]"));
       var completeSiteUpdateForm = document.querySelector("[data-complete-site-update-form]");
-      var completeSiteUpdateStart = document.querySelector("[data-complete-site-update-start]");
       var completeSiteUpdateSummary = document.querySelector("[data-complete-site-update-selection-summary]");
       var completeSiteUpdateDialog = document.querySelector("[data-complete-site-update-confirmation]");
       var completeSiteUpdateText = document.querySelector("[data-complete-site-update-confirmation-text]");
@@ -974,39 +977,63 @@
         return name ? name.textContent.trim() : "die ausgewählte Website";
       }
 
-      function syncCompleteSiteUpdateStart() {
+      function syncUpdateActionLaunch() {
+        var action = updateActionSelect ? updateActionSelect.value : "";
+        var completeValid = completeSiteUpdateSelection().length === 1;
+        var directSelected = selections().filter(function (selection) { return selection.checked; }).length;
+        updateActionPanels.forEach(function (panel) {
+          panel.hidden = panel.getAttribute("data-update-action-panel") !== action;
+        });
+        if (!updateActionStart) { return; }
+        updateActionStart.disabled = !action
+          || (action === "complete" && !completeValid)
+          || (action === "direct" && directSelected === 0);
+      }
+
+      function syncCompleteSiteUpdateSelection() {
         var selected = completeSiteUpdateSelection();
         var valid = selected.length === 1;
-        if (completeSiteUpdateStart) { completeSiteUpdateStart.disabled = !valid; }
         if (completeSiteUpdateSummary) {
           completeSiteUpdateSummary.textContent = valid
             ? "1 Website ausgewählt: " + completeSiteUpdateSiteName() + "."
             : "Für diesen ersten Schritt genau eine Website auswählen.";
         }
+        syncUpdateActionLaunch();
       }
 
-      if (completeSiteUpdateForm && completeSiteUpdateStart && completeSiteUpdateDialog && completeSiteUpdateConfirm) {
-        document.addEventListener("site-selector-change", syncCompleteSiteUpdateStart);
-        completeSiteUpdateStart.addEventListener("click", function () {
-          if (completeSiteUpdateSelection().length !== 1) { return; }
-          if (completeSiteUpdateText) {
-            completeSiteUpdateText.textContent = completeSiteUpdateSiteName()
-              + " wird in der Reihenfolge WordPress, Themes und Plugins aktualisiert. "
-              + "Nach jeder Phase erfolgt eine frische Update-Prüfung.";
-          }
-          completeSiteUpdateDialog.showModal();
-        });
+      if (completeSiteUpdateForm && completeSiteUpdateDialog && completeSiteUpdateConfirm) {
+        document.addEventListener("site-selector-change", syncCompleteSiteUpdateSelection);
         completeSiteUpdateConfirm.addEventListener("click", function (event) {
           event.preventDefault();
           if (completeSiteUpdateSelection().length !== 1) {
             completeSiteUpdateDialog.close();
-            syncCompleteSiteUpdateStart();
+            syncCompleteSiteUpdateSelection();
             return;
           }
           completeSiteUpdateDialog.close();
           completeSiteUpdateForm.requestSubmit();
         });
-        syncCompleteSiteUpdateStart();
+        syncCompleteSiteUpdateSelection();
+      }
+
+      if (updateActionSelect && updateActionStart) {
+        updateActionSelect.addEventListener("change", syncUpdateActionLaunch);
+        updateActionStart.addEventListener("click", function () {
+          if (updateActionSelect.value === "complete") {
+            if (completeSiteUpdateSelection().length !== 1 || !completeSiteUpdateDialog) { return; }
+            if (completeSiteUpdateText) {
+              completeSiteUpdateText.textContent = completeSiteUpdateSiteName()
+                + " wird in der Reihenfolge WordPress, Themes und Plugins aktualisiert. "
+                + "Nach jeder Phase erfolgt eine frische Update-Prüfung.";
+            }
+            completeSiteUpdateDialog.showModal();
+            return;
+          }
+          if (updateActionSelect.value === "direct" && directUpdateForm) {
+            directUpdateForm.requestSubmit();
+          }
+        });
+        syncUpdateActionLaunch();
       }
 
       if (!selectAll) {
@@ -1025,12 +1052,12 @@
         selectAll.disabled = selectable.length === 0;
         selectAll.checked = selectable.length > 0 && selected === selectable.length;
         selectAll.indeterminate = selected > 0 && selected < selectable.length;
-        if (directUpdateSubmit) { directUpdateSubmit.disabled = selected === 0; }
         if (selectionSummary) {
           selectionSummary.textContent = selected === 0
             ? "Keine Updates ausgewählt."
             : selected + " Update" + (selected === 1 ? "" : "s") + " ausgewählt.";
         }
+        syncUpdateActionLaunch();
       }
 
       function fillConfirmationList() {

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Contact · {{ detail.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <a class="button button-secondary" href="/customers/{{ detail.customer.id }}">Back to {{ detail.customer.name }}</a>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Zoho CRM contact</p>
+        <h2>{{ detail.name }}</h2>
+        <p class="subtle">Imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
+      </div>
+    </div>
+
+    <section class="detail-list">
+      <article class="card">
+        <h3>Hub data</h3>
+        <dl class="metadata-list">
+          <div><dt>Customer</dt><dd><a href="/customers/{{ detail.customer.id }}">{{ detail.customer.name }}</a></dd></div>
+          <div><dt>Zoho contact ID</dt><dd>{{ detail.contact.zoho_id }}</dd></div>
+          <div><dt>Last changed in Zoho</dt><dd>{{ (detail.contact.zoho_modified_at or "-") | berlin_time }}</dd></div>
+          <div><dt>Last synchronized</dt><dd>{{ (detail.contact.zoho_synced_at or "-") | berlin_time }}</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Zoho CRM</p>
+          <h3>Contact data</h3>
+          <p class="subtle">All fields currently synchronized for this contact.</p>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Field</th><th>Value</th></tr></thead>
+          <tbody>
+            {% for field in detail.profile_fields %}
+              <tr><td><strong>{{ field.label }}</strong></td><td>{{ field.value or "-" }}</td></tr>
+            {% else %}
+              <tr><td colspan="2">No Zoho contact data is available for this record.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+{% endblock %}

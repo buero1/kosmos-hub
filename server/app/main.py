@@ -15,13 +15,30 @@ from app.core.security import get_secret_cipher
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.fleet_refresh_run import FleetRefreshSiteResult
+from app.models.customer_contact import CustomerContact
+from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
+from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.site_user_snapshot import SiteUserSnapshot
+from app.models.styling_settings import StylingSettings
 from app.models.plugin_installation_package import PluginInstallationPackage
+from app.models.user_deletion_batch import UserDeletionBatch, UserDeletionBatchItem
 from app.mcp_server import hub_mcp, mcp_asgi_app
+from app.models.zoho_email_workflow_delivery import ZohoEmailWorkflowDelivery
+from app.models.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhook
+from app.models.zoho_email_content_import import ZohoEmailContentImport, ZohoEmailContentImportItem
+from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.maintenance_worker import process_pending_complete_site_updates, process_pending_direct_updates
+from app.services.maintenance_worker import (
+    process_pending_complete_site_updates,
+    process_pending_direct_updates,
+    process_pending_user_deletions,
+    schedule_pending_user_deletions,
+    schedule_pending_zoho_email_content_import,
+    schedule_pending_zoho_email_history_import,
+    schedule_pending_zoho_email_workflow_deliveries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +59,108 @@ def _ensure_phase_one_schema() -> None:
     if "fleet_refresh_site_results" not in table_names:
         FleetRefreshSiteResult.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created fleet_refresh_site_results table.")
+
+    if "customer_contacts" not in table_names:
+        CustomerContact.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_contacts table.")
+
+    if "customer_zoho_notes" not in table_names:
+        CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_zoho_notes table.")
+
+    if "customer_zoho_emails" not in table_names:
+        CustomerZohoEmail.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_zoho_emails table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("customer_zoho_emails")}
+        if "is_unread" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE customer_zoho_emails ADD COLUMN is_unread TINYINT(1) NOT NULL DEFAULT 1 AFTER direction")
+                )
+                connection.execute(text("UPDATE customer_zoho_emails SET is_unread = 0"))
+            logger.info("Added customer_zoho_emails.is_unread; existing emails were marked read.")
+        unique_constraints = inspector.get_unique_constraints("customer_zoho_emails")
+        legacy_unique_names = [
+            constraint["name"]
+            for constraint in unique_constraints
+            if constraint.get("column_names") == ["zoho_message_id"] and constraint.get("name")
+        ]
+        has_customer_message_constraint = any(
+            constraint.get("column_names") == ["customer_id", "zoho_message_id"]
+            for constraint in unique_constraints
+        )
+        if legacy_unique_names or not has_customer_message_constraint:
+            with engine.begin() as connection:
+                for constraint_name in legacy_unique_names:
+                    connection.execute(text(f"ALTER TABLE customer_zoho_emails DROP INDEX `{constraint_name}`"))
+                if not has_customer_message_constraint:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE customer_zoho_emails "
+                            "ADD CONSTRAINT uq_customer_zoho_emails_customer_id_zoho_message_id "
+                            "UNIQUE (customer_id, zoho_message_id)"
+                        )
+                    )
+            logger.info("Changed customer_zoho_emails uniqueness to customer_id plus zoho_message_id.")
+
+    if "customer_zoho_email_images" not in table_names:
+        CustomerZohoEmailImage.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_zoho_email_images table.")
+
+    if "customer_zoho_emails" in table_names:
+        columns = {column["name"]: column for column in inspector.get_columns("customer_zoho_emails")}
+        payload_column = columns.get("encrypted_payload_json")
+        if payload_column is not None and "MEDIUMTEXT" not in str(payload_column["type"]).upper():
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE customer_zoho_emails MODIFY COLUMN encrypted_payload_json MEDIUMTEXT NOT NULL")
+                )
+            logger.info("Expanded customer_zoho_emails.encrypted_payload_json to MEDIUMTEXT.")
+
+    if "hub_mailbox_emails" not in table_names:
+        HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_emails table.")
+
+    if "styling_settings" not in table_names:
+        StylingSettings.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created styling_settings table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("styling_settings")}
+        if "background_secondary_color" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE styling_settings ADD COLUMN background_secondary_color VARCHAR(7) NOT NULL DEFAULT '#efe8da' AFTER background_color")
+                )
+            logger.info("Added styling_settings.background_secondary_color column.")
+
+    if "zoho_email_workflow_webhooks" not in table_names:
+        ZohoEmailWorkflowWebhook.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_workflow_webhooks table.")
+
+    if "zoho_email_workflow_deliveries" not in table_names:
+        ZohoEmailWorkflowDelivery.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_workflow_deliveries table.")
+
+    if "zoho_email_history_imports" not in table_names:
+        ZohoEmailHistoryImport.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_history_imports table.")
+
+    if "zoho_email_content_imports" not in table_names:
+        ZohoEmailContentImport.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_content_imports table.")
+
+    if "zoho_email_content_import_items" not in table_names:
+        ZohoEmailContentImportItem.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_content_import_items table.")
+
+    if "user_deletion_batches" not in table_names:
+        UserDeletionBatch.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created user_deletion_batches table.")
+
+    if "user_deletion_batch_items" not in table_names:
+        UserDeletionBatchItem.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created user_deletion_batch_items table.")
 
     if "maintenance_runs" in table_names:
         columns = {column["name"] for column in inspector.get_columns("maintenance_runs")}
@@ -134,12 +253,13 @@ def _poll_maintenance_runs() -> dict[str, int]:
         backup_result = service.poll_active_updraftplus_backups(limit=25)
     plugin_update_result = process_pending_direct_updates()
     complete_site_update_result = process_pending_complete_site_updates()
+    user_deletion_result = process_pending_user_deletions()
     return {
-        "checked": backup_result["checked"] + plugin_update_result["checked"] + complete_site_update_result["checked"],
-        "succeeded": backup_result["succeeded"] + plugin_update_result["succeeded"] + complete_site_update_result["succeeded"],
-        "failed": backup_result["failed"] + plugin_update_result["failed"] + complete_site_update_result["failed"],
-        "waiting": backup_result["waiting"] + plugin_update_result["waiting"] + complete_site_update_result["waiting"],
-        "skipped": plugin_update_result["skipped"] + complete_site_update_result["skipped"],
+        "checked": backup_result["checked"] + plugin_update_result["checked"] + complete_site_update_result["checked"] + user_deletion_result["checked"],
+        "succeeded": backup_result["succeeded"] + plugin_update_result["succeeded"] + complete_site_update_result["succeeded"] + user_deletion_result["succeeded"],
+        "failed": backup_result["failed"] + plugin_update_result["failed"] + complete_site_update_result["failed"] + user_deletion_result["failed"],
+        "waiting": backup_result["waiting"] + plugin_update_result["waiting"] + complete_site_update_result["waiting"] + user_deletion_result["waiting"],
+        "skipped": plugin_update_result["skipped"] + complete_site_update_result["skipped"] + user_deletion_result["skipped"],
     }
 
 
@@ -162,6 +282,10 @@ async def lifespan(_: FastAPI):
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
+        schedule_pending_user_deletions()
+        schedule_pending_zoho_email_content_import()
+        schedule_pending_zoho_email_history_import()
+        schedule_pending_zoho_email_workflow_deliveries()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:
             logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)
@@ -244,12 +368,13 @@ def create_app() -> FastAPI:
             request.url.path == "/"
             or request.url.path.startswith("/account")
             or request.url.path.startswith("/sites")
+            or request.url.path.startswith("/users")
             or request.url.path == "/updates"
             or request.url.path.startswith("/plugin-installations")
             or request.url.path.startswith("/update-plans")
             or request.url.path.startswith("/assistant")
         ):
-            # Inventory and update data must not be served from a browser cache.
+            # Dynamic inventory, user, and update data must not be served from a browser cache.
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -280,7 +405,7 @@ app = create_app()
 
 
 def _is_public_hub_path(path: str) -> bool:
-    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith("/api/v1/plugin-packages/")
+    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith(("/account/zoho/email-workflow-webhook/receive/", "/api/v1/plugin-packages/"))
 
 
 def _is_mcp_path(path: str) -> bool:

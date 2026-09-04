@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Styling · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="section-heading styling-heading">
+    <div>
+      <p class="eyebrow">Design system</p>
+      <h2>Styling</h2>
+      <p class="subtle">Globale Werte fur Felder, Buttons, Schrift, Farben und Abstande. Anderungen gelten nach dem Speichern im gesamten Hub.</p>
+    </div>
+  </section>
+
+  {% if request.query_params.get("styling") == "saved" %}
+    <p class="notice-success">Die globalen Styling-Werte wurden gespeichert.</p>
+  {% endif %}
+  {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+
+  <div class="styling-page-layout">
+    <form class="styling-settings-form" method="post" action="/styling">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+      <section class="styling-panel">
+        <div class="styling-panel-heading">
+          <div>
+            <p class="eyebrow">Grundlagen</p>
+            <h3>Schrift, Abstande und Flachen</h3>
+          </div>
+        </div>
+        <div class="styling-settings-grid styling-settings-grid-foundation">
+          <label>Grundschrift
+            <select name="font_family_key">
+              {% for option in font_family_options %}
+                <option value="{{ option.key }}" {% if styling.font_family_key == option.key %}selected{% endif %}>{{ option.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Basisabstand (px)
+            <input type="number" name="base_spacing" min="4" max="40" value="{{ styling.base_spacing }}" required>
+          </label>
+          <label>Panel-Radius (px)
+            <input type="number" name="panel_radius" min="0" max="40" value="{{ styling.panel_radius }}" required>
+          </label>
+        </div>
+      </section>
+
+      <section class="styling-panel">
+        <div class="styling-panel-heading">
+          <div>
+            <p class="eyebrow">Farbpalette</p>
+            <h3>Globale Farben</h3>
+          </div>
+        </div>
+        <div class="styling-color-grid">
+          {% set colors = [
+            ("background_color", "Hintergrund oben", styling.background_color),
+            ("background_secondary_color", "Hintergrund unten", styling.background_secondary_color),
+            ("panel_color", "Panel", styling.panel_color),
+            ("ink_color", "Text", styling.ink_color),
+            ("muted_color", "Sekundarer Text", styling.muted_color),
+            ("accent_color", "Akzent", styling.accent_color),
+            ("accent_soft_color", "Akzent hell", styling.accent_soft_color),
+            ("border_color", "Rahmen", styling.border_color)
+          ] %}
+          {% for name, label, value in colors %}
+            <label class="styling-color-field">{{ label }}
+              <span>
+                <input type="color" name="{{ name }}" value="{{ value }}" aria-label="{{ label }} auswahlen">
+                <output data-color-output for="{{ name }}">{{ value }}</output>
+              </span>
+            </label>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="styling-panel">
+        <div class="styling-panel-heading">
+          <div>
+            <p class="eyebrow">Komponenten</p>
+            <h3>Variante 1</h3>
+          </div>
+          <p class="subtle">Standard fur normale Auswahl-, Text- und Schaltflachen.</p>
+        </div>
+        <div class="styling-settings-grid styling-settings-grid-variant">
+          <label>Hohe (px)<input type="number" name="control_v1_height" min="24" max="72" value="{{ styling.control_v1_height }}" required></label>
+          <label>Schriftgroße (px)<input type="number" name="control_v1_font_size" min="10" max="24" value="{{ styling.control_v1_font_size }}" required></label>
+          <label>Padding (px)<input type="number" name="control_v1_padding" min="0" max="32" value="{{ styling.control_v1_padding }}" required></label>
+          <label>Radius (px)<input type="number" name="control_v1_radius" min="0" max="32" value="{{ styling.control_v1_radius }}" required></label>
+        </div>
+        <div class="styling-component-preview control-variant-1">
+          <input value="Textfeld Variante 1" aria-label="Textfeld Variante 1">
+          <select aria-label="Auswahlfeld Variante 1"><option>Auswahlfeld Variante 1</option></select>
+          <button class="button button-variant-1" type="button">Button Variante 1</button>
+        </div>
+      </section>
+
+      <section class="styling-panel">
+        <div class="styling-panel-heading">
+          <div>
+            <p class="eyebrow">Komponenten</p>
+            <h3>Variante 2</h3>
+          </div>
+          <p class="subtle">Kompakte Variante, z. B. fur Werkzeugleisten und dichte Listen.</p>
+        </div>
+        <div class="styling-settings-grid styling-settings-grid-variant">
+          <label>Hohe (px)<input type="number" name="control_v2_height" min="24" max="72" value="{{ styling.control_v2_height }}" required></label>
+          <label>Schriftgroße (px)<input type="number" name="control_v2_font_size" min="10" max="24" value="{{ styling.control_v2_font_size }}" required></label>
+          <label>Padding (px)<input type="number" name="control_v2_padding" min="0" max="32" value="{{ styling.control_v2_padding }}" required></label>
+          <label>Radius (px)<input type="number" name="control_v2_radius" min="0" max="32" value="{{ styling.control_v2_radius }}" required></label>
+        </div>
+        <div class="styling-component-preview control-variant-2">
+          <input value="Textfeld Variante 2" aria-label="Textfeld Variante 2">
+          <select aria-label="Auswahlfeld Variante 2"><option>Auswahlfeld Variante 2</option></select>
+          <button class="button button-variant-2" type="button">Button Variante 2</button>
+        </div>
+      </section>
+
+      <div class="styling-save-row">
+        <button class="button" type="submit">Globale Werte speichern</button>
+      </div>
+    </form>
+
+    <aside class="styling-reference" aria-label="Varianten verwenden">
+      <p class="eyebrow">Verwendung</p>
+      <h3>Varianten-Klassen</h3>
+      <p class="subtle">Normale Felder und Buttons verwenden standardmaßig Variante 1.</p>
+      <code>.control-variant-1</code>
+      <code>.control-variant-2</code>
+      <code>.button-variant-1</code>
+      <code>.button-variant-2</code>
+      <p class="subtle">Die Klassen konnen direkt auf einem Feld oder auf einem umschließenden Bereich gesetzt werden. Alle Werte kommen aus dieser Seite.</p>
+    </aside>
+  </div>
+  <script>
+    document.querySelectorAll(".styling-color-field input[type='color']").forEach(function (input) {
+      input.addEventListener("input", function () {
+        var output = input.parentElement.querySelector("[data-color-output]");
+        if (output) output.value = input.value;
+      });
+    });
+  </script>
+{% endblock %}

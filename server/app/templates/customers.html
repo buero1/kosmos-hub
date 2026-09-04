@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">CRM directory</p>
         <h2>Customers</h2>
-        <p class="subtle">Imported from Zoho Accounts. A site is linked only after explicit confirmation in the Hub.</p>
+        <p class="subtle">{% if filters.email == "unread" %}Kunden mit ungelesenen eingehenden E-Mails.{% else %}Imported from Zoho Accounts. A site is linked only after explicit confirmation in the Hub.{% endif %}</p>
       </div>
       <div class="inventory-totals">
         <span><strong>{{ entries | length }}</strong> shown</span>
@@ -21,14 +21,29 @@
       </div>
     </div>
 
-    <form class="filter-panel customer-filter-panel" method="get" action="/customers">
+    <form id="customer-filter-form" class="filter-panel customer-filter-panel" method="get" action="/customers">
+      {% if filters.email == "unread" %}<input type="hidden" name="email" value="unread">{% endif %}
       <label>
         <span>Search customer data</span>
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, address, contact, note, or domain">
+        <span class="customer-search-input">
+          <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, email, phone, note, or domain">
+          <button class="customer-filter-search-submit" type="submit" aria-label="Search customer data" title="Search customer data">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+          </button>
+        </span>
+      </label>
+      <label>
+        <span>Branche</span>
+        <select name="industry" data-customer-auto-filter>
+          <option value="all" {% if filters.industry == "all" %}selected{% endif %}>Alle Branchen</option>
+          {% for option in industry_options %}
+            <option value="{{ option }}" {% if filters.industry == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
       </label>
       <label>
         <span>Status</span>
-        <select name="status">
+        <select name="status" data-customer-auto-filter>
           {% for option in status_options %}
             <option value="{{ option }}" {% if filters.status == option %}selected{% endif %}>{{ option }}</option>
           {% endfor %}
@@ -36,7 +51,6 @@
         </select>
       </label>
       <div class="filter-actions">
-        <button class="button" type="submit">Apply filters</button>
         <a href="/customers">Reset</a>
       </div>
     </form>
@@ -89,4 +103,12 @@
       </table>
     </div>
   </section>
+  <script>
+    (() => {
+      const form = document.getElementById("customer-filter-form");
+      form?.querySelectorAll("[data-customer-auto-filter]").forEach((filter) => {
+        filter.addEventListener("change", () => form.requestSubmit());
+      });
+    })();
+  </script>
 {% endblock %}

@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}E-Mails · kosmos-hub{% endblock %}
+{% block content %}
+  <style>
+    .mailbox-header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+    .mailbox-header h2 { margin: 0.18rem 0 0; }
+    .mailbox-compose { display: flex; gap: 0.55rem; align-items: end; }
+    .mailbox-compose label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.8rem; }
+    .mailbox-compose select { width: min(21rem, 36vw); }
+    .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
+    .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
+    .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
+    .mailbox-folders a:hover, .mailbox-folders a.is-active { background: var(--accent-soft); color: #075f4e; }
+    .mailbox-folders small { color: var(--muted); font-size: 0.75rem; }
+    .mailbox-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
+    .mailbox-list-heading { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 0.82rem; }
+    .mailbox-message { display: block; padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); color: var(--ink); text-decoration: none; }
+    .mailbox-message:hover { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
+    .mailbox-message.is-selected { background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel)); }
+    .mailbox-message.is-unread { border-left: 3px solid #1d63b8; padding-left: calc(1rem - 3px); }
+    .mailbox-message-row { display: flex; justify-content: space-between; gap: 0.65rem; align-items: baseline; }
+    .mailbox-message strong { display: block; overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+    .mailbox-message p { margin: 0.28rem 0 0; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mailbox-message time { color: var(--muted); font-size: 0.74rem; white-space: nowrap; }
+    .mailbox-message.is-unread strong, .mailbox-message.is-unread time { font-weight: 700; }
+    .mailbox-message.is-unread .mailbox-message-subject, .mailbox-message.is-unread time { color: #1d63b8; }
+    .mailbox-message .pill { font-size: 0.7rem; }
+    .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
+    .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
+    .mailbox-reading-meta { margin: 0.5rem 0 0; color: var(--muted); line-height: 1.45; }
+    .mailbox-customer-links { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem; }
+    .mailbox-customer-links a { color: #075f4e; font-size: 0.82rem; }
+    .mailbox-preview { margin-top: 1rem; }
+    .mailbox-preview iframe { display: block; width: 100%; min-height: 29rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: #fff; }
+    .mailbox-empty { padding: 1.5rem; color: var(--muted); }
+    .mailbox-unassigned { margin-top: 1rem; padding: 1rem; border: 1px dashed var(--border); border-radius: var(--control-v1-radius); background: color-mix(in srgb, var(--accent-soft) 20%, var(--panel)); }
+    .mailbox-unassigned h4 { margin: 0; }
+    .mailbox-unassigned p { color: var(--muted); line-height: 1.5; }
+    @media (max-width: 780px) { .mailbox-header { align-items: stretch; flex-direction: column; } .mailbox-compose select { width: 100%; } .mailbox-shell { display: block; height: auto; min-height: 0; } .mailbox-folders { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-folders a { flex: 0 0 auto; } .mailbox-list { max-height: 24rem; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-reading-pane { overflow: visible; } }
+  </style>
+  <section class="mailbox-header">
+    <div>
+      <p class="eyebrow">Zoho CRM</p>
+      <h2>E-Mail-Zentrale</h2>
+      <p class="subtle">Posteingang, gesendete Nachrichten und noch nicht zugeordnete Kontakte.</p>
+    </div>
+    <form class="mailbox-compose" method="get" action="/emails/compose">
+      <label>Kunde für neue E-Mail
+        <select name="customer_id" required>
+          <option value="">Kundenkontakt auswählen</option>
+          {% for customer in compose_customers %}<option value="{{ customer.id }}">{{ customer.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="button" type="submit">Neue E-Mail</button>
+    </form>
+  </section>
+
+  <section class="card mailbox-shell" data-mailbox-shell>
+    <nav class="mailbox-folders" aria-label="E-Mail-Ordner">
+      <a href="/emails?folder=inbox{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
+      <a href="/emails?folder=sent{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
+      <a href="/emails?folder=unassigned{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
+    </nav>
+
+    {% with messages=mailbox.messages, selected=mailbox.selected %}{% include "emails_message_list.html" %}{% include "emails_reading_pane.html" %}{% endwith %}
+  </section>
+  <script>
+    (function () {
+      var shell = document.querySelector('[data-mailbox-shell]');
+
+      function updateMailboxHeight() {
+        if (!shell) return;
+        if (!window.matchMedia('(min-width: 781px)').matches) {
+          shell.style.removeProperty('--mailbox-shell-height');
+          return;
+        }
+        var documentTop = shell.getBoundingClientRect().top + window.scrollY;
+        var availableHeight = Math.max(320, window.innerHeight - documentTop - 24);
+        shell.style.setProperty('--mailbox-shell-height', availableHeight + 'px');
+      }
+
+      updateMailboxHeight();
+      window.addEventListener('resize', updateMailboxHeight);
+
+      function attachMessageListeners(scope) {
+        scope.querySelectorAll('[data-mailbox-message]').forEach(function (link) {
+          link.addEventListener('click', function (event) {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            setSelectedMessage(link);
+            loadMessage(link);
+          });
+        });
+      }
+
+      function attachFolderListeners(scope) {
+        scope.querySelectorAll('[data-mailbox-folder]').forEach(function (link) {
+          link.addEventListener('click', function (event) {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            setActiveFolder(link);
+            loadFolder(link);
+          });
+        });
+      }
+
+      attachMessageListeners(document);
+      attachFolderListeners(document);
+
+      function setSelectedMessage(link) {
+        document.querySelectorAll('[data-mailbox-message]').forEach(function (message) {
+          message.classList.toggle('is-selected', message === link);
+        });
+      }
+
+      function setActiveFolder(link) {
+        var selectedUrl = new URL(link.href);
+        document.querySelectorAll('[data-mailbox-folder]').forEach(function (folderLink) {
+          var folderUrl = new URL(folderLink.href);
+          folderLink.classList.toggle('is-active', folderUrl.searchParams.get('folder') === selectedUrl.searchParams.get('folder'));
+        });
+      }
+
+      function activatePreview(preview) {
+        var frame = preview.querySelector('[data-email-preview-frame]');
+        if (frame && !frame.srcdoc) {
+          frame.srcdoc = frame.dataset.srcdoc || '';
+          frame.removeAttribute('data-srcdoc');
+        }
+        preview.dispatchEvent(new Event('toggle', { bubbles: true }));
+      }
+
+      function renderPreview(preview) {
+        var frame = preview.querySelector('[data-email-preview-frame]');
+        if (frame && !frame.srcdoc) {
+          frame.srcdoc = frame.dataset.srcdoc || '';
+          frame.removeAttribute('data-srcdoc');
+        }
+      }
+
+      function loadFolder(link) {
+        var panelUrl = new URL(link.href);
+        panelUrl.pathname = '/emails/folder';
+        window.fetch(panelUrl, { credentials: 'same-origin' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Mailbox folder response failed.');
+            return response.text();
+          })
+          .then(function (html) {
+            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+            var nextList = nextDocument.querySelector('[data-mailbox-list]');
+            var nextPane = nextDocument.querySelector('.mailbox-reading-pane');
+            var currentList = document.querySelector('[data-mailbox-list]');
+            var currentPane = document.querySelector('.mailbox-reading-pane');
+            if (!nextList || !nextPane || !currentList || !currentPane) throw new Error('Mailbox folder panel missing.');
+
+            currentList.replaceWith(nextList);
+            currentPane.replaceWith(nextPane);
+            window.history.pushState({}, '', link.href);
+            nextList.scrollTop = 0;
+            nextPane.scrollTop = 0;
+            nextPane.querySelectorAll('details[data-email-preview][open]').forEach(renderPreview);
+            attachMessageListeners(nextList);
+            attachFolderListeners(nextList);
+          })
+          .catch(function () {
+            // Keep the server-rendered navigation as a safe fallback.
+            window.location.assign(link.href);
+          });
+      }
+
+      function loadMessage(link) {
+        var paneUrl = new URL(link.href);
+        paneUrl.pathname = '/emails/selected';
+        window.fetch(paneUrl, { credentials: 'same-origin' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('Mailbox response failed.');
+            return response.text();
+          })
+          .then(function (html) {
+            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+            var nextPane = nextDocument.querySelector('.mailbox-reading-pane');
+            var currentPane = document.querySelector('.mailbox-reading-pane');
+            if (!nextPane || !currentPane) throw new Error('Mailbox pane missing.');
+
+            currentPane.replaceWith(nextPane);
+            window.history.pushState({}, '', link.href);
+            nextPane.scrollTop = 0;
+            var previews = nextPane.querySelectorAll('details[data-email-preview][open]');
+            previews.forEach(activatePreview);
+            if (previews.length) {
+              link.classList.remove('is-unread');
+              var unreadStatus = nextPane.querySelector('[data-mailbox-unread-status]');
+              if (unreadStatus) unreadStatus.remove();
+            }
+          })
+          .catch(function () {
+            // Keep the server-rendered navigation as a safe fallback.
+            window.location.assign(link.href);
+          });
+      }
+    }());
+
+    document.addEventListener('submit', function (event) {
+      var form = event.target;
+      if (!(form instanceof HTMLFormElement) || !form.matches('[data-mailbox-unassigned-read]')) return;
+      event.preventDefault();
+      window.fetch(form.action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(new FormData(form)).toString(), credentials: 'same-origin' }).then(function (response) { if (response.ok) { window.location.reload(); } });
+    });
+  </script>
+{% endblock %}

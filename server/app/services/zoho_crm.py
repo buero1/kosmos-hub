@@ -7,7 +7,8 @@ import re
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from threading import Lock
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -18,35 +19,45 @@ from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.models.customer import Customer
+from app.models.customer_contact import CustomerContact
 from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
+ZOHO_CONTACT_MODULE = "Contacts"
 # Request the complete CRM API scope once. Individual Hub workflows still decide
 # whether a connected capability may create, change, or delete CRM data.
-ZOHO_CRM_SCOPES = ",".join(
-    (
+_ZOHO_CRM_SCOPE_VALUES = (
         "ZohoCRM.modules.ALL",
+        "ZohoCRM.modules.emails.READ",
+        "ZohoCRM.modules.notes.ALL",
         "ZohoCRM.settings.ALL",
+        "ZohoCRM.settings.emails.READ",
         "ZohoCRM.users.ALL",
         "ZohoCRM.org.ALL",
         "ZohoCRM.bulk.ALL",
         "ZohoCRM.coql.READ",
-        "ZohoCRM.notifications.READ",
-        "ZohoCRM.notifications.CREATE",
-        "ZohoCRM.notifications.UPDATE",
-        "ZohoCRM.notifications.DELETE",
         "ZohoCRM.apis.READ",
         "ZohoCRM.send_mail.all.CREATE",
+        "ZohoCRM.templates.email.READ",
         "ZohoCRM.share.all",
         "ZohoCRM.signals.ALL",
         "ZohoSearch.securesearch.READ",
-    )
 )
+ZOHO_CRM_SCOPES = ",".join(_ZOHO_CRM_SCOPE_VALUES)
+_ZOHO_COMMUNICATION_SCOPE_VALUES = frozenset(
+    scope for scope in _ZOHO_CRM_SCOPE_VALUES if scope != "ZohoCRM.templates.email.READ"
+)
+_ZOHO_EMAIL_TEMPLATE_SCOPE = "ZohoCRM.templates.email.READ"
 _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
+_MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
+_ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
+_DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600
 ZOHO_RELEVANT_ACCOUNT_STATUSES = ("Aktuell", "Neu", "gekündigt", "Kündigung liegt vor")
+_ACCESS_TOKEN_CACHE: dict[str, tuple[str, datetime]] = {}
+_ACCESS_TOKEN_CACHE_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -81,6 +92,7 @@ ZOHO_ACCOUNT_FIELDS = (
     ZohoAccountField("phone", "Tel."),
     ZohoAccountField("website", "Webseite"),
     ZohoAccountField("customer_number", "Kunde-Nummer"),
+    ZohoAccountField("customer_type", "Kunde Typ"),
     ZohoAccountField("industry", "Branche"),
     ZohoAccountField("billing_street", "Rechnungsadresse - Straße"),
     ZohoAccountField("billing_city", "Rechnungsadresse - Stadt"),
@@ -139,7 +151,17 @@ class ZohoSyncResult:
     created_sites: int
     linked_sites: int
     site_conflicts: int
+    synchronized_contacts: int
+    created_contacts: int
+    updated_contacts: int
+    removed_contacts: int
     unmapped_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ZohoBinaryDownload:
+    content: bytes
+    content_type: str
 
 
 class ZohoCrmService:
@@ -205,6 +227,7 @@ class ZohoCrmService:
             connection.last_error = None
             connection.configured_by_user_id = actor.id
         self.db.flush()
+        self._clear_cached_access_token(connection)
         return connection
 
     def build_authorization_url(self, *, state: str) -> str:
@@ -254,6 +277,7 @@ class ZohoCrmService:
         connection.connected_at = datetime.now(UTC)
         connection.last_error = None
         self.db.flush()
+        self._clear_cached_access_token(connection)
         return connection
 
     def refresh_field_mapping(self) -> list[ZohoFieldMappingRow]:
@@ -281,6 +305,7 @@ class ZohoCrmService:
         if missing_required:
             raise ZohoCrmError(f"The required Zoho Account field(s) {', '.join(missing_required)} were not found. No customers were changed.")
 
+        contact_records = self._get_all_contact_records(connection)
         records = self._get_all_account_records(connection, mapping)
         created_customers = 0
         updated_customers = 0
@@ -337,6 +362,11 @@ class ZohoCrmService:
                 elif site_result == "conflict":
                     site_conflicts += 1
 
+        synchronized_contacts, created_contacts, updated_contacts, removed_contacts = self._synchronize_contacts(
+            records=contact_records,
+            synced_at=synced_at,
+        )
+
         existing_zoho_customers = list(self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all())
         for customer in existing_zoho_customers:
             if customer.zoho_id in synchronized_zoho_ids:
@@ -358,14 +388,228 @@ class ZohoCrmService:
             created_sites=created_sites,
             linked_sites=linked_sites,
             site_conflicts=site_conflicts,
+            synchronized_contacts=synchronized_contacts,
+            created_contacts=created_contacts,
+            updated_contacts=updated_contacts,
+            removed_contacts=removed_contacts,
             unmapped_fields=tuple(row.label for row in mapping_rows if row.api_name is None),
         )
+
+    def list_account_notes(self, account_id: str) -> list[dict[str, object]]:
+        """Return the Zoho notes attached to one Account, newest data included."""
+        connection = self._require_communication_connection()
+        records: list[dict[str, object]] = []
+        for page in range(1, _MAX_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{account_id}/Notes",
+                {
+                    "fields": "id,Note_Title,Note_Content,Created_Time,Modified_Time,Created_By,Modified_By",
+                    "per_page": "200",
+                    "page": str(page),
+                },
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError("Zoho returned an invalid Notes response.")
+            records.extend(item for item in data if isinstance(item, dict))
+            info = response.get("info")
+            if not (isinstance(info, dict) and info.get("more_records") is True):
+                break
+        return records
+
+    def list_record_email_headers(self, module: str, record_id: str) -> list[dict[str, object]]:
+        """Return up to 100 email headers for an Account or Contact related list."""
+        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
+            raise ZohoCrmError("Zoho email history is only supported for Accounts and Contacts.")
+        connection = self._require_communication_connection()
+        records: list[dict[str, object]] = []
+        next_index = "0"
+        seen_indexes: set[str] = set()
+        for _ in range(_MAX_PAGE_REQUESTS):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{module}/{record_id}/Emails",
+                {"index": next_index} if next_index != "0" else {},
+                allow_empty_response=True,
+            )
+            data = response.get("Emails")
+            if not isinstance(data, list):
+                raise ZohoCrmError("Zoho returned an invalid email history response.")
+            records.extend(item for item in data if isinstance(item, dict))
+            info = response.get("info")
+            following_index = info.get("next_index") if isinstance(info, dict) else None
+            if not isinstance(following_index, str) or not following_index or following_index in seen_indexes:
+                break
+            seen_indexes.add(next_index)
+            next_index = following_index
+        return records
+
+    def list_allowed_from_addresses(self) -> list[dict[str, object]]:
+        """Return only the sender addresses that Zoho permits for the connected user."""
+        connection = self._require_communication_connection()
+        response = self._api_get(
+            connection,
+            "/crm/v8/settings/emails/actions/from_addresses",
+            {},
+        )
+        addresses = response.get("from_addresses")
+        if not isinstance(addresses, list):
+            raise ZohoCrmError("Zoho returned no allowed sender addresses.")
+        return [address for address in addresses if isinstance(address, dict)]
+
+    def list_email_templates(self) -> list[dict[str, object]]:
+        """List every email template visible in the connected Zoho organization."""
+        connection = self._require_template_connection()
+        templates_by_id: dict[str, dict[str, object]] = {}
+        for page in range(1, _MAX_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                "/crm/v8/settings/email_templates",
+                {"per_page": "200", "page": str(page)},
+            )
+            for template in self._email_template_records(response):
+                template_id = self._as_text(template.get("id"))
+                if template_id:
+                    templates_by_id[template_id] = template
+            info = response.get("info")
+            if not isinstance(info, dict) or info.get("more_records") is not True:
+                break
+        else:
+            raise ZohoCrmError(
+                "Zoho returned more than 2,000 email templates. Reduce the template count before synchronizing again."
+            )
+        return list(templates_by_id.values())
+
+    def get_email_template(self, *, template_id: str) -> dict[str, object]:
+        """Load one template body on demand so it is never persisted as configuration."""
+        normalized_template_id = self._required_template_id(template_id)
+        connection = self._require_template_connection()
+        response = self._api_get(
+            connection,
+            f"/crm/v8/settings/email_templates/{normalized_template_id}",
+            {},
+        )
+        templates = self._email_template_records(response)
+        template = next((item for item in templates if self._as_text(item.get("id")) == normalized_template_id), None)
+        if template is None:
+            raise ZohoCrmError("Zoho returned no matching email template.")
+        return template
+
+    def get_record_email(self, *, module: str, record_id: str, message_id: str) -> dict[str, object]:
+        """Load a single email body only when the user asks to view it."""
+        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
+            raise ZohoCrmError("Zoho email history is only supported for Accounts and Contacts.")
+        connection = self._require_communication_connection()
+        response = self._api_get(
+            connection,
+            f"/crm/v8/{module}/{record_id}/Emails/{message_id}",
+            {},
+        )
+        return self._response_record(response, "email")
+
+    def download_record_email_attachment(
+        self,
+        *,
+        module: str,
+        record_id: str,
+        message_id: str,
+        user_id: str,
+        attachment_id: str,
+        filename: str,
+    ) -> ZohoBinaryDownload:
+        """Download one email attachment without exposing Zoho credentials to the browser."""
+        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
+            raise ZohoCrmError("Zoho email attachments are only supported for Accounts and Contacts.")
+        connection = self._require_communication_connection()
+        return self._api_download(
+            connection,
+            f"/crm/v8/{module}/{record_id}/Emails/actions/download_attachments",
+            {
+                "message_id": message_id,
+                "user_id": user_id,
+                "id": attachment_id,
+                "name": filename,
+            },
+        )
+
+    def download_record_email_inline_image(
+        self,
+        *,
+        module: str,
+        record_id: str,
+        message_id: str,
+        user_id: str,
+        image_id: str,
+    ) -> ZohoBinaryDownload:
+        """Download an inline image referenced by ``crm\\img_id`` in an email body."""
+        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
+            raise ZohoCrmError("Zoho inline images are only supported for Accounts and Contacts.")
+        connection = self._require_communication_connection()
+        return self._api_download(
+            connection,
+            f"/crm/v8/{module}/{record_id}/Emails/actions/download_inline_images",
+            {
+                "message_id": message_id,
+                "user_id": user_id,
+                "id": image_id,
+            },
+        )
+
+    def create_account_note(self, *, account_id: str, title: str, content: str) -> dict[str, object]:
+        """Create a Hub-authored note in the Zoho Account related list."""
+        connection = self._require_communication_connection()
+        response = self._api_post_json(
+            connection,
+            f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{account_id}/Notes",
+            {"data": [{"Note_Title": title, "Note_Content": content}]},
+        )
+        return self._response_record(response, "note")
+
+    def send_account_email(
+        self,
+        *,
+        account_id: str,
+        sender_name: str,
+        sender_email: str,
+        recipient_name: str,
+        recipient_email: str,
+        subject: str,
+        content: str,
+        template_id: str | None = None,
+        reply_to_message_id: str | None = None,
+        reply_to_owner_id: str | None = None,
+    ) -> dict[str, object]:
+        """Send an explicit Hub message through the sender connected to Zoho CRM."""
+        connection = self._require_communication_connection()
+        message: dict[str, object] = {
+            "from": {"user_name": sender_name, "email": sender_email},
+            "to": [{"user_name": recipient_name, "email": recipient_email}],
+            "subject": subject,
+            "content": content,
+            "mail_format": "html",
+        }
+        if template_id:
+            message["template"] = {"id": self._required_template_id(template_id)}
+        if reply_to_message_id:
+            in_reply_to: dict[str, object] = {"message_id": reply_to_message_id}
+            if reply_to_owner_id:
+                in_reply_to["owner"] = {"id": reply_to_owner_id}
+            message["in_reply_to"] = in_reply_to
+        response = self._api_post_json(
+            connection,
+            f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{account_id}/actions/send_mail",
+            {"data": [message]},
+        )
+        return self._response_record(response, "email")
 
     def remove_connection(self, *, actor: HubUser) -> None:
         self._require_admin(actor)
         connection = self.get_connection()
         if connection is None:
             raise ZohoCrmError("No Zoho CRM connection is stored in the Hub.")
+        self._clear_cached_access_token(connection)
         self.db.delete(connection)
 
     def record_error(self, message: str) -> None:
@@ -451,6 +695,95 @@ class ZohoCrmService:
             raise ZohoCrmError("Zoho returned more than 2,000 Accounts. Bulk synchronization must be enabled before importing them.")
         return list(records_by_id.values())
 
+    def _synchronize_contacts(
+        self,
+        *,
+        records: list[dict[str, object]],
+        synced_at: datetime,
+    ) -> tuple[int, int, int, int]:
+        """Import Contacts only when their Zoho Account is also a Hub customer."""
+        customers_by_zoho_id = {
+            customer.zoho_id: customer
+            for customer in self.db.scalars(select(Customer).where(Customer.zoho_id.is_not(None))).all()
+            if customer.zoho_id
+        }
+        synchronized_contacts = 0
+        created_contacts = 0
+        updated_contacts = 0
+        linked_contact_ids: set[str] = set()
+
+        for record in records:
+            synchronized_contacts += 1
+            contact_id = self._as_text(record.get("id"))
+            account_id = self._lookup_record_id(record.get("Account_Name"))
+            customer = customers_by_zoho_id.get(account_id or "")
+            if not contact_id or customer is None:
+                continue
+
+            linked_contact_ids.add(contact_id)
+            contact = self.db.scalar(select(CustomerContact).where(CustomerContact.zoho_id == contact_id))
+            if contact is None:
+                contact = CustomerContact(
+                    customer=customer,
+                    zoho_id=contact_id,
+                    encrypted_profile_json="",
+                )
+                self.db.add(contact)
+                created_contacts += 1
+            else:
+                contact.customer = customer
+                updated_contacts += 1
+
+            contact.encrypted_profile_json = self.cipher.encrypt(
+                json.dumps(self._build_contact_profile(record, account_id, synced_at), ensure_ascii=False, default=str)
+            )
+            contact.zoho_modified_at = self._parse_datetime(record.get("Modified_Time"))
+            contact.zoho_synced_at = synced_at
+
+        removed_contacts = 0
+        for contact in self.db.scalars(select(CustomerContact)).all():
+            if contact.zoho_id in linked_contact_ids:
+                continue
+            self.db.delete(contact)
+            removed_contacts += 1
+
+        self.db.flush()
+        return synchronized_contacts, created_contacts, updated_contacts, removed_contacts
+
+    def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
+        requested_fields = (
+            "Account_Name,Full_Name,First_Name,Last_Name,Email,Secondary_Email,Dritte_E_Mail_Adresse,"
+            "Phone,Other_Phone,Home_Phone,Mobile,Salutation,Title,Modified_Time"
+        )
+        records_by_id: dict[str, dict[str, object]] = {}
+        for page in range(1, _MAX_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{ZOHO_CONTACT_MODULE}",
+                {
+                    "fields": requested_fields,
+                    "per_page": "200",
+                    "page": str(page),
+                },
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError("Zoho returned an invalid Contacts response. No contacts were changed.")
+            for record in data:
+                if not isinstance(record, dict):
+                    continue
+                contact_id = self._as_text(record.get("id"))
+                if contact_id:
+                    records_by_id[contact_id] = record
+            info = response.get("info")
+            more_records = isinstance(info, dict) and info.get("more_records") is True
+            if not more_records:
+                break
+        else:
+            raise ZohoCrmError("Zoho returned more than 2,000 Contacts. Bulk synchronization must be enabled before importing them.")
+        return list(records_by_id.values())
+
     def _api_get(
         self,
         connection: ZohoConnection,
@@ -470,7 +803,44 @@ class ZohoCrmService:
             allow_empty_response=allow_empty_response,
         )
 
+    def _api_post_json(
+        self,
+        connection: ZohoConnection,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        return self._request_json(
+            f"{api_domain}{path}",
+            method="POST",
+            json_body=payload,
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+        )
+
+    def _api_download(
+        self,
+        connection: ZohoConnection,
+        path: str,
+        params: dict[str, str],
+    ) -> ZohoBinaryDownload:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        return self._request_binary(
+            f"{api_domain}{path}?{urlencode(params)}",
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+        )
+
     def _refresh_access_token(self, connection: ZohoConnection) -> str:
+        cache_key = self._access_token_cache_key(connection)
+        now = datetime.now(UTC)
+        with _ACCESS_TOKEN_CACHE_LOCK:
+            cached = _ACCESS_TOKEN_CACHE.get(cache_key)
+            if cached is not None and cached[1] > now:
+                return cached[0]
+
         refresh_token = self._decrypt(connection.encrypted_refresh_token or "", "Zoho refresh token")
         data_center = self._data_center(connection.data_center)
         response = self._request_json(
@@ -487,7 +857,35 @@ class ZohoCrmService:
         if not isinstance(access_token, str) or not access_token:
             raise ZohoCrmError("Zoho could not refresh the access token. Reconnect the Zoho account.")
         connection.api_domain = self._safe_api_domain(response.get("api_domain"), data_center)
+        lifetime_seconds = self._access_token_lifetime_seconds(response)
+        expires_at = now + timedelta(seconds=max(1, lifetime_seconds - _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS))
+        with _ACCESS_TOKEN_CACHE_LOCK:
+            _ACCESS_TOKEN_CACHE[cache_key] = (access_token, expires_at)
         return access_token
+
+    @staticmethod
+    def _access_token_lifetime_seconds(response: dict[str, object]) -> int:
+        for key in ("expires_in_sec", "expires_in"):
+            value = response.get(key)
+            try:
+                lifetime = int(str(value))
+            except (TypeError, ValueError):
+                continue
+            if lifetime > 0:
+                return lifetime
+        return _DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS
+
+    @staticmethod
+    def _access_token_cache_key(connection: ZohoConnection) -> str:
+        return f"{connection.id or 'new'}:{connection.encrypted_refresh_token or ''}"
+
+    @staticmethod
+    def _clear_cached_access_token(connection: ZohoConnection) -> None:
+        prefix = f"{connection.id or 'new'}:"
+        with _ACCESS_TOKEN_CACHE_LOCK:
+            for cache_key in tuple(_ACCESS_TOKEN_CACHE):
+                if cache_key.startswith(prefix):
+                    del _ACCESS_TOKEN_CACHE[cache_key]
 
     def _build_profile(self, record: dict[str, object], mapping: dict[str, str | None], synced_at: datetime) -> dict[str, object]:
         profile: dict[str, object] = {
@@ -503,6 +901,39 @@ class ZohoCrmService:
             api_name = mapping.get(field.key)
             values[field.label] = record.get(api_name) if api_name else None
         return profile
+
+    def _build_contact_profile(
+        self,
+        record: dict[str, object],
+        account_id: str | None,
+        synced_at: datetime,
+    ) -> dict[str, object]:
+        name = self._as_text(record.get("Full_Name"))
+        if not name:
+            name = " ".join(
+                value
+                for value in (self._as_text(record.get("First_Name")), self._as_text(record.get("Last_Name")))
+                if value
+            )
+        return {
+            "source": "zoho-crm-contacts",
+            "record_id": self._as_text(record.get("id")),
+            "account_id": account_id,
+            "modified_time": self._as_text(record.get("Modified_Time")),
+            "synced_at": synced_at.isoformat(),
+            "fields": {
+                "Name": name or "Zoho Contact",
+                "Anrede": self._as_text(record.get("Salutation")),
+                "E-Mail": self._as_text(record.get("Email")),
+                "Zweite E-Mail-Adresse": self._as_text(record.get("Secondary_Email")),
+                "Dritte E-Mail-Adresse": self._as_text(record.get("Dritte_E_Mail_Adresse")),
+                "Telefon": self._as_text(record.get("Phone")),
+                "Telefon alternativ": self._as_text(record.get("Other_Phone")),
+                "Telefon privat": self._as_text(record.get("Home_Phone")),
+                "Mobil": self._as_text(record.get("Mobile")),
+                "Position": self._as_text(record.get("Title")),
+            },
+        }
 
     def _sites_by_normalized_domain(self) -> dict[str, list[Site]]:
         sites_by_domain: dict[str, list[Site]] = {}
@@ -546,14 +977,28 @@ class ZohoCrmService:
         return "created"
 
     @staticmethod
+    def _lookup_record_id(value: object) -> str | None:
+        if not isinstance(value, dict):
+            return None
+        return ZohoCrmService._as_text(value.get("id"))
+
+    @staticmethod
     def _is_relevant_account_status(value: object) -> bool:
         status = ZohoCrmService._as_text(value)
         return status is not None and status.casefold() in {item.casefold() for item in ZOHO_RELEVANT_ACCOUNT_STATUSES}
 
     @staticmethod
     def _has_current_scope_grant(connection: ZohoConnection) -> bool:
+        return ZohoCrmService._has_scope_grant(connection, frozenset(_ZOHO_CRM_SCOPE_VALUES))
+
+    @staticmethod
+    def _has_scope_grant(connection: ZohoConnection, required_scopes: frozenset[str]) -> bool:
         granted_scopes = {scope.strip() for scope in connection.scopes.split(",")}
-        return set(ZOHO_CRM_SCOPES.split(",")).issubset(granted_scopes)
+        return required_scopes.issubset(granted_scopes)
+
+    @staticmethod
+    def _utc_datetime(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
     def _require_connection(self) -> ZohoConnection:
         connection = self.get_connection()
@@ -566,6 +1011,43 @@ class ZohoCrmService:
         if connection.encrypted_refresh_token is None:
             raise ZohoCrmError("Connect Zoho CRM before reading Accounts.")
         return connection
+
+    def _require_communication_connection(self) -> ZohoConnection:
+        connection = self._require_connected_connection()
+        if not self._has_scope_grant(connection, _ZOHO_COMMUNICATION_SCOPE_VALUES):
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve the requested email and note access.")
+        return connection
+
+    def _require_template_connection(self) -> ZohoConnection:
+        connection = self._require_connected_connection()
+        if not self._has_scope_grant(connection, frozenset({_ZOHO_EMAIL_TEMPLATE_SCOPE})):
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve access to Zoho email templates.")
+        return connection
+
+    @staticmethod
+    def _email_template_records(response: dict[str, object]) -> list[dict[str, object]]:
+        records = response.get("email_templates") or response.get("data")
+        if not isinstance(records, list):
+            raise ZohoCrmError("Zoho returned an invalid email template response.")
+        return [record for record in records if isinstance(record, dict)]
+
+    @staticmethod
+    def _required_template_id(value: str) -> str:
+        normalized = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", normalized):
+            raise ZohoCrmError("Choose a valid Zoho email template.")
+        return normalized
+
+    @staticmethod
+    def _response_record(response: dict[str, object], label: str) -> dict[str, object]:
+        data = response.get("data") or response.get("Emails")
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise ZohoCrmError(f"Zoho returned no {label} result.")
+        result = data[0]
+        details = result.get("details")
+        if isinstance(details, dict):
+            return details
+        return result
 
     @staticmethod
     def _require_admin(actor: HubUser) -> None:
@@ -647,28 +1129,26 @@ class ZohoCrmService:
         *,
         method: str,
         form: dict[str, str] | None = None,
+        json_body: dict[str, object] | None = None,
         headers: dict[str, str] | None = None,
         allow_empty_response: bool = False,
     ) -> dict[str, object]:
+        if form is not None and json_body is not None:
+            raise ValueError("Provide either form data or a JSON body, not both.")
         body = urlencode(form).encode("utf-8") if form is not None else None
+        if json_body is not None:
+            body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
         request_headers = {"Accept": "application/json", **(headers or {})}
-        if body is not None:
+        if form is not None:
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        elif json_body is not None:
+            request_headers["Content-Type"] = "application/json"
         request = Request(url, data=body, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
                 payload = response.read().decode("utf-8")
         except HTTPError as exc:
-            code = "unknown_error"
-            try:
-                error_payload = json.loads(exc.read().decode("utf-8"))
-                if isinstance(error_payload, dict):
-                    provider_code = error_payload.get("code") or error_payload.get("error")
-                    if isinstance(provider_code, str):
-                        code = provider_code
-            except Exception:
-                pass
-            raise ZohoCrmError(f"Zoho rejected the request ({code}).") from exc
+            raise ZohoCrmError(f"Zoho rejected the request ({ZohoCrmService._zoho_error_code(exc)}).") from exc
         except URLError as exc:
             raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.") from exc
 
@@ -681,3 +1161,33 @@ class ZohoCrmService:
         if not isinstance(decoded, dict):
             raise ZohoCrmError("Zoho returned an invalid response.")
         return decoded
+
+    @staticmethod
+    def _request_binary(url: str, *, headers: dict[str, str]) -> ZohoBinaryDownload:
+        request = Request(url, headers={"Accept": "application/octet-stream, */*", **headers}, method="GET")
+        try:
+            with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
+                content = response.read(_MAX_EMAIL_ATTACHMENT_BYTES + 1)
+                content_type = response.headers.get_content_type()
+        except HTTPError as exc:
+            raise ZohoCrmError(f"Zoho rejected the request ({ZohoCrmService._zoho_error_code(exc)}).") from exc
+        except URLError as exc:
+            raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.") from exc
+
+        if len(content) > _MAX_EMAIL_ATTACHMENT_BYTES:
+            raise ZohoCrmError("The Zoho email attachment exceeds the Hub download limit of 25 MB.")
+        if not re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", content_type.casefold()):
+            content_type = "application/octet-stream"
+        return ZohoBinaryDownload(content=content, content_type=content_type)
+
+    @staticmethod
+    def _zoho_error_code(exc: HTTPError) -> str:
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+            if isinstance(error_payload, dict):
+                provider_code = error_payload.get("code") or error_payload.get("error")
+                if isinstance(provider_code, str):
+                    return provider_code
+        except Exception:
+            pass
+        return f"HTTP_{exc.code}"

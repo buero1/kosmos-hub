@@ -53,12 +53,30 @@
       <p class="notice-success" data-account-notice-section="account-zoho">The technical Zoho field mapping was refreshed.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "synced" %}
-      <p class="notice-success" data-account-notice-section="account-zoho">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_sites_created", "0") }} customer websites were added for Bridge onboarding and {{ request.query_params.get("zoho_sites_linked", "0") }} existing sites were linked automatically. {{ request.query_params.get("zoho_site_conflicts", "0") }} domain conflicts need review.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Zoho Accounts synchronized: {{ request.query_params.get("zoho_total", "0") }} total, {{ request.query_params.get("zoho_created", "0") }} created, and {{ request.query_params.get("zoho_updated", "0") }} updated. {{ request.query_params.get("zoho_contacts_total", "0") }} linked contacts were synchronized: {{ request.query_params.get("zoho_contacts_created", "0") }} created, {{ request.query_params.get("zoho_contacts_updated", "0") }} updated, and {{ request.query_params.get("zoho_contacts_removed", "0") }} removed. {{ request.query_params.get("zoho_visible", "0") }} are visible for the managed statuses; {{ request.query_params.get("zoho_hidden", "0") }} are hidden. {{ request.query_params.get("zoho_sites_created", "0") }} customer websites were added for Bridge onboarding and {{ request.query_params.get("zoho_sites_linked", "0") }} existing sites were linked automatically. {{ request.query_params.get("zoho_site_conflicts", "0") }} domain conflicts need review.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-templates-synced" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Zoho-E-Mail-Vorlagen synchronisiert: {{ request.query_params.get("zoho_templates_created", "0") }} neu, {{ request.query_params.get("zoho_templates_updated", "0") }} aktualisiert und {{ request.query_params.get("zoho_templates_archived", "0") }} archiviert.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-history-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der vollständige Zoho-E-Mail-Verlauf wird jetzt im Hintergrund importiert.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-history-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der vollständige Zoho-E-Mail-Import läuft bereits weiter.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-content-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport für 50 vollständige Zoho-E-Mails läuft jetzt im Hintergrund.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-content-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport für vollständige Zoho-E-Mails läuft bereits weiter.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-content-import-completed" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport mit 50 vollständigen Zoho-E-Mails ist bereits abgeschlossen.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
     {% endif %}
-    {% if request.query_params.get("zoho") in ["connect-failed", "mapping-failed", "sync-failed", "not-approved"] %}
+    {% if request.query_params.get("zoho") in ["connect-failed", "mapping-failed", "sync-failed", "email-templates-failed", "not-approved"] %}
       <p class="notice-error" data-account-notice-section="account-zoho">{{ zoho_status.last_error or "The Zoho action could not be completed." }}</p>
     {% endif %}
     {% if error %}<p class="notice-error" data-account-notice-section="{{ error_section }}">{{ error }}</p>{% endif %}
@@ -213,8 +231,8 @@
       <div class="zoho-section-heading">
         <div class="zoho-heading-copy">
           <p class="eyebrow">CRM integration</p>
-          <h3>Zoho CRM Accounts</h3>
-          <p class="subtle">All Zoho Accounts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer profile fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
+          <h3>Zoho CRM Customers</h3>
+          <p class="subtle">All Zoho Accounts and their linked Contacts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer and contact fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
           {% if zoho_status.configured %}
             {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
             {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
@@ -223,10 +241,24 @@
           {% endif %}
         </div>
         {% if zoho_status.connected and not zoho_status.requires_scope_reconnect %}
-          <form class="zoho-sync-heading-action" method="post" action="/account/zoho/sync">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button" type="submit">Sync all Zoho Accounts now</button>
-          </form>
+          <div class="zoho-sync-heading-action">
+            <form method="post" action="/account/zoho/sync">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button" type="submit">Sync Zoho customers and contacts now</button>
+            </form>
+            <form method="post" action="/account/zoho/email-templates/sync">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit">Zoho-E-Mail-Vorlagen synchronisieren</button>
+            </form>
+            <form method="post" action="/account/zoho/email-history/import">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit">Alle Zoho-E-Mail-Verläufe importieren</button>
+            </form>
+            <form method="post" action="/account/zoho/email-content/import-test">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit" {% if zoho_email_content_import and zoho_email_content_import.status == "completed" and not zoho_email_content_import.failed_emails %}disabled{% endif %}>50 E-Mail-Inhalte testweise laden</button>
+            </form>
+          </div>
         {% endif %}
         {% if zoho_status.configured %}
           <div class="zoho-connection-status">
@@ -236,6 +268,54 @@
         {% endif %}
       </div>
       {% if zoho_status.connected %}
+        <div class="zoho-notification-test">
+          <div>
+            <h4>Zoho-E-Mail-Verläufe</h4>
+            <p class="subtle">Der Import lädt die Kopfzeilen aller Kunden und ihrer Kontakte fortsetzbar im Hintergrund. E-Mail-Inhalte und Anhänge werden nicht geladen.</p>
+          </div>
+          <div class="zoho-notification-test-status">
+            {% if zoho_email_history_import %}
+              <p><strong>{{ zoho_email_history_import.processed_customers }} von {{ zoho_email_history_import.total_customers }} Kunden</strong> · {{ zoho_email_history_import.imported_emails }} neue E-Mail-Kopfzeilen · Status: {{ zoho_email_history_import.status }}{% if zoho_email_history_import.started_at %} · gestartet {{ zoho_email_history_import.started_at | berlin_time }}{% endif %}{% if zoho_email_history_import.completed_at %} · beendet {{ zoho_email_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_history_import.last_error %} · {{ zoho_email_history_import.last_error }}{% endif %}</p>
+            {% else %}
+              <p class="subtle">Noch kein vollständiger E-Mail-Verlauf importiert.</p>
+            {% endif %}
+          </div>
+        </div>
+        <div class="zoho-notification-test zoho-email-workflow-webhook">
+          <div>
+            <h4>Manueller E-Mail-Webhook</h4>
+            <p class="subtle">Empfängt eine Zoho-E-Mail-Meldung und aktualisiert nur den betroffenen Kunden oder Kontakt im Hub. Die Zoho-Automation richtest du selbst ein; der Hub erstellt oder verändert keine Zoho-Regeln.</p>
+          </div>
+          <form method="post" action="/account/zoho/email-workflow-webhook/token">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">{% if zoho_email_workflow_webhook.is_configured %}Webhook-URL erneuern{% else %}Webhook-URL erzeugen{% endif %}</button>
+          </form>
+          <div class="zoho-notification-test-status">
+            {% if new_zoho_email_workflow_webhook_url %}
+              <p class="notice-warning"><strong>Webhook-URL, nur jetzt sichtbar:</strong> <code>{{ new_zoho_email_workflow_webhook_url }}</code></p>
+            {% endif %}
+            {% if zoho_email_workflow_webhook.is_configured %}
+              <p>Empfang eingerichtet{% if zoho_email_workflow_webhook.last_received_at %} · letzte Meldung: {{ zoho_email_workflow_webhook.last_received_at | berlin_time }}{% else %} · noch keine Meldung empfangen{% endif %}{% if zoho_email_workflow_webhook.last_imported_at %} · letzter Import: {{ zoho_email_workflow_webhook.last_imported_at | berlin_time }}{% endif %}{% if zoho_email_workflow_webhook.last_error %} · {{ zoho_email_workflow_webhook.last_error }}{% endif %}</p>
+              <p class="subtle">Die vollständige Webhook-URL wird aus Sicherheitsgründen nur beim Erzeugen oder Ersetzen des Zugangscodes angezeigt.</p>
+            {% else %}
+              <p class="subtle">Erzeuge zuerst eine Webhook-URL und hinterlege diese direkt als Zoho-Benachrichtigungs-URL. Ein zusätzlicher Header ist nicht nötig.</p>
+            {% endif %}
+            <p class="subtle">Ein gemeinsamer Zoho-Webhook kann die Formularparameter <code>absender</code> und <code>empfaenger</code> senden. Der Hub ordnet ausschließlich über Kontakt-E-Mail-Adressen zu: bei eingehenden E-Mails meist den Absender, bei ausgehenden meist den Empfänger. Mehrere passende Kontakte aktualisieren alle zugehörigen Kunden; nur ohne Kontakt-Treffer wird nichts importiert.</p>
+          </div>
+        </div>
+        <div class="zoho-notification-test">
+          <div>
+            <h4>Vollständige E-Mail-Inhalte</h4>
+            <p class="subtle">Der Test lädt die 50 neuesten noch nicht gespeicherten E-Mail-Inhalte verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
+          </div>
+          <div class="zoho-notification-test-status">
+            {% if zoho_email_content_import %}
+              <p><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen · Status: {{ zoho_email_content_import.status }}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
+            {% else %}
+              <p class="subtle">Noch kein Testimport von E-Mail-Inhalten ausgeführt.</p>
+            {% endif %}
+          </div>
+        </div>
         <details class="account-details zoho-mapping-details">
           <summary>Account field mapping: {{ zoho_status.mapped_field_count }} of {{ zoho_mapping|length }} fields found</summary>
           <div class="zoho-mapping-action-row">

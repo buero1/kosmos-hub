@@ -1,11 +1,13 @@
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.csrf import get_csrf_token, require_csrf
 from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
@@ -19,15 +21,24 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.site_users import SiteUserService
+from app.services.user_deletion_batches import UserDeletionBatchService
 from app.services.site_admin_launch import SiteAdminLaunchService
 from app.services.maintenance_runs import MaintenanceRunService
-from app.services.maintenance_worker import schedule_pending_complete_site_updates, schedule_pending_direct_updates
+from app.services.maintenance_worker import (
+    schedule_pending_complete_site_updates,
+    schedule_pending_direct_updates,
+    schedule_pending_user_deletions,
+)
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
+from app.services.customer_communications import CustomerCommunicationImageError, CustomerCommunicationService
+from app.services.hub_mailbox import HubMailboxService, MAILBOX_FOLDERS
+from app.models.customer import Customer
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
+from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsError, StylingSettingsService
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
-from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
+from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -49,6 +60,79 @@ def dashboard(request: Request, db: Annotated[Session, Depends(get_db)]):
             "sites": latest_sites,
         },
     )
+
+
+@router.get("/styling", response_class=HTMLResponse)
+def styling_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "styling.html",
+        _styling_context(request, StylingSettingsService(db=db)),
+    )
+
+
+@router.post("/styling")
+def update_styling(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+    font_family_key: Annotated[str, Form()] = "serif",
+    background_color: Annotated[str, Form()] = "#f5f1e8",
+    background_secondary_color: Annotated[str, Form()] = "#efe8da",
+    panel_color: Annotated[str, Form()] = "#fffaf2",
+    ink_color: Annotated[str, Form()] = "#1d2a2f",
+    muted_color: Annotated[str, Form()] = "#6c7469",
+    accent_color: Annotated[str, Form()] = "#0e7c66",
+    accent_soft_color: Annotated[str, Form()] = "#d7efe8",
+    border_color: Annotated[str, Form()] = "#d9d2c5",
+    base_spacing: Annotated[int, Form()] = 16,
+    panel_radius: Annotated[int, Form()] = 18,
+    control_v1_height: Annotated[int, Form()] = 38,
+    control_v1_font_size: Annotated[int, Form()] = 13,
+    control_v1_padding: Annotated[int, Form()] = 12,
+    control_v1_radius: Annotated[int, Form()] = 5,
+    control_v2_height: Annotated[int, Form()] = 30,
+    control_v2_font_size: Annotated[int, Form()] = 12,
+    control_v2_padding: Annotated[int, Form()] = 10,
+    control_v2_radius: Annotated[int, Form()] = 3,
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    service = StylingSettingsService(db=db)
+    try:
+        service.configure(
+            actor=user,
+            font_family_key=font_family_key,
+            background_color=background_color,
+            background_secondary_color=background_secondary_color,
+            panel_color=panel_color,
+            ink_color=ink_color,
+            muted_color=muted_color,
+            accent_color=accent_color,
+            accent_soft_color=accent_soft_color,
+            border_color=border_color,
+            base_spacing=base_spacing,
+            panel_radius=panel_radius,
+            control_v1_height=control_v1_height,
+            control_v1_font_size=control_v1_font_size,
+            control_v1_padding=control_v1_padding,
+            control_v1_radius=control_v1_radius,
+            control_v2_height=control_v2_height,
+            control_v2_font_size=control_v2_font_size,
+            control_v2_padding=control_v2_padding,
+            control_v2_radius=control_v2_radius,
+        )
+    except StylingSettingsError as exc:
+        return templates.TemplateResponse(
+            request,
+            "styling.html",
+            _styling_context(request, service, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(db, site=None, actor=user.username, source="hub-styling", action="update-global-styling", result="success")
+    db.commit()
+    return RedirectResponse(url="/styling?styling=saved", status_code=303)
 
 
 @router.get("/sites", response_class=HTMLResponse)
@@ -151,12 +235,22 @@ def customers_page(
     db: Annotated[Session, Depends(get_db)],
     q: str = "",
     status: str = "all",
+    industry: str = "all",
+    email: str = "all",
 ):
     valid_statuses = {*ZOHO_RELEVANT_ACCOUNT_STATUSES, "all"}
     if status not in valid_statuses:
         raise HTTPException(status_code=422, detail="Unknown customer status filter.")
+    if email not in {"all", "unread"}:
+        raise HTTPException(status_code=422, detail="Unknown customer email filter.")
     service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
-    entries = service.list_entries(query=q, status=None if status == "all" else status)
+    industry_options = service.list_industries()
+    entries = service.list_entries(
+        query=q,
+        status=None if status == "all" else status,
+        industry=None if industry == "all" else industry,
+        unread_email_only=email == "unread",
+    )
     candidate_count = sum(entry.exact_match_candidate is not None for entry in entries)
     return templates.TemplateResponse(
         request,
@@ -164,10 +258,170 @@ def customers_page(
         {
             "entries": entries,
             "candidate_count": candidate_count,
-            "filters": {"q": q, "status": status},
+            "filters": {"q": q, "status": status, "industry": industry, "email": email},
             "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
+            "industry_options": industry_options,
             "csrf_token": get_csrf_token(request),
         },
+    )
+
+
+@router.get("/emails", response_class=HTMLResponse)
+def mailbox_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    folder: str = "inbox",
+    unread: bool = False,
+    selected: str = "",
+):
+    _require_hub_admin(request)
+    if folder not in MAILBOX_FOLDERS:
+        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).get_view(folder=folder, unread_only=unread, selected_key=selected)
+    compose_customers = tuple(
+        db.scalars(
+            select(Customer)
+            .where(Customer.is_visible.is_(True))
+            .order_by(Customer.name.asc(), Customer.id.asc())
+        ).all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "emails.html",
+        {
+            "mailbox": mailbox,
+            "folder": folder,
+            "unread": unread,
+            "compose_customers": compose_customers,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.get("/emails/selected", response_class=HTMLResponse)
+def mailbox_selected_pane(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    folder: str = "inbox",
+    unread: bool = False,
+    selected: str = "",
+):
+    _require_hub_admin(request)
+    if folder not in MAILBOX_FOLDERS:
+        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
+    mailbox_service = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    return templates.TemplateResponse(
+        request,
+        "emails_reading_pane.html",
+        {
+            "selected": mailbox_service.get_selected_message(
+                folder=folder,
+                unread_only=unread,
+                selected_key=selected,
+            ),
+            "folder": folder,
+            "unread": unread,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.get("/emails/folder", response_class=HTMLResponse)
+def mailbox_folder_panel(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    folder: str = "inbox",
+    unread: bool = False,
+    selected: str = "",
+):
+    _require_hub_admin(request)
+    if folder not in MAILBOX_FOLDERS:
+        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
+    mailbox_service = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    return templates.TemplateResponse(
+        request,
+        "emails_folder_panel.html",
+        {
+            "mailbox": mailbox_service.get_folder_view(
+                folder=folder,
+                unread_only=unread,
+                selected_key=selected,
+            ),
+            "folder": folder,
+            "unread": unread,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.get("/emails/compose")
+def compose_mailbox_email(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    if db.get(Customer, customer_id) is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+    return RedirectResponse(url=f"/customers/{customer_id}?compose_email=1", status_code=303)
+
+
+@router.post("/emails/unassigned/{email_id}/read")
+def mark_unassigned_mailbox_email_read(
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    _require_hub_admin(request)
+    try:
+        HubMailboxService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).mark_unassigned_read(email_id=email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/emails/linked/{customer_id}/{email_id}/load")
+def load_linked_mailbox_email_content(
+    customer_id: int,
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    folder: Annotated[str, Form()] = "inbox",
+    unread: Annotated[bool, Form()] = False,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    _require_hub_admin(request)
+    if folder not in MAILBOX_FOLDERS:
+        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
+    try:
+        _customer_communication_service(db).load_email_content(customer_id=customer_id, email_id=email_id)
+    except (ValueError, ZohoCrmError):
+        db.rollback()
+    else:
+        db.commit()
+    return RedirectResponse(
+        url=_mailbox_url(folder=folder, unread=unread, selected=f"linked-{customer_id}-{email_id}"),
+        status_code=303,
     )
 
 
@@ -176,13 +430,339 @@ def customer_detail_page(
     customer_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    communication: str = "",
+    message: str = "",
+    compose_email: bool = False,
+    reply_email: int | None = None,
 ):
-    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_detail(customer_id=customer_id)
+    cipher = get_secret_cipher()
+    detail = CustomerDirectoryService(db=db, cipher=cipher).get_detail(customer_id=customer_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Customer not found.")
+    communication_service = CustomerCommunicationService(
+        db=db,
+        cipher=cipher,
+        public_base_url=get_settings().public_base_url,
+    )
+    can_manage_communications = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
+    reply_context = None
+    reply_error = ""
+    if reply_email is not None and can_manage_communications:
+        try:
+            reply_context = communication_service.get_email_reply(customer_id=customer_id, email_id=reply_email)
+        except ValueError as exc:
+            reply_error = str(exc)
+    communication_view = communication_service.get_view(customer_id=customer_id)
+    communication_state = communication if communication in {"success", "warning", "error"} else ""
+    communication_senders = ()
+    communication_sender_error = ""
+    communication_templates = communication_service.list_email_templates()
+    if can_manage_communications:
+        try:
+            communication_senders = communication_service.list_senders()
+        except ZohoCrmError as exc:
+            communication_sender_error = str(exc)
     return templates.TemplateResponse(
         request,
         "customer_detail.html",
+        {
+            "detail": detail,
+            "communication": communication_view,
+            "communication_senders": communication_senders,
+            "communication_sender_error": communication_sender_error,
+            "communication_templates": communication_templates,
+            "communication_state": communication_state,
+            "communication_message": message[:500] if communication_state else "",
+            "can_manage_communications": can_manage_communications,
+            "open_email_composer": compose_email or reply_context is not None,
+            "email_reply": reply_context,
+            "email_reply_error": reply_error,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/customers/{customer_id}/communications/sync")
+def sync_customer_communications(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _customer_communication_service(db).sync_customer(customer_id=customer_id)
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="sync-zoho-customer-communications",
+        result="ok",
+        detail=f"Synchronized Zoho communication headers for customer {customer_id}: {result.notes} new notes, {result.emails} new emails.",
+    )
+    db.commit()
+    return _customer_communication_redirect(
+        customer_id,
+        "success",
+        f"Zoho-Kommunikation aktualisiert: {result.notes} neue Notizen, {result.emails} neue E-Mail-Köpfe.",
+    )
+
+
+@router.post("/customers/{customer_id}/communications/notes")
+def create_customer_communication_note(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    title: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _customer_communication_service(db).create_note(
+            customer_id=customer_id,
+            actor=user.username,
+            title=title,
+            content=content,
+        )
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-zoho-customer-note",
+        result="ok" if result.success else "failed",
+        detail=f"Created customer note for customer {customer_id}; note content is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_communication_redirect(customer_id, "success" if result.success else "warning", result.message)
+
+
+@router.post("/customers/{customer_id}/communications/emails")
+def send_customer_communication_email(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    sender_email: Annotated[str, Form()] = "",
+    recipient_key: Annotated[str, Form()] = "",
+    subject: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    template_id: Annotated[str, Form()] = "",
+    reply_to_email_id: Annotated[str, Form()] = "",
+    confirmed: Annotated[bool, Form()] = False,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        reply_to_id = int(reply_to_email_id) if reply_to_email_id.strip() else None
+        result = _customer_communication_service(db).send_email(
+            customer_id=customer_id,
+            actor=user.username,
+            sender_email=sender_email,
+            recipient_key=recipient_key,
+            subject=subject,
+            content=content,
+            confirmed=confirmed,
+            template_id=template_id,
+            reply_to_email_id=reply_to_id,
+        )
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="send-zoho-customer-email",
+        result="ok" if result.success else "failed",
+        detail=f"Sent customer email for customer {customer_id}; recipients and message content are not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_communication_redirect(customer_id, "success" if result.success else "warning", result.message)
+
+
+@router.get("/customers/{customer_id}/communications/email-templates/{template_id}", response_class=JSONResponse)
+def load_customer_communication_email_template(
+    customer_id: int,
+    template_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    recipient_key: str = "",
+):
+    _require_hub_admin(request)
+    try:
+        template = _customer_communication_service(db).get_email_template(
+            customer_id=customer_id,
+            template_id=template_id,
+            recipient_key=recipient_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ZohoCrmError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "id": template.id,
+        "name": template.name,
+        "subject": template.subject,
+        "content": template.content,
+        "unresolved_placeholders": template.unresolved_placeholders,
+    }
+
+
+@router.post("/customers/{customer_id}/communications/emails/{email_id}/load")
+def load_customer_communication_email(
+    customer_id: int,
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _customer_communication_service(db).load_email_content(
+            customer_id=customer_id,
+            email_id=email_id,
+        )
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="load-zoho-customer-email-content",
+        result="ok",
+        detail=f"Loaded encrypted Zoho email content for customer {customer_id}.",
+    )
+    db.commit()
+    return _customer_communication_redirect(customer_id, "success", result.message)
+
+
+@router.post("/customers/{customer_id}/communications/emails/{email_id}/read")
+def mark_customer_communication_email_read(
+    customer_id: int,
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    if getattr(request.state, "hub_user", None) is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        _customer_communication_service(db).mark_email_read(customer_id=customer_id, email_id=email_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/customers/{customer_id}/communications/emails/{email_id}/attachments/{attachment_id}")
+def download_customer_communication_attachment(
+    customer_id: int,
+    email_id: int,
+    attachment_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    user = _require_hub_admin(request)
+    try:
+        download = _customer_communication_service(db).download_email_attachment(
+            customer_id=customer_id,
+            email_id=email_id,
+            attachment_id=attachment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ZohoCrmError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="download-zoho-customer-email-attachment",
+        result="ok",
+        detail=f"Downloaded a Zoho email attachment for customer {customer_id}; attachment data is not retained in the Hub.",
+    )
+    db.commit()
+    return Response(
+        content=download.content,
+        media_type=download.content_type,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(download.filename, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/customers/{customer_id}/communications/emails/{email_id}/images/{source_url_hash}")
+def display_customer_communication_email_image(
+    customer_id: int,
+    email_id: int,
+    source_url_hash: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        image = _customer_communication_service(db).get_email_preview_image(
+            customer_id=customer_id,
+            email_id=email_id,
+            source_url_hash=source_url_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CustomerCommunicationImageError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Das externe Bild konnte nicht sicher geladen werden.") from exc
+
+    db.commit()
+    return Response(
+        content=image.content,
+        media_type=image.content_type,
+        headers={
+            "Cache-Control": "private, max-age=2592000",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/customers/{customer_id}/contacts/{contact_id}", response_class=HTMLResponse)
+def customer_contact_detail_page(
+    customer_id: int,
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_contact_detail(
+        customer_id=customer_id,
+        contact_id=contact_id,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Contact not found for this customer.")
+    return templates.TemplateResponse(
+        request,
+        "customer_contact_detail.html",
         {
             "detail": detail,
             "csrf_token": get_csrf_token(request),
@@ -239,6 +819,8 @@ def users_workbench_page(
     fresh_users: str = "",
     active_refresh_run_id: Annotated[int | None, Query(ge=1)] = None,
     message: str = "",
+    deletion_batch_id: Annotated[int | None, Query(ge=1)] = None,
+    deletion_error: str = "",
 ):
     _require_hub_admin(request)
     selected_site_ids = set(site_id or []) if site_scope == "selected" else None
@@ -256,6 +838,8 @@ def users_workbench_page(
             fresh_users=fresh_users,
             active_refresh_run_id=active_refresh_run_id,
             message=message,
+            deletion_batch_id=deletion_batch_id,
+            deletion_error=deletion_error,
         ),
     )
 
@@ -425,13 +1009,10 @@ def update_selected_user_passwords(
     db: Annotated[Session, Depends(get_db)],
     selected: Annotated[list[str] | None, Form()] = None,
     password: Annotated[str, Form()] = "",
-    confirm_shared_password: Annotated[bool, Form()] = False,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
-    if not confirm_shared_password:
-        return _render_user_workbench(request, db, error="Confirm that the same password should be applied to every selected WordPress user.")
     try:
         outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).update_passwords_bulk(
             selected_keys=selected or [],
@@ -443,64 +1024,199 @@ def update_selected_user_passwords(
     return _render_user_workbench(request, db, outcomes=outcomes, action_label="Password update")
 
 
-@router.post("/users/bulk/delete/review", response_class=HTMLResponse)
-def review_selected_user_deletions(
+@router.post("/users/actions/create-site", response_class=JSONResponse)
+def create_user_on_one_site(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    selected: Annotated[list[str] | None, Form()] = None,
+    site_id: Annotated[int, Form()],
+    username: Annotated[str, Form()],
+    email: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    role: Annotated[str, Form()],
     csrf_token: Annotated[str, Form()] = "",
 ):
+    """Execute one browser-orchestrated creation without storing the submitted password."""
     require_csrf(request, csrf_token)
-    _require_hub_admin(request)
-    service = SiteUserService(db=db, cipher=get_secret_cipher())
+    user = _require_hub_admin(request)
+    site = SiteRepository(db).get_site(site_id)
+    if site is None:
+        return {"site_id": site_id, "site": "Unknown site", "username": username, "status": "failed", "message": "The selected site no longer exists."}
     try:
-        targets = service.selected_workbench_entries(selected or [])
-    except ValueError as exc:
-        return _render_user_workbench(request, db, error=str(exc))
-
-    entries_by_site: dict[int, list] = {}
-    for entry in service.list_workbench_entries():
-        entries_by_site.setdefault(entry.site.id, []).append(entry)
-    review_items = [
-        {
-            "target": target,
-            "replacements": [
-                entry for entry in entries_by_site.get(target.site.id, []) if entry.user["id"] != target.user["id"]
-            ],
-        }
-        for target in targets
-    ]
-    return templates.TemplateResponse(
-        request,
-        "user_delete_review.html",
-        {
-            "review_items": review_items,
-            "deletion_ready": all(item["replacements"] for item in review_items),
-            "csrf_token": get_csrf_token(request),
-        },
-    )
+        created = SiteUserService(db=db, cipher=get_secret_cipher()).create_user(
+            site_id=site_id,
+            username=username,
+            email=email,
+            password=password,
+            role=role,
+            display_name="",
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return {"site_id": site.id, "site": site.domain, "username": username, "status": "failed", "message": str(exc)}
+    return {
+        "site_id": site.id,
+        "site": site.domain,
+        "username": str(created.get("username") or username),
+        "status": "succeeded",
+        "message": "Created and verified by WordPress.",
+    }
 
 
-@router.post("/users/bulk/delete", response_class=HTMLResponse)
-def delete_selected_users(
+@router.post("/users/actions/update-role", response_class=JSONResponse)
+def update_one_user_role(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[int, Form()],
+    user_id: Annotated[int, Form()],
+    role: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Execute one browser-orchestrated role change."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    site = SiteRepository(db).get_site(site_id)
+    if site is None:
+        return {"site_id": site_id, "site": "Unknown site", "username": str(user_id), "status": "failed", "message": "The selected site no longer exists."}
+    try:
+        changed = SiteUserService(db=db, cipher=get_secret_cipher()).update_role(
+            site_id=site_id,
+            user_id=user_id,
+            role=role,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return {"site_id": site.id, "site": site.domain, "username": str(user_id), "status": "failed", "message": str(exc)}
+    return {
+        "site_id": site.id,
+        "site": site.domain,
+        "username": str(changed.get("username") or user_id),
+        "status": "succeeded",
+        "message": f"Role changed to {role} and verified by WordPress.",
+    }
+
+
+@router.post("/users/actions/update-password", response_class=JSONResponse)
+def update_one_user_password(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[int, Form()],
+    user_id: Annotated[int, Form()],
+    password: Annotated[str, Form()],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Execute one browser-orchestrated password change without storing the password."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    site = SiteRepository(db).get_site(site_id)
+    if site is None:
+        return {"site_id": site_id, "site": "Unknown site", "username": str(user_id), "status": "failed", "message": "The selected site no longer exists."}
+    try:
+        changed = SiteUserService(db=db, cipher=get_secret_cipher()).update_password(
+            site_id=site_id,
+            user_id=user_id,
+            password=password,
+            actor=user.username,
+        )
+    except (SiteMcpProxyError, ValueError) as exc:
+        return {"site_id": site.id, "site": site.domain, "username": str(user_id), "status": "failed", "message": str(exc)}
+    return {
+        "site_id": site.id,
+        "site": site.domain,
+        "username": str(changed.get("username") or user_id),
+        "status": "succeeded",
+        "message": "Password changed and verified by WordPress.",
+    }
+
+
+@router.post("/users/bulk/delete/prepare")
+def prepare_selected_user_deletions(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     selected: Annotated[list[str] | None, Form()] = None,
-    reassign_to_user_id: Annotated[list[int] | None, Form()] = None,
+    deletion_confirmation: Annotated[str, Form()] = "",
+    return_to: Annotated[str, Form()] = "/users",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _require_hub_admin(request)
-    selection = selected or []
+    return_url = _safe_users_return_url(return_to)
     try:
-        outcomes = SiteUserService(db=db, cipher=get_secret_cipher()).delete_users_bulk(
-            selected_keys=selection,
-            reassign_to_user_ids=reassign_to_user_id or [],
+        batch = UserDeletionBatchService(db=db, cipher=get_secret_cipher()).prepare_batch(
+            selected_keys=selected or [],
             actor=user.username,
+            deletion_confirmation=deletion_confirmation,
         )
-    except (SiteMcpProxyError, ValueError) as exc:
-        return _render_user_workbench(request, db, error=str(exc))
-    return _render_user_workbench(request, db, outcomes=outcomes, action_label="User deletion")
+        db.commit()
+    except ValueError as exc:
+        return RedirectResponse(
+            url=_users_return_url_with_deletion_error(return_url, str(exc)),
+            status_code=303,
+        )
+    return RedirectResponse(url=_user_deletion_batch_url(batch.id, return_to=return_url), status_code=303)
+
+
+@router.post("/users/deletion-batches/{batch_id}/start")
+def start_selected_user_deletion_batch(
+    batch_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    item_id: Annotated[list[int] | None, Form()] = None,
+    reassign_to_user_id: Annotated[list[int] | None, Form()] = None,
+    return_to: Annotated[str, Form()] = "/users",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    _require_hub_admin(request)
+    return_url = _safe_users_return_url(return_to)
+    try:
+        UserDeletionBatchService(db=db, cipher=get_secret_cipher()).start_batch(
+            batch_id=batch_id,
+            item_ids=item_id or [],
+            replacement_user_ids=reassign_to_user_id or [],
+        )
+        db.commit()
+    except ValueError as exc:
+        return RedirectResponse(url=_user_deletion_batch_url(batch_id, return_to=return_url, error=str(exc)), status_code=303)
+    schedule_pending_user_deletions()
+    return RedirectResponse(url=_user_deletion_batch_url(batch_id, return_to=return_url), status_code=303)
+
+
+@router.get("/users/deletion-batches/{batch_id}/status", response_class=JSONResponse)
+def user_deletion_batch_status(
+    batch_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    service = UserDeletionBatchService(db=db, cipher=get_secret_cipher())
+    batch = service.get_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="The deletion batch no longer exists.")
+    return service.status_payload(batch)
+
+
+@router.post("/users/deletion-batches/{batch_id}/cancel")
+def cancel_selected_user_deletion_batch(
+    batch_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    return_to: Annotated[str, Form()] = "/users",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    _require_hub_admin(request)
+    return_url = _safe_users_return_url(return_to)
+    try:
+        service = UserDeletionBatchService(db=db, cipher=get_secret_cipher())
+        batch = service.get_batch(batch_id)
+        was_prepared = batch is not None and batch.status == UserDeletionBatchService.BATCH_PREPARED
+        service.cancel_batch(batch_id=batch_id)
+        db.commit()
+    except ValueError as exc:
+        return RedirectResponse(url=_user_deletion_batch_url(batch_id, return_to=return_url, error=str(exc)), status_code=303)
+    if was_prepared:
+        return RedirectResponse(url=return_url, status_code=303)
+    return RedirectResponse(url=_user_deletion_batch_url(batch_id, return_to=return_url), status_code=303)
 
 
 @router.get("/updates", response_class=HTMLResponse)
@@ -1644,6 +2360,37 @@ def _is_removable_empty_test_registration(site) -> bool:
     )
 
 
+def _safe_users_return_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.path != "/users":
+        return "/users"
+    return f"/users?{parsed.query}" if parsed.query else "/users"
+
+
+def _user_deletion_batch_url(batch_id: int, *, return_to: str = "/users", error: str = "") -> str:
+    parsed = urlsplit(_safe_users_return_url(return_to))
+    query: list[tuple[str, str | int]] = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"deletion_batch_id", "deletion_error"}
+    ]
+    query.append(("deletion_batch_id", batch_id))
+    if error:
+        query.append(("deletion_error", error))
+    return f"/users?{urlencode(query)}#user-deletion"
+
+
+def _users_return_url_with_deletion_error(return_to: str, error: str) -> str:
+    parsed = urlsplit(_safe_users_return_url(return_to))
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key != "deletion_error"
+    ]
+    query.append(("deletion_error", error))
+    return f"/users?{urlencode(query)}"
+
+
 def _render_user_workbench(
     request: Request,
     db: Session,
@@ -1651,6 +2398,8 @@ def _render_user_workbench(
     error: str = "",
     outcomes: list[dict[str, str]] | None = None,
     action_label: str = "",
+    deletion_batch_id: int | None = None,
+    deletion_error: str = "",
 ):
     return templates.TemplateResponse(
         request,
@@ -1661,6 +2410,8 @@ def _render_user_workbench(
             error=error,
             outcomes=outcomes or [],
             action_label=action_label,
+            deletion_batch_id=deletion_batch_id,
+            deletion_error=deletion_error,
         ),
     )
 
@@ -1681,6 +2432,8 @@ def _user_workbench_context(
     fresh_users: str = "",
     active_refresh_run_id: int | None = None,
     message: str = "",
+    deletion_batch_id: int | None = None,
+    deletion_error: str = "",
 ) -> dict:
     service = SiteUserService(db=db, cipher=get_secret_cipher())
     entries = service.list_workbench_entries()
@@ -1732,6 +2485,21 @@ def _user_workbench_context(
             [("q", query), ("role", role), ("customer_status", customer_status), ("fresh_users", "ok"), ("message", "Fresh user inventory checks completed.")]
         )
         completion_url = f"/users?{urlencode(completion_query)}"
+    deletion_return_query: list[tuple[str, str | int]] = [("site_scope", site_scope)]
+    deletion_return_query.extend(("site_id", selected_id) for selected_id in sorted(selected_site_ids or []))
+    deletion_return_query.extend(
+        [("q", query), ("role", role), ("customer_status", customer_status)]
+    )
+    deletion_return_url = f"/users?{urlencode(deletion_return_query)}"
+    deletion_service = UserDeletionBatchService(db=db, cipher=get_secret_cipher())
+    deletion_batch = deletion_service.get_batch(deletion_batch_id) if deletion_batch_id is not None else None
+    deletion_rows = deletion_service.preparation_rows(deletion_batch) if deletion_batch is not None else []
+    deletion_batch_can_start = deletion_batch is not None and deletion_service.batch_can_start(deletion_batch, deletion_rows)
+    if deletion_batch is not None and deletion_batch.status in {
+        UserDeletionBatchService.BATCH_QUEUED,
+        UserDeletionBatchService.BATCH_RUNNING,
+    }:
+        schedule_pending_user_deletions()
     return {
         "entries": filtered_entries,
         "summary": {
@@ -1767,8 +2535,14 @@ def _user_workbench_context(
         "outcomes": outcome_rows,
         "action_label": action_label,
         "bulk_limit": SiteUserService.BULK_ACTION_LIMIT,
+        "deletion_text_confirmation_threshold": UserDeletionBatchService.TEXT_CONFIRMATION_THRESHOLD,
         "fresh_users": fresh_users,
         "message": message,
+        "deletion_error": deletion_error,
+        "deletion_batch": deletion_batch,
+        "deletion_rows": deletion_rows,
+        "deletion_batch_can_start": deletion_batch_can_start,
+        "deletion_return_url": deletion_return_url,
         "progress_refresh_run": progress_refresh_run,
         "refresh_completion_url": completion_url,
         "refresh_completion_label": "Benutzerprüfung abgeschlossen",
@@ -1981,6 +2755,38 @@ def _updates_return_url_with_message(return_url: str, message: str) -> str:
     query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "message"]
     query.append(("message", message))
     return f"/updates?{urlencode(query)}"
+
+
+def _customer_communication_service(db: Session) -> CustomerCommunicationService:
+    return CustomerCommunicationService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+
+
+def _customer_communication_redirect(customer_id: int, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"communication": state, "message": message[:500]})
+    return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-communications", status_code=303)
+
+
+def _mailbox_url(*, folder: str, unread: bool, selected: str) -> str:
+    query = {"folder": folder, "selected": selected}
+    if unread:
+        query["unread"] = "true"
+    return f"/emails?{urlencode(query)}"
+
+
+def _styling_context(request: Request, service: StylingSettingsService, error: str | None = None) -> dict:
+    return {
+        "styling": service.get_runtime_settings(),
+        "font_family_options": [
+            {"key": key, "label": label}
+            for key, label, _ in FONT_FAMILY_OPTIONS
+        ],
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
 
 
 def _require_hub_admin(request: Request):

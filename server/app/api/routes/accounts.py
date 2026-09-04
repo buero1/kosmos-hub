@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
+from secrets import compare_digest
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -17,6 +19,15 @@ from app.services.fleet_refresh_settings import FleetRefreshSettingsError, Fleet
 from app.services.hub_accounts import HubAccountService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
+from app.services.customer_communications import CustomerCommunicationService
+from app.services.maintenance_worker import (
+    schedule_pending_zoho_email_content_import,
+    schedule_pending_zoho_email_history_import,
+    schedule_pending_zoho_email_workflow_deliveries,
+)
+from app.services.zoho_email_history_import import ZohoEmailHistoryImportService
+from app.services.zoho_email_content_import import ZohoEmailContentImportService
+from app.services.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhookService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/account", include_in_schema=False)
@@ -611,13 +622,14 @@ def sync_zoho_accounts(
         site=None,
         actor=user.username,
         source="zoho-crm",
-        action="sync-accounts-read-only",
+        action="sync-customers-and-contacts-read-only",
         result="success",
         detail=(
-            f"Synchronized {result.synchronized_accounts} Zoho Accounts: created {result.created_customers}, "
+            f"Synchronized {result.synchronized_accounts} Zoho Accounts and {result.synchronized_contacts} linked Contacts: created {result.created_customers}, "
             f"updated {result.updated_customers}, {result.visible_accounts} visible, and {result.hidden_customers} hidden; "
             f"created {result.created_sites} managed site records, linked {result.linked_sites} existing site records, "
-            f"and found {result.site_conflicts} site conflicts."
+            f"and found {result.site_conflicts} site conflicts. Contacts: created {result.created_contacts}, "
+            f"updated {result.updated_contacts}, and removed {result.removed_contacts}."
         ),
     )
     db.commit()
@@ -627,9 +639,195 @@ def sync_zoho_accounts(
             f"&zoho_total={result.synchronized_accounts}&zoho_visible={result.visible_accounts}"
             f"&zoho_hidden={result.hidden_customers}&zoho_sites_created={result.created_sites}"
             f"&zoho_sites_linked={result.linked_sites}&zoho_site_conflicts={result.site_conflicts}"
+            f"&zoho_contacts_total={result.synchronized_contacts}&zoho_contacts_created={result.created_contacts}"
+            f"&zoho_contacts_updated={result.updated_contacts}&zoho_contacts_removed={result.removed_contacts}"
         ),
         status_code=303,
     )
+
+
+@router.post("/zoho/email-history/import")
+def import_zoho_email_history(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoEmailHistoryImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).start(requested_by=user.username)
+    except (ValueError, ZohoCrmError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="import-all-zoho-email-headers",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho email header import {status.id} {'started' if started else 'was already active'} "
+            f"for {status.total_customers} customers."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_email_history_import()
+    state = "email-history-import-started" if started else "email-history-import-running"
+    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+
+
+@router.post("/zoho/email-content/import-test")
+def import_zoho_email_content_test(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoEmailContentImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).start(requested_by=user.username, limit=50)
+    except (ValueError, ZohoCrmError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="import-zoho-email-content-test",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho email content import {status.id} {'started' if started else 'was already active'} "
+            f"for {status.total_emails} selected email headers."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_email_content_import()
+    if started:
+        state = "email-content-import-started"
+    elif status.status == "completed":
+        state = "email-content-import-completed"
+    else:
+        state = "email-content-import-running"
+    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+
+
+@router.post("/zoho/email-templates/sync")
+def sync_zoho_email_templates(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        result = CustomerCommunicationService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).sync_email_templates()
+    except (ValueError, ZohoCrmError) as exc:
+        _zoho_service(db).record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho=email-templates-failed", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="sync-zoho-email-templates-read-only",
+        result="success",
+        detail=f"Synchronized Zoho Account email templates: {result.created} created, {result.updated} updated, {result.archived} archived.",
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/account?zoho=email-templates-synced&zoho_templates_created={result.created}&zoho_templates_updated={result.updated}&zoho_templates_archived={result.archived}",
+        status_code=303,
+    )
+
+
+@router.post("/zoho/email-workflow-webhook/token", response_class=HTMLResponse)
+def rotate_zoho_email_workflow_webhook_token(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    token = _zoho_email_workflow_webhook_service(db).rotate_token()
+    webhook_url = _zoho_email_workflow_webhook_service(db).endpoint_for_token(token)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="rotate-email-workflow-webhook-token",
+        result="success",
+        detail="Rotated the token for the manually configured Zoho E-Mails webhook.",
+    )
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(
+            request,
+            user,
+            _account_service(db),
+            new_zoho_email_workflow_webhook_url=webhook_url,
+        ),
+    )
+
+
+@router.post("/zoho/email-workflow-webhook/receive/{token}")
+async def receive_zoho_email_workflow_webhook(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    token: str,
+):
+    """Receive a manually configured Zoho E-Mails workflow webhook."""
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > 64_000:
+        raise HTTPException(status_code=413, detail="Zoho webhook payload is too large.")
+
+    content_type = request.headers.get("content-type", "").casefold()
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid Zoho webhook JSON payload.") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Zoho webhook payload must be a JSON object.")
+    else:
+        form = await request.form()
+        payload = {key: str(value) for key, value in form.multi_items() if isinstance(value, str)}
+        if not payload:
+            raise HTTPException(status_code=400, detail="Zoho webhook form data is empty.")
+
+    service = _zoho_email_workflow_webhook_service(db)
+    if not service.receive(token=token, payload=payload):
+        raise HTTPException(status_code=403, detail="Unknown Zoho email workflow webhook URL.")
+    db.commit()
+    schedule_pending_zoho_email_workflow_deliveries()
+    return Response(status_code=204)
 
 
 @router.post("/zoho/remove")
@@ -688,6 +886,14 @@ def _zoho_service(db: Session) -> ZohoCrmService:
     )
 
 
+def _zoho_email_workflow_webhook_service(db: Session) -> ZohoEmailWorkflowWebhookService:
+    return ZohoEmailWorkflowWebhookService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+
+
 def _account_context(
     request: Request,
     user,
@@ -696,7 +902,9 @@ def _account_context(
     error: str | None = None,
     new_mcp_token: str | None = None,
     new_mcp_token_name: str | None = None,
+    new_zoho_email_workflow_webhook_url: str | None = None,
 ) -> dict:
+    zoho_service = _zoho_service(service.db)
     return {
         "user": user,
         "csrf_token": get_csrf_token(request),
@@ -705,11 +913,23 @@ def _account_context(
         "error_section": _account_section_for_path(request.url.path),
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
+        "zoho_email_workflow_webhook": _zoho_email_workflow_webhook_service(service.db).status(),
+        "zoho_email_history_import": ZohoEmailHistoryImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).status(),
+        "zoho_email_content_import": ZohoEmailContentImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).status(),
+        "new_zoho_email_workflow_webhook_url": new_zoho_email_workflow_webhook_url,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
         "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
         "fleet_refresh_settings": FleetRefreshSettingsService(db=service.db).get_runtime_settings(),
-        "zoho_status": _zoho_service(service.db).get_status(),
-        "zoho_mapping": _zoho_service(service.db).mapping_rows(),
+        "zoho_status": zoho_service.get_status(),
+        "zoho_mapping": zoho_service.mapping_rows(),
         "zoho_data_centers": ZOHO_DATA_CENTERS.values(),
     }
 

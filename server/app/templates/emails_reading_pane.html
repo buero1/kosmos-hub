@@ -1,0 +1,20 @@
+<div class="mailbox-reading-pane">
+  {% if selected %}
+    <div class="mailbox-reading-heading">
+      <div><h3>{{ selected.subject }}</h3><p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}</p></div>
+      <div>{% if selected.kind == 'linked' and selected.direction == 'inbound' %}<a class="button button-secondary button-variant-2" href="/customers/{{ selected.customer_id }}?reply_email={{ selected.customer_email_id }}#customer-communications">Antworten</a>{% endif %}{% if selected.is_unread %}<span class="pill" data-mailbox-unread-status>Neu</span>{% endif %}</div>
+    </div>
+    {% if selected.customers %}<div class="mailbox-customer-links">{% for customer in selected.customers %}<a href="/customers/{{ customer.id }}">{{ customer.name }}</a>{% endfor %}</div>{% endif %}
+    {% if selected.kind == 'linked' %}
+      {% if selected.preview_html %}
+        <details class="mailbox-preview" open data-email-preview data-email-unread="{{ 'true' if selected.is_unread else 'false' }}" data-email-read-url="/customers/{{ selected.customer_id }}/communications/emails/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>
+      {% elif selected.can_load_content %}
+        <div class="mailbox-unassigned"><p>Der Inhalt liegt noch nicht im Hub vor.</p><form method="post" action="/emails/linked/{{ selected.customer_id }}/{{ selected.customer_email_id }}/load"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="folder" value="{{ folder }}"><input type="hidden" name="unread" value="{{ 'true' if unread else 'false' }}"><button class="button" type="submit">Nachricht laden</button></form></div>
+      {% else %}<p class="mailbox-empty">Für diese E-Mail liegt nur der Kopf vor.</p>{% endif %}
+      {% if selected.attachments %}<ul class="communication-attachments">{% for attachment in selected.attachments %}<li><a href="/customers/{{ selected.customer_id }}/communications/emails/{{ selected.customer_email_id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}</ul>{% endif %}
+    {% else %}
+      <div class="mailbox-unassigned"><h4>Unbekannte E-Mail</h4>{% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview{% if selected.is_unread %} data-email-unread="true" data-email-read-url="/emails/unassigned/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"{% endif %}><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% else %}<p>Der Hub hat Absender und Empfänger aus dem Zoho-Workflow gespeichert. Der vollständige Nachrichtentext ist noch nicht vorhanden.</p>{% endif %}{% if selected.is_unread %}<form method="post" action="/emails/unassigned/{{ selected.customer_email_id }}/read" data-mailbox-unassigned-read><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary" type="submit">Als gelesen markieren</button></form>{% endif %}</div>
+    {% endif %}
+    {% if selected.last_error %}<p class="notice-warning">{{ selected.last_error }}</p>{% endif %}
+  {% else %}<p class="mailbox-empty">Wähle links eine E-Mail aus.</p>{% endif %}
+</div>

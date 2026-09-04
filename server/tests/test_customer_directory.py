@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.customer_contact import CustomerContact
+from app.models.customer_communication import CustomerZohoEmail
 from app.models.site import Site
 from app.services.customer_directory import CustomerDirectoryService
 
@@ -97,7 +99,42 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
                 )
             ),
         )
-        db.add(customer)
+        first_contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-1",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Name": "Anna Example",
+                            "Anrede": "Frau",
+                            "Position": "Managing Director",
+                            "E-Mail": "anna@example-customer.de",
+                            "Zweite E-Mail-Adresse": "anna.private@example-customer.de",
+                            "Dritte E-Mail-Adresse": "anna.other@example-customer.de",
+                            "Telefon": "+49 89 123456-1",
+                            "Telefon alternativ": "+49 89 123456-2",
+                            "Telefon privat": "+49 89 123456-3",
+                        }
+                    }
+                )
+            ),
+        )
+        second_contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-2",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Name": "Max Example",
+                            "Mobil": "+49 170 1234567",
+                        }
+                    }
+                )
+            ),
+        )
+        db.add_all([customer, first_contact, second_contact])
         db.commit()
 
         entry = _service(db).list_entries()[0]
@@ -112,3 +149,134 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
             ("Kontakt-E-Mail", "team@example-customer.de"),
             ("Rechnungsadresse - Stadt", "Muenchen"),
         ]
+        assert [(contact.name, contact.email, contact.mobile) for contact in detail.contacts] == [
+            ("Anna Example", "anna@example-customer.de", None),
+            ("Max Example", None, "+49 170 1234567"),
+        ]
+        assert detail.contacts[0].id == first_contact.id
+        assert detail.contacts[0].salutation == "Frau"
+        assert detail.contacts[0].secondary_email == "anna.private@example-customer.de"
+        assert detail.contacts[0].third_email == "anna.other@example-customer.de"
+        assert detail.contacts[0].alternate_phone == "+49 89 123456-2"
+        assert detail.contacts[0].private_phone == "+49 89 123456-3"
+
+        contact_detail = _service(db).get_contact_detail(customer_id=customer.id, contact_id=first_contact.id)
+        assert contact_detail is not None
+        assert contact_detail.customer.id == customer.id
+        assert [(field.label, field.value) for field in contact_detail.profile_fields] == [
+            ("Name", "Anna Example"),
+            ("Anrede", "Frau"),
+            ("Position", "Managing Director"),
+            ("E-Mail", "anna@example-customer.de"),
+            ("Zweite E-Mail-Adresse", "anna.private@example-customer.de"),
+            ("Dritte E-Mail-Adresse", "anna.other@example-customer.de"),
+            ("Telefon", "+49 89 123456-1"),
+            ("Telefon alternativ", "+49 89 123456-2"),
+            ("Telefon privat", "+49 89 123456-3"),
+        ]
+        assert _service(db).get_contact_detail(customer_id=customer.id + 1, contact_id=first_contact.id) is None
+
+
+def test_customer_directory_lists_and_filters_zoho_industries():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        craft_customer = Customer(
+            name="Craft Customer",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Branche": "Handwerk"}})),
+        )
+        consulting_customer = Customer(
+            name="Consulting Customer",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Branche": "Beratung"}})),
+        )
+        duplicate_industry_customer = Customer(
+            name="Second Craft Customer",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Branche": "handwerk"}})),
+        )
+        db.add_all([craft_customer, consulting_customer, duplicate_industry_customer])
+        db.commit()
+
+        service = _service(db)
+        assert service.list_industries() == ["Beratung", "Handwerk"]
+        assert [entry.customer.id for entry in service.list_entries(industry="Handwerk")] == [
+            craft_customer.id,
+            duplicate_industry_customer.id,
+        ]
+        assert service.list_entries(industry="Nicht vorhanden") == []
+
+
+def test_customer_directory_filters_customers_with_unread_inbound_emails():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        unread_customer = Customer(name="Unread Customer")
+        read_customer = Customer(name="Read Customer")
+        db.add_all(
+            [
+                unread_customer,
+                read_customer,
+                CustomerZohoEmail(
+                    customer=unread_customer,
+                    zoho_message_id="email-unread",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    encrypted_payload_json="encrypted",
+                ),
+                CustomerZohoEmail(
+                    customer=read_customer,
+                    zoho_message_id="email-read",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=False,
+                    encrypted_payload_json="encrypted",
+                ),
+            ]
+        )
+        db.commit()
+
+        assert [entry.customer.id for entry in _service(db).list_entries(unread_email_only=True)] == [unread_customer.id]
+
+
+def test_customer_directory_finds_customer_and_contact_phone_numbers_across_common_formats():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Phone Search Customer",
+            zoho_id="zoho-phone-search",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps({"fields": {"Tel.": "0049 (89) / 123-456"}})
+            ),
+        )
+        contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-phone-search",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Name": "Phone Contact",
+                            "Telefon alternativ": "089-555 / 123",
+                            "Telefon privat": "089 777 456",
+                            "Mobil": "+49 171-222 333",
+                            "Interne Kontakt-Notiz": "Only this contact has the search phrase",
+                        }
+                    }
+                )
+            ),
+        )
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db)
+        assert [entry.customer.id for entry in service.list_entries(query="089123456")] == [customer.id]
+        assert [entry.customer.id for entry in service.list_entries(query="+49 89 123-456")] == [customer.id]
+        assert [entry.customer.id for entry in service.list_entries(query="89/555123")] == [customer.id]
+        assert [entry.customer.id for entry in service.list_entries(query="0049 171 222333")] == [customer.id]
+        assert [entry.customer.id for entry in service.list_entries(query="only this contact")] == [customer.id]

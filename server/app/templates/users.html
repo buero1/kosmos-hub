@@ -20,41 +20,19 @@
     </div>
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if deletion_error %}<p class="notice-error">{{ deletion_error }}</p>{% endif %}
     {% if fresh_users == "ok" %}<p class="notice-success">{{ message }}</p>{% elif fresh_users == "error" %}<p class="notice-error">{{ message }}</p>{% endif %}
 
-    <div class="filter-panel filter-panel-workbench">
-      <label>
-        <span>Search</span>
-        <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
-      </label>
-      <label>
-        <span>Role</span>
-        <select form="{{ site_selector.form_id }}" name="role">
-          <option value="all" {% if filters.role == "all" %}selected{% endif %}>All roles</option>
-          {% for option in role_options %}
-            <option value="{{ option }}" {% if filters.role == option %}selected{% endif %}>{{ option | title }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>
-        <span>Customer status</span>
-        <select form="{{ site_selector.form_id }}" name="customer_status">
-          <option value="all" {% if filters.customer_status == "all" %}selected{% endif %}>All statuses</option>
-          {% for option in customer_status_options %}
-            <option value="{{ option }}" {% if filters.customer_status == option %}selected{% endif %}>{{ option }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <div class="filter-actions">
-        <a href="/users">Reset</a>
-      </div>
-    </div>
+    <nav class="user-workbench-action-nav" aria-label="User actions">
+      <button type="button" data-user-action-tab="create" aria-controls="user-action-create" aria-expanded="false">Add user</button>
+      <button type="button" data-user-action-tab="role" aria-controls="user-action-role" aria-expanded="false">Set role</button>
+      <button type="button" data-user-action-tab="password" aria-controls="user-action-password" aria-expanded="false">Set password</button>
+      <button type="button" data-user-action-tab="delete" aria-controls="user-action-delete" aria-expanded="false">Delete users</button>
+    </nav>
 
-    {% include "partials/fleet_refresh_progress.html" %}
-
-    <details class="user-workbench-create">
+    <details id="user-action-create" class="user-workbench-create user-workbench-action-panel" data-user-action-panel="create">
       <summary>Add WordPress user to selected sites</summary>
-      <form method="post" action="/users/bulk/create">
+      <form method="post" action="/users/bulk/create" data-user-action-form data-user-action-kind="create">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% for selected_site_id in filters.site_ids %}
           <input type="hidden" name="site_id" value="{{ selected_site_id }}">
@@ -80,15 +58,15 @@
           </span>
         </label>
         <div class="user-workbench-create-actions">
-          <button class="button" type="submit">Create user on selected sites</button>
+          <button class="button" type="submit">Benutzer anlegen vorbereiten</button>
         </div>
       </form>
       <p class="subtle">Choose up to {{ bulk_limit }} sites in the panel, then apply the site selection before creating the user.</p>
     </details>
 
-    <details class="user-workbench-create user-workbench-bulk-action">
+    <details id="user-action-role" class="user-workbench-create user-workbench-bulk-action user-workbench-action-panel" data-user-action-panel="role">
       <summary>Set role for selected users</summary>
-      <form method="post" action="/users/bulk/role" data-user-bulk-form>
+      <form method="post" action="/users/bulk/role" data-user-bulk-form data-user-action-form data-user-action-kind="role">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <p class="bulk-action-warning">Applies exactly one selected role to every checked user. Sites require Bridge 0.3.54 or newer.</p>
         <label>
@@ -100,14 +78,14 @@
           </select>
         </label>
         <div class="user-workbench-create-actions">
-          <button class="button" type="submit">Apply selected role</button>
+          <button class="button" type="submit">Rollenänderung vorbereiten</button>
         </div>
       </form>
     </details>
 
-    <details class="user-workbench-create user-workbench-bulk-action">
+    <details id="user-action-password" class="user-workbench-create user-workbench-bulk-action user-workbench-action-panel" data-user-action-panel="password">
       <summary>Set password for selected users</summary>
-      <form method="post" action="/users/bulk/password" data-user-bulk-form>
+      <form method="post" action="/users/bulk/password" data-user-bulk-form data-user-action-form data-user-action-kind="password">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <p class="bulk-action-warning">The same password is set on every selected user. Copy and store it before submitting; it is never displayed again.</p>
         <label>
@@ -122,26 +100,126 @@
             </button>
           </span>
         </label>
-        <label class="bulk-action-confirmation">
-          <input type="checkbox" name="confirm_shared_password" value="true" required>
-          <span>I understand that every selected user receives this same password.</span>
-        </label>
         <div class="user-workbench-create-actions">
-          <button class="button" type="submit">Set selected passwords</button>
+          <button class="button" type="submit">Passwortänderung vorbereiten</button>
         </div>
       </form>
     </details>
 
-    <details class="user-workbench-create user-workbench-bulk-action">
+    <details id="user-action-delete" class="user-workbench-create user-workbench-bulk-action user-workbench-action-panel" data-user-action-panel="delete">
       <summary>Delete selected users</summary>
-      <form method="post" action="/users/bulk/delete/review" data-user-bulk-form>
+      <form method="post" action="/users/bulk/delete/prepare" data-user-bulk-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <p class="bulk-action-warning">A review screen requires an individual content reassignment for every user. WordPress blocks removal of the last administrator.</p>
+        <input type="hidden" name="return_to" value="{{ deletion_return_url }}">
+        <p class="bulk-action-warning">An inline review automatically selects another administrator per website for the content reassignment. WordPress blocks removal of the last administrator.</p>
+        <label class="user-deletion-large-confirmation" data-user-deletion-confirmation hidden>
+          <span>For more than {{ deletion_text_confirmation_threshold }} users, type <code>delete</code> to confirm the larger deletion.</span>
+          <input name="deletion_confirmation" type="text" autocomplete="off" spellcheck="false" data-user-deletion-confirmation-input>
+        </label>
         <div class="user-workbench-create-actions">
-          <button class="button button-danger" type="submit">Review selected deletion</button>
+          <button class="button" type="submit">Prepare selected deletion</button>
         </div>
       </form>
     </details>
+
+    <section id="user-action-batch" class="direct-update-status-card user-action-batch" hidden aria-live="polite"></section>
+
+    {% if deletion_batch %}
+      <section
+        id="user-deletion"
+        class="direct-update-status-card user-deletion-status-card"
+        {% if deletion_batch.status != "prepared" %}data-user-deletion-progress data-status-url="/users/deletion-batches/{{ deletion_batch.id }}/status"{% endif %}
+        aria-labelledby="user-deletion-heading"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Benutzerlöschung</p>
+            <h3 id="user-deletion-heading" data-user-deletion-title>
+              {% if deletion_batch.status == "prepared" %}Löschung prüfen{% elif deletion_batch.status in ["queued", "running"] %}Löschung läuft{% elif deletion_batch.status == "cancelled" %}Löschung abgebrochen{% else %}Löschung abgeschlossen{% endif %}
+            </h3>
+            <p class="subtle" data-user-deletion-summary>
+              {% if deletion_batch.status == "prepared" %}
+                Für jeden Benutzer ist ein anderer, nicht ausgewählter Administrator vorausgewählt. Die Auswahl kann je Zeile angepasst werden.
+              {% elif deletion_batch.status == "cancelled" %}
+                Bereits gestartete WordPress-Anfragen durften sauber enden; alle übrigen Löschungen wurden abgebrochen.
+              {% else %}
+                Die Benutzer werden nacheinander mit einer aktuellen WordPress-Prüfung gelöscht.
+              {% endif %}
+            </p>
+          </div>
+          {% if deletion_batch.status in ["queued", "running"] and not deletion_batch.cancellation_requested %}
+            <form class="direct-update-cancel-form" method="post" action="/users/deletion-batches/{{ deletion_batch.id }}/cancel" data-user-deletion-cancel-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="return_to" value="{{ deletion_return_url }}">
+              <button class="button button-secondary" type="submit">Abbrechen</button>
+            </form>
+          {% endif %}
+        </div>
+
+        {% if deletion_batch.status == "prepared" %}
+          <form class="user-deletion-review-form" method="post" action="/users/deletion-batches/{{ deletion_batch.id }}/start">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="return_to" value="{{ deletion_return_url }}">
+            <div class="table-scroll">
+              <table class="user-deletion-review-table">
+                <thead><tr><th>Website</th><th>Benutzer löschen</th><th>Inhalte übertragen an</th><th>Prüfung</th></tr></thead>
+                <tbody>
+                  {% for row in deletion_rows %}
+                    {% set item = row.item %}
+                    <tr>
+                      <td>{{ site_domain_link(item.site, "/sites/" ~ item.site_id ~ "#users") }}</td>
+                      <td><strong>{{ item.target_username }}</strong></td>
+                      <td>
+                        <input type="hidden" name="item_id" value="{{ item.id }}">
+                        {% if item.status == "ready" and row.candidates %}
+                          <select name="reassign_to_user_id" aria-label="Inhalte von {{ item.target_username }} übertragen an" required>
+                            {% for candidate in row.candidates %}
+                              <option value="{{ candidate.user.id }}" {% if candidate.user.id == item.replacement_user_id %}selected{% endif %}>
+                                {{ candidate.user.username }} (Administrator)
+                              </option>
+                            {% endfor %}
+                          </select>
+                        {% else %}
+                          <span class="subtle">Kein anderer Administrator verfügbar</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <span class="pill {% if item.status == "ready" %}pill-active{% else %}pill-missing{% endif %}">{{ item.status }}</span>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="user-deletion-review-actions">
+              <button class="button button-danger" type="submit" {% if not deletion_batch_can_start %}disabled{% endif %}>Löschung starten</button>
+              <button class="button button-secondary" type="submit" formaction="/users/deletion-batches/{{ deletion_batch.id }}/cancel" formmethod="post" formnovalidate>Abbrechen</button>
+              {% if not deletion_batch_can_start %}<p class="subtle">Jede Zeile benötigt einen anderen, nicht ausgewählten Administrator auf derselben Website.</p>{% endif %}
+            </div>
+          </form>
+        {% else %}
+          <div class="direct-update-progress-track" role="progressbar" aria-label="Fortschritt der Benutzerlöschung" aria-valuemin="0" aria-valuemax="{{ deletion_batch.items | length }}" aria-valuenow="0" data-user-deletion-progress-track>
+            <span class="direct-update-progress-fill" data-user-deletion-progress-fill></span>
+          </div>
+          <div class="table-scroll">
+            <table class="direct-update-run-table user-deletion-run-table">
+              <thead><tr><th>Website</th><th>Benutzer</th><th>Inhalte an</th><th>Status</th><th>Details</th></tr></thead>
+              <tbody data-user-deletion-rows>
+                {% for item in deletion_batch.items %}
+                  <tr>
+                    <td>{{ site_domain_link(item.site, "/sites/" ~ item.site_id ~ "#users") }}</td>
+                    <td>{{ item.target_username }}</td>
+                    <td>{{ item.replacement_username or "-" }}</td>
+                    <td><span class="pill {% if item.status == "succeeded" %}pill-active{% elif item.status in ["queued", "running"] %}pill-unknown{% else %}pill-missing{% endif %}">{{ item.status }}</span></td>
+                    <td>{{ item.message or "" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </section>
+    {% endif %}
 
     {% if outcomes %}
       {% set succeeded = outcomes | selectattr("status", "equalto", "succeeded") | list | length %}
@@ -165,9 +243,38 @@
       </section>
     {% endif %}
 
-    <p class="result-count">{{ entries | length }} stored WordPress users shown. Select up to {{ bulk_limit }} users for one operation.</p>
-    <div class="table-scroll">
-      <table class="user-workbench-table">
+    {% if not deletion_batch %}
+      {% include "partials/fleet_refresh_progress.html" %}
+      <div class="filter-panel filter-panel-workbench">
+        <label>
+          <span>Search</span>
+          <input form="{{ site_selector.form_id }}" type="search" name="q" value="{{ filters.q }}" placeholder="User, email, site, or customer">
+        </label>
+        <label>
+          <span>Role</span>
+          <select form="{{ site_selector.form_id }}" name="role" data-user-auto-filter>
+            <option value="all" {% if filters.role == "all" %}selected{% endif %}>All roles</option>
+            {% for option in role_options %}
+              <option value="{{ option }}" {% if filters.role == option %}selected{% endif %}>{{ option | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Customer status</span>
+          <select form="{{ site_selector.form_id }}" name="customer_status" data-user-auto-filter>
+            <option value="all" {% if filters.customer_status == "all" %}selected{% endif %}>All statuses</option>
+            {% for option in customer_status_options %}
+              <option value="{{ option }}" {% if filters.customer_status == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="filter-actions">
+          <a href="/users">Reset</a>
+        </div>
+        <p class="result-count user-workbench-filter-summary">{{ entries | length }} stored WordPress users shown.</p>
+      </div>
+      <div class="table-scroll">
+        <table class="user-workbench-table">
         <thead>
           <tr>
             <th>
@@ -189,7 +296,20 @@
         <tbody>
           {% for entry in entries %}
             <tr>
-              <td><input class="user-selection" type="checkbox" value="{{ entry.key }}" aria-label="Select {{ entry.user.username }} on {{ entry.site.domain }}"></td>
+              <td>
+                <input
+                  class="user-selection"
+                  type="checkbox"
+                  value="{{ entry.key }}"
+                  data-site-id="{{ entry.site.id }}"
+                  data-site-domain="{{ entry.site.domain }}"
+                  data-user-id="{{ entry.user.id }}"
+                  data-username="{{ entry.user.username }}"
+                  data-supports-role="{{ 'true' if entry.supports_role_change else 'false' }}"
+                  data-supports-password="{{ 'true' if entry.supports_password_change else 'false' }}"
+                  aria-label="Select {{ entry.user.username }} on {{ entry.site.domain }}"
+                >
+              </td>
               <td>{{ site_domain_link(entry.site, "/sites/" ~ entry.site.id ~ "#users") }}</td>
               <td>
                 {% if entry.site.customer %}
@@ -214,8 +334,9 @@
             <tr><td colspan="9">No stored WordPress users match these filters. Refresh a site's user inventory first if it is missing.</td></tr>
           {% endfor %}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+    {% endif %}
     </section>
   </div>
   <script>
@@ -231,13 +352,70 @@
 
       var selections = Array.prototype.slice.call(document.querySelectorAll(".user-selection"));
       var selectAll = document.getElementById("select-all-filtered-users");
+      var actionTabs = Array.prototype.slice.call(document.querySelectorAll("[data-user-action-tab]"));
+      var actionPanels = Array.prototype.slice.call(document.querySelectorAll("[data-user-action-panel]"));
+      var autoFilters = Array.prototype.slice.call(document.querySelectorAll("[data-user-auto-filter]"));
+      var deletionForm = document.querySelector('form[action="/users/bulk/delete/prepare"]');
+      var deletionConfirmation = document.querySelector("[data-user-deletion-confirmation]");
+      var deletionConfirmationInput = document.querySelector("[data-user-deletion-confirmation-input]");
+      var deletionTextConfirmationThreshold = {{ deletion_text_confirmation_threshold }};
+
+      function syncDeletionConfirmation() {
+        if (!deletionConfirmation || !deletionConfirmationInput) { return; }
+        var requiresConfirmation = selections.filter(function (checkbox) { return checkbox.checked; }).length > deletionTextConfirmationThreshold;
+        deletionConfirmation.hidden = !requiresConfirmation;
+        deletionConfirmationInput.required = requiresConfirmation;
+        if (!requiresConfirmation) { deletionConfirmationInput.value = ""; }
+      }
+
       if (selectAll) {
         selectAll.addEventListener("change", function () {
           selections.forEach(function (checkbox) { checkbox.checked = selectAll.checked; });
+          syncDeletionConfirmation();
+        });
+      }
+      selections.forEach(function (checkbox) {
+        checkbox.addEventListener("change", syncDeletionConfirmation);
+      });
+      if (deletionForm) { syncDeletionConfirmation(); }
+
+      autoFilters.forEach(function (filter) {
+        filter.addEventListener("change", function () {
+          var filterForm = document.getElementById(filter.getAttribute("form"));
+          if (filterForm) { filterForm.requestSubmit(); }
+        });
+      });
+
+      function syncUserActionNavigation() {
+        var activePanel = actionPanels.find(function (panel) { return panel.open; });
+        actionTabs.forEach(function (tab) {
+          var isActive = activePanel && tab.dataset.userActionTab === activePanel.dataset.userActionPanel;
+          tab.classList.toggle("is-active", Boolean(isActive));
+          tab.setAttribute("aria-expanded", String(Boolean(isActive)));
         });
       }
 
-      document.querySelectorAll("[data-user-bulk-form]").forEach(function (form) {
+      function setActiveUserActionPanel(panelName, shouldOpen) {
+        actionPanels.forEach(function (panel) {
+          panel.open = shouldOpen && panel.dataset.userActionPanel === panelName;
+        });
+        syncUserActionNavigation();
+      }
+
+      actionTabs.forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          var panel = actionPanels.find(function (candidate) {
+            return candidate.dataset.userActionPanel === tab.dataset.userActionTab;
+          });
+          setActiveUserActionPanel(tab.dataset.userActionTab, !(panel && panel.open));
+        });
+      });
+      actionPanels.forEach(function (panel) {
+        panel.addEventListener("toggle", syncUserActionNavigation);
+      });
+      syncUserActionNavigation();
+
+      document.querySelectorAll("[data-user-bulk-form]:not([data-user-action-form])").forEach(function (form) {
         form.addEventListener("submit", function (event) {
           form.querySelectorAll("[data-user-selected]").forEach(function (input) { input.remove(); });
           var selected = selections.filter(function (checkbox) { return checkbox.checked; });
@@ -256,6 +434,379 @@
           });
         });
       });
+
+      var actionRunner = document.getElementById("user-action-batch");
+      var activeUserAction = null;
+
+      function actionEscapeHtml(value) {
+        return String(value || "").replace(/[&<>'"]/g, function (character) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character];
+        });
+      }
+
+      function userActionStatusClass(status) {
+        if (status === "succeeded" || status === "ready") { return "pill-active"; }
+        if (status === "queued" || status === "running") { return "pill-unknown"; }
+        return "pill-missing";
+      }
+
+      function userActionTitle(kind) {
+        return { create: "Benutzer anlegen", role: "Rolle ändern", password: "Passwort ändern" }[kind];
+      }
+
+      function userActionDescription(action) {
+        if (action.kind === "create") {
+          return "Die Angaben werden auf jeder ausgewählten Website einzeln von WordPress geprüft und angelegt.";
+        }
+        if (action.kind === "role") {
+          return "Die neue Rolle wird nacheinander für jeden ausgewählten WordPress-Benutzer gesetzt.";
+        }
+        return "Das gemeinsame Passwort wird nacheinander gesetzt. Es bleibt nur in diesem Browser bis zum Ende des Vorgangs verfügbar.";
+      }
+
+      function userActionValue(action, item) {
+        if (action.kind === "create") {
+          return actionEscapeHtml(action.values.username) + " · " + actionEscapeHtml(action.values.email) + " · " + actionEscapeHtml(action.values.role);
+        }
+        if (action.kind === "role") { return actionEscapeHtml(action.values.role); }
+        return "Neues gemeinsames Passwort";
+      }
+
+      function userActionStatusText(status) {
+        return {
+          ready: "bereit",
+          blocked: "nicht verfügbar",
+          queued: "wartet",
+          running: "läuft",
+          succeeded: "erfolgreich",
+          failed: "fehlgeschlagen",
+          cancelled: "abgebrochen"
+        }[status] || status;
+      }
+
+      function isUserActionTerminal(status) {
+        return ["blocked", "succeeded", "failed", "cancelled"].indexOf(status) !== -1;
+      }
+
+      function selectedUserActionItems(kind) {
+        return selections.filter(function (checkbox) { return checkbox.checked; }).map(function (checkbox) {
+          var supportsAction = checkbox.dataset[kind === "role" ? "supportsRole" : "supportsPassword"] === "true";
+          return {
+            siteId: Number(checkbox.dataset.siteId),
+            site: checkbox.dataset.siteDomain,
+            userId: Number(checkbox.dataset.userId),
+            username: checkbox.dataset.username,
+            status: supportsAction ? "ready" : "blocked",
+            message: supportsAction ? "" : "Die verbundene Bridge unterstützt diese Aktion auf der Website nicht."
+          };
+        });
+      }
+
+      function selectedCreateActionItems(form) {
+        return Array.prototype.slice.call(form.querySelectorAll('input[name="site_id"]')).map(function (input) {
+          var siteCheckbox = document.querySelector('[data-site-selector] input[name="site_id"][value="' + input.value + '"]');
+          var siteLabel = siteCheckbox ? siteCheckbox.closest("label").querySelector("span").textContent.trim() : "Website " + input.value;
+          return {
+            siteId: Number(input.value),
+            site: siteLabel,
+            username: form.elements.username.value.trim(),
+            status: "ready",
+            message: ""
+          };
+        });
+      }
+
+      function clearActionPassword(action) {
+        if (action.kind === "create" || action.kind === "password") {
+          var passwordInput = action.form.querySelector('input[name="password"]');
+          if (passwordInput) {
+            passwordInput.value = "";
+            passwordInput.readOnly = false;
+          }
+        }
+      }
+
+      function renderUserAction() {
+        if (!activeUserAction || !actionRunner) { return; }
+        var action = activeUserAction;
+        var total = action.items.length;
+        var completed = action.items.filter(function (item) { return isUserActionTerminal(item.status); }).length;
+        var percentage = total ? Math.round((completed / total) * 100) : 0;
+        var hasReadyItem = action.items.some(function (item) { return item.status === "ready"; });
+        var phaseTitle = action.phase === "prepared"
+          ? userActionTitle(action.kind) + " prüfen"
+          : action.phase === "running"
+            ? userActionTitle(action.kind) + " läuft"
+            : action.phase === "cancelled"
+              ? userActionTitle(action.kind) + " abgebrochen"
+              : userActionTitle(action.kind) + " abgeschlossen";
+        var summary = action.phase === "prepared"
+          ? userActionDescription(action)
+          : completed + " von " + total + " Vorgängen abgeschlossen."
+            + (action.cancellationRequested ? " Alle noch wartenden Vorgänge wurden abgebrochen." : "");
+        var tableRows = action.items.map(function (item) {
+          return "<tr>"
+            + "<td><a href=\"/sites/" + encodeURIComponent(item.siteId) + "#users\">" + actionEscapeHtml(item.site) + "</a></td>"
+            + "<td>" + actionEscapeHtml(item.username) + "</td>"
+            + "<td>" + userActionValue(action, item) + "</td>"
+            + "<td><span class=\"pill " + userActionStatusClass(item.status) + "\">" + actionEscapeHtml(userActionStatusText(item.status)) + "</span></td>"
+            + "<td>" + actionEscapeHtml(item.message) + "</td>"
+            + "</tr>";
+        }).join("");
+        var actions = "";
+        if (action.phase === "prepared") {
+          actions = "<button class=\"button\" type=\"button\" data-user-action-start" + (hasReadyItem ? "" : " disabled") + ">Starten</button>"
+            + "<button class=\"button button-secondary\" type=\"button\" data-user-action-cancel>Abbrechen</button>";
+        } else if (action.phase === "running") {
+          actions = "<button class=\"button button-secondary\" type=\"button\" data-user-action-cancel>Abbrechen</button>";
+        } else {
+          actions = "<button class=\"button button-secondary\" type=\"button\" data-user-action-close>Schließen</button>";
+        }
+
+        actionRunner.hidden = false;
+        actionRunner.innerHTML = "<div class=\"section-heading\">"
+          + "<div><p class=\"eyebrow\">Benutzeraktion</p><h3>" + actionEscapeHtml(phaseTitle) + "</h3><p class=\"subtle\">" + actionEscapeHtml(summary) + "</p></div>"
+          + "</div>"
+          + (action.phase === "prepared" ? "" : "<div class=\"direct-update-progress-track\" role=\"progressbar\" aria-label=\"Fortschritt der Benutzeraktion\" aria-valuemin=\"0\" aria-valuemax=\"" + total + "\" aria-valuenow=\"" + completed + "\"><span class=\"direct-update-progress-fill\" style=\"width: " + percentage + "%\"></span></div>")
+          + "<div class=\"table-scroll\"><table class=\"direct-update-run-table user-action-review-table\"><thead><tr><th>Website</th><th>Benutzer</th><th>Änderung</th><th>Status</th><th>Details</th></tr></thead><tbody>" + tableRows + "</tbody></table></div>"
+          + "<div class=\"user-action-batch-actions\">" + actions + "</div>";
+        actionRunner.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      function prepareUserAction(form) {
+        if (!form.reportValidity()) { return; }
+        if (activeUserAction && activeUserAction.phase === "running") {
+          window.alert("Eine Benutzeraktion läuft noch. Bitte zuerst abschließen oder abbrechen.");
+          return;
+        }
+        var kind = form.dataset.userActionKind;
+        var items = kind === "create" ? selectedCreateActionItems(form) : selectedUserActionItems(kind);
+        if (!items.length) {
+          window.alert(kind === "create" ? "Wähle mindestens eine Website aus und übernimm die Auswahl zuerst." : "Wähle mindestens einen WordPress-Benutzer aus.");
+          return;
+        }
+        if (items.length > {{ bulk_limit }}) {
+          window.alert("Wähle höchstens {{ bulk_limit }} Ziele für eine Benutzeraktion.");
+          return;
+        }
+        activeUserAction = {
+          kind: kind,
+          form: form,
+          phase: "prepared",
+          cancellationRequested: false,
+          values: {
+            username: kind === "create" ? form.elements.username.value.trim() : "",
+            email: kind === "create" ? form.elements.email.value.trim() : "",
+            role: kind === "create" || kind === "role" ? form.elements.role.value : ""
+          },
+          items: items
+        };
+        renderUserAction();
+      }
+
+      function userActionEndpoint(kind) {
+        return {
+          create: "/users/actions/create-site",
+          role: "/users/actions/update-role",
+          password: "/users/actions/update-password"
+        }[kind];
+      }
+
+      function executeUserActionItem(action, item) {
+        var formData = new FormData();
+        var csrfInput = action.form.querySelector('input[name="csrf_token"]');
+        formData.append("csrf_token", csrfInput ? csrfInput.value : "");
+        formData.append("site_id", String(item.siteId));
+        if (action.kind === "create") {
+          formData.append("username", action.values.username);
+          formData.append("email", action.values.email);
+          formData.append("password", action.form.elements.password.value);
+          formData.append("role", action.values.role);
+        } else {
+          formData.append("user_id", String(item.userId));
+          if (action.kind === "role") {
+            formData.append("role", action.values.role);
+          } else {
+            formData.append("password", action.form.elements.password.value);
+          }
+        }
+        return window.fetch(userActionEndpoint(action.kind), {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          body: formData
+        }).then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (payload) {
+            if (!response.ok) {
+              return {
+                site_id: item.siteId,
+                site: item.site,
+                username: item.username,
+                status: "failed",
+                message: payload.detail || "Die Aktion konnte nicht an den Hub gesendet werden."
+              };
+            }
+            return payload;
+          });
+        });
+      }
+
+      function finishUserAction(action) {
+        action.phase = action.cancellationRequested ? "cancelled" : "completed";
+        clearActionPassword(action);
+        renderUserAction();
+      }
+
+      function runNextUserActionItem() {
+        var action = activeUserAction;
+        if (!action || action.phase !== "running") { return; }
+        if (action.cancellationRequested) {
+          action.items.forEach(function (item) {
+            if (item.status === "queued") {
+              item.status = "cancelled";
+              item.message = "Vor dem Start abgebrochen.";
+            }
+          });
+          finishUserAction(action);
+          return;
+        }
+        var item = action.items.find(function (candidate) { return candidate.status === "queued"; });
+        if (!item) {
+          finishUserAction(action);
+          return;
+        }
+        item.status = "running";
+        item.message = "WordPress wird geprüft und aktualisiert.";
+        renderUserAction();
+        executeUserActionItem(action, item).then(function (result) {
+          item.status = result.status === "succeeded" ? "succeeded" : "failed";
+          item.site = result.site || item.site;
+          item.username = result.username || item.username;
+          item.message = result.message || "WordPress did not return a result.";
+        }).catch(function () {
+          item.status = "failed";
+          item.message = "Die Verbindung zum Hub wurde während der Aktion unterbrochen.";
+        }).then(function () {
+          if (activeUserAction === action) { runNextUserActionItem(); }
+        });
+      }
+
+      if (actionRunner) {
+        actionRunner.addEventListener("click", function (event) {
+          var target = event.target.closest("button");
+          if (!target || !activeUserAction) { return; }
+          if (target.hasAttribute("data-user-action-start")) {
+            activeUserAction.phase = "running";
+            activeUserAction.items.forEach(function (item) {
+              if (item.status === "ready") { item.status = "queued"; }
+            });
+            if (activeUserAction.kind === "create" || activeUserAction.kind === "password") {
+              activeUserAction.form.elements.password.readOnly = true;
+            }
+            renderUserAction();
+            runNextUserActionItem();
+          } else if (target.hasAttribute("data-user-action-cancel")) {
+            if (activeUserAction.phase === "prepared") {
+              clearActionPassword(activeUserAction);
+              activeUserAction = null;
+              actionRunner.hidden = true;
+              actionRunner.innerHTML = "";
+            } else {
+              activeUserAction.cancellationRequested = true;
+              renderUserAction();
+            }
+          } else if (target.hasAttribute("data-user-action-close")) {
+            activeUserAction = null;
+            actionRunner.hidden = true;
+            actionRunner.innerHTML = "";
+          }
+        });
+      }
+
+      document.querySelectorAll("[data-user-action-form]").forEach(function (form) {
+        form.addEventListener("submit", function (event) {
+          event.preventDefault();
+          prepareUserAction(form);
+        });
+      });
+
+      var deletionContainer = document.querySelector("[data-user-deletion-progress]");
+      if (deletionContainer && deletionContainer.dataset.statusUrl) {
+        var deletionTimer;
+
+        function escapeHtml(value) {
+          return String(value || "").replace(/[&<>'"]/g, function (character) {
+            return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character];
+          });
+        }
+
+        function deletionStatusClass(status) {
+          if (status === "succeeded") { return "pill-active"; }
+          if (status === "queued" || status === "running") { return "pill-unknown"; }
+          return "pill-missing";
+        }
+
+        function deletionTitle(status) {
+          if (status === "queued" || status === "running") { return "Löschung läuft"; }
+          if (status === "cancelled") { return "Löschung abgebrochen"; }
+          return "Löschung abgeschlossen";
+        }
+
+        function renderDeletionProgress(payload) {
+          var total = Number(payload.total) || 0;
+          var completed = Number(payload.completed) || 0;
+          var percentage = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+          var track = deletionContainer.querySelector("[data-user-deletion-progress-track]");
+          var fill = deletionContainer.querySelector("[data-user-deletion-progress-fill]");
+          var title = deletionContainer.querySelector("[data-user-deletion-title]");
+          var summary = deletionContainer.querySelector("[data-user-deletion-summary]");
+          var cancelForm = deletionContainer.querySelector("[data-user-deletion-cancel-form]");
+          var rows = deletionContainer.querySelector("[data-user-deletion-rows]");
+
+          if (track) {
+            track.setAttribute("aria-valuemax", String(total));
+            track.setAttribute("aria-valuenow", String(completed));
+          }
+          if (fill) { fill.style.width = percentage + "%"; }
+          if (title) { title.textContent = deletionTitle(payload.status); }
+          if (summary) {
+            summary.textContent = completed + " von " + total + " Benutzer abgeschlossen."
+              + (payload.cancellation_requested ? " Die übrigen Warteschlangen-Einträge wurden abgebrochen." : "");
+          }
+          if (cancelForm && !payload.can_cancel) { cancelForm.hidden = true; }
+          if (rows) {
+            rows.innerHTML = (payload.items || []).map(function (item) {
+              return "<tr>"
+                + "<td><a href=\"/sites/" + encodeURIComponent(item.site_id) + "#users\">" + escapeHtml(item.site) + "</a></td>"
+                + "<td>" + escapeHtml(item.username) + "</td>"
+                + "<td>" + escapeHtml(item.replacement_username) + "</td>"
+                + "<td><span class=\"pill " + deletionStatusClass(item.status) + "\">" + escapeHtml(item.status) + "</span></td>"
+                + "<td>" + escapeHtml(item.message) + "</td>"
+                + "</tr>";
+            }).join("");
+          }
+        }
+
+        function pollDeletionProgress() {
+          window.fetch(deletionContainer.dataset.statusUrl, { headers: { Accept: "application/json" } })
+            .then(function (response) {
+              if (!response.ok) { throw new Error("Unable to load user deletion status."); }
+              return response.json();
+            })
+            .then(function (payload) {
+              renderDeletionProgress(payload);
+              if (payload.status === "queued" || payload.status === "running") {
+                deletionTimer = window.setTimeout(pollDeletionProgress, 2000);
+              }
+            })
+            .catch(function () {
+              deletionTimer = window.setTimeout(pollDeletionProgress, 5000);
+            });
+        }
+
+        pollDeletionProgress();
+        window.addEventListener("beforeunload", function () { window.clearTimeout(deletionTimer); });
+      }
 
       document.querySelectorAll("[data-user-generate-password]").forEach(function (button) {
         button.addEventListener("click", function () {
