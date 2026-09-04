@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
     __tablename__ = "customer_zoho_emails"
     __table_args__ = (
         UniqueConstraint("customer_id", "zoho_message_id", name="uq_customer_zoho_emails_customer_id_zoho_message_id"),
+        Index("ix_customer_zoho_emails_zoho_message_id", "zoho_message_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

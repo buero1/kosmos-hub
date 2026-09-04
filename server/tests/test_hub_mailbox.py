@@ -3,7 +3,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
@@ -124,3 +124,12 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         service.mark_unassigned_read(email_id=unassigned_email.id)
         unread = service.get_view(folder="inbox", unread_only=True)
         assert [message.subject for message in unread.messages] == ["Bekannte E-Mail"]
+
+
+def test_customer_email_message_id_has_a_dedicated_index():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    index_names = {index["name"] for index in inspect(engine).get_indexes("customer_zoho_emails")}
+
+    assert "ix_customer_zoho_emails_zoho_message_id" in index_names

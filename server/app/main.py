@@ -118,6 +118,13 @@ def _ensure_phase_one_schema() -> None:
                     text("ALTER TABLE customer_zoho_emails MODIFY COLUMN encrypted_payload_json MEDIUMTEXT NOT NULL")
                 )
             logger.info("Expanded customer_zoho_emails.encrypted_payload_json to MEDIUMTEXT.")
+        email_index_names = {index["name"] for index in inspector.get_indexes("customer_zoho_emails")}
+        if "ix_customer_zoho_emails_zoho_message_id" not in email_index_names:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("CREATE INDEX ix_customer_zoho_emails_zoho_message_id ON customer_zoho_emails (zoho_message_id)")
+                )
+            logger.info("Added customer_zoho_emails.zoho_message_id index.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
