@@ -155,6 +155,7 @@ def _ensure_phase_one_schema() -> None:
         additions = {
             "cancel_requested": "TINYINT(1) NOT NULL DEFAULT 0 AFTER status",
             "consecutive_failures": "INT NOT NULL DEFAULT 0 AFTER cancel_requested",
+            "continue_automatically": "TINYINT(1) NOT NULL DEFAULT 1 AFTER consecutive_failures",
         }
         missing = [(name, definition) for name, definition in additions.items() if name not in columns]
         if missing:

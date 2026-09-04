@@ -302,7 +302,7 @@
         <div class="zoho-notification-test">
           <div>
             <h4>Vollständige E-Mail-Inhalte</h4>
-            <p class="subtle">Jede Charge lädt bis zu 500 der neuesten noch nicht gespeicherten E-Mail-Inhalte verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
+            <p class="subtle">Der Hintergrundimport lädt alle noch nicht gespeicherten E-Mail-Inhalte in fortlaufenden 500er-Chargen verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
           </div>
           {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
             <form method="post" action="/account/zoho/email-content/import/cancel">
@@ -313,12 +313,12 @@
             <form method="post" action="/account/zoho/email-content/import">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="limit" value="500">
-              <button class="button button-secondary" type="submit">Nächste 500 E-Mail-Inhalte laden</button>
+              <button class="button button-secondary" type="submit">Alle verbleibenden E-Mail-Inhalte laden</button>
             </form>
           {% endif %}
           <div class="zoho-notification-test-status">
             {% if zoho_email_content_import %}
-              <p data-zoho-email-content-import-status><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
+              <p data-zoho-email-content-import-status><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %}{% if zoho_email_content_import.continue_automatically %} · weitere Chargen folgen automatisch{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
             {% else %}
               <p class="subtle">Noch keine E-Mail-Inhalts-Charge ausgeführt.</p>
             {% endif %}
@@ -343,6 +343,7 @@
                 statusLine.append(progress);
                 statusLine.append(' · ' + status.loaded_emails + ' Inhalte geladen · ' + status.failed_emails + ' fehlgeschlagen');
                 if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+                if (status.continue_automatically) statusLine.append(' · weitere Chargen folgen automatisch');
                 statusLine.append(' · Status: ' + statusLabel(status.status));
                 if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
                 if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);

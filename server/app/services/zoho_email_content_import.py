@@ -29,6 +29,7 @@ class ZohoEmailContentImportStatus:
     failed_emails: int
     cancel_requested: bool
     consecutive_failures: int
+    continue_automatically: bool
     started_at: datetime | None
     completed_at: datetime | None
     last_error: str | None
@@ -58,7 +59,14 @@ class ZohoEmailContentImportService:
         )
         return self._status(latest) if latest is not None else None
 
-    def start(self, *, requested_by: str, limit: int) -> tuple[ZohoEmailContentImportStatus, bool]:
+    def start(
+        self,
+        *,
+        requested_by: str,
+        limit: int,
+        continue_automatically: bool = True,
+        initial_consecutive_failures: int = 0,
+    ) -> tuple[ZohoEmailContentImportStatus, bool]:
         if limit < 1 or limit > 500:
             raise ValueError("Eine E-Mail-Inhalts-Charge muss zwischen 1 und 500 Nachrichten umfassen.")
         active = self._active_import()
@@ -88,6 +96,8 @@ class ZohoEmailContentImportService:
         run = ZohoEmailContentImport(
             requested_by=requested_by[:128],
             status="pending",
+            continue_automatically=continue_automatically,
+            consecutive_failures=initial_consecutive_failures,
             requested_limit=limit,
             total_emails=len(selected_email_ids),
         )
@@ -137,6 +147,19 @@ class ZohoEmailContentImportService:
             run.status = "completed"
             run.completed_at = datetime.now(UTC)
             self.db.commit()
+            if run.continue_automatically:
+                try:
+                    _, started = self.start(
+                        requested_by=run.requested_by,
+                        limit=run.requested_limit,
+                        continue_automatically=True,
+                        initial_consecutive_failures=run.consecutive_failures,
+                    )
+                except ValueError:
+                    return "completed"
+                if started:
+                    self.db.commit()
+                    return "continued"
             return "completed"
 
         run_id = run.id
@@ -225,6 +248,7 @@ class ZohoEmailContentImportService:
             failed_emails=run.failed_emails,
             cancel_requested=run.cancel_requested,
             consecutive_failures=run.consecutive_failures,
+            continue_automatically=run.continue_automatically,
             started_at=run.started_at,
             completed_at=run.completed_at,
             last_error=run.last_error,

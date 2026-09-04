@@ -281,8 +281,11 @@ def process_pending_zoho_email_content_import() -> dict[str, int]:
                 summary["failed"] += 1
                 return summary
 
-            if outcome is None or outcome == "completed":
+            if outcome is None or outcome in {"completed", "cancelled", "stopped"}:
                 return summary
+            if outcome == "continued":
+                sleep(0.5)
+                continue
             summary["checked"] += 1
             summary["succeeded" if outcome == "succeeded" else "failed"] += 1
             # Preserve capacity for direct customer and email actions in Zoho.

@@ -16,6 +16,7 @@ class ZohoEmailContentImport(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
     consecutive_failures: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
+    continue_automatically: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
     requested_limit: Mapped[int] = mapped_column(Integer(), nullable=False)
     total_emails: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
     processed_emails: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)

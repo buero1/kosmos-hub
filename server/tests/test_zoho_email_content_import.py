@@ -58,7 +58,7 @@ def test_email_content_import_continues_after_one_email_fails():
             public_base_url="https://hub.example",
             communication_service=communications,  # type: ignore[arg-type]
         )
-        status, started = service.start(requested_by="operator", limit=3)
+        status, started = service.start(requested_by="operator", limit=3, continue_automatically=False)
 
         assert started is True
         assert status.total_emails == 3
@@ -80,7 +80,7 @@ def test_email_content_import_continues_after_one_email_fails():
         ).all() == ["loaded", "failed", "loaded"]
 
         communications.failing_email_ids.clear()
-        retry_status, retried = service.start(requested_by="operator", limit=3)
+        retry_status, retried = service.start(requested_by="operator", limit=3, continue_automatically=False)
 
         assert retried is True
         assert retry_status.status == "pending"
@@ -91,7 +91,7 @@ def test_email_content_import_continues_after_one_email_fails():
         assert service.status().loaded_emails == 1  # type: ignore[union-attr]
 
         with pytest.raises(ValueError, match="keine Zoho-E-Mails ohne gespeicherten Inhalt"):
-            service.start(requested_by="operator", limit=3)
+            service.start(requested_by="operator", limit=3, continue_automatically=False)
 
 
 def test_email_content_import_stops_after_three_consecutive_failures():
@@ -124,7 +124,7 @@ def test_email_content_import_stops_after_three_consecutive_failures():
             public_base_url="https://hub.example",
             communication_service=communications,  # type: ignore[arg-type]
         )
-        service.start(requested_by="operator", limit=4)
+        service.start(requested_by="operator", limit=4, continue_automatically=False)
 
         assert service.process_next_email() == "failed"
         assert service.process_next_email() == "failed"
@@ -162,7 +162,7 @@ def test_email_content_import_can_be_cancelled_before_the_next_email():
             public_base_url="https://hub.example",
             communication_service=FakeCustomerCommunications(failing_email_id=0),  # type: ignore[arg-type]
         )
-        service.start(requested_by="operator", limit=1)
+        service.start(requested_by="operator", limit=1, continue_automatically=False)
         status, requested = service.cancel()
 
         assert requested is True
@@ -170,3 +170,46 @@ def test_email_content_import_can_be_cancelled_before_the_next_email():
         assert status.cancel_requested is True
         assert service.process_next_email() == "cancelled"
         assert service.status().status == "cancelled"  # type: ignore[union-attr]
+
+
+def test_email_content_import_continues_with_a_follow_up_batch():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Customer", zoho_id="zoho-customer")
+        db.add(customer)
+        db.flush()
+        emails = [
+            CustomerZohoEmail(
+                customer_id=customer.id,
+                zoho_message_id=f"message-{index}",
+                zoho_module="Accounts",
+                zoho_record_id="zoho-customer",
+                source="zoho",
+                encrypted_payload_json="header",
+            )
+            for index in range(2)
+        ]
+        db.add_all(emails)
+        db.commit()
+
+        communications = FakeCustomerCommunications(failing_email_id=0)
+        service = ZohoEmailContentImportService(
+            db=db,
+            cipher=SecretCipher("a" * 32),
+            public_base_url="https://hub.example",
+            communication_service=communications,  # type: ignore[arg-type]
+        )
+        first, started = service.start(requested_by="operator", limit=1, continue_automatically=True)
+
+        assert started is True
+        assert service.process_next_email() == "succeeded"
+        assert service.process_next_email() == "continued"
+        second = service.status()
+        assert second is not None
+        assert second.id != first.id
+        assert second.continue_automatically is True
+        assert second.total_emails == 1
+        assert service.process_next_email() == "succeeded"
+        assert service.process_next_email() == "completed"

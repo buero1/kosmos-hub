@@ -781,6 +781,7 @@ def zoho_email_content_batch_status(
             "failed_emails": status.failed_emails,
             "consecutive_failures": status.consecutive_failures,
             "cancel_requested": status.cancel_requested,
+            "continue_automatically": status.continue_automatically,
             "last_error": status.last_error,
         }
     )
