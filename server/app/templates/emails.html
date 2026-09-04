@@ -12,9 +12,11 @@
     .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
     .mailbox-folders a:hover, .mailbox-folders a.is-active { background: var(--accent-soft); color: #075f4e; }
     .mailbox-folders small { color: var(--muted); font-size: 0.75rem; }
-    .mailbox-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
+    .mailbox-list { --mailbox-row-height: 94px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
     .mailbox-list-heading { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 0.82rem; }
+    .mailbox-list-canvas { position: relative; min-height: 0; }
     .mailbox-message { display: block; padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); color: var(--ink); text-decoration: none; }
+    .mailbox-list-canvas .mailbox-message { position: absolute; inset-inline: 0; height: var(--mailbox-row-height); box-sizing: border-box; overflow: hidden; }
     .mailbox-message:hover { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
     .mailbox-message.is-selected { background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel)); }
     .mailbox-message.is-unread { border-left: 3px solid #1d63b8; padding-left: calc(1rem - 3px); }
@@ -83,19 +85,29 @@
       updateMailboxHeight();
       window.addEventListener('resize', updateMailboxHeight);
 
-      function attachMessageListeners(scope) {
-        scope.querySelectorAll('[data-mailbox-message]').forEach(function (link) {
-          link.addEventListener('click', function (event) {
-            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            event.preventDefault();
-            setSelectedMessage(link);
-            loadMessage(link);
-          });
+      function attachMessageListener(link) {
+        if (link.dataset.mailboxMessageBound) return;
+        link.dataset.mailboxMessageBound = 'true';
+        link.addEventListener('click', function (event) {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          var list = link.closest('[data-mailbox-list]');
+          if (!list) return;
+          var href = link.href;
+          var messageKey = link.dataset.mailboxKey;
+          setSelectedMessage(list, messageKey);
+          loadMessage(href, list, messageKey);
         });
+      }
+
+      function attachMessageListeners(scope) {
+        scope.querySelectorAll('[data-mailbox-message]').forEach(attachMessageListener);
       }
 
       function attachFolderListeners(scope) {
         scope.querySelectorAll('[data-mailbox-folder]').forEach(function (link) {
+          if (link.dataset.mailboxFolderBound) return;
+          link.dataset.mailboxFolderBound = 'true';
           link.addEventListener('click', function (event) {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault();
@@ -105,13 +117,103 @@
         });
       }
 
-      attachMessageListeners(document);
       attachFolderListeners(document);
 
-      function setSelectedMessage(link) {
-        document.querySelectorAll('[data-mailbox-message]').forEach(function (message) {
-          message.classList.toggle('is-selected', message === link);
-        });
+      function mailboxMessageUrl(list, messageKey) {
+        var url = new URL('/emails', window.location.origin);
+        url.searchParams.set('folder', list.dataset.mailboxFolderName || 'inbox');
+        if (list.dataset.mailboxUnread === 'true') url.searchParams.set('unread', 'true');
+        url.searchParams.set('selected', messageKey);
+        return url.toString();
+      }
+
+      function createMailboxMessage(list, message, index) {
+        var link = document.createElement('a');
+        link.className = 'mailbox-message';
+        if (list.dataset.mailboxSelectedKey === message.key) link.classList.add('is-selected');
+        if (message.is_unread) link.classList.add('is-unread');
+        link.href = mailboxMessageUrl(list, message.key);
+        link.dataset.mailboxMessage = '';
+        link.dataset.mailboxKey = message.key;
+        link.style.top = (index * parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'))) + 'px';
+
+        var header = document.createElement('div');
+        header.className = 'mailbox-message-row';
+        var sender = document.createElement('strong');
+        sender.textContent = message.sender;
+        header.append(sender);
+        if (message.time) {
+          var time = document.createElement('time');
+          time.textContent = message.time;
+          header.append(time);
+        }
+        link.append(header);
+
+        var subject = document.createElement('strong');
+        subject.className = 'mailbox-message-subject';
+        subject.textContent = message.subject;
+        link.append(subject);
+
+        var context = document.createElement('p');
+        if (message.kind === 'unassigned') {
+          var badge = document.createElement('span');
+          badge.className = 'pill';
+          badge.textContent = 'Unbekannt';
+          context.append(badge);
+        } else {
+          context.textContent = message.context;
+        }
+        link.append(context);
+        attachMessageListener(link);
+        return link;
+      }
+
+      function renderMailboxListWindow(list) {
+        var canvas = list.querySelector('[data-mailbox-list-canvas]');
+        var messages = list._mailboxMessages;
+        if (!canvas || !messages) return;
+        var rowHeight = parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'));
+        var heading = list.querySelector('.mailbox-list-heading');
+        var viewportHeight = list.clientHeight;
+        var viewportTop = Math.max(0, list.scrollTop - (heading ? heading.offsetHeight : 0));
+        var first = Math.max(0, Math.floor(viewportTop / rowHeight) - 24);
+        var last = Math.min(messages.length, Math.ceil((viewportTop + viewportHeight) / rowHeight) + 24);
+        var fragment = document.createDocumentFragment();
+        for (var index = first; index < last; index += 1) {
+          fragment.append(createMailboxMessage(list, messages[index], index));
+        }
+        canvas.replaceChildren(fragment);
+      }
+
+      function attachMailboxListVirtualization(list) {
+        var canvas = list.querySelector('[data-mailbox-list-canvas]');
+        var data = list.querySelector('[data-mailbox-list-data]');
+        if (!canvas || !data) return;
+        try {
+          list._mailboxMessages = JSON.parse(data.textContent || '[]');
+        } catch (_) {
+          list._mailboxMessages = [];
+        }
+        var rowHeight = parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'));
+        canvas.style.height = (list._mailboxMessages.length * rowHeight) + 'px';
+        var scheduled = false;
+        function renderOnAnimationFrame() {
+          if (scheduled) return;
+          scheduled = true;
+          window.requestAnimationFrame(function () {
+            scheduled = false;
+            renderMailboxListWindow(list);
+          });
+        }
+        list.addEventListener('scroll', renderOnAnimationFrame, { passive: true });
+        renderMailboxListWindow(list);
+      }
+
+      document.querySelectorAll('[data-mailbox-list]').forEach(attachMailboxListVirtualization);
+
+      function setSelectedMessage(list, messageKey) {
+        list.dataset.mailboxSelectedKey = messageKey;
+        renderMailboxListWindow(list);
       }
 
       function setActiveFolder(link) {
@@ -161,7 +263,7 @@
             nextList.scrollTop = 0;
             nextPane.scrollTop = 0;
             nextPane.querySelectorAll('details[data-email-preview][open]').forEach(renderPreview);
-            attachMessageListeners(nextList);
+            attachMailboxListVirtualization(nextList);
             attachFolderListeners(nextList);
           })
           .catch(function () {
@@ -170,8 +272,8 @@
           });
       }
 
-      function loadMessage(link) {
-        var paneUrl = new URL(link.href);
+      function loadMessage(messageUrl, list, messageKey) {
+        var paneUrl = new URL(messageUrl);
         paneUrl.pathname = '/emails/selected';
         window.fetch(paneUrl, { credentials: 'same-origin' })
           .then(function (response) {
@@ -185,12 +287,16 @@
             if (!nextPane || !currentPane) throw new Error('Mailbox pane missing.');
 
             currentPane.replaceWith(nextPane);
-            window.history.pushState({}, '', link.href);
+            window.history.pushState({}, '', messageUrl);
             nextPane.scrollTop = 0;
             var previews = nextPane.querySelectorAll('details[data-email-preview][open]');
             previews.forEach(activatePreview);
             if (previews.length) {
-              link.classList.remove('is-unread');
+              var message = (list._mailboxMessages || []).find(function (item) { return item.key === messageKey; });
+              if (message) {
+                message.is_unread = false;
+                renderMailboxListWindow(list);
+              }
               var unreadStatus = nextPane.querySelector('[data-mailbox-unread-status]');
               if (unreadStatus) unreadStatus.remove();
             }

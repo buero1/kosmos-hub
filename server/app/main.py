@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from sqlalchemy import inspect, text
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.routes import accounts, assistant, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
@@ -390,6 +391,7 @@ def create_app() -> FastAPI:
     app.include_router(site_updates.router)
     app.include_router(web.router)
     app.mount("/mcp", mcp_asgi_app)
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.app_secret_key,
