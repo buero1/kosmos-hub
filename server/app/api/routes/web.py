@@ -429,9 +429,9 @@ def mailbox_compose_options(
 
 @router.get("/emails/compose/recipients", response_class=JSONResponse)
 def mailbox_compose_recipients(
-    q: str = "",
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    q: str = "",
 ):
     _require_hub_admin(request)
     matches = _customer_communication_service(db).search_recipients(query=q)
