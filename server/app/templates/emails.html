@@ -61,9 +61,9 @@
 
   <section class="card mailbox-shell" data-mailbox-shell>
     <nav class="mailbox-folders" aria-label="E-Mail-Ordner">
-      <a href="/emails?folder=inbox{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
-      <a href="/emails?folder=sent{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
-      <a href="/emails?folder=unassigned{% if unread %}&amp;unread=true{% endif %}" data-mailbox-folder{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
+      <a href="/emails?folder=inbox" data-mailbox-folder{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
+      <a href="/emails?folder=sent" data-mailbox-folder{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
+      <a href="/emails?folder=unassigned" data-mailbox-folder{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
     </nav>
 
     {% with messages=mailbox.messages, selected=mailbox.selected %}{% include "emails_message_list.html" %}{% include "emails_reading_pane.html" %}{% endwith %}
@@ -413,12 +413,11 @@
         var list = document.querySelector('[data-mailbox-list]');
         if (!list) return;
         var activeFolder = list.dataset.mailboxFolderName || 'inbox';
-        var unread = list.dataset.mailboxUnread === 'true';
         var queue = ['inbox', 'sent', 'unassigned'].filter(function (folder) { return folder !== activeFolder; });
         function loadNextFolder() {
           var folder = queue.shift();
           if (!folder) return;
-          fetchMailboxFolder(folder, unread).then(loadNextFolder, function () {
+          fetchMailboxFolder(folder, false).then(loadNextFolder, function () {
             // A failed preload never blocks the remaining folder preloads.
             loadNextFolder();
           });
@@ -447,6 +446,11 @@
         if (!currentList) {
           window.location.assign(link.href);
           return;
+        }
+        // Folder links show complete folders; only the in-place "Nur neu" control keeps that filter.
+        if (folder !== (currentList.dataset.mailboxFolderName || 'inbox')) {
+          unread = false;
+          targetUrl.searchParams.delete('unread');
         }
         rememberMailboxScroll(currentList);
         fetchMailboxFolder(folder, unread)
