@@ -361,6 +361,11 @@ class CustomerCommunicationService:
             raise ZohoCrmError("Zoho CRM has no verified sender address for this connection.")
         return tuple(senders)
 
+    def list_recipients(self, *, customer_id: int) -> tuple[CustomerCommunicationRecipient, ...]:
+        """List only the current customer's valid recipient addresses for the mailbox composer."""
+        customer = self._require_zoho_customer(customer_id)
+        return tuple(self._recipients_for_customer(customer))
+
     def list_email_templates(self) -> tuple[CustomerCommunicationEmailTemplate, ...]:
         """List the local, encrypted Zoho templates without querying Zoho."""
         templates: list[CustomerCommunicationEmailTemplate] = []

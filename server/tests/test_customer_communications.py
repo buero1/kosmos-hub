@@ -257,6 +257,25 @@ def test_customer_communications_marks_webhook_emails_unread_until_opened():
         assert email.is_unread is False
 
 
+def test_customer_communications_lists_recipients_without_loading_the_full_view():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        recipients = _service(db, FakeZohoCommunications()).list_recipients(customer_id=customer.id)
+
+        assert [(recipient.name, recipient.email) for recipient in recipients] == [
+            ("Example Customer", "accounts@example.de"),
+            ("Anna Example", "anna@example.de"),
+            ("Anna Example", "anna.private@example.de"),
+        ]
+
+
 def test_customer_communications_marks_all_shared_email_copies_read():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

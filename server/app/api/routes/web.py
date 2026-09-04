@@ -404,30 +404,51 @@ def mailbox_status(
     }
 
 
-@router.get("/emails/compose")
-def compose_mailbox_email(
+@router.get("/emails/compose/options", response_class=JSONResponse)
+def mailbox_compose_options(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    customer_id: int | None = None,
-    options: bool = False,
 ):
     _require_hub_admin(request)
-    if options:
-        return {
-            "customers": [
-                {"id": customer.id, "name": customer.name}
-                for customer in db.scalars(
-                    select(Customer)
-                    .where(Customer.is_visible.is_(True))
-                    .order_by(Customer.name.asc(), Customer.id.asc())
-                ).all()
-            ]
-        }
-    if customer_id is None:
-        return RedirectResponse(url="/emails", status_code=303)
-    if db.get(Customer, customer_id) is None:
-        raise HTTPException(status_code=404, detail="Customer not found.")
-    return RedirectResponse(url=f"/customers/{customer_id}?compose_email=1", status_code=303)
+    service = _customer_communication_service(db)
+    sender_error = ""
+    try:
+        senders = service.list_senders()
+    except ZohoCrmError as exc:
+        senders = ()
+        sender_error = str(exc)
+    return {
+        "customers": [
+            {"id": customer.id, "name": customer.name}
+            for customer in db.scalars(
+                select(Customer)
+                .where(Customer.is_visible.is_(True), Customer.zoho_id.is_not(None))
+                .order_by(Customer.name.asc(), Customer.id.asc())
+            ).all()
+        ],
+        "senders": [{"name": sender.name, "email": sender.email} for sender in senders],
+        "templates": [
+            {"id": template.id, "name": template.name, "module": template.module, "subject": template.subject}
+            for template in service.list_email_templates()
+        ],
+        "sender_error": sender_error,
+    }
+
+
+@router.get("/emails/compose/recipients", response_class=JSONResponse)
+def mailbox_compose_recipients(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    try:
+        recipients = _customer_communication_service(db).list_recipients(customer_id=customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "recipients": [{"key": recipient.key, "name": recipient.name, "email": recipient.email} for recipient in recipients]
+    }
 
 
 @router.post("/emails/unassigned/{email_id}/read")
