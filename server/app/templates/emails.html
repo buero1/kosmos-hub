@@ -18,6 +18,7 @@
     .mailbox-message { display: block; padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); color: var(--ink); text-decoration: none; }
     .mailbox-list-canvas .mailbox-message { position: absolute; inset-inline: 0; height: var(--mailbox-row-height); box-sizing: border-box; overflow: hidden; }
     .mailbox-message:hover { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
+    .mailbox-message.is-marked { background: color-mix(in srgb, var(--accent-soft) 52%, var(--panel)); }
     .mailbox-message.is-selected { background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel)); }
     .mailbox-message.is-unread { border-left: 3px solid #1d63b8; padding-left: calc(1rem - 3px); }
     .mailbox-message-row { display: flex; justify-content: space-between; gap: 0.65rem; align-items: baseline; }
@@ -74,6 +75,7 @@
       var folderRequests = new Map();
       var folderSelections = new Map();
       var folderScrollPositions = new Map();
+      var folderMarkedMessages = new Map();
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
 
       function updateMailboxHeight() {
@@ -94,12 +96,17 @@
         if (link.dataset.mailboxMessageBound) return;
         link.dataset.mailboxMessageBound = 'true';
         link.addEventListener('click', function (event) {
-          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (event.defaultPrevented || event.button !== 0 || event.altKey) return;
           event.preventDefault();
           var list = link.closest('[data-mailbox-list]');
           if (!list) return;
           var href = link.href;
           var messageKey = link.dataset.mailboxKey;
+          if (event.ctrlKey || event.metaKey || event.shiftKey) {
+            markMailboxMessages(list, messageKey, event);
+            return;
+          }
+          markMailboxMessages(list, messageKey);
           setSelectedMessage(list, messageKey);
           loadMessage(href, list, messageKey);
         });
@@ -139,6 +146,46 @@
         return url.toString();
       }
 
+      function markedMailboxMessages(list) {
+        var folder = list.dataset.mailboxFolderName || 'inbox';
+        var unread = list.dataset.mailboxUnread === 'true';
+        var cacheKey = mailboxFolderKey(folder, unread);
+        var marked = folderMarkedMessages.get(cacheKey);
+        if (!marked) {
+          marked = { keys: new Set(), anchorKey: list.dataset.mailboxSelectedKey || '' };
+          if (list.dataset.mailboxSelectedKey) marked.keys.add(list.dataset.mailboxSelectedKey);
+          folderMarkedMessages.set(cacheKey, marked);
+        }
+        return marked;
+      }
+
+      function markMailboxMessages(list, messageKey, event) {
+        var marked = markedMailboxMessages(list);
+        var messages = list._mailboxMessages || [];
+        if (event && event.shiftKey && marked.anchorKey) {
+          var anchorIndex = messages.findIndex(function (message) { return message.key === marked.anchorKey; });
+          var targetIndex = messages.findIndex(function (message) { return message.key === messageKey; });
+          if (anchorIndex >= 0 && targetIndex >= 0) {
+            if (!(event.ctrlKey || event.metaKey)) marked.keys.clear();
+            var first = Math.min(anchorIndex, targetIndex);
+            var last = Math.max(anchorIndex, targetIndex);
+            for (var index = first; index <= last; index += 1) marked.keys.add(messages[index].key);
+          }
+        } else if (event && (event.ctrlKey || event.metaKey)) {
+          if (marked.keys.has(messageKey)) {
+            marked.keys.delete(messageKey);
+          } else {
+            marked.keys.add(messageKey);
+          }
+          marked.anchorKey = messageKey;
+        } else {
+          marked.keys.clear();
+          marked.keys.add(messageKey);
+          marked.anchorKey = messageKey;
+        }
+        renderMailboxListWindow(list);
+      }
+
       function rememberMailboxScroll(list) {
         var folder = list.dataset.mailboxFolderName || 'inbox';
         var unread = list.dataset.mailboxUnread === 'true';
@@ -169,6 +216,7 @@
       function createMailboxMessage(list, message, index) {
         var link = document.createElement('a');
         link.className = 'mailbox-message';
+        if (markedMailboxMessages(list).keys.has(message.key)) link.classList.add('is-marked');
         if (list.dataset.mailboxSelectedKey === message.key) link.classList.add('is-selected');
         if (message.is_unread) link.classList.add('is-unread');
         link.href = mailboxMessageUrl(list, message.key);
@@ -292,6 +340,12 @@
         list.dataset.mailboxFolderName = folder;
         list.dataset.mailboxUnread = unread ? 'true' : 'false';
         list.dataset.mailboxSelectedKey = selectedKey || '';
+        var selectionCacheKey = mailboxFolderKey(folder, unread);
+        if (!folderMarkedMessages.has(selectionCacheKey)) {
+          var marked = { keys: new Set(), anchorKey: selectedKey || '' };
+          if (selectedKey) marked.keys.add(selectedKey);
+          folderMarkedMessages.set(selectionCacheKey, marked);
+        }
         var title = list.querySelector('[data-mailbox-list-title]');
         if (title) title.textContent = folderTitles[folder] || 'Posteingang';
         var toggle = list.querySelector('.mailbox-list-heading [data-mailbox-folder]');
