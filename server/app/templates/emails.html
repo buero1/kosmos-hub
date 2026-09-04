@@ -73,6 +73,7 @@
       var folderCache = new Map();
       var folderRequests = new Map();
       var folderSelections = new Map();
+      var folderScrollPositions = new Map();
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
 
       function updateMailboxHeight() {
@@ -136,6 +137,12 @@
         url.searchParams.set('folder', folder);
         if (unread) url.searchParams.set('unread', 'true');
         return url.toString();
+      }
+
+      function rememberMailboxScroll(list) {
+        var folder = list.dataset.mailboxFolderName || 'inbox';
+        var unread = list.dataset.mailboxUnread === 'true';
+        folderScrollPositions.set(mailboxFolderKey(folder, unread), list.scrollTop);
       }
 
       function mailboxListMessages(list) {
@@ -234,6 +241,9 @@
           });
         }
         list.addEventListener('scroll', renderOnAnimationFrame, { passive: true });
+        list.addEventListener('scroll', function () {
+          rememberMailboxScroll(list);
+        }, { passive: true });
         updateMailboxList(list, list._mailboxMessages);
       }
 
@@ -289,8 +299,10 @@
           toggle.href = mailboxFolderUrl(folder, !unread);
           toggle.textContent = unread ? 'Alle' : 'Nur neu';
         }
-        list.scrollTop = 0;
         updateMailboxList(list, messages);
+        var savedScrollTop = folderScrollPositions.get(mailboxFolderKey(folder, unread)) || 0;
+        list.scrollTop = savedScrollTop;
+        renderMailboxListWindow(list);
       }
 
       function clearMailboxReadingPane() {
@@ -382,6 +394,7 @@
           window.location.assign(link.href);
           return;
         }
+        rememberMailboxScroll(currentList);
         fetchMailboxFolder(folder, unread)
           .then(function (messages) {
             var selection = folderSelections.get(mailboxFolderKey(folder, unread));
