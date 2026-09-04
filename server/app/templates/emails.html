@@ -565,6 +565,9 @@
       }
 
       preloadMailboxFolders();
+      document.querySelectorAll('details[data-email-preview][open]').forEach(function (preview) {
+        activatePreview(preview);
+      });
 
       function loadMessage(messageUrl, list, messageKey) {
         var startedAt = performance.now();

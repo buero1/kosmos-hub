@@ -541,7 +541,6 @@ class CustomerCommunicationService:
         load_new_inbound_content: bool,
     ) -> CustomerCommunicationEmailHeaderSyncResult:
         email_count = 0
-        new_inbound_emails: list[CustomerZohoEmail] = []
         known_emails = {
             (email.customer_id, email.zoho_message_id): email
             for email in self.db.scalars(
@@ -573,19 +572,22 @@ class CustomerCommunicationService:
                 )
                 if created_email is not None:
                     email_count += 1
-                    if load_new_inbound_content and created_email.direction == "inbound":
-                        new_inbound_emails.append(created_email)
 
         self.db.flush()
         duplicate_count = self._deduplicate_customer_emails(customer_id=customer.id)
         loaded_contents = 0
         if load_new_inbound_content:
-            for created_email in new_inbound_emails:
-                email_id = created_email.id
-                if email_id is None:
-                    continue
-                email = self.db.get(CustomerZohoEmail, email_id)
-                if email is None or email.direction != "inbound" or self.has_loaded_email_content(email):
+            # Webhooks set only newly discovered inbound messages to unread. Looking them up again
+            # after deduplication also handles the Account/Contact copies Zoho may return together.
+            unread_emails = self.db.scalars(
+                select(CustomerZohoEmail).where(
+                    CustomerZohoEmail.customer_id == customer.id,
+                    CustomerZohoEmail.direction == "inbound",
+                    CustomerZohoEmail.is_unread.is_(True),
+                )
+            ).all()
+            for email in unread_emails:
+                if self.has_loaded_email_content(email):
                     continue
                 try:
                     self._load_email_content_for_email(email, mark_as_read=False)
