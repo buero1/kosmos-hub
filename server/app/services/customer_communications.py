@@ -818,7 +818,19 @@ class CustomerCommunicationService:
         if email is None:
             raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
         if email.direction == "inbound":
-            email.is_unread = False
+            if email.zoho_message_id:
+                # A Zoho message can be displayed for several customers through shared contacts.
+                # Reading it in one view must update every mirrored copy as one mailbox message.
+                mirrored_emails = self.db.scalars(
+                    select(CustomerZohoEmail).where(
+                        CustomerZohoEmail.zoho_message_id == email.zoho_message_id,
+                        CustomerZohoEmail.direction == "inbound",
+                    )
+                ).all()
+                for mirrored_email in mirrored_emails:
+                    mirrored_email.is_unread = False
+            else:
+                email.is_unread = False
             self.db.flush()
 
     def download_email_attachment(

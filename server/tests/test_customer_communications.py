@@ -257,6 +257,44 @@ def test_customer_communications_marks_webhook_emails_unread_until_opened():
         assert email.is_unread is False
 
 
+def test_customer_communications_marks_all_shared_email_copies_read():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        first_customer, _first_contact = _customer(cipher)
+        second_customer = Customer(name="Second customer", zoho_id="zoho-account-2")
+        first_email = CustomerZohoEmail(
+            customer=first_customer,
+            zoho_message_id="zoho-shared-email-1",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            sync_status="synced",
+            encrypted_payload_json=cipher.encrypt('{"subject":"Shared message"}'),
+        )
+        second_email = CustomerZohoEmail(
+            customer=second_customer,
+            zoho_message_id="zoho-shared-email-1",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            sync_status="synced",
+            encrypted_payload_json=cipher.encrypt('{"subject":"Shared message"}'),
+        )
+        db.add_all([first_customer, second_customer, first_email, second_email])
+        db.commit()
+
+        _service(db, FakeZohoCommunications()).mark_email_read(
+            customer_id=first_customer.id,
+            email_id=first_email.id,
+        )
+
+        assert first_email.is_unread is False
+        assert second_email.is_unread is False
+
+
 def test_customer_communications_auto_loads_new_webhook_email_content_without_marking_it_read():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
