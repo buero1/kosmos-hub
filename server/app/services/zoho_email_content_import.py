@@ -27,6 +27,8 @@ class ZohoEmailContentImportStatus:
     processed_emails: int
     loaded_emails: int
     failed_emails: int
+    cancel_requested: bool
+    consecutive_failures: int
     started_at: datetime | None
     completed_at: datetime | None
     last_error: str | None
@@ -58,21 +60,10 @@ class ZohoEmailContentImportService:
 
     def start(self, *, requested_by: str, limit: int) -> tuple[ZohoEmailContentImportStatus, bool]:
         if limit < 1 or limit > 500:
-            raise ValueError("Der E-Mail-Inhaltstest muss zwischen 1 und 500 Nachrichten umfassen.")
+            raise ValueError("Eine E-Mail-Inhalts-Charge muss zwischen 1 und 500 Nachrichten umfassen.")
         active = self._active_import()
         if active is not None:
             return self._status(active), False
-
-        latest = self.db.scalar(
-            select(ZohoEmailContentImport).order_by(ZohoEmailContentImport.id.desc()).limit(1)
-        )
-        if latest is not None and latest.status == "completed":
-            if latest.failed_emails:
-                self._retry_failed_items(latest)
-                return self._status(latest), True
-            # This control deliberately runs one fixed test batch. A later full import
-            # is a separate, explicit action rather than an accidental repeat click.
-            return self._status(latest), False
 
         selected_email_ids: list[int] = []
         candidates = self.db.scalars(
@@ -109,11 +100,26 @@ class ZohoEmailContentImportService:
         self.db.flush()
         return self._status(run), True
 
+    def cancel(self) -> tuple[ZohoEmailContentImportStatus | None, bool]:
+        """Request a safe stop after the current remote Zoho request completes."""
+        run = self._active_import()
+        if run is None:
+            return self.status(), False
+        run.cancel_requested = True
+        self.db.flush()
+        return self._status(run), True
+
     def process_next_email(self) -> str | None:
         """Load the next selected email, recording failures without stopping the batch."""
         run = self._active_import()
         if run is None:
             return None
+        if run.cancel_requested:
+            run.status = "cancelled"
+            run.completed_at = datetime.now(UTC)
+            run.last_error = "Der Import wurde durch den Benutzer abgebrochen."
+            self.db.commit()
+            return "cancelled"
         if run.status == "pending":
             run.status = "running"
             run.started_at = datetime.now(UTC)
@@ -145,12 +151,12 @@ class ZohoEmailContentImportService:
             self.communications.load_email_content(customer_id=email.customer_id, email_id=email.id)
         except (ValueError, ZohoCrmError) as exc:
             self.db.rollback()
-            self._record_failure(run_id=run_id, item_id=item_id, email_id=email_id, error=str(exc))
-            return "failed"
+            stopped = self._record_failure(run_id=run_id, item_id=item_id, email_id=email_id, error=str(exc))
+            return "stopped" if stopped else "failed"
         except Exception as exc:
             self.db.rollback()
-            self._record_failure(run_id=run_id, item_id=item_id, email_id=email_id, error=str(exc))
-            return "failed"
+            stopped = self._record_failure(run_id=run_id, item_id=item_id, email_id=email_id, error=str(exc))
+            return "stopped" if stopped else "failed"
 
         run = self.db.get(ZohoEmailContentImport, run_id)
         item = self.db.get(ZohoEmailContentImportItem, item_id)
@@ -161,43 +167,35 @@ class ZohoEmailContentImportService:
         item.last_error = None
         run.processed_emails += 1
         run.loaded_emails += 1
+        run.consecutive_failures = 0
         run.last_error = None
         self.db.commit()
         return "succeeded"
 
-    def _record_failure(self, *, run_id: int, item_id: int, email_id: int, error: str) -> None:
+    def _record_failure(self, *, run_id: int, item_id: int, email_id: int, error: str) -> bool:
         message = self._safe_error_message(error)
         run = self.db.get(ZohoEmailContentImport, run_id)
         item = self.db.get(ZohoEmailContentImportItem, item_id)
         email = self.db.get(CustomerZohoEmail, email_id)
         if run is None or item is None:
             self.db.rollback()
-            return
+            return False
         item.status = "failed"
         item.last_error = message
         if email is not None:
             email.last_error = message
         run.processed_emails += 1
         run.failed_emails += 1
-        run.last_error = message
+        run.consecutive_failures += 1
+        stopped = run.consecutive_failures >= 3
+        if stopped:
+            run.status = "stopped"
+            run.completed_at = datetime.now(UTC)
+            run.last_error = "Import nach drei aufeinanderfolgenden Fehlern automatisch angehalten."
+        else:
+            run.last_error = message
         self.db.commit()
-
-    def _retry_failed_items(self, run: ZohoEmailContentImport) -> None:
-        failed_items = self.db.scalars(
-            select(ZohoEmailContentImportItem).where(
-                ZohoEmailContentImportItem.email_import_id == run.id,
-                ZohoEmailContentImportItem.status == "failed",
-            )
-        ).all()
-        for item in failed_items:
-            item.status = "pending"
-            item.last_error = None
-        run.status = "pending"
-        run.processed_emails -= len(failed_items)
-        run.failed_emails = 0
-        run.completed_at = None
-        run.last_error = None
-        self.db.flush()
+        return stopped
 
     @staticmethod
     def _safe_error_message(error: str) -> str:
@@ -225,6 +223,8 @@ class ZohoEmailContentImportService:
             processed_emails=run.processed_emails,
             loaded_emails=run.loaded_emails,
             failed_emails=run.failed_emails,
+            cancel_requested=run.cancel_requested,
+            consecutive_failures=run.consecutive_failures,
             started_at=run.started_at,
             completed_at=run.completed_at,
             last_error=run.last_error,

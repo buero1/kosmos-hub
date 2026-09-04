@@ -65,13 +65,13 @@
       <p class="notice-success" data-account-notice-section="account-zoho">Der vollständige Zoho-E-Mail-Import läuft bereits weiter.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "email-content-import-started" %}
-      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport für 50 vollständige Zoho-E-Mails läuft jetzt im Hintergrund.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Die 500er-Charge vollständiger Zoho-E-Mails läuft jetzt im Hintergrund.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "email-content-import-running" %}
-      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport für vollständige Zoho-E-Mails läuft bereits weiter.</p>
+      <p class="notice-success" data-account-notice-section="account-zoho">Die E-Mail-Inhalts-Charge läuft bereits weiter.</p>
     {% endif %}
-    {% if request.query_params.get("zoho") == "email-content-import-completed" %}
-      <p class="notice-success" data-account-notice-section="account-zoho">Der Testimport mit 50 vollständigen Zoho-E-Mails ist bereits abgeschlossen.</p>
+    {% if request.query_params.get("zoho") == "email-content-import-cancel-requested" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Abbruch wurde vorgemerkt. Die aktuell laufende E-Mail wird noch sicher abgeschlossen.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
@@ -254,10 +254,6 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="button button-secondary" type="submit">Alle Zoho-E-Mail-Verläufe importieren</button>
             </form>
-            <form method="post" action="/account/zoho/email-content/import-test">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit" {% if zoho_email_content_import and zoho_email_content_import.status == "completed" and not zoho_email_content_import.failed_emails %}disabled{% endif %}>50 E-Mail-Inhalte testweise laden</button>
-            </form>
           </div>
         {% endif %}
         {% if zoho_status.configured %}
@@ -306,13 +302,25 @@
         <div class="zoho-notification-test">
           <div>
             <h4>Vollständige E-Mail-Inhalte</h4>
-            <p class="subtle">Der Test lädt die 50 neuesten noch nicht gespeicherten E-Mail-Inhalte verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
+            <p class="subtle">Jede Charge lädt bis zu 500 der neuesten noch nicht gespeicherten E-Mail-Inhalte verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
           </div>
+          {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
+            <form method="post" action="/account/zoho/email-content/import/cancel">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit" {% if zoho_email_content_import.cancel_requested %}disabled{% endif %}>{% if zoho_email_content_import.cancel_requested %}Abbruch vorgemerkt{% else %}Import abbrechen{% endif %}</button>
+            </form>
+          {% else %}
+            <form method="post" action="/account/zoho/email-content/import">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="limit" value="500">
+              <button class="button button-secondary" type="submit">Nächste 500 E-Mail-Inhalte laden</button>
+            </form>
+          {% endif %}
           <div class="zoho-notification-test-status">
             {% if zoho_email_content_import %}
-              <p><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen · Status: {{ zoho_email_content_import.status }}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
+              <p><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
             {% else %}
-              <p class="subtle">Noch kein Testimport von E-Mail-Inhalten ausgeführt.</p>
+              <p class="subtle">Noch keine E-Mail-Inhalts-Charge ausgeführt.</p>
             {% endif %}
           </div>
         </div>

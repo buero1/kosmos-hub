@@ -150,6 +150,18 @@ def _ensure_phase_one_schema() -> None:
     if "zoho_email_content_imports" not in table_names:
         ZohoEmailContentImport.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created zoho_email_content_imports table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("zoho_email_content_imports")}
+        additions = {
+            "cancel_requested": "TINYINT(1) NOT NULL DEFAULT 0 AFTER status",
+            "consecutive_failures": "INT NOT NULL DEFAULT 0 AFTER cancel_requested",
+        }
+        missing = [(name, definition) for name, definition in additions.items() if name not in columns]
+        if missing:
+            with engine.begin() as connection:
+                for name, definition in missing:
+                    connection.execute(text(f"ALTER TABLE zoho_email_content_imports ADD COLUMN {name} {definition}"))
+            logger.info("Added zoho_email_content_imports columns: %s", ", ".join(name for name, _ in missing))
 
     if "zoho_email_content_import_items" not in table_names:
         ZohoEmailContentImportItem.__table__.create(bind=engine, checkfirst=True)

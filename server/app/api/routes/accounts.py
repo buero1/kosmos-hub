@@ -686,10 +686,12 @@ def import_zoho_email_history(
     return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
 
 
-@router.post("/zoho/email-content/import-test")
-def import_zoho_email_content_test(
+@router.post("/zoho/email-content/import")
+@router.post("/zoho/email-content/import-test", include_in_schema=False)
+def import_zoho_email_content_batch(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Form()] = 500,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -699,7 +701,7 @@ def import_zoho_email_content_test(
             db=db,
             cipher=get_secret_cipher(),
             public_base_url=get_settings().public_base_url,
-        ).start(requested_by=user.username, limit=50)
+        ).start(requested_by=user.username, limit=limit)
     except (ValueError, ZohoCrmError) as exc:
         return templates.TemplateResponse(
             request,
@@ -713,7 +715,7 @@ def import_zoho_email_content_test(
         site=None,
         actor=user.username,
         source="zoho-crm",
-        action="import-zoho-email-content-test",
+        action="import-zoho-email-content-batch",
         result="started" if started else "already-running",
         detail=(
             f"Zoho email content import {status.id} {'started' if started else 'was already active'} "
@@ -724,11 +726,36 @@ def import_zoho_email_content_test(
     schedule_pending_zoho_email_content_import()
     if started:
         state = "email-content-import-started"
-    elif status.status == "completed":
-        state = "email-content-import-completed"
     else:
         state = "email-content-import-running"
     return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+
+
+@router.post("/zoho/email-content/import/cancel")
+def cancel_zoho_email_content_batch(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    status, requested = ZohoEmailContentImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).cancel()
+    if requested and status is not None:
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho-crm",
+            action="cancel-zoho-email-content-batch",
+            result="requested",
+            detail=f"Cancellation requested for Zoho email content import {status.id}.",
+        )
+        db.commit()
+    return RedirectResponse(url="/account?zoho=email-content-import-cancel-requested", status_code=303)
 
 
 @router.post("/zoho/email-templates/sync")

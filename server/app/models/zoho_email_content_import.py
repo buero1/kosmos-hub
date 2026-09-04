@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -14,6 +14,8 @@ class ZohoEmailContentImport(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    consecutive_failures: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
     requested_limit: Mapped[int] = mapped_column(Integer(), nullable=False)
     total_emails: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
     processed_emails: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)

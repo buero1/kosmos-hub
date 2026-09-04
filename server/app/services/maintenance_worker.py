@@ -239,7 +239,7 @@ def process_pending_zoho_email_history_import() -> dict[str, int]:
                 summary["failed"] += 1
                 return summary
 
-            if outcome is None or outcome == "completed":
+            if outcome is None or outcome in {"completed", "cancelled", "stopped"}:
                 return summary
             summary["checked"] += 1
             if outcome == "failed":
