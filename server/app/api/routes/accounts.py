@@ -758,6 +758,34 @@ def cancel_zoho_email_content_batch(
     return RedirectResponse(url="/account?zoho=email-content-import-cancel-requested", status_code=303)
 
 
+@router.get("/zoho/email-content/import/status")
+def zoho_email_content_batch_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_admin_user(request)
+    status = ZohoEmailContentImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).status()
+    if status is None:
+        return JSONResponse({"active": False, "status": None})
+    return JSONResponse(
+        {
+            "active": status.status in {"pending", "running"},
+            "status": status.status,
+            "processed_emails": status.processed_emails,
+            "total_emails": status.total_emails,
+            "loaded_emails": status.loaded_emails,
+            "failed_emails": status.failed_emails,
+            "consecutive_failures": status.consecutive_failures,
+            "cancel_requested": status.cancel_requested,
+            "last_error": status.last_error,
+        }
+    )
+
+
 @router.post("/zoho/email-templates/sync")
 def sync_zoho_email_templates(
     request: Request,

@@ -318,12 +318,60 @@
           {% endif %}
           <div class="zoho-notification-test-status">
             {% if zoho_email_content_import %}
-              <p><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
+              <p data-zoho-email-content-import-status><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
             {% else %}
               <p class="subtle">Noch keine E-Mail-Inhalts-Charge ausgeführt.</p>
             {% endif %}
           </div>
         </div>
+        {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
+          <script>
+            (function () {
+              var statusLine = document.querySelector('[data-zoho-email-content-import-status]');
+              if (!statusLine) return;
+
+              function statusLabel(status) {
+                if (status === 'cancelled') return 'abgebrochen';
+                if (status === 'stopped') return 'automatisch angehalten';
+                return status;
+              }
+
+              function renderStatus(status) {
+                statusLine.replaceChildren();
+                var progress = document.createElement('strong');
+                progress.textContent = status.processed_emails + ' von ' + status.total_emails + ' E-Mails';
+                statusLine.append(progress);
+                statusLine.append(' · ' + status.loaded_emails + ' Inhalte geladen · ' + status.failed_emails + ' fehlgeschlagen');
+                if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+                statusLine.append(' · Status: ' + statusLabel(status.status));
+                if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
+                if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
+              }
+
+              function refreshStatus() {
+                window.fetch('/account/zoho/email-content/import/status', { credentials: 'same-origin' })
+                  .then(function (response) {
+                    if (!response.ok) throw new Error('Import status response failed.');
+                    return response.json();
+                  })
+                  .then(function (status) {
+                    if (!status.status) return;
+                    renderStatus(status);
+                    if (!status.active) {
+                      window.setTimeout(function () { window.location.reload(); }, 750);
+                      return;
+                    }
+                    window.setTimeout(refreshStatus, 3000);
+                  })
+                  .catch(function () {
+                    window.setTimeout(refreshStatus, 6000);
+                  });
+              }
+
+              window.setTimeout(refreshStatus, 3000);
+            }());
+          </script>
+        {% endif %}
         <details class="account-details zoho-mapping-details">
           <summary>Account field mapping: {{ zoho_status.mapped_field_count }} of {{ zoho_mapping|length }} fields found</summary>
           <div class="zoho-mapping-action-row">
