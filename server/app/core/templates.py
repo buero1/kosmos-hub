@@ -35,27 +35,47 @@ def _unread_email_count(user) -> int:
         return 0
     try:
         with SessionLocal() as db:
-            linked_emails = db.scalars(
-                select(CustomerZohoEmail).where(
-                    CustomerZohoEmail.direction == "inbound",
-                    CustomerZohoEmail.is_unread.is_(True),
-                )
-            ).all()
-            # One Zoho email can be linked to several customers through shared contacts.
-            linked_count = len({email.zoho_message_id or f"local-{email.id}" for email in linked_emails})
-            return linked_count + int(
-                db.scalar(
-                    select(func.count())
-                    .select_from(HubMailboxEmail)
-                    .where(
-                        HubMailboxEmail.direction == "inbound",
-                        HubMailboxEmail.is_unread.is_(True),
-                    )
-                )
-                or 0
-            )
+            return _unread_email_count_for_db(db)
     except Exception:
         return 0
+
+
+def _unread_email_count_for_db(db) -> int:
+    """Count unread messages without loading encrypted email payloads for the navigation badge."""
+    linked_filters = (
+        CustomerZohoEmail.direction == "inbound",
+        CustomerZohoEmail.is_unread.is_(True),
+    )
+    # A Zoho message can be linked to several customers through shared contacts.
+    linked_count = int(
+        db.scalar(
+            select(func.count(func.distinct(CustomerZohoEmail.zoho_message_id))).where(
+                *linked_filters,
+                CustomerZohoEmail.zoho_message_id.is_not(None),
+            )
+        )
+        or 0
+    )
+    local_linked_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(CustomerZohoEmail)
+            .where(*linked_filters, CustomerZohoEmail.zoho_message_id.is_(None))
+        )
+        or 0
+    )
+    unassigned_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(HubMailboxEmail)
+            .where(
+                HubMailboxEmail.direction == "inbound",
+                HubMailboxEmail.is_unread.is_(True),
+            )
+        )
+        or 0
+    )
+    return linked_count + local_linked_count + unassigned_count
 
 
 def create_templates(*, directory: str) -> Jinja2Templates:

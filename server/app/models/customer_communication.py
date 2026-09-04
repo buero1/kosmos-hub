@@ -34,6 +34,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("customer_id", "zoho_message_id", name="uq_customer_zoho_emails_customer_id_zoho_message_id"),
         Index("ix_customer_zoho_emails_zoho_message_id", "zoho_message_id"),
+        Index("ix_customer_zoho_emails_direction_is_unread_message_id", "direction", "is_unread", "zoho_message_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

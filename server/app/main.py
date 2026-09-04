@@ -125,6 +125,15 @@ def _ensure_phase_one_schema() -> None:
                     text("CREATE INDEX ix_customer_zoho_emails_zoho_message_id ON customer_zoho_emails (zoho_message_id)")
                 )
             logger.info("Added customer_zoho_emails.zoho_message_id index.")
+        if "ix_customer_zoho_emails_direction_is_unread_message_id" not in email_index_names:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_customer_zoho_emails_direction_is_unread_message_id "
+                        "ON customer_zoho_emails (direction, is_unread, zoho_message_id)"
+                    )
+                )
+            logger.info("Added customer_zoho_emails unread navigation index.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
-from app.core.templates import create_templates
+from app.core.templates import _unread_email_count_for_db, create_templates
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
@@ -133,3 +133,59 @@ def test_customer_email_message_id_has_a_dedicated_index():
     index_names = {index["name"] for index in inspect(engine).get_indexes("customer_zoho_emails")}
 
     assert "ix_customer_zoho_emails_zoho_message_id" in index_names
+    assert "ix_customer_zoho_emails_direction_is_unread_message_id" in index_names
+
+
+def test_unread_email_count_uses_message_identity_without_loading_email_views():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        first_customer = Customer(name="First GmbH", zoho_id="zoho-account-1")
+        second_customer = Customer(name="Second GmbH", zoho_id="zoho-account-2")
+        db.add_all(
+            [
+                CustomerZohoEmail(
+                    customer=first_customer,
+                    zoho_message_id="shared-message",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    encrypted_payload_json=cipher.encrypt(json.dumps({"content": "first"})),
+                ),
+                CustomerZohoEmail(
+                    customer=second_customer,
+                    zoho_message_id="shared-message",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    encrypted_payload_json=cipher.encrypt(json.dumps({"content": "second"})),
+                ),
+                CustomerZohoEmail(
+                    customer=first_customer,
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    encrypted_payload_json=cipher.encrypt(json.dumps({"content": "local"})),
+                ),
+                CustomerZohoEmail(
+                    customer=first_customer,
+                    zoho_message_id="read-message",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=False,
+                    encrypted_payload_json=cipher.encrypt(json.dumps({"content": "read"})),
+                ),
+                HubMailboxEmail(
+                    direction="inbound",
+                    is_unread=True,
+                    fingerprint="b" * 64,
+                    encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Unassigned"})),
+                    received_at=datetime(2026, 9, 3, 10, 0, tzinfo=UTC),
+                ),
+            ]
+        )
+        db.commit()
+
+        assert _unread_email_count_for_db(db) == 3
