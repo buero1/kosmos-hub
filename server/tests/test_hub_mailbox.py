@@ -56,10 +56,20 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         db.commit()
 
         service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        full_view_calls: list[int] = []
+        original_email_view = service.communications._email_view
+
+        def track_full_view(email: CustomerZohoEmail):
+            full_view_calls.append(email.id)
+            return original_email_view(email)
+
+        service.communications._email_view = track_full_view
         inbox = service.get_view(folder="inbox", unread_only=False)
 
         assert inbox.folder_counts == {"inbox": 2, "sent": 0, "unassigned": 1}
         assert [message.subject for message in inbox.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
+        assert full_view_calls == []
+        assert not hasattr(inbox.messages[1], "preview_html")
         assert inbox.selected is not None
         assert inbox.selected.kind == "unassigned"
         assert "Neue Anfrage <strong>mit Inhalt</strong>" in (inbox.selected.preview_html or "")

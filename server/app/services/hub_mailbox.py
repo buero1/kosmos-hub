@@ -44,8 +44,23 @@ class HubMailboxMessage:
 
 
 @dataclass(frozen=True)
+class HubMailboxListItem:
+    """The minimal data needed to render one row in the mailbox list."""
+
+    key: str
+    kind: str
+    subject: str
+    sender: str | None
+    recipients: str | None
+    direction: str
+    is_unread: bool
+    occurred_at: datetime | None
+    customers: tuple[HubMailboxCustomerLink, ...]
+
+
+@dataclass(frozen=True)
 class HubMailboxView:
-    messages: tuple[HubMailboxMessage, ...]
+    messages: tuple[HubMailboxListItem, ...]
     selected: HubMailboxMessage | None
     folder_counts: dict[str, int]
 
@@ -66,7 +81,7 @@ class HubMailboxService:
         if folder not in MAILBOX_FOLDERS:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
-        messages = self._linked_messages() + self._unassigned_messages()
+        messages = self._linked_list_messages() + self._unassigned_list_messages()
         folder_counts = {
             "inbox": sum(message.direction == "inbound" for message in messages),
             "sent": sum(message.direction == "outbound" for message in messages),
@@ -79,7 +94,12 @@ class HubMailboxService:
             key=lambda message: (message.occurred_at.timestamp() if message.occurred_at else 0, message.key),
             reverse=True,
         )
-        selected = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected = self.get_selected_message(
+            folder=folder,
+            unread_only=unread_only,
+            selected_key=selected_item.key,
+        ) if selected_item else None
         return HubMailboxView(messages=tuple(messages), selected=selected, folder_counts=folder_counts)
 
     def get_folder_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
@@ -88,17 +108,22 @@ class HubMailboxService:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
         if folder == "unassigned":
-            messages = self._unassigned_messages()
+            messages = self._unassigned_list_messages()
         else:
             direction = "inbound" if folder == "inbox" else "outbound"
-            messages = self._linked_messages(direction=direction) + self._unassigned_messages(direction=direction)
+            messages = self._linked_list_messages(direction=direction) + self._unassigned_list_messages(direction=direction)
         if unread_only:
             messages = [message for message in messages if message.is_unread]
         messages.sort(
             key=lambda message: (message.occurred_at.timestamp() if message.occurred_at else 0, message.key),
             reverse=True,
         )
-        selected = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
+        selected = self.get_selected_message(
+            folder=folder,
+            unread_only=unread_only,
+            selected_key=selected_item.key,
+        ) if selected_item else None
         return HubMailboxView(messages=tuple(messages), selected=selected, folder_counts={})
 
     def get_selected_message(
@@ -158,7 +183,8 @@ class HubMailboxService:
         email.is_unread = False
         self.db.flush()
 
-    def _linked_messages(self, *, direction: str | None = None) -> list[HubMailboxMessage]:
+    def _linked_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
+        """Load headers for the mailbox list without constructing every email preview."""
         statement = (
             select(CustomerZohoEmail)
             .options(selectinload(CustomerZohoEmail.customer))
@@ -172,19 +198,50 @@ class HubMailboxService:
             group_key = email.zoho_message_id or f"local-{email.id}"
             groups.setdefault(group_key, []).append(email)
 
-        messages: list[HubMailboxMessage] = []
+        messages: list[HubMailboxListItem] = []
         for emails in groups.values():
-            messages.append(self._linked_message(emails))
+            messages.append(self._linked_list_message(emails))
         return messages
 
-    def _unassigned_messages(self, *, direction: str | None = None) -> list[HubMailboxMessage]:
+    def _unassigned_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
         statement = select(HubMailboxEmail).order_by(HubMailboxEmail.received_at.desc(), HubMailboxEmail.id.desc())
         if direction is not None:
             statement = statement.where(HubMailboxEmail.direction == direction)
         return [
-            self._unassigned_message(email)
+            self._unassigned_list_message(email)
             for email in self.db.scalars(statement).all()
         ]
+
+    def _linked_list_message(self, emails: list[CustomerZohoEmail]) -> HubMailboxListItem:
+        # The full view may parse HTML and attachments. A list row only needs its header fields.
+        winner = max(emails, key=lambda email: email.id)
+        payload = self._payload(winner.encrypted_payload_json)
+        customers = self._linked_customers(emails)
+        return HubMailboxListItem(
+            key=f"linked-{winner.customer_id}-{winner.id}",
+            kind="linked",
+            subject=self._text(payload.get("subject")) or "Ohne Betreff",
+            sender=self._people(payload.get("from")),
+            recipients=self._people(payload.get("to")),
+            direction=winner.direction,
+            is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
+            occurred_at=winner.zoho_sent_at or winner.created_at,
+            customers=customers,
+        )
+
+    def _unassigned_list_message(self, email: HubMailboxEmail) -> HubMailboxListItem:
+        payload = self._payload(email.encrypted_payload_json)
+        return HubMailboxListItem(
+            key=f"unassigned-{email.id}",
+            kind="unassigned",
+            subject=self._text(payload.get("betreff")) or self._text(payload.get("subject")) or "Ohne Betreff",
+            sender=self._people(payload.get("absender") or payload.get("sender") or payload.get("from")),
+            recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
+            direction=email.direction,
+            is_unread=email.is_unread,
+            occurred_at=email.received_at,
+            customers=(),
+        )
 
     def _linked_message(self, emails: list[CustomerZohoEmail]) -> HubMailboxMessage:
         winner = max(
@@ -192,18 +249,7 @@ class HubMailboxService:
             key=lambda email: (bool(self.communications._email_view(email).preview_html), email.id),
         )
         view = self.communications._email_view(winner)
-        customers_by_id = {
-            email.customer.id: email.customer
-            for email in emails
-            if email.customer is not None
-        }
-        customers = tuple(
-            HubMailboxCustomerLink(id=customer.id, name=customer.name)
-            for customer in sorted(
-                customers_by_id.values(),
-                key=lambda customer: (customer.name.casefold(), customer.id),
-            )
-        )
+        customers = self._linked_customers(emails)
         return HubMailboxMessage(
             key=f"linked-{winner.customer_id}-{winner.id}",
             kind="linked",
@@ -245,7 +291,22 @@ class HubMailboxService:
         )
 
     @staticmethod
-    def _matches_folder(message: HubMailboxMessage, folder: str) -> bool:
+    def _linked_customers(emails: list[CustomerZohoEmail]) -> tuple[HubMailboxCustomerLink, ...]:
+        customers_by_id = {
+            email.customer.id: email.customer
+            for email in emails
+            if email.customer is not None
+        }
+        return tuple(
+            HubMailboxCustomerLink(id=customer.id, name=customer.name)
+            for customer in sorted(
+                customers_by_id.values(),
+                key=lambda customer: (customer.name.casefold(), customer.id),
+            )
+        )
+
+    @staticmethod
+    def _matches_folder(message: HubMailboxMessage | HubMailboxListItem, folder: str) -> bool:
         if folder == "unassigned":
             return message.kind == "unassigned"
         if folder == "sent":
