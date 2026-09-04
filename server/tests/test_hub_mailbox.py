@@ -134,6 +134,44 @@ def test_customer_email_message_id_has_a_dedicated_index():
 
     assert "ix_customer_zoho_emails_zoho_message_id" in index_names
     assert "ix_customer_zoho_emails_direction_is_unread_message_id" in index_names
+    assert "ix_customer_zoho_emails_direction_sent_at" in index_names
+
+
+def test_mailbox_list_reads_compact_header_without_full_email_payload():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Example GmbH", zoho_id="zoho-account-1")
+        db.add(
+            CustomerZohoEmail(
+                customer=customer,
+                zoho_message_id="zoho-email-1",
+                source="zoho",
+                direction="outbound",
+                is_unread=False,
+                encrypted_payload_json=cipher.encrypt(json.dumps({"content": "full email body only"})),
+                encrypted_header_json=cipher.encrypt(
+                    json.dumps(
+                        {
+                            "subject": "Kurz gespeichert",
+                            "sender": "team@example.de",
+                            "recipients": "customer@example.de",
+                        }
+                    )
+                ),
+                zoho_sent_at=datetime(2026, 9, 3, 9, 0, tzinfo=UTC),
+            )
+        )
+        db.commit()
+
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        message = service.get_folder_view(folder="sent", unread_only=False).messages[0]
+
+        assert message.subject == "Kurz gespeichert"
+        assert message.sender == "team@example.de"
+        assert message.recipients == "customer@example.de"
 
 
 def test_unread_email_count_uses_message_identity_without_loading_email_views():

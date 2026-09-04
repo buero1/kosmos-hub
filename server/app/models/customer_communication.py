@@ -35,6 +35,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
         UniqueConstraint("customer_id", "zoho_message_id", name="uq_customer_zoho_emails_customer_id_zoho_message_id"),
         Index("ix_customer_zoho_emails_zoho_message_id", "zoho_message_id"),
         Index("ix_customer_zoho_emails_direction_is_unread_message_id", "direction", "is_unread", "zoho_message_id"),
+        Index("ix_customer_zoho_emails_direction_sent_at", "direction", "zoho_sent_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -47,6 +48,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
     is_unread: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
     sync_status: Mapped[str] = mapped_column(String(16), nullable=False, default="synced")
     encrypted_payload_json: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
+    encrypted_header_json: Mapped[str] = mapped_column(Text(), nullable=False, default="")
     created_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     zoho_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -659,26 +659,26 @@ class CustomerCommunicationService:
             template = self._stored_email_template(normalized_template_id)
             template_name = self._text(self._payload(template.encrypted_payload_json).get("name")) or ""
         now = datetime.now(UTC)
+        outbound_payload = {
+            "subject": normalized_subject,
+            "content": normalized_content,
+            "from": {"name": sender.name, "email": sender.email},
+            "to": {"name": recipient.name, "email": recipient.email},
+            "sent_time": now.isoformat(),
+            "template": {"id": normalized_template_id, "name": template_name} if normalized_template_id else None,
+            "in_reply_to": {
+                "email_id": reply_to_email_id,
+                "message_id": reply_to_message_id,
+            } if reply_to_message_id else None,
+        }
         email = CustomerZohoEmail(
             customer=customer,
             source="hub",
             direction="outbound",
             is_unread=False,
             sync_status="pending",
-            encrypted_payload_json=self._encrypt_payload(
-                {
-                    "subject": normalized_subject,
-                    "content": normalized_content,
-                    "from": {"name": sender.name, "email": sender.email},
-                    "to": {"name": recipient.name, "email": recipient.email},
-                    "sent_time": now.isoformat(),
-                    "template": {"id": normalized_template_id, "name": template_name} if normalized_template_id else None,
-                    "in_reply_to": {
-                        "email_id": reply_to_email_id,
-                        "message_id": reply_to_message_id,
-                    } if reply_to_message_id else None,
-                }
-            ),
+            encrypted_payload_json=self._encrypt_payload(outbound_payload),
+            encrypted_header_json=self._encrypt_email_list_header(outbound_payload),
             created_by_username=actor[:64],
             zoho_module=ZOHO_ACCOUNT_MODULE,
             zoho_record_id=customer.zoho_id,
@@ -766,6 +766,7 @@ class CustomerCommunicationService:
             raise ZohoCrmError("Zoho hat die E-Mail ohne Inhalt geliefert.")
         payload.update(record)
         email.encrypted_payload_json = self._encrypt_payload(payload)
+        email.encrypted_header_json = self._encrypt_email_list_header(payload)
         email.zoho_synced_at = datetime.now(UTC)
         email.is_unread = False
         email.last_error = None
@@ -948,6 +949,7 @@ class CustomerCommunicationService:
                 is_unread=mark_new_emails_unread and self._email_direction(record) == "inbound",
                 sync_status="synced",
                 encrypted_payload_json="",
+                encrypted_header_json="",
             )
             self.db.add(email)
             known_emails[key] = email
@@ -964,6 +966,7 @@ class CustomerCommunicationService:
             if key in existing_payload and key not in merged_payload:
                 merged_payload[key] = existing_payload[key]
         email.encrypted_payload_json = self._encrypt_payload(merged_payload)
+        email.encrypted_header_json = self._encrypt_email_list_header(merged_payload)
         email.zoho_sent_at = self._email_datetime(record)
         email.zoho_synced_at = synced_at
         email.last_error = None
@@ -1445,6 +1448,18 @@ class CustomerCommunicationService:
 
     def _encrypt_payload(self, payload: dict[str, object]) -> str:
         return self.cipher.encrypt(json.dumps(payload, ensure_ascii=False, default=str))
+
+    def _encrypt_email_list_header(self, payload: dict[str, object]) -> str:
+        return self._encrypt_payload(self.email_list_header_payload(payload))
+
+    @classmethod
+    def email_list_header_payload(cls, payload: dict[str, object]) -> dict[str, object]:
+        """Store only the list fields separately so mailbox rows never need the full body."""
+        return {
+            "subject": cls._text(payload.get("subject")),
+            "sender": cls._people_text(payload.get("from")),
+            "recipients": cls._people_text(payload.get("to")),
+        }
 
     def _payload(self, encrypted_payload: str | None) -> dict[str, object]:
         if not encrypted_payload:

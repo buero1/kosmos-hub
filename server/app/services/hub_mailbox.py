@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, selectinload
 
 from app.core.security import SecretCipher
+from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.customer_communications import CustomerCommunicationAttachment, CustomerCommunicationService
@@ -78,29 +79,17 @@ class HubMailboxService:
         )
 
     def get_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
-        if folder not in MAILBOX_FOLDERS:
-            raise ValueError("Unbekannter E-Mail-Ordner.")
-
-        messages = self._linked_list_messages() + self._unassigned_list_messages()
-        folder_counts = {
-            "inbox": sum(message.direction == "inbound" for message in messages),
-            "sent": sum(message.direction == "outbound" for message in messages),
-            "unassigned": sum(message.kind == "unassigned" for message in messages),
-        }
-        messages = [message for message in messages if self._matches_folder(message, folder)]
-        if unread_only:
-            messages = [message for message in messages if message.is_unread]
-        messages.sort(
-            key=lambda message: (message.occurred_at.timestamp() if message.occurred_at else 0, message.key),
-            reverse=True,
-        )
-        selected_item = next((message for message in messages if message.key == selected_key), messages[0] if messages else None)
-        selected = self.get_selected_message(
+        """Load only the active folder; sidebar counts never need full email payloads."""
+        folder_view = self.get_folder_view(
             folder=folder,
             unread_only=unread_only,
-            selected_key=selected_item.key,
-        ) if selected_item else None
-        return HubMailboxView(messages=tuple(messages), selected=selected, folder_counts=folder_counts)
+            selected_key=selected_key,
+        )
+        return HubMailboxView(
+            messages=folder_view.messages,
+            selected=folder_view.selected,
+            folder_counts=self._folder_counts(),
+        )
 
     def get_folder_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
         """Load one folder for in-page navigation without rebuilding the other folders."""
@@ -187,7 +176,19 @@ class HubMailboxService:
         """Load headers for the mailbox list without constructing every email preview."""
         statement = (
             select(CustomerZohoEmail)
-            .options(selectinload(CustomerZohoEmail.customer))
+            .options(
+                load_only(
+                    CustomerZohoEmail.id,
+                    CustomerZohoEmail.customer_id,
+                    CustomerZohoEmail.zoho_message_id,
+                    CustomerZohoEmail.direction,
+                    CustomerZohoEmail.is_unread,
+                    CustomerZohoEmail.zoho_sent_at,
+                    CustomerZohoEmail.created_at,
+                    CustomerZohoEmail.encrypted_header_json,
+                ),
+                selectinload(CustomerZohoEmail.customer).load_only(Customer.id, Customer.name),
+            )
             .order_by(CustomerZohoEmail.zoho_sent_at.desc(), CustomerZohoEmail.id.desc())
         )
         if direction is not None:
@@ -213,16 +214,16 @@ class HubMailboxService:
         ]
 
     def _linked_list_message(self, emails: list[CustomerZohoEmail]) -> HubMailboxListItem:
-        # The full view may parse HTML and attachments. A list row only needs its header fields.
+        # The full view may parse HTML and attachments. A list row reads only its encrypted header.
         winner = max(emails, key=lambda email: email.id)
-        payload = self._payload(winner.encrypted_payload_json)
+        payload = self._email_list_header(winner)
         customers = self._linked_customers(emails)
         return HubMailboxListItem(
             key=f"linked-{winner.customer_id}-{winner.id}",
             kind="linked",
             subject=self._text(payload.get("subject")) or "Ohne Betreff",
-            sender=self._people(payload.get("from")),
-            recipients=self._people(payload.get("to")),
+            sender=self._text(payload.get("sender")),
+            recipients=self._text(payload.get("recipients")),
             direction=winner.direction,
             is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
             occurred_at=winner.zoho_sent_at or winner.created_at,
@@ -242,6 +243,35 @@ class HubMailboxService:
             occurred_at=email.received_at,
             customers=(),
         )
+
+    def _folder_counts(self) -> dict[str, int]:
+        """Build sidebar counts from message identifiers, never encrypted bodies."""
+        linked_keys = {
+            (direction, message_id or f"local-{email_id}")
+            for direction, message_id, email_id in self.db.execute(
+                select(
+                    CustomerZohoEmail.direction,
+                    CustomerZohoEmail.zoho_message_id,
+                    CustomerZohoEmail.id,
+                )
+            )
+        }
+        unassigned_rows = self.db.execute(
+            select(HubMailboxEmail.direction, HubMailboxEmail.id)
+        )
+        return {
+            "inbox": sum(direction == "inbound" for direction, _ in linked_keys)
+            + sum(direction == "inbound" for direction, _ in unassigned_rows),
+            "sent": sum(direction == "outbound" for direction, _ in linked_keys),
+            "unassigned": sum(1 for _ in self.db.execute(select(HubMailboxEmail.id))),
+        }
+
+    def _email_list_header(self, email: CustomerZohoEmail) -> dict[str, object]:
+        header = self._payload(email.encrypted_header_json)
+        if header:
+            return header
+        # Existing rows are backfilled on startup. This fallback keeps the list readable if a migration is interrupted.
+        return self._payload(email.encrypted_payload_json)
 
     def _linked_message(self, emails: list[CustomerZohoEmail]) -> HubMailboxMessage:
         winner = max(

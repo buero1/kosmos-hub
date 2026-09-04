@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -31,6 +31,7 @@ from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
+from app.services.customer_communications import CustomerCommunicationService
 from app.services.maintenance_worker import (
     process_pending_complete_site_updates,
     process_pending_direct_updates,
@@ -81,6 +82,15 @@ def _ensure_phase_one_schema() -> None:
                 )
                 connection.execute(text("UPDATE customer_zoho_emails SET is_unread = 0"))
             logger.info("Added customer_zoho_emails.is_unread; existing emails were marked read.")
+        if "encrypted_header_json" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE customer_zoho_emails "
+                        "ADD COLUMN encrypted_header_json TEXT NOT NULL DEFAULT '' AFTER encrypted_payload_json"
+                    )
+                )
+            logger.info("Added customer_zoho_emails.encrypted_header_json column.")
         unique_constraints = inspector.get_unique_constraints("customer_zoho_emails")
         legacy_unique_names = [
             constraint["name"]
@@ -134,6 +144,15 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added customer_zoho_emails unread navigation index.")
+        if "ix_customer_zoho_emails_direction_sent_at" not in email_index_names:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_customer_zoho_emails_direction_sent_at "
+                        "ON customer_zoho_emails (direction, zoho_sent_at, id)"
+                    )
+                )
+            logger.info("Added customer_zoho_emails folder ordering index.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
@@ -249,6 +268,35 @@ def _ensure_phase_one_schema() -> None:
             logger.info("Added customers.%s index.", column_name)
 
 
+def _backfill_customer_zoho_email_headers() -> None:
+    """Create the compact encrypted list header for existing imported messages."""
+    settings = get_settings()
+    updated = 0
+    with SessionLocal() as db:
+        communications = CustomerCommunicationService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=settings.public_base_url,
+        )
+        while True:
+            emails = db.scalars(
+                select(CustomerZohoEmail)
+                .where(CustomerZohoEmail.encrypted_header_json == "")
+                .order_by(CustomerZohoEmail.id.asc())
+                .limit(250)
+            ).all()
+            if not emails:
+                break
+            for email in emails:
+                payload = communications._payload(email.encrypted_payload_json)
+                email.encrypted_header_json = communications._encrypt_email_list_header(payload)
+            updated += len(emails)
+            db.commit()
+            db.expire_all()
+    if updated:
+        logger.info("Backfilled compact headers for %s customer Zoho email(s).", updated)
+
+
 def _queue_scheduled_fleet_refresh() -> int | None:
     return FleetRefreshService.queue_scheduled_run()
 
@@ -312,6 +360,7 @@ async def lifespan(_: FastAPI):
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
+        _backfill_customer_zoho_email_headers()
         schedule_pending_user_deletions()
         schedule_pending_zoho_email_content_import()
         schedule_pending_zoho_email_history_import()
