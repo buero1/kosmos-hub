@@ -320,12 +320,11 @@
             <div data-expandable-content>
               <div class="table-scroll">
                 <table class="customer-contacts-table">
-                <thead><tr><th>Name</th><th>Position</th><th>E-Mail</th><th>Telefon</th></tr></thead>
+                <thead><tr><th>Name</th><th>E-Mail</th></tr></thead>
                 <tbody>
                   {% for contact in detail.contacts %}
                     <tr>
                       <td><a href="/customers/{{ detail.entry.customer.id }}/contacts/{{ contact.id }}">{% if contact.salutation %}{{ contact.salutation }} {% endif %}<strong>{{ contact.name }}</strong></a></td>
-                      <td>{{ contact.title or "-" }}</td>
                       <td>
                         {{ communication_email_address(contact.email) }}
                         {% if contact.email and contact.secondary_email %}<br>{% endif %}
@@ -334,19 +333,9 @@
                         {{ communication_email_address(contact.third_email, "3.: ") }}
                         {% if not contact.email and not contact.secondary_email and not contact.third_email %}-{% endif %}
                       </td>
-                      <td>
-                        {% if contact.phone %}{{ contact.phone }}{% endif %}
-                        {% if contact.phone and contact.alternate_phone %}<br>{% endif %}
-                        {% if contact.alternate_phone %}Alternativ: {{ contact.alternate_phone }}{% endif %}
-                        {% if (contact.phone or contact.alternate_phone) and contact.private_phone %}<br>{% endif %}
-                        {% if contact.private_phone %}Privat: {{ contact.private_phone }}{% endif %}
-                        {% if (contact.phone or contact.alternate_phone or contact.private_phone) and contact.mobile %}<br>{% endif %}
-                        {% if contact.mobile %}Mobil: {{ contact.mobile }}{% endif %}
-                        {% if not contact.phone and not contact.alternate_phone and not contact.private_phone and not contact.mobile %}-{% endif %}
-                      </td>
                     </tr>
                   {% else %}
-                    <tr><td colspan="4">Keine Zoho-Kontakte sind derzeit mit diesem Kunden verknüpft.</td></tr>
+                    <tr><td colspan="2">Keine Zoho-Kontakte sind derzeit mit diesem Kunden verknüpft.</td></tr>
                   {% endfor %}
                 </tbody>
                 </table>

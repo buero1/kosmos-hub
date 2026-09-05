@@ -2079,7 +2079,13 @@
         opacity: 0.74;
         text-decoration: none;
       }
-      .customer-contacts-table { min-width: 43rem; }
+      .customer-contacts-table {
+        min-width: 0;
+        table-layout: fixed;
+      }
+      .customer-contacts-table th:first-child,
+      .customer-contacts-table td:first-child { width: 40%; }
+      .customer-contacts-table td { overflow-wrap: anywhere; }
       .customer-note-composer {
         display: grid;
         gap: 0.8rem;
