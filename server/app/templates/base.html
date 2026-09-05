@@ -1135,64 +1135,54 @@
         width: 100%;
         margin: 0;
       }
-      .zoho-section-heading {
-        display: grid;
-        align-items: flex-start;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 1rem;
-      }
       .zoho-heading-copy { min-width: 0; }
-      .account-panel .zoho-sync-heading-action {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 0.5rem;
-        flex: 0 0 auto;
-        grid-column: 2;
-        grid-row: 1;
-        margin: 0;
+      .account-panel .zoho-area {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
       }
-      .zoho-sync-heading-action .button,
-      .zoho-mapping-action-row .button { margin: 0; }
-      .zoho-sync-heading-action form { margin: 0; }
-      .zoho-sync-heading-action .button { white-space: nowrap; }
+      .zoho-area-content {
+        display: grid;
+        gap: 0.9rem;
+        margin-top: 0.2rem;
+      }
       .zoho-connection-status {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
-        grid-column: 1 / -1;
         gap: 0.65rem;
       }
       .zoho-connection-status .subtle { margin: 0; }
       .zoho-connection-status .zoho-reconnect-action { margin: 0; }
-      .zoho-notification-test {
+      .zoho-import-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
         gap: 0.8rem 1rem;
-        margin-top: 1.15rem;
-        padding: 1rem;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-panel);
-        background: var(--panel);
-      }
-      .zoho-notification-test h4,
-      .zoho-notification-test p { margin: 0; }
-      .zoho-notification-test .button { margin: 0; }
-      .zoho-notification-test-status {
-        display: grid;
-        grid-column: 1 / -1;
-        gap: 0.35rem;
-        padding-top: 0.7rem;
+        padding-top: 0.9rem;
         border-top: 1px solid var(--border);
+      }
+      .zoho-import-row:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+      .zoho-import-row h4,
+      .zoho-import-row p { margin: 0; }
+      .zoho-import-row .subtle { margin-top: 0.25rem; }
+      .zoho-import-row form,
+      .zoho-import-row .button { margin: 0; }
+      .zoho-import-status {
+        margin-top: 0.55rem !important;
         color: var(--muted);
         font-size: 0.88rem;
       }
       .zoho-mapping-action-row {
         display: flex;
         justify-content: flex-end;
-        margin: 0.85rem 0;
+        margin: 0.25rem 0;
       }
       .account-panel .zoho-mapping-action-row form { display: block; }
+      .zoho-mapping-action-row .button { margin: 0; }
       .account-panel .zoho-disconnect-action { display: block; }
       .account-panel .fleet-refresh-settings-form {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2656,10 +2646,8 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .account-panel .zoho-credentials-form { grid-template-columns: 1fr; }
-        .zoho-section-heading { grid-template-columns: 1fr; }
-        .account-panel .zoho-sync-heading-action { grid-column: auto; grid-row: auto; }
         .zoho-connection-status { align-items: flex-start; flex-direction: column; }
-        .zoho-notification-test { grid-template-columns: 1fr; }
+        .zoho-import-row { grid-template-columns: 1fr; }
         .zoho-credentials-form .zoho-data-center-field,
         .zoho-credentials-form .zoho-client-id-field,
         .zoho-credentials-form .zoho-client-secret-field,

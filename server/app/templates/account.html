@@ -234,72 +234,129 @@
       </div>
     </section>
     <section id="account-zoho" class="account-panel account-panel-wide account-section" data-account-section>
-      <div class="zoho-section-heading">
-        <div class="zoho-heading-copy">
-          <p class="eyebrow">CRM integration</p>
-          <h3>Zoho CRM Customers</h3>
-          <p class="subtle">All Zoho Accounts and their linked Contacts are synchronized. Accounts with the status Aktuell, Neu, gekündigt, or Kündigung liegt vor are visible by default; all other statuses remain stored but hidden. Their website is added or linked as a pending Hub site and becomes ready for inventory, updates, and backups as soon as Kosmos Bridge registers from WordPress. Client secret, refresh token, and transferred customer and contact fields are encrypted on the Hub. The Hub never writes back to Zoho in this phase.</p>
+      <div class="zoho-heading-copy">
+        <p class="eyebrow">CRM-Integration</p>
+        <h3>Zoho CRM</h3>
+        <p class="subtle">Der Hub synchronisiert Zoho-Accounts, Kontakte, E-Mails, Vorlagen und Notizen. Zugangsdaten und übertragene Kundendaten werden im Hub verschlüsselt gespeichert.</p>
+        {% if zoho_status.last_error %}<p class="notice-error">Letzte Zoho-Aktion: {{ zoho_status.last_error }}</p>{% endif %}
+      </div>
+      <details class="account-details zoho-area" {% if not zoho_status.connected or zoho_status.requires_scope_reconnect %}open{% endif %}>
+        <summary>Verbindung</summary>
+        <div class="zoho-area-content">
           {% if zoho_status.configured %}
-            {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Reconnect Zoho CRM once before the next sync to approve the Hub's full CRM scope. Existing Hub workflows still require their own explicit approval before they write or delete Zoho data.</p>{% endif %}
-            {% if zoho_status.last_error %}<p class="notice-error">Last Zoho action: {{ zoho_status.last_error }}</p>{% endif %}
+            <div class="zoho-connection-status">
+              <p class="subtle">Rechenzentrum: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Verbunden seit {{ zoho_status.connected_at | berlin_time }}.{% else %}Noch nicht verbunden.{% endif %}</p>
+              <a class="button button-secondary zoho-reconnect-action" href="/account/zoho/connect">{% if zoho_status.connected %}Zoho CRM erneut verbinden{% else %}Zoho CRM verbinden{% endif %}</a>
+            </div>
+            {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Verbinde Zoho CRM vor dem nächsten Abgleich erneut, um den vollständigen CRM-Zugriff zu bestätigen.</p>{% endif %}
           {% else %}
-            <p class="subtle">Not configured yet. Create a Zoho server-based OAuth client first, then save its credentials here.</p>
+            <p class="subtle">Hinterlege zuerst die Zoho-Zugangsdaten und verbinde anschließend Zoho CRM.</p>
           {% endif %}
         </div>
-        {% if zoho_status.connected and not zoho_status.requires_scope_reconnect %}
-          <div class="zoho-sync-heading-action">
-            <form method="post" action="/account/zoho/sync">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button" type="submit">Sync Zoho customers and contacts now</button>
-            </form>
-            <form method="post" action="/account/zoho/email-templates/sync">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Zoho-E-Mail-Vorlagen synchronisieren</button>
-            </form>
-            <form method="post" action="/account/zoho/email-history/import">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Alle Zoho-E-Mail-Verläufe importieren</button>
-            </form>
-            <form method="post" action="/account/zoho/note-history/import">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Alle Zoho-Notizen importieren</button>
-            </form>
-          </div>
-        {% endif %}
-        {% if zoho_status.configured %}
-          <div class="zoho-connection-status">
-            <p class="subtle">Data center: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Connected: {{ zoho_status.connected_at | berlin_time }}.{% else %}Awaiting OAuth connection.{% endif %}</p>
-            <a class="button button-secondary zoho-reconnect-action" href="/account/zoho/connect">{% if zoho_status.connected %}Reconnect Zoho CRM{% else %}Connect Zoho CRM{% endif %}</a>
-          </div>
-        {% endif %}
-      </div>
+      </details>
       {% if zoho_status.connected %}
-        <div class="zoho-notification-test">
-          <div>
-            <h4>Zoho-E-Mail-Verläufe</h4>
-            <p class="subtle">Der Import lädt die Kopfzeilen aller Kunden und ihrer Kontakte fortsetzbar im Hintergrund. E-Mail-Inhalte und Anhänge werden nicht geladen.</p>
-          </div>
-          <div class="zoho-notification-test-status">
-            {% if zoho_email_history_import %}
-              <p><strong>{{ zoho_email_history_import.processed_customers }} von {{ zoho_email_history_import.total_customers }} Kunden</strong> · {{ zoho_email_history_import.imported_emails }} neue E-Mail-Kopfzeilen · Status: {{ zoho_email_history_import.status }}{% if zoho_email_history_import.started_at %} · gestartet {{ zoho_email_history_import.started_at | berlin_time }}{% endif %}{% if zoho_email_history_import.completed_at %} · beendet {{ zoho_email_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_history_import.last_error %} · {{ zoho_email_history_import.last_error }}{% endif %}</p>
-            {% else %}
-              <p class="subtle">Noch kein vollständiger E-Mail-Verlauf importiert.</p>
+        <details class="account-details zoho-area">
+          <summary>Kundendaten</summary>
+          <div class="zoho-area-content">
+            <p class="subtle">Übernimmt Änderungen an Zoho-Accounts und ihren Kontakten. Sichtbar bleiben Kunden mit dem Status Aktuell, Neu, gekündigt oder Kündigung liegt vor.</p>
+            {% if not zoho_status.requires_scope_reconnect %}
+              <form method="post" action="/account/zoho/sync">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button" type="submit">Kunden und Kontakte synchronisieren</button>
+              </form>
             {% endif %}
           </div>
-        </div>
-        <div class="zoho-notification-test">
-          <div>
-            <h4>Zoho-Notizen</h4>
-            <p class="subtle">Der Import lädt alle vorhandenen Account-Notizen fortsetzbar im Hintergrund. Bereits gespeicherte Notizen werden über ihre Zoho-ID aktualisiert und nicht doppelt angelegt.</p>
-          </div>
-          <div class="zoho-notification-test-status">
-            {% if zoho_note_history_import %}
-              <p data-zoho-note-history-import-status><strong>{{ zoho_note_history_import.processed_customers }} von {{ zoho_note_history_import.total_customers }} Kunden</strong> · {{ zoho_note_history_import.imported_notes }} neue Notizen · Status: {{ zoho_note_history_import.status }}{% if zoho_note_history_import.started_at %} · gestartet {{ zoho_note_history_import.started_at | berlin_time }}{% endif %}{% if zoho_note_history_import.completed_at %} · beendet {{ zoho_note_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_note_history_import.last_error %} · {{ zoho_note_history_import.last_error }}{% endif %}</p>
-            {% else %}
-              <p class="subtle">Noch kein vollständiger Zoho-Notizimport ausgeführt.</p>
+        </details>
+        <details class="account-details zoho-area">
+          <summary>E-Mail-Synchronisierung</summary>
+          <div class="zoho-area-content">
+            <div class="zoho-import-row">
+              <div>
+                <h4>Zoho-E-Mail-Vorlagen</h4>
+                <p class="subtle">Übernimmt neue und geänderte Vorlagen für das Erstellen von E-Mails im Hub.</p>
+              </div>
+              <form method="post" action="/account/zoho/email-templates/sync">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">Vorlagen synchronisieren</button>
+              </form>
+            </div>
+            <div class="zoho-import-row">
+              <div>
+                <h4>Webhook für neue E-Mails</h4>
+                {% if zoho_email_workflow_webhook.is_configured %}
+                  <p class="subtle">Empfang eingerichtet{% if zoho_email_workflow_webhook.last_received_at %} · letzte Meldung: {{ zoho_email_workflow_webhook.last_received_at | berlin_time }}{% endif %}{% if zoho_email_workflow_webhook.last_imported_at %} · letzter Import: {{ zoho_email_workflow_webhook.last_imported_at | berlin_time }}{% endif %}{% if zoho_email_workflow_webhook.last_error %} · {{ zoho_email_workflow_webhook.last_error }}{% endif %}</p>
+                {% else %}
+                  <p class="subtle">Erzeuge die Webhook-URL und hinterlege sie in der Zoho-Automation für eingehende und ausgehende E-Mails.</p>
+                {% endif %}
+              </div>
+              <form method="post" action="/account/zoho/email-workflow-webhook/token">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">{% if zoho_email_workflow_webhook.is_configured %}Webhook-URL erneuern{% else %}Webhook-URL erzeugen{% endif %}</button>
+              </form>
+            </div>
+            {% if new_zoho_email_workflow_webhook_url %}
+              <p class="notice-warning"><strong>Webhook-URL, nur jetzt sichtbar:</strong> <code>{{ new_zoho_email_workflow_webhook_url }}</code></p>
             {% endif %}
           </div>
-        </div>
+        </details>
+        <details class="account-details zoho-area" {% if (zoho_note_history_import and zoho_note_history_import.status in ["pending", "running"]) or (zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"]) %}open{% endif %}>
+          <summary>Datenübernahmen</summary>
+          <div class="zoho-area-content">
+            <div class="zoho-import-row">
+              <div>
+                <h4>Historische E-Mail-Verläufe</h4>
+                <p class="subtle">Importiert die Kopfzeilen aller Kunden und Kontakte. E-Mail-Inhalte und Anhänge werden dabei nicht geladen.</p>
+                {% if zoho_email_history_import %}
+                  <p class="zoho-import-status"><strong>{{ zoho_email_history_import.processed_customers }} von {{ zoho_email_history_import.total_customers }} Kunden</strong> · {{ zoho_email_history_import.imported_emails }} neue E-Mail-Kopfzeilen · Status: {{ zoho_email_history_import.status }}{% if zoho_email_history_import.completed_at %} · beendet {{ zoho_email_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_history_import.last_error %} · {{ zoho_email_history_import.last_error }}{% endif %}</p>
+                {% else %}
+                  <p class="zoho-import-status">Noch kein vollständiger E-Mail-Verlauf importiert.</p>
+                {% endif %}
+              </div>
+              <form method="post" action="/account/zoho/email-history/import">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">E-Mail-Verläufe importieren</button>
+              </form>
+            </div>
+            <div class="zoho-import-row">
+              <div>
+                <h4>Vollständige E-Mail-Inhalte</h4>
+                <p class="subtle">Lädt alle noch nicht gespeicherten E-Mail-Inhalte verschlüsselt in den Hub. Anhänge bleiben einzeln abrufbar.</p>
+                {% if zoho_email_content_import %}
+                  <p class="zoho-import-status" data-zoho-email-content-import-status><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %}{% if zoho_email_content_import.continue_automatically %} · weitere Chargen folgen automatisch{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
+                {% else %}
+                  <p class="zoho-import-status">Noch keine E-Mail-Inhalts-Charge ausgeführt.</p>
+                {% endif %}
+              </div>
+              {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
+                <form method="post" action="/account/zoho/email-content/import/cancel">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="button button-secondary" type="submit" {% if zoho_email_content_import.cancel_requested %}disabled{% endif %}>{% if zoho_email_content_import.cancel_requested %}Abbruch vorgemerkt{% else %}Import abbrechen{% endif %}</button>
+                </form>
+              {% else %}
+                <form method="post" action="/account/zoho/email-content/import">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="limit" value="500">
+                  <button class="button button-secondary" type="submit">Verbleibende Inhalte laden</button>
+                </form>
+              {% endif %}
+            </div>
+            <div class="zoho-import-row">
+              <div>
+                <h4>Zoho-Notizen</h4>
+                <p class="subtle">Importiert alle vorhandenen Account-Notizen. Bereits gespeicherte Notizen werden über ihre Zoho-ID aktualisiert, nicht doppelt angelegt.</p>
+                {% if zoho_note_history_import %}
+                  <p class="zoho-import-status" data-zoho-note-history-import-status><strong>{{ zoho_note_history_import.processed_customers }} von {{ zoho_note_history_import.total_customers }} Kunden</strong> · {{ zoho_note_history_import.imported_notes }} neue Notizen · Status: {{ zoho_note_history_import.status }}{% if zoho_note_history_import.completed_at %} · beendet {{ zoho_note_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_note_history_import.last_error %} · {{ zoho_note_history_import.last_error }}{% endif %}</p>
+                {% else %}
+                  <p class="zoho-import-status">Noch kein vollständiger Zoho-Notizimport ausgeführt.</p>
+                {% endif %}
+              </div>
+              <form method="post" action="/account/zoho/note-history/import">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">Zoho-Notizen importieren</button>
+              </form>
+            </div>
+          </div>
+        </details>
         {% if zoho_note_history_import and zoho_note_history_import.status in ["pending", "running"] %}
           <script>
             (function () {
@@ -339,53 +396,6 @@
             }());
           </script>
         {% endif %}
-        <div class="zoho-notification-test zoho-email-workflow-webhook">
-          <div>
-            <h4>Manueller E-Mail-Webhook</h4>
-            <p class="subtle">Empfängt eine Zoho-E-Mail-Meldung und aktualisiert nur den betroffenen Kunden oder Kontakt im Hub. Die Zoho-Automation richtest du selbst ein; der Hub erstellt oder verändert keine Zoho-Regeln.</p>
-          </div>
-          <form method="post" action="/account/zoho/email-workflow-webhook/token">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-secondary" type="submit">{% if zoho_email_workflow_webhook.is_configured %}Webhook-URL erneuern{% else %}Webhook-URL erzeugen{% endif %}</button>
-          </form>
-          <div class="zoho-notification-test-status">
-            {% if new_zoho_email_workflow_webhook_url %}
-              <p class="notice-warning"><strong>Webhook-URL, nur jetzt sichtbar:</strong> <code>{{ new_zoho_email_workflow_webhook_url }}</code></p>
-            {% endif %}
-            {% if zoho_email_workflow_webhook.is_configured %}
-              <p>Empfang eingerichtet{% if zoho_email_workflow_webhook.last_received_at %} · letzte Meldung: {{ zoho_email_workflow_webhook.last_received_at | berlin_time }}{% else %} · noch keine Meldung empfangen{% endif %}{% if zoho_email_workflow_webhook.last_imported_at %} · letzter Import: {{ zoho_email_workflow_webhook.last_imported_at | berlin_time }}{% endif %}{% if zoho_email_workflow_webhook.last_error %} · {{ zoho_email_workflow_webhook.last_error }}{% endif %}</p>
-              <p class="subtle">Die vollständige Webhook-URL wird aus Sicherheitsgründen nur beim Erzeugen oder Ersetzen des Zugangscodes angezeigt.</p>
-            {% else %}
-              <p class="subtle">Erzeuge zuerst eine Webhook-URL und hinterlege diese direkt als Zoho-Benachrichtigungs-URL. Ein zusätzlicher Header ist nicht nötig.</p>
-            {% endif %}
-            <p class="subtle">Ein gemeinsamer Zoho-Webhook kann die Formularparameter <code>absender</code> und <code>empfaenger</code> senden. Der Hub ordnet ausschließlich über Kontakt-E-Mail-Adressen zu: bei eingehenden E-Mails meist den Absender, bei ausgehenden meist den Empfänger. Mehrere passende Kontakte aktualisieren alle zugehörigen Kunden; nur ohne Kontakt-Treffer wird nichts importiert.</p>
-          </div>
-        </div>
-        <div class="zoho-notification-test">
-          <div>
-            <h4>Vollständige E-Mail-Inhalte</h4>
-            <p class="subtle">Der Hintergrundimport lädt alle noch nicht gespeicherten E-Mail-Inhalte in fortlaufenden 500er-Chargen verschlüsselt in den Hub. Anhänge werden weiterhin erst beim Klick heruntergeladen.</p>
-          </div>
-          {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
-            <form method="post" action="/account/zoho/email-content/import/cancel">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit" {% if zoho_email_content_import.cancel_requested %}disabled{% endif %}>{% if zoho_email_content_import.cancel_requested %}Abbruch vorgemerkt{% else %}Import abbrechen{% endif %}</button>
-            </form>
-          {% else %}
-            <form method="post" action="/account/zoho/email-content/import">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="limit" value="500">
-              <button class="button button-secondary" type="submit">Alle verbleibenden E-Mail-Inhalte laden</button>
-            </form>
-          {% endif %}
-          <div class="zoho-notification-test-status">
-            {% if zoho_email_content_import %}
-              <p data-zoho-email-content-import-status><strong>{{ zoho_email_content_import.processed_emails }} von {{ zoho_email_content_import.total_emails }} E-Mails</strong> · {{ zoho_email_content_import.loaded_emails }} Inhalte geladen · {{ zoho_email_content_import.failed_emails }} fehlgeschlagen{% if zoho_email_content_import.consecutive_failures %} · {{ zoho_email_content_import.consecutive_failures }} Fehler in Folge{% endif %}{% if zoho_email_content_import.continue_automatically %} · weitere Chargen folgen automatisch{% endif %} · Status: {% if zoho_email_content_import.status == "cancelled" %}abgebrochen{% elif zoho_email_content_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_content_import.status }}{% endif %}{% if zoho_email_content_import.started_at %} · gestartet {{ zoho_email_content_import.started_at | berlin_time }}{% endif %}{% if zoho_email_content_import.completed_at %} · beendet {{ zoho_email_content_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_content_import.last_error %} · letzte Meldung: {{ zoho_email_content_import.last_error }}{% endif %}</p>
-            {% else %}
-              <p class="subtle">Noch keine E-Mail-Inhalts-Charge ausgeführt.</p>
-            {% endif %}
-          </div>
-        </div>
         {% if zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"] %}
           <script>
             (function () {
@@ -435,32 +445,35 @@
             }());
           </script>
         {% endif %}
-        <details class="account-details zoho-mapping-details">
-          <summary>Account field mapping: {{ zoho_status.mapped_field_count }} of {{ zoho_mapping|length }} fields found</summary>
-          <div class="zoho-mapping-action-row">
-            <form method="post" action="/account/zoho/mapping">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button class="button button-secondary" type="submit">Refresh field mapping</button>
-            </form>
-          </div>
-          {% if zoho_status.missing_fields %}<p class="notice-error">Not found in Zoho Accounts: {{ zoho_status.missing_fields|join(", ") }}. The Hub will preserve the other fields and report these as unmapped.</p>{% endif %}
-          <div class="table-scroll">
-            <table>
-              <thead><tr><th>Hub field</th><th>Zoho API field</th><th>Status</th></tr></thead>
-              <tbody>
-                {% for field in zoho_mapping %}
-                  <tr>
-                    <td><strong>{{ field.label }}</strong>{% if field.required_for_identity %}<p class="subtle table-note">Required for customer identity</p>{% endif %}</td>
-                    <td>{{ field.api_name or "—" }}</td>
-                    <td>{% if field.api_name %}<span class="pill">Mapped</span>{% else %}<span class="pill pill-missing">Not found</span>{% endif %}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+        <details class="account-details zoho-area zoho-mapping-details">
+          <summary>Technik</summary>
+          <div class="zoho-area-content">
+            <p class="subtle">Feldzuordnung der Zoho-Accounts: {{ zoho_status.mapped_field_count }} von {{ zoho_mapping|length }} Feldern gefunden.</p>
+            <div class="zoho-mapping-action-row">
+              <form method="post" action="/account/zoho/mapping">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">Feldzuordnung aktualisieren</button>
+              </form>
+            </div>
+            {% if zoho_status.missing_fields %}<p class="notice-error">Nicht in Zoho Accounts gefunden: {{ zoho_status.missing_fields|join(", ") }}.</p>{% endif %}
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Hub-Feld</th><th>Zoho-API-Feld</th><th>Status</th></tr></thead>
+                <tbody>
+                  {% for field in zoho_mapping %}
+                    <tr>
+                      <td><strong>{{ field.label }}</strong>{% if field.required_for_identity %}<p class="subtle table-note">Für Kundenidentität erforderlich</p>{% endif %}</td>
+                      <td>{{ field.api_name or "—" }}</td>
+                      <td>{% if field.api_name %}<span class="pill">Zugeordnet</span>{% else %}<span class="pill pill-missing">Nicht gefunden</span>{% endif %}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
           </div>
         </details>
       {% endif %}
-      <details class="account-details zoho-credentials-details">
+      <details class="account-details zoho-area zoho-credentials-details">
         <summary>Zoho credentials</summary>
         <form class="zoho-credentials-form" method="post" action="/account/zoho">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -485,12 +498,12 @@
         </form>
       </details>
       {% if zoho_status.configured %}
-        <details class="account-details zoho-disconnect-details">
-          <summary>Disconnect Zoho CRM</summary>
-          <p class="subtle">This removes the encrypted OAuth connection and stored Zoho credentials. Previously imported customers and linked sites remain in the Hub.</p>
+        <details class="account-details zoho-area zoho-disconnect-details">
+          <summary>Zoho CRM trennen</summary>
+          <p class="subtle">Entfernt die verschlüsselte OAuth-Verbindung und die gespeicherten Zoho-Zugangsdaten. Bereits importierte Kunden und Websites bleiben im Hub erhalten.</p>
           <form class="zoho-disconnect-action" method="post" action="/account/zoho/remove">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-danger" type="submit">Remove Zoho connection</button>
+            <button class="button button-danger" type="submit">Zoho-Verbindung entfernen</button>
           </form>
         </details>
       {% endif %}
