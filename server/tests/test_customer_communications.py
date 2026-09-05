@@ -610,7 +610,6 @@ def test_customer_communications_forwards_loaded_content_and_attachments():
                         "owner": {"id": "zoho-owner-1"},
                         "from": {"name": "Anna Example", "email": "anna@example.de"},
                         "to": [{"name": "Hub Team", "email": "team@example.de"}],
-                        "content": "<p>Bitte das Angebot weiterleiten.</p>",
                         "attachments": [{"id": "zoho-attachment-1", "name": "Angebot.pdf"}],
                     }
                 )
@@ -620,12 +619,17 @@ def test_customer_communications_forwards_loaded_content_and_attachments():
         db.commit()
 
         fake_zoho = FakeZohoCommunications()
+        fake_zoho.get_record_email = lambda **_kwargs: {
+            "id": "zoho-forward-message-1",
+            "content": "<p>Bitte das Angebot weiterleiten.</p>",
+        }  # type: ignore[method-assign]
         service = _service(db, fake_zoho)
         forward = service.get_email_forward(customer_id=customer.id, email_id=original.id)
         recipient = service.get_view(customer_id=customer.id).recipients[1]
 
         assert forward.subject == "Fwd: Angebot"
         assert "Weitergeleitete Nachricht" in forward.content
+        assert service._payload(original.encrypted_payload_json)["content"] == "<p>Bitte das Angebot weiterleiten.</p>"
         result = service.send_email(
             customer_id=customer.id,
             actor="operator",

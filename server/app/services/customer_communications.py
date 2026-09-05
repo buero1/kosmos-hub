@@ -864,12 +864,16 @@ class CustomerCommunicationService:
         )
 
     def get_email_forward(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailForward:
-        """Prepare an editable forwarded copy without transmitting anything yet."""
+        """Prepare an editable forwarded copy, fetching its body only when needed."""
         email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
         payload = self._payload(email.encrypted_payload_json)
         original_content = self._text(payload.get("content"))
         if original_content is None:
-            raise ValueError("Der Nachrichtentext muss vor dem Weiterleiten zuerst geladen werden.")
+            self._load_email_content_for_email(email, mark_as_read=False)
+            payload = self._payload(email.encrypted_payload_json)
+            original_content = self._text(payload.get("content"))
+        if original_content is None:
+            raise ZohoCrmError("Zoho hat die E-Mail ohne Nachrichtentext geliefert.")
         subject = self._text(payload.get("subject")) or "Ohne Betreff"
         if not re.match(r"^\s*fwd\s*:", subject, flags=re.IGNORECASE):
             subject = f"Fwd: {subject}"

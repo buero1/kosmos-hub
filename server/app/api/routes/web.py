@@ -485,6 +485,8 @@ def mailbox_linked_email_compose_context(
             }
         if action == "forward":
             forward = service.get_email_forward(customer_id=customer_id, email_id=email_id)
+            # The explicit forwarding action may have fetched a previously missing body.
+            db.commit()
             return {
                 "action": action,
                 "customer_id": customer_id,
@@ -496,7 +498,11 @@ def mailbox_linked_email_compose_context(
                 "forward_from_email_id": forward.email_id,
             }
     except ValueError as exc:
+        db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ZohoCrmError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     raise HTTPException(status_code=422, detail="Unknown mailbox compose action.")
 
 
