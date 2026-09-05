@@ -1891,7 +1891,12 @@
         background: var(--panel);
         box-shadow: 0 0.65rem 1.5rem rgba(29, 42, 47, 0.14);
       }
+      .customer-actions-menu-popover {
+        display: grid;
+        gap: 0.45rem;
+      }
       .customer-actions-menu-popover form { margin: 0; }
+      .customer-actions-menu-item { width: 100%; }
       .customer-detail-layout {
         display: grid;
         grid-template-columns: minmax(0, 1.55fr) minmax(17.5rem, 0.85fr);
@@ -1938,6 +1943,41 @@
       .customer-fields-grid dd {
         margin: 0.32rem 0 0;
         overflow-wrap: anywhere;
+      }
+      .customer-field-drag-handle { display: none; }
+      .customer-detail-panel.is-layout-editing .customer-fields-grid {
+        gap: 0.65rem 0.85rem;
+      }
+      .customer-detail-panel.is-layout-editing .customer-field-layout-item {
+        position: relative;
+        min-height: 4.5rem;
+        padding: 0.75rem 0.75rem 0.75rem 4.2rem;
+        border: 1px dashed var(--accent);
+        border-radius: var(--control-v2-radius);
+        background: var(--accent-soft);
+        cursor: grab;
+        user-select: none;
+      }
+      .customer-detail-panel.is-layout-editing .customer-field-drag-handle {
+        position: absolute;
+        top: 50%;
+        left: 0.75rem;
+        display: block;
+        transform: translateY(-50%);
+        color: var(--accent);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .customer-detail-panel.is-layout-editing .layout-sortable-ghost {
+        opacity: 0.4;
+      }
+      .customer-detail-panel.is-layout-editing .layout-sortable-chosen {
+        cursor: grabbing;
+      }
+      .customer-detail-panel.is-layout-editing .layout-sortable-drag {
+        box-shadow: 0 0.65rem 1.5rem rgba(29, 42, 47, 0.18);
       }
       .customer-field-type {
         color: var(--muted);
@@ -2844,6 +2884,7 @@
         {% block content %}{% endblock %}
       </main>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script>
       (function () {
         var adminIconPaths = [
@@ -3163,7 +3204,7 @@
           if (!content || !toggle) { return; }
 
           function updateExpandableSection() {
-            if (section.classList.contains("is-editing")) {
+            if (section.classList.contains("is-editing") || section.classList.contains("is-layout-editing")) {
               toggle.hidden = true;
               return;
             }
@@ -3239,6 +3280,97 @@
           });
           cancels.forEach(function (cancel) {
             cancel.addEventListener("click", function () { setEditing(false); });
+          });
+        });
+
+        document.querySelectorAll("[data-layout-editor]").forEach(function (editor) {
+          var layoutKey = editor.getAttribute("data-layout-editor");
+          var sortable = editor.querySelector("[data-layout-sortable]");
+          var form = editor.querySelector("[data-layout-form]");
+          var orderInput = form && form.querySelector("[data-layout-order-input]");
+          var section = editor.querySelector("[data-expandable-section]");
+          var content = section && section.querySelector("[data-expandable-content]");
+          var toggle = section && section.querySelector("[data-expandable-toggle]");
+          if (!layoutKey || !sortable || !form || !orderInput || !section || !content) { return; }
+          if (!window.Sortable) { return; }
+
+          var openers = document.querySelectorAll('[data-layout-edit-open="' + layoutKey + '"]');
+          var actions = document.querySelectorAll('[data-layout-edit-actions="' + layoutKey + '"]');
+          var cancels = document.querySelectorAll('[data-layout-edit-cancel="' + layoutKey + '"]');
+          var hiddenWhileEditing = document.querySelectorAll("[data-layout-hide-while-editing]");
+          var originalOrder = itemKeys();
+          if (!openers.length || !actions.length || !cancels.length) { return; }
+
+          function items() {
+            return Array.prototype.filter.call(sortable.children, function (item) {
+              return item.hasAttribute("data-layout-item");
+            });
+          }
+
+          function itemKeys() {
+            return items().map(function (item) { return item.getAttribute("data-layout-item-key"); });
+          }
+
+          function restoreOriginalOrder() {
+            originalOrder.forEach(function (key) {
+              var item = items().find(function (candidate) {
+                return candidate.getAttribute("data-layout-item-key") === key;
+              });
+              if (item) { sortable.appendChild(item); }
+            });
+          }
+
+          var sortableInstance = window.Sortable.create(sortable, {
+            animation: 150,
+            draggable: "[data-layout-item]",
+            ghostClass: "layout-sortable-ghost",
+            chosenClass: "layout-sortable-chosen",
+            dragClass: "layout-sortable-drag",
+            filter: "input, textarea, select, button, a",
+            preventOnFilter: false,
+            disabled: true,
+            onMove: function (_event, originalEvent) {
+              var source = originalEvent && originalEvent.touches ? originalEvent.touches[0] : originalEvent;
+              if (!source || typeof source.clientY !== "number") { return; }
+              var threshold = 100;
+              var speed = 10;
+              if (source.clientY < threshold) {
+                window.scrollBy(0, -speed);
+              } else if (source.clientY > window.innerHeight - threshold) {
+                window.scrollBy(0, speed);
+              }
+            }
+          });
+
+          function setLayoutEditing(editing) {
+            editor.classList.toggle("is-layout-editing", editing);
+            section.classList.toggle("is-layout-editing", editing);
+            content.classList.add("is-expanded");
+            items().forEach(function (item) {
+              item.removeAttribute("draggable");
+            });
+            sortableInstance.option("disabled", !editing);
+            openers.forEach(function (opener) { opener.hidden = editing; });
+            actions.forEach(function (action) { action.hidden = !editing; });
+            hiddenWhileEditing.forEach(function (control) { control.hidden = editing; });
+            if (toggle) { toggle.hidden = true; }
+            if (!editing) { restoreOriginalOrder(); }
+            window.dispatchEvent(new Event("resize"));
+          }
+
+          openers.forEach(function (opener) {
+            opener.addEventListener("click", function () {
+              var menu = opener.closest("details");
+              if (menu) { menu.open = false; }
+              originalOrder = itemKeys();
+              setLayoutEditing(true);
+            });
+          });
+          cancels.forEach(function (cancel) {
+            cancel.addEventListener("click", function () { setLayoutEditing(false); });
+          });
+          form.addEventListener("submit", function () {
+            orderInput.value = JSON.stringify(itemKeys());
           });
         });
       }());

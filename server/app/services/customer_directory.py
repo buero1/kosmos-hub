@@ -14,7 +14,11 @@ from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.site import Site
+from app.services.module_layouts import ModuleLayoutService
 from app.services.zoho_crm import ZohoCrmService
+
+
+CUSTOMER_FIELDS_LAYOUT_KEY = "customer-fields"
 
 
 @dataclass(frozen=True)
@@ -58,8 +62,7 @@ class CustomerDirectoryDetail:
     contacts: tuple["CustomerContactProfile", ...]
     editable_profile_fields: tuple[CustomerProfileField, ...] = ()
     subforms: tuple[CustomerProfileSubform, ...] = ()
-    priority_profile_fields: tuple[CustomerProfileField, ...] = ()
-    remaining_profile_fields: tuple[CustomerProfileField, ...] = ()
+    display_profile_fields: tuple[CustomerProfileField, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -169,15 +172,14 @@ class CustomerDirectoryService:
         linked_by_customer, unlinked_by_domain = self._site_maps()
         profile = self._profile_data(customer)
         profile_fields = self._profile_fields_from_data(profile, include_sensitive=include_sensitive)
-        priority_fields, remaining_fields = self._profile_field_display_layout(profile_fields)
+        display_profile_fields = self._profile_field_display_layout(profile_fields)
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
             editable_profile_fields=tuple(field for field in profile_fields if field.editable),
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
-            priority_profile_fields=priority_fields,
-            remaining_profile_fields=remaining_fields,
+            display_profile_fields=display_profile_fields,
         )
 
     def get_contact_detail(self, *, customer_id: int, contact_id: int) -> CustomerContactDetail | None:
@@ -294,13 +296,10 @@ class CustomerDirectoryService:
             fields.append(self._profile_field(str(label), key, raw_value, definition, sensitive=sensitive))
         return tuple(fields)
 
-    @staticmethod
     def _profile_field_display_layout(
+        self,
         profile_fields: tuple[CustomerProfileField, ...],
-    ) -> tuple[
-        tuple[CustomerProfileField, ...],
-        tuple[CustomerProfileField, ...],
-    ]:
+    ) -> tuple[CustomerProfileField, ...]:
         """Place the core customer data first and combine postal code with city for the Hub."""
         visible_fields = tuple(field for field in profile_fields if field.value)
         fields_by_key = {field.key: field for field in visible_fields if field.key}
@@ -333,8 +332,13 @@ class CustomerDirectoryService:
         placed_keys = set(priority_keys) | {"send_options_to_wordpress"}
         if postal_city is not None:
             placed_keys.update(("billing_postal_code", "billing_city"))
-        remaining_fields = tuple(field for field in visible_fields if field.key not in placed_keys)
-        return priority_fields, remaining_fields
+        default_fields = priority_fields + tuple(field for field in visible_fields if field.key not in placed_keys)
+        fields_by_key = {field.key: field for field in default_fields if field.key}
+        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+            layout_key=CUSTOMER_FIELDS_LAYOUT_KEY,
+            default_keys=tuple(fields_by_key),
+        )
+        return tuple(fields_by_key[key] for key in ordered_keys)
 
     def _profile_subforms(
         self,

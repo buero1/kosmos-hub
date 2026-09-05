@@ -10,6 +10,7 @@ from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
+from app.models.module_layout import ModuleLayout
 from app.models.provider_credential import ProviderCredential
 from app.models.plugin_official_version import PluginOfficialVersion
 from app.models.plugin_installation_package import PluginInstallationPackage
@@ -50,6 +51,7 @@ __all__ = [
     "HubUser",
     "MaintenanceRun",
     "MaintenanceRunStep",
+    "ModuleLayout",
     "ProviderCredential",
     "PluginOfficialVersion",
     "PluginInstallationPackage",

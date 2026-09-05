@@ -31,7 +31,7 @@ from app.services.maintenance_worker import (
 )
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
-from app.services.customer_directory import CustomerDirectoryService
+from app.services.customer_directory import CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
 from app.services.customer_communications import (
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationImageError,
@@ -41,6 +41,7 @@ from app.services.hub_mailbox import HubMailboxService, MAILBOX_FOLDERS
 from app.models.customer import Customer
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
 from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsError, StylingSettingsService
+from app.services.module_layouts import ModuleLayoutError, ModuleLayoutService
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
 
@@ -686,6 +687,8 @@ def customer_detail_page(
     message: str = "",
     fields: str = "",
     fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
     compose_email: bool = False,
     reply_email: int | None = None,
 ):
@@ -735,6 +738,8 @@ def customer_detail_page(
             "can_manage_customer_fields": can_manage_customer_fields,
             "fields_state": fields if fields in {"success", "error"} else "",
             "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+            "layout_state": layout if layout in {"success", "error"} else "",
+            "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
             "open_email_composer": compose_email or reply_context is not None,
             "email_reply": reply_context,
             "email_reply_error": reply_error,
@@ -779,6 +784,52 @@ async def update_customer_fields(
     )
     db.commit()
     query = urlencode({"fields": "success", "fields_message": "Kundendaten wurden in Zoho CRM gespeichert."})
+    return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
+
+
+@router.post("/customers/{customer_id}/layout")
+async def update_customer_field_layout(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    csrf_token = form.get("csrf_token")
+    require_csrf(request, csrf_token if isinstance(csrf_token, str) else "")
+    user = _require_hub_admin(request)
+    order_json = form.get("order_json")
+    if not isinstance(order_json, str):
+        order_json = ""
+    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_detail(
+        customer_id=customer_id,
+        include_sensitive=True,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=CUSTOMER_FIELDS_LAYOUT_KEY,
+            item_order_json=order_json,
+            allowed_keys=tuple(field.key for field in detail.display_profile_fields),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-customer-fields-layout",
+        result="ok",
+        detail="Updated the global customer field layout.",
+    )
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Kundenfelder-Layout wurde gespeichert."})
     return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
 
 

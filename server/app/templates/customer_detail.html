@@ -41,20 +41,31 @@
       </div>
       <div class="customer-detail-heading-actions">
         {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
-          <button class="button button-variant-1" type="button" data-customer-edit-open>Bearbeiten</button>
+          <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
           <div class="customer-edit-heading-actions" data-customer-edit-actions hidden>
             <button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button>
             <button class="button button-variant-1" type="submit" form="customer-fields-form">Speichern</button>
           </div>
         {% endif %}
-        {% if can_manage_communications %}
-          <details class="customer-actions-menu" data-customer-actions-menu>
+        {% if can_manage_customer_fields and detail.display_profile_fields %}
+          <div class="customer-edit-heading-actions" data-layout-edit-actions="customer-fields" hidden>
+            <button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="customer-fields">Abbrechen</button>
+            <button class="button button-variant-1" type="submit" form="customer-fields-layout-form">Speichern</button>
+          </div>
+        {% endif %}
+        {% if can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields) %}
+          <details class="customer-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
             <summary class="customer-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="customer-actions-menu-popover">
-              <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
-              </form>
+              {% if can_manage_communications %}
+                <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
+                </form>
+              {% endif %}
+              {% if can_manage_customer_fields and detail.display_profile_fields %}
+                <button class="button button-secondary button-variant-1 customer-actions-menu-item" type="button" data-layout-edit-open="customer-fields">Layout bearbeiten</button>
+              {% endif %}
             </div>
           </details>
         {% endif %}
@@ -70,10 +81,13 @@
     {% if fields_state and fields_message %}
       <p class="notice-{{ fields_state }}">{{ fields_message }}</p>
     {% endif %}
+    {% if layout_state and layout_message %}
+      <p class="notice-{{ layout_state }}">{{ layout_message }}</p>
+    {% endif %}
 
     <div id="customer-communications" class="customer-detail-layout">
       <div class="customer-detail-main-column">
-        <article id="customer-fields" class="card customer-detail-panel">
+        <article id="customer-fields" class="card customer-detail-panel" data-layout-editor="customer-fields">
           <div class="customer-detail-panel-heading">
             <div>
               <p class="eyebrow">Zoho CRM</p>
@@ -84,27 +98,28 @@
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>
               <div data-customer-fields-readonly>
-                {% if detail.priority_profile_fields or detail.remaining_profile_fields %}
-                  {% if detail.priority_profile_fields %}
-                    <dl class="customer-fields-grid">
-                      {% for field in detail.priority_profile_fields %}
-                        <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
-                      {% endfor %}
-                    </dl>
-                  {% endif %}
-                  {% if detail.remaining_profile_fields %}
-                    <dl class="customer-fields-grid customer-fields-grid-following">
-                      {% for field in detail.remaining_profile_fields %}
-                        <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
-                      {% endfor %}
-                    </dl>
-                  {% endif %}
+                {% if detail.display_profile_fields %}
+                  <dl class="customer-fields-grid" data-layout-sortable>
+                    {% for field in detail.display_profile_fields %}
+                      <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
+                        <span class="customer-field-drag-handle" aria-hidden="true">Ziehen</span>
+                        <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                        <dd>{{ field.value }}</dd>
+                      </div>
+                    {% endfor %}
+                  </dl>
                 {% else %}
                   <dl class="customer-fields-grid">
                     <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
                   </dl>
                 {% endif %}
               </div>
+              {% if can_manage_customer_fields and detail.display_profile_fields %}
+                <form id="customer-fields-layout-form" method="post" action="/customers/{{ detail.entry.customer.id }}/layout" data-layout-form hidden>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="order_json" value="" data-layout-order-input>
+                </form>
+              {% endif %}
               {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
                 <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

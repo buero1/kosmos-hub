@@ -10,6 +10,7 @@ from app.models.hub_user import HubUser
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshSiteResult
 from app.models.fleet_refresh_settings import FleetRefreshSettings
 from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
+from app.models.module_layout import ModuleLayout
 from app.models.plugin_installation_package import PluginInstallationPackage
 from app.models.provider_credential import ProviderCredential
 from app.models.plugin_official_version import PluginOfficialVersion
@@ -23,4 +24,4 @@ from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.models.zoho_connection import ZohoConnection
 
-__all__ = ["AiProviderConfig", "CustomerContact", "CustomerZohoEmail", "CustomerZohoEmailImage", "CustomerZohoNote", "FleetRefreshRun", "FleetRefreshSettings", "FleetRefreshSiteResult", "HubAccessToken", "HubMailboxEmail", "HubSetupToken", "HubUser", "MaintenanceRun", "MaintenanceRunStep", "PluginInstallationPackage", "PluginOfficialVersion", "ProviderCredential", "SiteUserSnapshot", "StylingSettings", "UserDeletionBatch", "UserDeletionBatchItem", "ZohoConnection", "ZohoEmailContentImport", "ZohoEmailContentImportItem", "ZohoEmailTemplate", "ZohoEmailHistoryImport", "ZohoNoteHistoryImport", "ZohoEmailWorkflowWebhook"]
+__all__ = ["AiProviderConfig", "CustomerContact", "CustomerZohoEmail", "CustomerZohoEmailImage", "CustomerZohoNote", "FleetRefreshRun", "FleetRefreshSettings", "FleetRefreshSiteResult", "HubAccessToken", "HubMailboxEmail", "HubSetupToken", "HubUser", "MaintenanceRun", "MaintenanceRunStep", "ModuleLayout", "PluginInstallationPackage", "PluginOfficialVersion", "ProviderCredential", "SiteUserSnapshot", "StylingSettings", "UserDeletionBatch", "UserDeletionBatchItem", "ZohoConnection", "ZohoEmailContentImport", "ZohoEmailContentImportItem", "ZohoEmailTemplate", "ZohoEmailHistoryImport", "ZohoNoteHistoryImport", "ZohoEmailWorkflowWebhook"]

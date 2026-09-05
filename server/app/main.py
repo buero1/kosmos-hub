@@ -21,6 +21,7 @@ from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEma
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.site_user_snapshot import SiteUserSnapshot
 from app.models.styling_settings import StylingSettings
+from app.models.module_layout import ModuleLayout
 from app.models.plugin_installation_package import PluginInstallationPackage
 from app.models.user_deletion_batch import UserDeletionBatch, UserDeletionBatchItem
 from app.mcp_server import hub_mcp, mcp_asgi_app
@@ -210,6 +211,10 @@ def _ensure_phase_one_schema() -> None:
                     text("ALTER TABLE styling_settings ADD COLUMN background_secondary_color VARCHAR(7) NOT NULL DEFAULT '#efe8da' AFTER background_color")
                 )
             logger.info("Added styling_settings.background_secondary_color column.")
+
+    if "module_layouts" not in table_names:
+        ModuleLayout.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created module_layouts table.")
 
     if "zoho_email_workflow_webhooks" not in table_names:
         ZohoEmailWorkflowWebhook.__table__.create(bind=engine, checkfirst=True)

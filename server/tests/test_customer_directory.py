@@ -8,8 +8,10 @@ from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.hub_user import HubUser
 from app.models.site import Site
-from app.services.customer_directory import CustomerDirectoryService
+from app.services.customer_directory import CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
+from app.services.module_layouts import ModuleLayoutService
 
 
 def _site(*, site_id: int, domain: str, customer_id: int | None = None) -> Site:
@@ -224,7 +226,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
         detail = _service(db).get_detail(customer_id=customer.id)
 
         assert detail is not None
-        assert [field.label for field in detail.priority_profile_fields] == [
+        assert [field.label for field in detail.display_profile_fields] == [
             "Kunde-Name",
             "Tel.",
             "Status",
@@ -234,10 +236,27 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Rechnungsadresse - Straße",
             "PLZ Ort",
             "Options an WP senden",
+            "Branche",
         ]
-        assert detail.priority_profile_fields[-2].value == "82319 Starnberg"
-        assert detail.priority_profile_fields[-2].display_type == "Hub-Feld"
-        assert [field.label for field in detail.remaining_profile_fields] == ["Branche"]
+        assert detail.display_profile_fields[-3].value == "82319 Starnberg"
+        assert detail.display_profile_fields[-3].display_type == "Hub-Feld"
+
+        admin = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(admin)
+        db.flush()
+        default_keys = tuple(field.key for field in detail.display_profile_fields)
+        ModuleLayoutService(db=db).configure(
+            actor=admin,
+            layout_key=CUSTOMER_FIELDS_LAYOUT_KEY,
+            item_order_json=json.dumps(("industry",) + default_keys[:-1]),
+            allowed_keys=default_keys,
+        )
+        db.commit()
+
+        reordered = _service(db).get_detail(customer_id=customer.id)
+
+        assert reordered is not None
+        assert reordered.display_profile_fields[0].label == "Branche"
 
 
 def test_customer_directory_lists_and_filters_zoho_industries():
