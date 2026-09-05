@@ -16,7 +16,9 @@ from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.customer_communications import CustomerCommunicationAttachment, CustomerCommunicationService
 
 
-MAILBOX_FOLDERS = frozenset({"inbox", "sent", "unassigned"})
+MAILBOX_FOLDERS = frozenset({"inbox", "sent", "unassigned", "trash", "spam"})
+_ACTIVE_MAILBOX_STATE = "active"
+_MAILBOX_STATE_BY_FOLDER = {"trash": "trash", "spam": "spam"}
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class HubMailboxMessage:
     recipients: str | None
     direction: str
     is_unread: bool
+    mailbox_state: str
     occurred_at: datetime | None
     customers: tuple[HubMailboxCustomerLink, ...]
     customer_id: int | None
@@ -55,6 +58,7 @@ class HubMailboxListItem:
     recipients: str | None
     direction: str
     is_unread: bool
+    mailbox_state: str
     occurred_at: datetime | None
     customers: tuple[HubMailboxCustomerLink, ...]
 
@@ -101,10 +105,13 @@ class HubMailboxService:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
         if folder == "unassigned":
-            messages = self._unassigned_list_messages()
+            messages = self._unassigned_list_messages(mailbox_state=_ACTIVE_MAILBOX_STATE)
+        elif folder in _MAILBOX_STATE_BY_FOLDER:
+            mailbox_state = _MAILBOX_STATE_BY_FOLDER[folder]
+            messages = self._linked_list_messages(mailbox_state=mailbox_state) + self._unassigned_list_messages(mailbox_state=mailbox_state)
         else:
             direction = "inbound" if folder == "inbox" else "outbound"
-            messages = self._linked_list_messages(direction=direction) + self._unassigned_list_messages(direction=direction)
+            messages = self._linked_list_messages(direction=direction, mailbox_state=_ACTIVE_MAILBOX_STATE) + self._unassigned_list_messages(direction=direction, mailbox_state=_ACTIVE_MAILBOX_STATE)
         if unread_only:
             messages = [message for message in messages if message.is_unread]
         messages.sort(
@@ -176,7 +183,12 @@ class HubMailboxService:
         email.is_unread = False
         self.db.flush()
 
-    def _linked_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
+    def _linked_list_messages(
+        self,
+        *,
+        direction: str | None = None,
+        mailbox_state: str = _ACTIVE_MAILBOX_STATE,
+    ) -> list[HubMailboxListItem]:
         """Load headers for the mailbox list without constructing every email preview."""
         statement = (
             select(CustomerZohoEmail)
@@ -187,6 +199,7 @@ class HubMailboxService:
                     CustomerZohoEmail.zoho_message_id,
                     CustomerZohoEmail.direction,
                     CustomerZohoEmail.is_unread,
+                    CustomerZohoEmail.mailbox_state,
                     CustomerZohoEmail.zoho_sent_at,
                     CustomerZohoEmail.created_at,
                     CustomerZohoEmail.encrypted_header_json,
@@ -195,6 +208,7 @@ class HubMailboxService:
             )
             .order_by(CustomerZohoEmail.zoho_sent_at.desc(), CustomerZohoEmail.id.desc())
         )
+        statement = statement.where(CustomerZohoEmail.mailbox_state == mailbox_state)
         if direction is not None:
             statement = statement.where(CustomerZohoEmail.direction == direction)
         rows = self.db.scalars(statement).all()
@@ -208,8 +222,14 @@ class HubMailboxService:
             messages.append(self._linked_list_message(emails))
         return messages
 
-    def _unassigned_list_messages(self, *, direction: str | None = None) -> list[HubMailboxListItem]:
+    def _unassigned_list_messages(
+        self,
+        *,
+        direction: str | None = None,
+        mailbox_state: str = _ACTIVE_MAILBOX_STATE,
+    ) -> list[HubMailboxListItem]:
         statement = select(HubMailboxEmail).order_by(HubMailboxEmail.received_at.desc(), HubMailboxEmail.id.desc())
+        statement = statement.where(HubMailboxEmail.mailbox_state == mailbox_state)
         if direction is not None:
             statement = statement.where(HubMailboxEmail.direction == direction)
         return [
@@ -230,6 +250,7 @@ class HubMailboxService:
             recipients=self._text(payload.get("recipients")),
             direction=winner.direction,
             is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
+            mailbox_state=winner.mailbox_state,
             occurred_at=winner.zoho_sent_at or winner.created_at,
             customers=customers,
         )
@@ -244,6 +265,7 @@ class HubMailboxService:
             recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
             direction=email.direction,
             is_unread=email.is_unread,
+            mailbox_state=email.mailbox_state,
             occurred_at=email.received_at,
             customers=(),
         )
@@ -251,23 +273,38 @@ class HubMailboxService:
     def _folder_counts(self) -> dict[str, int]:
         """Build sidebar counts from message identifiers, never encrypted bodies."""
         linked_keys = {
-            (direction, message_id or f"local-{email_id}")
-            for direction, message_id, email_id in self.db.execute(
+            (mailbox_state, direction, message_id or f"local-{email_id}")
+            for mailbox_state, direction, message_id, email_id in self.db.execute(
                 select(
+                    CustomerZohoEmail.mailbox_state,
                     CustomerZohoEmail.direction,
                     CustomerZohoEmail.zoho_message_id,
                     CustomerZohoEmail.id,
                 )
             )
         }
-        unassigned_rows = self.db.execute(
-            select(HubMailboxEmail.direction, HubMailboxEmail.id)
-        )
+        unassigned_rows = list(self.db.execute(
+            select(HubMailboxEmail.mailbox_state, HubMailboxEmail.direction, HubMailboxEmail.id)
+        ))
+        active_unassigned_rows = [
+            (direction, email_id)
+            for mailbox_state, direction, email_id in unassigned_rows
+            if mailbox_state == _ACTIVE_MAILBOX_STATE
+        ]
         return {
-            "inbox": sum(direction == "inbound" for direction, _ in linked_keys)
-            + sum(direction == "inbound" for direction, _ in unassigned_rows),
-            "sent": sum(direction == "outbound" for direction, _ in linked_keys),
-            "unassigned": sum(1 for _ in self.db.execute(select(HubMailboxEmail.id))),
+            "inbox": sum(
+                mailbox_state == _ACTIVE_MAILBOX_STATE and direction == "inbound"
+                for mailbox_state, direction, _ in linked_keys
+            ) + sum(direction == "inbound" for direction, _ in active_unassigned_rows),
+            "sent": sum(
+                mailbox_state == _ACTIVE_MAILBOX_STATE and direction == "outbound"
+                for mailbox_state, direction, _ in linked_keys
+            ),
+            "unassigned": len(active_unassigned_rows),
+            "trash": sum(mailbox_state == "trash" for mailbox_state, _, _ in linked_keys)
+            + sum(mailbox_state == "trash" for mailbox_state, _, _ in unassigned_rows),
+            "spam": sum(mailbox_state == "spam" for mailbox_state, _, _ in linked_keys)
+            + sum(mailbox_state == "spam" for mailbox_state, _, _ in unassigned_rows),
         }
 
     def _email_list_header(self, email: CustomerZohoEmail) -> dict[str, object]:
@@ -292,6 +329,7 @@ class HubMailboxService:
             recipients=view.recipients,
             direction=view.direction,
             is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
+            mailbox_state=winner.mailbox_state,
             occurred_at=view.occurred_at,
             customers=customers,
             customer_id=winner.customer_id,
@@ -313,6 +351,7 @@ class HubMailboxService:
             recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
             direction=email.direction,
             is_unread=email.is_unread,
+            mailbox_state=email.mailbox_state,
             occurred_at=email.received_at,
             customers=(),
             customer_id=None,
@@ -341,11 +380,13 @@ class HubMailboxService:
 
     @staticmethod
     def _matches_folder(message: HubMailboxMessage | HubMailboxListItem, folder: str) -> bool:
+        if folder in _MAILBOX_STATE_BY_FOLDER:
+            return message.mailbox_state == _MAILBOX_STATE_BY_FOLDER[folder]
         if folder == "unassigned":
-            return message.kind == "unassigned"
+            return message.kind == "unassigned" and message.mailbox_state == _ACTIVE_MAILBOX_STATE
         if folder == "sent":
-            return message.direction == "outbound"
-        return message.direction == "inbound"
+            return message.mailbox_state == _ACTIVE_MAILBOX_STATE and message.direction == "outbound"
+        return message.mailbox_state == _ACTIVE_MAILBOX_STATE and message.direction == "inbound"
 
     def _payload(self, encrypted_payload_json: str) -> dict[str, object]:
         try:

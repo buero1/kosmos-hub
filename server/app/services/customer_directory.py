@@ -86,6 +86,7 @@ class CustomerDirectoryService:
                 select(CustomerZohoEmail.customer_id).where(
                     CustomerZohoEmail.direction == "inbound",
                     CustomerZohoEmail.is_unread.is_(True),
+                    CustomerZohoEmail.mailbox_state == "active",
                 )
             ).all()
         ) if unread_email_only else set()

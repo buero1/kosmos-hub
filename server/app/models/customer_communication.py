@@ -36,6 +36,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
         Index("ix_customer_zoho_emails_zoho_message_id", "zoho_message_id"),
         Index("ix_customer_zoho_emails_direction_is_unread_message_id", "direction", "is_unread", "zoho_message_id"),
         Index("ix_customer_zoho_emails_direction_sent_at", "direction", "zoho_sent_at", "id"),
+        Index("ix_customer_zoho_emails_mailbox_state_direction_sent_at", "mailbox_state", "direction", "zoho_sent_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -46,6 +47,7 @@ class CustomerZohoEmail(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(16), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
     is_unread: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
+    mailbox_state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     sync_status: Mapped[str] = mapped_column(String(16), nullable=False, default="synced")
     encrypted_payload_json: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
     encrypted_header_json: Mapped[str] = mapped_column(Text(), nullable=False, default="")

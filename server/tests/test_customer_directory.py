@@ -214,10 +214,14 @@ def test_customer_directory_filters_customers_with_unread_inbound_emails():
     with Session(engine) as db:
         unread_customer = Customer(name="Unread Customer")
         read_customer = Customer(name="Read Customer")
+        spam_customer = Customer(name="Spam Customer")
+        trash_customer = Customer(name="Trash Customer")
         db.add_all(
             [
                 unread_customer,
                 read_customer,
+                spam_customer,
+                trash_customer,
                 CustomerZohoEmail(
                     customer=unread_customer,
                     zoho_message_id="email-unread",
@@ -232,6 +236,24 @@ def test_customer_directory_filters_customers_with_unread_inbound_emails():
                     source="zoho",
                     direction="inbound",
                     is_unread=False,
+                    encrypted_payload_json="encrypted",
+                ),
+                CustomerZohoEmail(
+                    customer=spam_customer,
+                    zoho_message_id="email-spam",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    mailbox_state="spam",
+                    encrypted_payload_json="encrypted",
+                ),
+                CustomerZohoEmail(
+                    customer=trash_customer,
+                    zoho_message_id="email-trash",
+                    source="zoho",
+                    direction="inbound",
+                    is_unread=True,
+                    mailbox_state="trash",
                     encrypted_payload_json="encrypted",
                 ),
             ]

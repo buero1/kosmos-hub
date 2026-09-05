@@ -45,6 +45,7 @@ def _unread_email_count_for_db(db) -> int:
     linked_filters = (
         CustomerZohoEmail.direction == "inbound",
         CustomerZohoEmail.is_unread.is_(True),
+        CustomerZohoEmail.mailbox_state == "active",
     )
     # A Zoho message can be linked to several customers through shared contacts.
     linked_count = int(
@@ -71,6 +72,7 @@ def _unread_email_count_for_db(db) -> int:
             .where(
                 HubMailboxEmail.direction == "inbound",
                 HubMailboxEmail.is_unread.is_(True),
+                HubMailboxEmail.mailbox_state == "active",
             )
         )
         or 0

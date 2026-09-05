@@ -82,6 +82,15 @@ def _ensure_phase_one_schema() -> None:
                 )
                 connection.execute(text("UPDATE customer_zoho_emails SET is_unread = 0"))
             logger.info("Added customer_zoho_emails.is_unread; existing emails were marked read.")
+        if "mailbox_state" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE customer_zoho_emails "
+                        "ADD COLUMN mailbox_state VARCHAR(16) NOT NULL DEFAULT 'active' AFTER is_unread"
+                    )
+                )
+            logger.info("Added customer_zoho_emails.mailbox_state column.")
         if "encrypted_header_json" not in columns:
             with engine.begin() as connection:
                 connection.execute(
@@ -153,10 +162,40 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added customer_zoho_emails folder ordering index.")
+        if "ix_customer_zoho_emails_mailbox_state_direction_sent_at" not in email_index_names:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_customer_zoho_emails_mailbox_state_direction_sent_at "
+                        "ON customer_zoho_emails (mailbox_state, direction, zoho_sent_at, id)"
+                    )
+                )
+            logger.info("Added customer_zoho_emails mailbox-state folder index.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_mailbox_emails table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("hub_mailbox_emails")}
+        if "mailbox_state" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_mailbox_emails "
+                        "ADD COLUMN mailbox_state VARCHAR(16) NOT NULL DEFAULT 'active' AFTER is_unread"
+                    )
+                )
+            logger.info("Added hub_mailbox_emails.mailbox_state column.")
+        mailbox_email_indexes = {index["name"] for index in inspector.get_indexes("hub_mailbox_emails")}
+        if "ix_hub_mailbox_emails_mailbox_state_direction_received_at" not in mailbox_email_indexes:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_hub_mailbox_emails_mailbox_state_direction_received_at "
+                        "ON hub_mailbox_emails (mailbox_state, direction, received_at, id)"
+                    )
+                )
+            logger.info("Added hub_mailbox_emails mailbox-state folder index.")
 
     if "styling_settings" not in table_names:
         StylingSettings.__table__.create(bind=engine, checkfirst=True)

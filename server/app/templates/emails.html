@@ -203,6 +203,8 @@
       <a href="/emails?folder=inbox" data-mailbox-folder data-mailbox-folder-count="inbox"{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
       <a href="/emails?folder=sent" data-mailbox-folder data-mailbox-folder-count="sent"{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
       <a href="/emails?folder=unassigned" data-mailbox-folder data-mailbox-folder-count="unassigned"{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
+      <a href="/emails?folder=trash" data-mailbox-folder data-mailbox-folder-count="trash"{% if folder == 'trash' %} class="is-active"{% endif %}><span>Papierkorb</span><small>{{ mailbox.folder_counts.trash }}</small></a>
+      <a href="/emails?folder=spam" data-mailbox-folder data-mailbox-folder-count="spam"{% if folder == 'spam' %} class="is-active"{% endif %}><span>Spam</span><small>{{ mailbox.folder_counts.spam }}</small></a>
     </nav>
 
     {% with messages=mailbox.messages, selected=mailbox.selected %}{% include "emails_message_list.html" %}{% include "emails_reading_pane.html" %}{% endwith %}
@@ -215,7 +217,7 @@
       var folderSelections = new Map();
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
-      var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt' };
+      var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
       var mailboxStatus = {
         folderCounts: {{ mailbox.folder_counts | tojson }},
         unreadCount: {{ unread_email_count | default(0) | tojson }}
@@ -1074,7 +1076,7 @@
         var list = document.querySelector('[data-mailbox-list]');
         if (!list) return;
         var activeFolder = list.dataset.mailboxFolderName || 'inbox';
-        var queue = ['inbox', 'sent', 'unassigned'].filter(function (folder) { return folder !== activeFolder; });
+        var queue = ['inbox', 'sent', 'unassigned', 'trash', 'spam'].filter(function (folder) { return folder !== activeFolder; });
         function loadNextFolder() {
           var folder = queue.shift();
           if (!folder) return;

@@ -69,7 +69,7 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         service.communications._email_view = track_full_view
         inbox = service.get_view(folder="inbox", unread_only=False)
 
-        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "unassigned": 1}
+        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "unassigned": 1, "trash": 0, "spam": 0}
         assert [message.subject for message in inbox.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
         assert full_view_calls == []
         assert not hasattr(inbox.messages[1], "preview_html")
@@ -135,6 +135,52 @@ def test_customer_email_message_id_has_a_dedicated_index():
     assert "ix_customer_zoho_emails_zoho_message_id" in index_names
     assert "ix_customer_zoho_emails_direction_is_unread_message_id" in index_names
     assert "ix_customer_zoho_emails_direction_sent_at" in index_names
+    assert "ix_customer_zoho_emails_mailbox_state_direction_sent_at" in index_names
+
+
+def test_mailbox_separates_spam_and_trashed_messages_from_active_folders():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Example GmbH", zoho_id="zoho-account-1")
+        active_email = CustomerZohoEmail(
+            customer=customer,
+            zoho_message_id="active-email",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Aktive Nachricht"})),
+            zoho_sent_at=datetime(2026, 9, 3, 9, 0, tzinfo=UTC),
+        )
+        spam_email = CustomerZohoEmail(
+            customer=customer,
+            zoho_message_id="spam-email",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            mailbox_state="spam",
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Spam-Nachricht"})),
+            zoho_sent_at=datetime(2026, 9, 3, 10, 0, tzinfo=UTC),
+        )
+        trashed_email = HubMailboxEmail(
+            direction="inbound",
+            is_unread=True,
+            mailbox_state="trash",
+            fingerprint="c" * 64,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Gelöschte Nachricht"})),
+            received_at=datetime(2026, 9, 3, 11, 0, tzinfo=UTC),
+        )
+        db.add_all([customer, active_email, spam_email, trashed_email])
+        db.commit()
+
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+
+        assert [message.subject for message in service.get_folder_view(folder="inbox", unread_only=False).messages] == ["Aktive Nachricht"]
+        assert [message.subject for message in service.get_folder_view(folder="spam", unread_only=False).messages] == ["Spam-Nachricht"]
+        assert [message.subject for message in service.get_folder_view(folder="trash", unread_only=False).messages] == ["Gelöschte Nachricht"]
+        assert service.get_folder_counts() == {"inbox": 1, "sent": 0, "unassigned": 0, "trash": 1, "spam": 1}
 
 
 def test_mailbox_list_reads_compact_header_without_full_email_payload():
