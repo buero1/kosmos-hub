@@ -84,13 +84,31 @@
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>
               <div data-customer-fields-readonly>
-                <dl class="customer-fields-grid">
-                  {% for field in detail.profile_fields if field.value %}
-                    <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
-                  {% else %}
+                {% if detail.priority_profile_fields_left or detail.priority_profile_fields_right or detail.remaining_profile_fields %}
+                  <div class="customer-fields-priority-layout">
+                    <dl class="customer-fields-column">
+                      {% for field in detail.priority_profile_fields_left %}
+                        <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
+                      {% endfor %}
+                    </dl>
+                    <dl class="customer-fields-column">
+                      {% for field in detail.priority_profile_fields_right %}
+                        <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
+                      {% endfor %}
+                    </dl>
+                  </div>
+                  {% if detail.remaining_profile_fields %}
+                    <dl class="customer-fields-grid customer-fields-grid-following">
+                      {% for field in detail.remaining_profile_fields %}
+                        <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
+                      {% endfor %}
+                    </dl>
+                  {% endif %}
+                {% else %}
+                  <dl class="customer-fields-grid">
                     <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
-                  {% endfor %}
-                </dl>
+                  </dl>
+                {% endif %}
               </div>
               {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
                 <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>

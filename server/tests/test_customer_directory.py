@@ -177,6 +177,68 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
         assert _service(db).get_contact_detail(customer_id=customer.id + 1, contact_id=first_contact.id) is None
 
 
+def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for_the_hub():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Example Customer",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Kunde-Name": "Example Customer",
+                            "Status": "Aktuell",
+                            "Rechnungsadresse - Straße": "Musterstraße 1",
+                            "Rechnungsadresse - PLZ": "82319",
+                            "Rechnungsadresse - Stadt": "Starnberg",
+                            "Tel.": "+498151123456",
+                            "Webseite": "https://example.test",
+                            "Arbeitsdomain-Login": "https://example.test/wp-admin",
+                            "Options an WP senden": False,
+                            "Branche": "Beratung",
+                        },
+                        "field_metadata": {
+                            "customer_name": {"label": "Kunde-Name"},
+                            "account_status": {"label": "Status"},
+                            "billing_street": {"label": "Rechnungsadresse - Straße"},
+                            "billing_postal_code": {"label": "Rechnungsadresse - PLZ"},
+                            "billing_city": {"label": "Rechnungsadresse - Stadt"},
+                            "phone": {"label": "Tel."},
+                            "website": {"label": "Webseite"},
+                            "work_domain_login": {"label": "Arbeitsdomain-Login"},
+                            "send_options_to_wordpress": {"label": "Options an WP senden"},
+                            "industry": {"label": "Branche"},
+                        },
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.commit()
+
+        detail = _service(db).get_detail(customer_id=customer.id)
+
+        assert detail is not None
+        assert [field.label for field in detail.priority_profile_fields_left] == [
+            "Kunde-Name",
+            "Status",
+            "Rechnungsadresse - Straße",
+            "PLZ Ort",
+        ]
+        assert detail.priority_profile_fields_left[-1].value == "82319 Starnberg"
+        assert detail.priority_profile_fields_left[-1].display_type == "Hub-Feld"
+        assert [field.label for field in detail.priority_profile_fields_right] == [
+            "Tel.",
+            "Webseite",
+            "Arbeitsdomain-Login",
+            "Options an WP senden",
+        ]
+        assert [field.label for field in detail.remaining_profile_fields] == ["Branche"]
+
+
 def test_customer_directory_lists_and_filters_zoho_industries():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

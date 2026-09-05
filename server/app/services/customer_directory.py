@@ -58,6 +58,9 @@ class CustomerDirectoryDetail:
     contacts: tuple["CustomerContactProfile", ...]
     editable_profile_fields: tuple[CustomerProfileField, ...] = ()
     subforms: tuple[CustomerProfileSubform, ...] = ()
+    priority_profile_fields_left: tuple[CustomerProfileField, ...] = ()
+    priority_profile_fields_right: tuple[CustomerProfileField, ...] = ()
+    remaining_profile_fields: tuple[CustomerProfileField, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -167,12 +170,16 @@ class CustomerDirectoryService:
         linked_by_customer, unlinked_by_domain = self._site_maps()
         profile = self._profile_data(customer)
         profile_fields = self._profile_fields_from_data(profile, include_sensitive=include_sensitive)
+        priority_left, priority_right, remaining_fields = self._profile_field_display_layout(profile_fields)
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
             editable_profile_fields=tuple(field for field in profile_fields if field.editable),
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
+            priority_profile_fields_left=priority_left,
+            priority_profile_fields_right=priority_right,
+            remaining_profile_fields=remaining_fields,
         )
 
     def get_contact_detail(self, *, customer_id: int, contact_id: int) -> CustomerContactDetail | None:
@@ -288,6 +295,41 @@ class CustomerDirectoryService:
                 continue
             fields.append(self._profile_field(str(label), key, raw_value, definition, sensitive=sensitive))
         return tuple(fields)
+
+    @staticmethod
+    def _profile_field_display_layout(
+        profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[
+        tuple[CustomerProfileField, ...],
+        tuple[CustomerProfileField, ...],
+        tuple[CustomerProfileField, ...],
+    ]:
+        """Place the core customer data first and combine postal code with city for the Hub."""
+        visible_fields = tuple(field for field in profile_fields if field.value)
+        fields_by_key = {field.key: field for field in visible_fields if field.key}
+        postal_code = fields_by_key.get("billing_postal_code")
+        city = fields_by_key.get("billing_city")
+        postal_city_value = " ".join(
+            value for value in (postal_code.value if postal_code else None, city.value if city else None) if value
+        )
+        postal_city = (
+            CustomerProfileField(label="PLZ Ort", value=postal_city_value, key="hub_postal_city", display_type="Hub-Feld")
+            if postal_city_value
+            else None
+        )
+
+        left_keys = ("customer_name", "account_status", "billing_street")
+        right_keys = ("phone", "website", "work_domain_login", "send_options_to_wordpress")
+        priority_left = tuple(fields_by_key[key] for key in left_keys if key in fields_by_key)
+        if postal_city is not None:
+            priority_left += (postal_city,)
+        priority_right = tuple(fields_by_key[key] for key in right_keys if key in fields_by_key)
+
+        placed_keys = set(left_keys) | set(right_keys)
+        if postal_city is not None:
+            placed_keys.update(("billing_postal_code", "billing_city"))
+        remaining_fields = tuple(field for field in visible_fields if field.key not in placed_keys)
+        return priority_left, priority_right, remaining_fields
 
     def _profile_subforms(
         self,
