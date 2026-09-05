@@ -42,6 +42,15 @@ class CustomerProfileField:
 
 
 @dataclass(frozen=True)
+class CustomerProfileFieldTab:
+    """A named, filtered view of the customer fields without duplicating their data."""
+
+    key: str
+    label: str
+    fields: tuple[CustomerProfileField, ...]
+
+
+@dataclass(frozen=True)
 class CustomerProfileSubformRow:
     id: str | None
     fields: tuple[CustomerProfileField, ...]
@@ -65,6 +74,7 @@ class CustomerDirectoryDetail:
     display_profile_fields: tuple[CustomerProfileField, ...] = ()
     summary_profile_fields: tuple[CustomerProfileField, ...] = ()
     following_profile_fields: tuple[CustomerProfileField, ...] = ()
+    profile_field_tabs: tuple[CustomerProfileFieldTab, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,6 +104,43 @@ class CustomerContactDetail:
 
 class CustomerDirectoryService:
     """Presents CRM customers without ever assigning sites automatically."""
+
+    _PROFILE_FIELD_TAB_GROUPS = (
+        (
+            "bank-details",
+            "Bankverbindung",
+            frozenset((
+                "bank",
+                "show_bank_details",
+                "bic",
+                "iban",
+                "account_holder",
+                "sepa_grant_type",
+                "sepa_grant_date",
+            )),
+        ),
+        ("dialfire", "Dialfire", frozenset((
+            "dialfire_campaign_name",
+            "dialfire_campaign_stage",
+            "dialfire_follow_up_at",
+            "dialfire_api_token",
+            "dialfire_comment",
+            "dialfire_result",
+            "dialfire_id",
+            "dialfire_campaign_id",
+            "dialfire_season_time",
+            "dialfire_status",
+            "dialfire_follow_up_owner",
+            "dialfire_follow_up_formula",
+            "dialfire_follow_up_note",
+        ))),
+        ("appointments", "Termin", frozenset((
+            "duration_minutes",
+            "google_calendar",
+            "appointment_reminder",
+            "appointment_at",
+        ))),
+    )
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -178,6 +225,7 @@ class CustomerDirectoryService:
         summary_profile_fields, following_profile_fields = self._split_profile_field_summary(
             display_profile_fields
         )
+        profile_field_tabs = self._profile_field_tabs(display_profile_fields)
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
@@ -187,6 +235,7 @@ class CustomerDirectoryService:
             display_profile_fields=display_profile_fields,
             summary_profile_fields=summary_profile_fields,
             following_profile_fields=following_profile_fields,
+            profile_field_tabs=profile_field_tabs,
         )
 
     def get_contact_detail(self, *, customer_id: int, contact_id: int) -> CustomerContactDetail | None:
@@ -356,6 +405,21 @@ class CustomerDirectoryService:
             if field.key == "send_options_to_wordpress":
                 return display_profile_fields[: index + 1], display_profile_fields[index + 1 :]
         return display_profile_fields, ()
+
+    @classmethod
+    def _profile_field_tabs(
+        cls,
+        display_profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[CustomerProfileFieldTab, ...]:
+        """Filter the displayed field order into reusable tab views."""
+        return tuple(
+            CustomerProfileFieldTab(
+                key=key,
+                label=label,
+                fields=tuple(field for field in display_profile_fields if field.key in field_keys),
+            )
+            for key, label, field_keys in cls._PROFILE_FIELD_TAB_GROUPS
+        )
 
     def _profile_subforms(
         self,

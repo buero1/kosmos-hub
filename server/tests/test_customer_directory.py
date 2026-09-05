@@ -271,6 +271,86 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
         assert reordered.display_profile_fields[0].label == "Branche"
 
 
+def test_customer_directory_groups_existing_fields_into_synchronized_tabs():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Example Customer",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Bank": "Musterbank",
+                            "Bankverbindung zeigen": True,
+                            "BIC": "MUSTERBIC",
+                            "IBAN": "DE02120300000000202051",
+                            "Kontoinhaber": "Erika Muster",
+                            "Art SEPA-Erteilung": "Online",
+                            "Datum SEPA-Erteilung": "2026-01-15",
+                            "Dialfire Kampagnename": "Gewinnung 2026",
+                            "Dialfire-API-Token": "secret-token",
+                            "Dialfire-ID": "dialfire-42",
+                            "Dauer in Minuten": "30",
+                            "Google Kalender": "Kalender A",
+                            "Termin-Erinnerung setzen?": True,
+                            "Terminzeit": "2026-02-20T10:00:00+01:00",
+                        },
+                        "field_metadata": {
+                            "bank": {"label": "Bank"},
+                            "show_bank_details": {"label": "Bankverbindung zeigen"},
+                            "bic": {"label": "BIC"},
+                            "iban": {"label": "IBAN", "sensitive": True},
+                            "account_holder": {"label": "Kontoinhaber"},
+                            "sepa_grant_type": {"label": "Art SEPA-Erteilung"},
+                            "sepa_grant_date": {"label": "Datum SEPA-Erteilung"},
+                            "dialfire_campaign_name": {"label": "Dialfire Kampagnename"},
+                            "dialfire_api_token": {"label": "Dialfire-API-Token", "sensitive": True},
+                            "dialfire_id": {"label": "Dialfire-ID"},
+                            "duration_minutes": {"label": "Dauer in Minuten"},
+                            "google_calendar": {"label": "Google Kalender"},
+                            "appointment_reminder": {"label": "Termin-Erinnerung setzen?"},
+                            "appointment_at": {"label": "Terminzeit"},
+                        },
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.commit()
+
+        detail = _service(db).get_detail(customer_id=customer.id, include_sensitive=True)
+
+        assert detail is not None
+        tabs = {tab.key: tab for tab in detail.profile_field_tabs}
+        assert [tab.label for tab in detail.profile_field_tabs] == ["Bankverbindung", "Dialfire", "Termin"]
+        assert [field.label for field in tabs["bank-details"].fields] == [
+            "Bank",
+            "Bankverbindung zeigen",
+            "BIC",
+            "IBAN",
+            "Kontoinhaber",
+            "Art SEPA-Erteilung",
+            "Datum SEPA-Erteilung",
+        ]
+        assert [field.label for field in tabs["dialfire"].fields] == [
+            "Dialfire Kampagnename",
+            "Dialfire-API-Token",
+            "Dialfire-ID",
+        ]
+        assert [field.label for field in tabs["appointments"].fields] == [
+            "Dauer in Minuten",
+            "Google Kalender",
+            "Termin-Erinnerung setzen?",
+            "Terminzeit",
+        ]
+        assert tabs["bank-details"].fields[3].value == "Geschützt"
+        assert tabs["dialfire"].fields[1].value == "Geschützt"
+        assert all(field in detail.display_profile_fields for tab in tabs.values() for field in tab.fields)
+
+
 def test_customer_directory_lists_and_filters_zoho_industries():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

@@ -1928,6 +1928,34 @@
         width: 150px;
         justify-content: center;
       }
+      .field-tabs-list {
+        display: flex;
+        gap: 0.2rem;
+        margin-bottom: 1.15rem;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--border);
+        scrollbar-width: thin;
+      }
+      .field-tab {
+        flex: 0 0 auto;
+        padding: 0.55rem 0.7rem 0.65rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+      }
+      .field-tab:hover { color: var(--ink); }
+      .field-tab[aria-selected="true"] {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+      .field-tab:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
       .customer-fields-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3210,6 +3238,43 @@
 
           opener.addEventListener("click", openNoteComposer);
           cancel.addEventListener("click", closeNoteComposer);
+        });
+
+        document.querySelectorAll("[data-field-tabs]").forEach(function (tabsContainer) {
+          var root = tabsContainer.parentElement;
+          var tabs = Array.prototype.slice.call(tabsContainer.querySelectorAll("[data-field-tab]"));
+          var panels = root ? Array.prototype.slice.call(root.querySelectorAll("[data-field-tab-panel]")) : [];
+          if (!root || !tabs.length || !panels.length) { return; }
+
+          function selectTab(key) {
+            tabs.forEach(function (tab) {
+              var selected = tab.getAttribute("data-field-tab") === key;
+              tab.setAttribute("aria-selected", selected ? "true" : "false");
+              tab.tabIndex = selected ? 0 : -1;
+            });
+            panels.forEach(function (panel) {
+              panel.hidden = panel.getAttribute("data-field-tab-panel") !== key;
+            });
+            window.dispatchEvent(new Event("resize"));
+          }
+
+          tabs.forEach(function (tab, index) {
+            tab.addEventListener("click", function () {
+              selectTab(tab.getAttribute("data-field-tab"));
+            });
+            tab.addEventListener("keydown", function (event) {
+              var nextIndex = null;
+              if (event.key === "ArrowRight") { nextIndex = (index + 1) % tabs.length; }
+              if (event.key === "ArrowLeft") { nextIndex = (index - 1 + tabs.length) % tabs.length; }
+              if (event.key === "Home") { nextIndex = 0; }
+              if (event.key === "End") { nextIndex = tabs.length - 1; }
+              if (nextIndex === null) { return; }
+              event.preventDefault();
+              var nextTab = tabs[nextIndex];
+              selectTab(nextTab.getAttribute("data-field-tab"));
+              nextTab.focus();
+            });
+          });
         });
 
         document.querySelectorAll("[data-expandable-section]").forEach(function (section) {
