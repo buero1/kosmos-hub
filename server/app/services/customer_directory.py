@@ -63,6 +63,8 @@ class CustomerDirectoryDetail:
     editable_profile_fields: tuple[CustomerProfileField, ...] = ()
     subforms: tuple[CustomerProfileSubform, ...] = ()
     display_profile_fields: tuple[CustomerProfileField, ...] = ()
+    summary_profile_fields: tuple[CustomerProfileField, ...] = ()
+    following_profile_fields: tuple[CustomerProfileField, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,9 @@ class CustomerDirectoryService:
         profile = self._profile_data(customer)
         profile_fields = self._profile_fields_from_data(profile, include_sensitive=include_sensitive)
         display_profile_fields = self._profile_field_display_layout(profile_fields)
+        summary_profile_fields, following_profile_fields = self._split_profile_field_summary(
+            display_profile_fields
+        )
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
@@ -180,6 +185,8 @@ class CustomerDirectoryService:
             editable_profile_fields=tuple(field for field in profile_fields if field.editable),
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
             display_profile_fields=display_profile_fields,
+            summary_profile_fields=summary_profile_fields,
+            following_profile_fields=following_profile_fields,
         )
 
     def get_contact_detail(self, *, customer_id: int, contact_id: int) -> CustomerContactDetail | None:
@@ -339,6 +346,16 @@ class CustomerDirectoryService:
             default_keys=tuple(fields_by_key),
         )
         return tuple(fields_by_key[key] for key in ordered_keys)
+
+    @staticmethod
+    def _split_profile_field_summary(
+        display_profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[tuple[CustomerProfileField, ...], tuple[CustomerProfileField, ...]]:
+        """Keep the global field order while ending the summary at the WordPress action."""
+        for index, field in enumerate(display_profile_fields):
+            if field.key == "send_options_to_wordpress":
+                return display_profile_fields[: index + 1], display_profile_fields[index + 1 :]
+        return display_profile_fields, ()
 
     def _profile_subforms(
         self,

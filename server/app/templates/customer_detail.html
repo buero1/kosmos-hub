@@ -96,91 +96,114 @@
             </div>
           </div>
           <div class="customer-section-expandable" data-expandable-section>
-            <div data-expandable-content>
-              <div data-customer-fields-readonly>
+            <div data-customer-fields-readonly>
+              {% if detail.display_profile_fields %}
+                <dl class="customer-fields-grid customer-fields-grid-summary">
+                  {% for field in detail.summary_profile_fields %}
+                    <div>
+                      <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                      <dd>{{ field.value }}</dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+                {% if detail.following_profile_fields %}
+                  <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+                {% endif %}
+              {% endif %}
+              <div data-expandable-content{% if not detail.following_profile_fields %} class="is-expanded"{% endif %}>
                 {% if detail.display_profile_fields %}
-                  <dl class="customer-fields-grid" data-layout-sortable>
-                    {% for field in detail.display_profile_fields %}
-                      <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
-                        <span class="customer-field-drag-handle" aria-hidden="true">Ziehen</span>
-                        <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
-                        <dd>{{ field.value }}</dd>
-                      </div>
-                    {% endfor %}
-                  </dl>
+                  {% if detail.following_profile_fields %}
+                    <dl class="customer-fields-grid customer-fields-grid-following">
+                      {% for field in detail.following_profile_fields %}
+                        <div>
+                          <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                          <dd>{{ field.value }}</dd>
+                        </div>
+                      {% endfor %}
+                    </dl>
+                  {% endif %}
                 {% else %}
                   <dl class="customer-fields-grid">
                     <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
                   </dl>
                 {% endif %}
-              </div>
-              {% if can_manage_customer_fields and detail.display_profile_fields %}
-                <form id="customer-fields-layout-form" method="post" action="/customers/{{ detail.entry.customer.id }}/layout" data-layout-form hidden>
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="order_json" value="" data-layout-order-input>
-                </form>
-              {% endif %}
-              {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
-                <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  {% if detail.editable_profile_fields %}
-                    <div class="customer-field-editor-grid">
-                      {% for field in detail.editable_profile_fields %}
-                        {{ customer_field_control(field, "customer_field__" ~ field.key) }}
-                      {% endfor %}
-                    </div>
+                <div class="customer-system-details">
+                  <p class="eyebrow">Hub-Daten</p>
+                  <dl class="customer-fields-grid">
+                    <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
+                    <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
+                    <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
+                    <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
+                  </dl>
+                  <p class="eyebrow customer-linked-sites-heading">Verknüpfte Hub-Websites</p>
+                  <div class="customer-linked-sites">
+                    {% for site in detail.entry.linked_sites %}
+                      <a href="/sites/{{ site.id }}">{{ site.domain }}</a>
+                    {% else %}
+                      <span class="subtle">Noch keine Hub-Website verknüpft.</span>
+                    {% endfor %}
+                  </div>
+                  {% if detail.entry.exact_match_candidate %}
+                    <p class="subtle">Exakte Zuordnung verfügbar: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>.</p>
                   {% endif %}
-                  {% for subform in detail.subforms %}
-                    <section class="customer-subform-editor">
-                      <h4>{{ subform.label }}</h4>
-                      {% for row in subform.records %}
-                        {% set row_index = loop.index0 %}
-                        <fieldset class="customer-subform-row">
-                          <legend>Eintrag {{ loop.index }}</legend>
-                          <div class="customer-field-editor-grid">
-                            {% for field in row.fields if field.editable %}
-                              {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key) }}
-                            {% endfor %}
-                          </div>
-                          <label class="customer-subform-delete"><input type="checkbox" name="customer_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
-                        </fieldset>
-                      {% endfor %}
-                      {% if subform.fields %}
-                        <fieldset class="customer-subform-row">
-                          <legend>Neuer Eintrag</legend>
-                          <div class="customer-field-editor-grid">
-                            {% for field in subform.fields if field.editable %}
-                              {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__new__" ~ field.key) }}
-                            {% endfor %}
-                          </div>
-                        </fieldset>
-                      {% endif %}
-                    </section>
-                  {% endfor %}
-                </form>
-              {% endif %}
-              <div class="customer-system-details">
-                <p class="eyebrow">Hub-Daten</p>
-                <dl class="customer-fields-grid">
-                  <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
-                  <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
-                  <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
-                  <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
-                </dl>
-                <p class="eyebrow customer-linked-sites-heading">Verknüpfte Hub-Websites</p>
-                <div class="customer-linked-sites">
-                  {% for site in detail.entry.linked_sites %}
-                    <a href="/sites/{{ site.id }}">{{ site.domain }}</a>
-                  {% else %}
-                    <span class="subtle">Noch keine Hub-Website verknüpft.</span>
-                  {% endfor %}
                 </div>
-                {% if detail.entry.exact_match_candidate %}
-                  <p class="subtle">Exakte Zuordnung verfügbar: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>.</p>
-                {% endif %}
               </div>
             </div>
-            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+            {% if can_manage_customer_fields and detail.display_profile_fields %}
+              <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
+                <dl class="customer-fields-grid" data-layout-sortable>
+                  {% for field in detail.display_profile_fields %}
+                    <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
+                      <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                      <dd>{{ field.value }}</dd>
+                    </div>
+                  {% endfor %}
+                </dl>
+              </div>
+              <form id="customer-fields-layout-form" method="post" action="/customers/{{ detail.entry.customer.id }}/layout" data-layout-form hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="order_json" value="" data-layout-order-input>
+              </form>
+            {% endif %}
+            {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
+              <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                {% if detail.editable_profile_fields %}
+                  <div class="customer-field-editor-grid">
+                    {% for field in detail.editable_profile_fields %}
+                      {{ customer_field_control(field, "customer_field__" ~ field.key) }}
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                {% for subform in detail.subforms %}
+                  <section class="customer-subform-editor">
+                    <h4>{{ subform.label }}</h4>
+                    {% for row in subform.records %}
+                      {% set row_index = loop.index0 %}
+                      <fieldset class="customer-subform-row">
+                        <legend>Eintrag {{ loop.index }}</legend>
+                        <div class="customer-field-editor-grid">
+                          {% for field in row.fields if field.editable %}
+                            {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key) }}
+                          {% endfor %}
+                        </div>
+                        <label class="customer-subform-delete"><input type="checkbox" name="customer_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
+                      </fieldset>
+                    {% endfor %}
+                    {% if subform.fields %}
+                      <fieldset class="customer-subform-row">
+                        <legend>Neuer Eintrag</legend>
+                        <div class="customer-field-editor-grid">
+                          {% for field in subform.fields if field.editable %}
+                            {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__new__" ~ field.key) }}
+                          {% endfor %}
+                        </div>
+                      </fieldset>
+                    {% endif %}
+                  </section>
+                {% endfor %}
+              </form>
+            {% endif %}
           </div>
         </article>
 

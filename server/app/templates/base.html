@@ -1944,31 +1944,17 @@
         margin: 0.32rem 0 0;
         overflow-wrap: anywhere;
       }
-      .customer-field-drag-handle { display: none; }
       .customer-detail-panel.is-layout-editing .customer-fields-grid {
         gap: 0.65rem 0.85rem;
       }
       .customer-detail-panel.is-layout-editing .customer-field-layout-item {
-        position: relative;
         min-height: 4.5rem;
-        padding: 0.75rem 0.75rem 0.75rem 4.2rem;
+        padding: 0.75rem;
         border: 1px dashed var(--accent);
         border-radius: var(--control-v2-radius);
         background: var(--accent-soft);
         cursor: grab;
         user-select: none;
-      }
-      .customer-detail-panel.is-layout-editing .customer-field-drag-handle {
-        position: absolute;
-        top: 50%;
-        left: 0.75rem;
-        display: block;
-        transform: translateY(-50%);
-        color: var(--accent);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
       }
       .customer-detail-panel.is-layout-editing .layout-sortable-ghost {
         opacity: 0.4;
@@ -3248,8 +3234,8 @@
 
         document.querySelectorAll("[data-customer-field-editor]").forEach(function (editor) {
           var section = editor.closest("[data-expandable-section]");
-          var content = editor.closest("[data-expandable-content]");
-          var readonly = content && content.querySelector("[data-customer-fields-readonly]");
+          var content = section && section.querySelector("[data-expandable-content]");
+          var readonly = section && section.querySelector("[data-customer-fields-readonly]");
           var toggle = section && section.querySelector("[data-expandable-toggle]");
           var openers = document.querySelectorAll("[data-customer-edit-open]");
           var editActions = document.querySelectorAll("[data-customer-edit-actions]");
@@ -3286,12 +3272,13 @@
         document.querySelectorAll("[data-layout-editor]").forEach(function (editor) {
           var layoutKey = editor.getAttribute("data-layout-editor");
           var sortable = editor.querySelector("[data-layout-sortable]");
+          var layoutFieldsEditor = editor.querySelector("[data-layout-fields-editor]");
           var form = editor.querySelector("[data-layout-form]");
           var orderInput = form && form.querySelector("[data-layout-order-input]");
           var section = editor.querySelector("[data-expandable-section]");
           var content = section && section.querySelector("[data-expandable-content]");
           var toggle = section && section.querySelector("[data-expandable-toggle]");
-          if (!layoutKey || !sortable || !form || !orderInput || !section || !content) { return; }
+          if (!layoutKey || !sortable || !layoutFieldsEditor || !form || !orderInput || !section || !content) { return; }
           if (!window.Sortable) { return; }
 
           var openers = document.querySelectorAll('[data-layout-edit-open="' + layoutKey + '"]');
@@ -3299,6 +3286,7 @@
           var cancels = document.querySelectorAll('[data-layout-edit-cancel="' + layoutKey + '"]');
           var hiddenWhileEditing = document.querySelectorAll("[data-layout-hide-while-editing]");
           var originalOrder = itemKeys();
+          var originalExpanded = content.classList.contains("is-expanded");
           if (!openers.length || !actions.length || !cancels.length) { return; }
 
           function items() {
@@ -3345,7 +3333,10 @@
           function setLayoutEditing(editing) {
             editor.classList.toggle("is-layout-editing", editing);
             section.classList.toggle("is-layout-editing", editing);
-            content.classList.add("is-expanded");
+            content.classList.toggle("is-expanded", editing || originalExpanded);
+            var readonly = section.querySelector("[data-customer-fields-readonly]");
+            if (readonly) { readonly.hidden = editing; }
+            layoutFieldsEditor.hidden = !editing;
             items().forEach(function (item) {
               item.removeAttribute("draggable");
             });
@@ -3353,7 +3344,10 @@
             openers.forEach(function (opener) { opener.hidden = editing; });
             actions.forEach(function (action) { action.hidden = !editing; });
             hiddenWhileEditing.forEach(function (control) { control.hidden = editing; });
-            if (toggle) { toggle.hidden = true; }
+            if (toggle) {
+              toggle.hidden = editing;
+              toggle.textContent = originalExpanded ? "Weniger anzeigen" : "Weiter lesen ...";
+            }
             if (!editing) { restoreOriginalOrder(); }
             window.dispatchEvent(new Event("resize"));
           }
@@ -3363,6 +3357,7 @@
               var menu = opener.closest("details");
               if (menu) { menu.open = false; }
               originalOrder = itemKeys();
+              originalExpanded = content.classList.contains("is-expanded");
               setLayoutEditing(true);
             });
           });
