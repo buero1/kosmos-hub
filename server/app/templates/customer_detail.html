@@ -41,15 +41,19 @@
       </div>
       <div class="customer-detail-heading-actions">
         {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
-          <button class="button button-secondary button-variant-2" type="button" data-customer-edit-open>Bearbeiten</button>
+          <button class="button button-variant-1" type="button" data-customer-edit-open>Bearbeiten</button>
+          <div class="customer-edit-heading-actions" data-customer-edit-actions hidden>
+            <button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button>
+            <button class="button button-variant-1" type="submit" form="customer-fields-form">Speichern</button>
+          </div>
         {% endif %}
         {% if can_manage_communications %}
-          <details class="customer-actions-menu">
+          <details class="customer-actions-menu" data-customer-actions-menu>
             <summary class="customer-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="customer-actions-menu-popover">
               <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="button button-secondary button-variant-2" type="submit">Aus Zoho synchronisieren</button>
+                <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
               </form>
             </div>
           </details>
@@ -89,7 +93,7 @@
                 </dl>
               </div>
               {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
-                <form method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
+                <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   {% if detail.editable_profile_fields %}
                     <div class="customer-field-editor-grid">
@@ -125,10 +129,6 @@
                       {% endif %}
                     </section>
                   {% endfor %}
-                  <div class="customer-field-editor-actions">
-                    <button class="button button-secondary button-variant-2" type="button" data-customer-edit-cancel>Abbrechen</button>
-                    <button class="button button-variant-2" type="submit">Kundendaten in Zoho speichern</button>
-                  </div>
                 </form>
               {% endif %}
               <div class="customer-system-details">

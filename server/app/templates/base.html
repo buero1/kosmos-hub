@@ -1853,18 +1853,25 @@
       }
       .customer-detail-heading-actions form { margin: 0; }
       .customer-detail-heading-actions .button { margin: 0; }
+      .customer-edit-heading-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .customer-edit-heading-actions[hidden] { display: none; }
       .customer-actions-menu {
         position: relative;
       }
       .customer-actions-menu-trigger {
         display: grid;
-        width: var(--control-v2-height);
-        height: var(--control-v2-height);
+        width: var(--control-v1-height);
+        height: var(--control-v1-height);
         padding: 0;
         place-items: center;
-        border: 1px solid var(--accent);
-        border-radius: var(--control-v2-radius);
-        color: var(--accent);
+        border: 0;
+        border-radius: var(--control-v1-radius);
+        background: var(--accent);
+        color: white;
         cursor: pointer;
         font-size: 1.3rem;
         line-height: 1;
@@ -1978,12 +1985,6 @@
         font-size: 0.82rem;
       }
       .customer-subform-delete { font-size: 0.88rem; }
-      .customer-field-editor-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 0.55rem;
-      }
       .customer-system-details {
         display: grid;
         gap: 0.9rem;
@@ -3204,8 +3205,10 @@
           var readonly = content && content.querySelector("[data-customer-fields-readonly]");
           var toggle = section && section.querySelector("[data-expandable-toggle]");
           var openers = document.querySelectorAll("[data-customer-edit-open]");
-          var cancel = editor.querySelector("[data-customer-edit-cancel]");
-          if (!section || !content || !readonly || !openers.length || !cancel) { return; }
+          var editActions = document.querySelectorAll("[data-customer-edit-actions]");
+          var actionMenus = document.querySelectorAll("[data-customer-actions-menu]");
+          var cancels = document.querySelectorAll("[data-customer-edit-cancel]");
+          if (!section || !content || !readonly || !openers.length || !cancels.length) { return; }
 
           function setEditing(editing) {
             section.classList.toggle("is-editing", editing);
@@ -3213,6 +3216,8 @@
             readonly.hidden = editing;
             editor.hidden = !editing;
             openers.forEach(function (opener) { opener.hidden = editing; });
+            editActions.forEach(function (actions) { actions.hidden = !editing; });
+            actionMenus.forEach(function (menu) { menu.hidden = editing; });
             if (toggle) { toggle.hidden = true; }
             if (editing) {
               var firstControl = editor.querySelector("input:not([type=hidden]), select, textarea");
@@ -3226,7 +3231,9 @@
           openers.forEach(function (opener) {
             opener.addEventListener("click", function () { setEditing(true); });
           });
-          cancel.addEventListener("click", function () { setEditing(false); });
+          cancels.forEach(function (cancel) {
+            cancel.addEventListener("click", function () { setEditing(false); });
+          });
         });
       }());
     </script>
