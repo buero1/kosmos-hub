@@ -31,7 +31,7 @@ from app.services.maintenance_worker import (
 )
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
-from app.services.customer_directory import CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
+from app.services.customer_directory import CONTACT_FIELDS_LAYOUT_KEY, CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
 from app.services.customer_communications import (
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationImageError,
@@ -44,6 +44,7 @@ from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsEr
 from app.services.module_layouts import ModuleLayoutError, ModuleLayoutService
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -271,6 +272,98 @@ def customers_page(
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/contacts", response_class=HTMLResponse)
+def contacts_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: int | None = None,
+):
+    _require_hub_admin(request)
+    service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
+    return templates.TemplateResponse(
+        request,
+        "contacts.html",
+        {
+            "entries": service.list_contact_entries(),
+            "created": created,
+        },
+    )
+
+
+@router.get("/contacts/new", response_class=HTMLResponse)
+def new_contact_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    customer_id: int | None = None,
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "contact_create.html",
+        _contact_create_context(request, db, selected_customer_id=customer_id),
+    )
+
+
+@router.post("/contacts")
+async def create_contact_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    csrf_token = str(form.get("csrf_token") or "")
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    submitted_values = {
+        key: str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and key.startswith("contact_field__")
+    }
+    try:
+        customer_id = int(str(form.get("customer_id") or ""))
+    except ValueError:
+        customer_id = None
+    if customer_id is None:
+        return templates.TemplateResponse(
+            request,
+            "contact_create.html",
+            _contact_create_context(request, db, submitted_values=submitted_values, error="Wähle einen Kunden aus."),
+            status_code=400,
+        )
+
+    try:
+        contact = ZohoCrmService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).create_contact(customer_id=customer_id, submitted_values=submitted_values)
+    except ZohoCrmError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "contact_create.html",
+            _contact_create_context(
+                request,
+                db,
+                selected_customer_id=customer_id,
+                submitted_values=submitted_values,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-zoho-contact",
+        result="ok",
+        detail=f"Created Zoho Contact {contact.zoho_id} for customer {contact.customer_id}; contact data is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/contacts?{urlencode({'created': contact.id})}", status_code=303)
 
 
 @router.get("/emails", response_class=HTMLResponse)
@@ -3140,6 +3233,31 @@ def _customer_communication_service(db: Session) -> CustomerCommunicationService
         cipher=get_secret_cipher(),
         public_base_url=get_settings().public_base_url,
     )
+
+
+def _contact_create_context(
+    request: Request,
+    db: Session,
+    *,
+    selected_customer_id: int | None = None,
+    submitted_values: dict[str, str] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    directory = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
+    customers = tuple(entry.customer for entry in directory.list_entries())
+    fields_by_key = {field.key: field for field in ZOHO_CONTACT_FIELDS}
+    ordered_keys = ModuleLayoutService(db=db).ordered_keys(
+        layout_key=CONTACT_FIELDS_LAYOUT_KEY,
+        default_keys=tuple(fields_by_key),
+    )
+    return {
+        "customers": customers,
+        "fields": tuple(fields_by_key[key] for key in ordered_keys),
+        "selected_customer_id": selected_customer_id,
+        "submitted_values": submitted_values or {},
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
 
 
 def _customer_communication_redirect(customer_id: int, state: str, message: str) -> RedirectResponse:

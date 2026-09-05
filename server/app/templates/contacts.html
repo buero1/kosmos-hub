@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Kontakte · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}
+      <p class="notice-success">Der Kontakt wurde in Zoho CRM angelegt und mit dem ausgewählten Kunden verknüpft.</p>
+    {% endif %}
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Zoho CRM</p>
+        <h2>Kontakte</h2>
+        <p class="subtle">Synchronisierte Kontakte und ihre Kundenverknüpfungen.</p>
+      </div>
+      <a class="button button-variant-1" href="/contacts/new">Kontakt neu anlegen</a>
+    </div>
+
+    <article class="card customer-detail-panel">
+      <div class="table-scroll">
+        <table class="customer-contacts-table contacts-directory-table">
+          <thead>
+            <tr><th>Kunde</th><th>Name</th><th>E-Mail</th></tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr>
+                <td><a href="/customers/{{ entry.customer.id }}">{{ entry.customer.name }}</a></td>
+                <td><a href="/customers/{{ entry.customer.id }}/contacts/{{ entry.contact.id }}">{{ entry.contact.name }}</a></td>
+                <td>{% if entry.contact.email %}<a href="mailto:{{ entry.contact.email }}">{{ entry.contact.email }}</a>{% else %}-{% endif %}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="3">Noch keine synchronisierten Kontakte vorhanden.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+{% endblock %}

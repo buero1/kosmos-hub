@@ -343,6 +343,9 @@
               <h3>Kontakte</h3>
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Kontakte.</p>
             </div>
+            {% if can_manage_customer_fields %}
+              <a class="button button-secondary button-variant-2" href="/contacts/new?customer_id={{ detail.entry.customer.id }}">Kontakt anlegen</a>
+            {% endif %}
           </div>
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>

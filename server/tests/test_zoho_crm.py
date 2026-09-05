@@ -20,6 +20,7 @@ from app.schemas.registration import RegistrationHeaders, RegistrationRequest
 from app.services.hub_accounts import hash_password
 from app.services.site_registration import SiteRegistrationService
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.zoho_crm import ZOHO_CRM_SCOPES, ZohoBinaryDownload, ZohoCrmError, ZohoCrmService
 
 
@@ -117,6 +118,67 @@ def test_zoho_account_catalog_matches_the_reviewed_field_selection():
 
     assert len(root_fields) == 60
     assert sum(len(subform.fields) for subform in ZOHO_ACCOUNT_SUBFORMS) == 7
+
+
+def test_zoho_contact_catalog_matches_the_reviewed_contact_fields():
+    assert len(ZOHO_CONTACT_FIELDS) == 21
+    assert next(field for field in ZOHO_CONTACT_FIELDS if field.key == "last_name").required is True
+    assert "Email" in {field.api_name for field in ZOHO_CONTACT_FIELDS}
+
+
+def test_zoho_creates_a_contact_for_the_selected_customer_and_encrypts_the_profile():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("d" * 32)
+        customer = Customer(name="Example Customer", zoho_id="zoho-account-1", is_visible=True)
+        db.add(customer)
+        db.commit()
+
+        service = ZohoCrmService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        submitted = {
+            "contact_field__salutation": "Frau",
+            "contact_field__first_name": "Anna",
+            "contact_field__last_name": "Example",
+            "contact_field__email": "anna@example.test",
+            "contact_field__mailing_city": "Starnberg",
+        }
+        captured: dict[str, object] = {}
+        service._require_connected_connection = lambda: SimpleNamespace()
+
+        def fake_post(_connection, path, payload):
+            captured["path"] = path
+            captured["payload"] = payload
+            return {"data": [{"status": "success", "code": "SUCCESS", "details": {"id": "zoho-contact-1"}}]}
+
+        service._api_post_json = fake_post
+        contact = service.create_contact(customer_id=customer.id, submitted_values=submitted)
+        db.commit()
+
+        assert captured == {
+            "path": "/crm/v8/Contacts",
+            "payload": {
+                "data": [{
+                    "Account_Name": {"id": "zoho-account-1"},
+                    "Salutation": "Frau",
+                    "First_Name": "Anna",
+                    "Last_Name": "Example",
+                    "Email": "anna@example.test",
+                    "Mailing_City": "Starnberg",
+                }],
+            },
+        }
+        assert contact.customer_id == customer.id
+        assert contact.zoho_id == "zoho-contact-1"
+        assert "anna@example.test" not in contact.encrypted_profile_json
+        profile = json.loads(cipher.decrypt(contact.encrypted_profile_json))
+        assert profile["fields"]["Name"] == "Anna Example"
+        assert profile["fields"]["E-Mail"] == "anna@example.test"
+        assert profile["fields"]["Postadresse Stadt"] == "Starnberg"
+
+        with pytest.raises(ZohoCrmError, match="Nachname"):
+            service.create_contact(customer_id=customer.id, submitted_values={})
 
 
 def test_zoho_field_metadata_keeps_picklist_options_and_respects_zoho_write_permissions():

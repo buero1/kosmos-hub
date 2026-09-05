@@ -19,6 +19,7 @@ from app.services.zoho_crm import ZohoCrmService
 
 
 CUSTOMER_FIELDS_LAYOUT_KEY = "customer-fields"
+CONTACT_FIELDS_LAYOUT_KEY = "contact-fields"
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,12 @@ class CustomerContactDetail:
     contact: CustomerContact
     name: str
     profile_fields: tuple[CustomerProfileField, ...]
+
+
+@dataclass(frozen=True)
+class CustomerContactDirectoryEntry:
+    customer: Customer
+    contact: CustomerContactProfile
 
 
 class CustomerDirectoryService:
@@ -257,6 +264,20 @@ class CustomerDirectoryService:
             name=next((field.value for field in profile_fields if field.label == "Name" and field.value), "Zoho contact"),
             profile_fields=profile_fields,
         )
+
+    def list_contact_entries(self) -> tuple[CustomerContactDirectoryEntry, ...]:
+        """Return the current synchronized contact directory with its Hub customer link."""
+        entries: list[CustomerContactDirectoryEntry] = []
+        rows = self.db.execute(
+            select(CustomerContact, Customer)
+            .join(Customer, Customer.id == CustomerContact.customer_id)
+            .where(Customer.is_visible.is_(True))
+        ).all()
+        for stored_contact, customer in rows:
+            profiles = self._contact_profiles_from_records([stored_contact])
+            if profiles:
+                entries.append(CustomerContactDirectoryEntry(customer=customer, contact=profiles[0]))
+        return tuple(sorted(entries, key=lambda entry: (entry.contact.name.casefold(), entry.customer.name.casefold())))
 
     def link_exact_match(self, *, customer_id: int, site_id: int) -> tuple[Customer, Site]:
         customer = self.db.get(Customer, customer_id)
@@ -550,7 +571,7 @@ class CustomerDirectoryService:
                     id=contact.id,
                     name=self._format_profile_value(values.get("Name")) or "Unnamed Zoho contact",
                     salutation=self._format_profile_value(values.get("Anrede")),
-                    title=self._format_profile_value(values.get("Position")),
+                    title=self._format_profile_value(values.get("Titel")) or self._format_profile_value(values.get("Position")),
                     email=self._format_profile_value(values.get("E-Mail")),
                     secondary_email=self._format_profile_value(values.get("Zweite E-Mail-Adresse")),
                     third_email=self._format_profile_value(values.get("Dritte E-Mail-Adresse")),

@@ -24,6 +24,7 @@ from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS, ZOHO_ACCOUNT_SUBFORMS, ZohoAccountField
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
@@ -59,6 +60,7 @@ _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
 _MAX_FIELDS_PER_ZOHO_REQUEST = 50
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
+_MAX_CONTACT_FIELD_LENGTH = 1_000
 _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
 _DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600
 ZOHO_RELEVANT_ACCOUNT_STATUSES = ("Aktuell", "Neu", "gekündigt", "Kündigung liegt vor")
@@ -949,9 +951,8 @@ class ZohoCrmService:
         return synchronized_contacts, created_contacts, updated_contacts, removed_contacts
 
     def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
-        requested_fields = (
-            "Account_Name,Full_Name,First_Name,Last_Name,Email,Secondary_Email,Dritte_E_Mail_Adresse,"
-            "Phone,Other_Phone,Home_Phone,Mobile,Salutation,Title,Modified_Time"
+        requested_fields = ",".join(
+            ("Account_Name", "Full_Name", "Modified_Time", *(field.api_name for field in ZOHO_CONTACT_FIELDS))
         )
         records_by_id: dict[str, dict[str, object]] = {}
         for page in range(1, _MAX_PAGE_REQUESTS + 1):
@@ -981,6 +982,64 @@ class ZohoCrmService:
         else:
             raise ZohoCrmError("Zoho returned more than 2,000 Contacts. Bulk synchronization must be enabled before importing them.")
         return list(records_by_id.values())
+
+    def create_contact(self, *, customer_id: int, submitted_values: dict[str, str]) -> CustomerContact:
+        """Create a Contact in Zoho and retain its encrypted local representation."""
+        connection = self._require_connected_connection()
+        customer = self.db.get(Customer, customer_id)
+        if customer is None or not customer.is_visible or not customer.zoho_id:
+            raise ZohoCrmError("Wähle einen aktuellen, mit Zoho verknüpften Kunden aus.")
+
+        values = self._contact_creation_values(submitted_values)
+        response = self._api_post_json(
+            connection,
+            f"/crm/v8/{ZOHO_CONTACT_MODULE}",
+            {"data": [{"Account_Name": {"id": customer.zoho_id}, **values}]},
+        )
+        created_id = self._created_contact_id(response)
+        synced_at = datetime.now(UTC)
+        record = {"id": created_id, "Account_Name": {"id": customer.zoho_id}, **values}
+        contact = CustomerContact(
+            customer=customer,
+            zoho_id=created_id,
+            encrypted_profile_json=self.cipher.encrypt(
+                json.dumps(self._build_contact_profile(record, customer.zoho_id, synced_at), ensure_ascii=False, default=str)
+            ),
+            zoho_synced_at=synced_at,
+        )
+        self.db.add(contact)
+        self.db.flush()
+        return contact
+
+    @staticmethod
+    def _created_contact_id(response: dict[str, object]) -> str:
+        data = response.get("data")
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise ZohoCrmError("Zoho returned no Contact creation result.")
+        result = data[0]
+        status = ZohoCrmService._as_text(result.get("status"))
+        code = ZohoCrmService._as_text(result.get("code"))
+        if (status and status.casefold() != "success") or (code and code.casefold() != "success"):
+            raise ZohoCrmError(ZohoCrmService._as_text(result.get("message")) or "Zoho could not create the Contact.")
+        details = result.get("details")
+        contact_id = ZohoCrmService._as_text(details.get("id")) if isinstance(details, dict) else None
+        if not contact_id:
+            raise ZohoCrmError("Zoho created no usable Contact ID.")
+        return contact_id
+
+    @staticmethod
+    def _contact_creation_values(submitted_values: dict[str, str]) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for field in ZOHO_CONTACT_FIELDS:
+            raw_value = submitted_values.get(f"contact_field__{field.key}", "")
+            value = raw_value.strip()
+            if len(value) > _MAX_CONTACT_FIELD_LENGTH:
+                raise ZohoCrmError(f"{field.label} ist zu lang.")
+            if field.required and not value:
+                raise ZohoCrmError(f"{field.label} ist erforderlich.")
+            if value:
+                values[field.api_name] = value
+        return values
 
     def _api_get(
         self,
@@ -1382,24 +1441,20 @@ class ZohoCrmService:
                 for value in (self._as_text(record.get("First_Name")), self._as_text(record.get("Last_Name")))
                 if value
             )
+        fields = {"Name": name or "Zoho Contact"}
+        fields.update(
+            {
+                field.label: self._as_text(record.get(field.api_name))
+                for field in ZOHO_CONTACT_FIELDS
+            }
+        )
         return {
             "source": "zoho-crm-contacts",
             "record_id": self._as_text(record.get("id")),
             "account_id": account_id,
             "modified_time": self._as_text(record.get("Modified_Time")),
             "synced_at": synced_at.isoformat(),
-            "fields": {
-                "Name": name or "Zoho Contact",
-                "Anrede": self._as_text(record.get("Salutation")),
-                "E-Mail": self._as_text(record.get("Email")),
-                "Zweite E-Mail-Adresse": self._as_text(record.get("Secondary_Email")),
-                "Dritte E-Mail-Adresse": self._as_text(record.get("Dritte_E_Mail_Adresse")),
-                "Telefon": self._as_text(record.get("Phone")),
-                "Telefon alternativ": self._as_text(record.get("Other_Phone")),
-                "Telefon privat": self._as_text(record.get("Home_Phone")),
-                "Mobil": self._as_text(record.get("Mobile")),
-                "Position": self._as_text(record.get("Title")),
-            },
+            "fields": fields,
         }
 
     def _sites_by_normalized_domain(self) -> dict[str, list[Site]]:

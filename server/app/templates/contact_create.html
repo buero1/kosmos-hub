@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Kontakt neu anlegen · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <a class="button button-secondary" href="/contacts">Zurück zu Kontakte</a>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Zoho CRM</p>
+        <h2>Kontakt neu anlegen</h2>
+        <p class="subtle">Der Kontakt wird direkt in Zoho CRM erstellt und mit dem ausgewählten Kunden verknüpft.</p>
+      </div>
+    </div>
+
+    <article class="card customer-detail-panel contact-create-card">
+      {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+      <form method="post" action="/contacts" class="customer-field-editor contact-create-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label class="customer-field-control contact-create-customer">
+          <span>Kunde-Name <small>erforderlich</small></span>
+          <select name="customer_id" required>
+            <option value="">Kunden auswählen</option>
+            {% for customer in customers %}
+              <option value="{{ customer.id }}"{% if customer.id == selected_customer_id %} selected{% endif %}>{{ customer.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <p class="subtle contact-create-hint">Der Kunde wird als Zoho-Verknüpfung gespeichert. Felder mit „erforderlich“ müssen ausgefüllt sein.</p>
+        <div class="customer-field-editor-grid">
+          {% for field in fields %}
+            {% set value = submitted_values.get("contact_field__" ~ field.key, "") %}
+            <label class="customer-field-control">
+              <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+              {% if field.key == "salutation" %}
+                <select name="contact_field__{{ field.key }}">
+                  <option value="">Auswählen</option>
+                  {% for option in ("Frau", "Herr", "Divers") %}
+                    <option value="{{ option }}"{% if value == option %} selected{% endif %}>{{ option }}</option>
+                  {% endfor %}
+                </select>
+              {% elif field.display_type == "E-Mail" %}
+                <input type="email" name="contact_field__{{ field.key }}" value="{{ value }}" autocomplete="email">
+              {% elif field.display_type == "Telefon" %}
+                <input type="tel" name="contact_field__{{ field.key }}" value="{{ value }}" autocomplete="tel">
+              {% else %}
+                <input type="text" name="contact_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+              {% endif %}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="contact-create-actions">
+          <a class="button button-secondary button-variant-1" href="/contacts">Abbrechen</a>
+          <button class="button button-variant-1" type="submit">Kontakt anlegen</button>
+        </div>
+      </form>
+    </article>
+  </section>
+{% endblock %}

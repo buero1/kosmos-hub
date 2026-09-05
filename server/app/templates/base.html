@@ -2028,6 +2028,26 @@
         min-height: 1rem;
         margin: 0.35rem 0;
       }
+      .contact-create-card { max-width: 72rem; }
+      .contact-create-form {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+      }
+      .contact-create-form input,
+      .contact-create-form select { width: 100%; }
+      .contact-create-customer { max-width: 34rem; }
+      .contact-create-hint { margin: -0.2rem 0 0; }
+      .contact-create-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.6rem;
+        margin-top: 0.25rem;
+      }
+      .contacts-directory-table { min-width: 42rem; }
+      .contacts-directory-table th:first-child,
+      .contacts-directory-table td:first-child { width: 32%; }
       .customer-subform-editor {
         display: grid;
         gap: 0.8rem;
@@ -2910,6 +2930,7 @@
           <a href="/"{% if request.url.path == "/" %} class="is-active"{% endif %}>Dashboard</a>
           <a href="/sites"{% if request.url.path.startswith("/sites") %} class="is-active"{% endif %}>Sites</a>
           <a href="/customers"{% if request.url.path.startswith("/customers") %} class="is-active"{% endif %}>Customers</a>
+          <a href="/contacts"{% if request.url.path.startswith("/contacts") %} class="is-active"{% endif %}>Kontakte</a>
           <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>
           <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
           <a href="/backups"{% if request.url.path.startswith("/backups") %} class="is-active"{% endif %}>Backups</a>
