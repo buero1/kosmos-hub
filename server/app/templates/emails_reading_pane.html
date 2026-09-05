@@ -6,7 +6,9 @@
     </div>
     <p class="mailbox-preview-timing" data-mailbox-preview-timing aria-live="polite"></p>
     {% if selected.customers %}<div class="mailbox-customer-links">{% for customer in selected.customers %}<a href="/customers/{{ customer.id }}">{{ customer.name }}</a>{% endfor %}</div>{% endif %}
-    {% if selected.kind == 'linked' %}
+    {% if selected.kind == 'draft' %}
+      <div class="mailbox-unassigned"><h4>Gespeicherter Entwurf</h4><p>Dieser Entwurf wurde noch nicht über Zoho CRM versendet.</p><button class="button button-secondary" type="button" data-mailbox-draft-open data-mailbox-draft-id="{{ selected.customer_email_id }}">Entwurf bearbeiten</button>{% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview><summary>Nachricht</summary><iframe data-email-preview-frame title="Entwurf: {{ selected.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% endif %}</div>
+    {% elif selected.kind == 'linked' %}
       {% if selected.preview_html %}
         <details class="mailbox-preview" open data-email-preview data-email-unread="{{ 'true' if selected.is_unread else 'false' }}" data-email-read-url="/customers/{{ selected.customer_id }}/communications/emails/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>
       {% elif selected.can_load_content %}

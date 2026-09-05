@@ -69,7 +69,7 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         service.communications._email_view = track_full_view
         inbox = service.get_view(folder="inbox", unread_only=False)
 
-        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "unassigned": 1, "trash": 0, "spam": 0}
+        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "drafts": 0, "unassigned": 1, "trash": 0, "spam": 0}
         assert [message.subject for message in inbox.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
         assert full_view_calls == []
         assert not hasattr(inbox.messages[1], "preview_html")
@@ -180,7 +180,98 @@ def test_mailbox_separates_spam_and_trashed_messages_from_active_folders():
         assert [message.subject for message in service.get_folder_view(folder="inbox", unread_only=False).messages] == ["Aktive Nachricht"]
         assert [message.subject for message in service.get_folder_view(folder="spam", unread_only=False).messages] == ["Spam-Nachricht"]
         assert [message.subject for message in service.get_folder_view(folder="trash", unread_only=False).messages] == ["Gelöschte Nachricht"]
-        assert service.get_folder_counts() == {"inbox": 1, "sent": 0, "unassigned": 0, "trash": 1, "spam": 1}
+        assert service.get_folder_counts() == {"inbox": 1, "sent": 0, "drafts": 0, "unassigned": 0, "trash": 1, "spam": 1}
+
+
+def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_emails():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        first_customer = Customer(name="First GmbH", zoho_id="zoho-account-1")
+        second_customer = Customer(name="Second GmbH", zoho_id="zoho-account-2")
+        first_copy = CustomerZohoEmail(
+            customer=first_customer,
+            zoho_message_id="shared-message",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Gemeinsame Nachricht"})),
+        )
+        second_copy = CustomerZohoEmail(
+            customer=second_customer,
+            zoho_message_id="shared-message",
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Gemeinsame Nachricht"})),
+        )
+        unassigned = HubMailboxEmail(
+            direction="inbound",
+            is_unread=True,
+            fingerprint="d" * 64,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Unbekannte Nachricht"})),
+            received_at=datetime(2026, 9, 3, 10, 0, tzinfo=UTC),
+        )
+        db.add_all([first_customer, second_customer, first_copy, second_copy, unassigned])
+        db.commit()
+
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        assert service.apply_batch_action(
+            keys=[f"linked-{first_customer.id}-{first_copy.id}"],
+            action="mark_read",
+        ) == 2
+        assert not first_copy.is_unread
+        assert not second_copy.is_unread
+
+        assert service.apply_batch_action(
+            keys=[f"linked-{first_customer.id}-{first_copy.id}", f"unassigned-{unassigned.id}"],
+            action="move_spam",
+        ) == 3
+        assert first_copy.mailbox_state == "spam"
+        assert second_copy.mailbox_state == "spam"
+        assert unassigned.mailbox_state == "spam"
+        assert [message.subject for message in service.get_folder_view(folder="inbox", unread_only=False).messages] == []
+        assert {message.subject for message in service.get_folder_view(folder="spam", unread_only=False).messages} == {
+            "Unbekannte Nachricht",
+            "Gemeinsame Nachricht",
+        }
+
+
+def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        draft = service.save_draft(
+            draft_id=None,
+            sender_email="team@example.de",
+            recipient_email="contact@example.de",
+            recipient_key="contact:1",
+            recipient_customer_id=7,
+            recipient_name="Example Contact",
+            subject="Noch nicht versendet",
+            content="<p>Bearbeitbarer Entwurf</p>",
+            cc_emails="cc@example.de",
+            template_id="template-1",
+            reply_to_email_id="12",
+            forward_from_email_id="",
+        )
+        db.commit()
+
+        drafts = service.get_view(folder="drafts", unread_only=False)
+        assert drafts.folder_counts["drafts"] == 1
+        assert [message.subject for message in drafts.messages] == ["Noch nicht versendet"]
+        assert drafts.messages[0].kind == "draft"
+        context = service.get_draft_compose_context(draft_id=draft.id)
+        assert context["recipient_email"] == "contact@example.de"
+        assert context["recipient"]["key"] == "contact:1"
+        assert context["content"] == "<p>Bearbeitbarer Entwurf</p>"
+        assert service.discard_draft(draft_id=draft.id)
+        assert service.get_folder_counts()["drafts"] == 0
 
 
 def test_mailbox_list_reads_compact_header_without_full_email_payload():

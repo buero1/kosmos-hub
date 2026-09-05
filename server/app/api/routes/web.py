@@ -408,6 +408,43 @@ def mailbox_status(
     }
 
 
+@router.post("/emails/actions", response_class=JSONResponse)
+def apply_mailbox_batch_action(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    action: Annotated[str, Form()] = "",
+    keys: Annotated[list[str] | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Apply one contextual mailbox action to the current multi-selection."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    try:
+        changed_count = mailbox.apply_batch_action(keys=keys or [], action=action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action=f"mailbox-{action}",
+        result="ok",
+        detail=f"Applied mailbox action to {changed_count} stored email record(s).",
+    )
+    db.commit()
+    return {
+        "changed_count": changed_count,
+        "folder_counts": mailbox.get_folder_counts(),
+        "unread_count": _unread_email_count_for_db(db),
+    }
+
+
 @router.get("/emails/compose/options", response_class=JSONResponse)
 def mailbox_compose_options(
     request: Request,
@@ -508,6 +545,87 @@ def mailbox_linked_email_compose_context(
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     raise HTTPException(status_code=422, detail="Unknown mailbox compose action.")
+
+
+@router.get("/emails/drafts/{draft_id}/compose-context", response_class=JSONResponse)
+def mailbox_draft_compose_context(
+    draft_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    try:
+        return HubMailboxService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).get_draft_compose_context(draft_id=draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/emails/drafts", response_class=JSONResponse)
+def save_mailbox_draft(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    draft_id: Annotated[str, Form()] = "",
+    sender_email: Annotated[str, Form()] = "",
+    recipient_email: Annotated[str, Form()] = "",
+    recipient_key: Annotated[str, Form()] = "",
+    recipient_customer_id: Annotated[str, Form()] = "",
+    recipient_name: Annotated[str, Form()] = "",
+    subject: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    cc_emails: Annotated[str, Form()] = "",
+    template_id: Annotated[str, Form()] = "",
+    reply_to_email_id: Annotated[str, Form()] = "",
+    forward_from_email_id: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        parsed_draft_id = int(draft_id) if draft_id.strip() else None
+        parsed_customer_id = int(recipient_customer_id) if recipient_customer_id.strip() else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Der Entwurf enthält eine ungültige Zuordnung.") from exc
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    try:
+        draft = mailbox.save_draft(
+            draft_id=parsed_draft_id,
+            sender_email=sender_email,
+            recipient_email=recipient_email,
+            recipient_key=recipient_key,
+            recipient_customer_id=parsed_customer_id,
+            recipient_name=recipient_name,
+            subject=subject,
+            content=content,
+            cc_emails=cc_emails,
+            template_id=template_id,
+            reply_to_email_id=reply_to_email_id,
+            forward_from_email_id=forward_from_email_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="save-mailbox-email-draft",
+        result="ok",
+        detail=f"Saved mailbox email draft {draft.id}; email content is not retained in the audit log.",
+    )
+    db.commit()
+    return {
+        "draft_id": draft.id,
+        "folder_counts": mailbox.get_folder_counts(),
+        "unread_count": _unread_email_count_for_db(db),
+    }
 
 
 @router.post("/emails/unassigned/{email_id}/read")
@@ -694,6 +812,7 @@ async def send_customer_communication_email(
     reply_to_email_id: Annotated[str, Form()] = "",
     cc_emails: Annotated[str, Form()] = "",
     forward_from_email_id: Annotated[str, Form()] = "",
+    draft_id: Annotated[str, Form()] = "",
     attachments: Annotated[list[UploadFile] | None, File()] = None,
     confirmed: Annotated[bool, Form()] = False,
     csrf_token: Annotated[str, Form()] = "",
@@ -726,6 +845,12 @@ async def send_customer_communication_email(
             forward_from_email_id=forward_from_id,
             attachments=uploaded_attachments,
         )
+        if result.success and draft_id.strip().isdigit():
+            HubMailboxService(
+                db=db,
+                cipher=get_secret_cipher(),
+                public_base_url=get_settings().public_base_url,
+            ).discard_draft(draft_id=int(draft_id))
     except (ValueError, ZohoCrmError) as exc:
         db.rollback()
         return _customer_communication_redirect(customer_id, "error", str(exc))

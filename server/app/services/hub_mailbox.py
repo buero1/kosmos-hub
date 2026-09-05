@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from hashlib import sha256
+from secrets import token_hex
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, selectinload
@@ -16,9 +18,12 @@ from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.customer_communications import CustomerCommunicationAttachment, CustomerCommunicationService
 
 
-MAILBOX_FOLDERS = frozenset({"inbox", "sent", "unassigned", "trash", "spam"})
+MAILBOX_FOLDERS = frozenset({"inbox", "sent", "drafts", "unassigned", "trash", "spam"})
 _ACTIVE_MAILBOX_STATE = "active"
-_MAILBOX_STATE_BY_FOLDER = {"trash": "trash", "spam": "spam"}
+_DRAFT_MAILBOX_STATE = "draft"
+_DRAFT_SOURCE = "hub-draft"
+_MAILBOX_STATE_BY_FOLDER = {"drafts": _DRAFT_MAILBOX_STATE, "trash": "trash", "spam": "spam"}
+_BATCH_ACTIONS = frozenset({"mark_read", "mark_unread", "move_trash", "move_spam"})
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,8 @@ class HubMailboxService:
 
         if folder == "unassigned":
             messages = self._unassigned_list_messages(mailbox_state=_ACTIVE_MAILBOX_STATE)
+        elif folder == "drafts":
+            messages = self._unassigned_list_messages(mailbox_state=_DRAFT_MAILBOX_STATE)
         elif folder in _MAILBOX_STATE_BY_FOLDER:
             mailbox_state = _MAILBOX_STATE_BY_FOLDER[folder]
             messages = self._linked_list_messages(mailbox_state=mailbox_state) + self._unassigned_list_messages(mailbox_state=mailbox_state)
@@ -183,6 +190,166 @@ class HubMailboxService:
         email.is_unread = False
         self.db.flush()
 
+    def apply_batch_action(self, *, keys: list[str], action: str) -> int:
+        """Apply one mailbox action to a deduplicated selection of visible messages."""
+        if action not in _BATCH_ACTIONS:
+            raise ValueError("Unbekannte E-Mail-Aktion.")
+        selected_keys = tuple(dict.fromkeys(key for key in keys if key))
+        if not selected_keys:
+            raise ValueError("Wähle mindestens eine E-Mail aus.")
+        if len(selected_keys) > 1000:
+            raise ValueError("Es können höchstens 1000 E-Mails gleichzeitig bearbeitet werden.")
+
+        linked_by_id: dict[int, CustomerZohoEmail] = {}
+        unassigned_by_id: dict[int, HubMailboxEmail] = {}
+        for key in selected_keys:
+            if key.startswith("linked-"):
+                try:
+                    _, customer_id, email_id = key.split("-", 2)
+                    email = self.db.scalar(
+                        select(CustomerZohoEmail).where(
+                            CustomerZohoEmail.customer_id == int(customer_id),
+                            CustomerZohoEmail.id == int(email_id),
+                        )
+                    )
+                except (TypeError, ValueError):
+                    email = None
+                if email is None:
+                    continue
+                # One Zoho message may be visible for several linked customers. Keep all copies aligned.
+                related = (
+                    self.db.scalars(
+                        select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == email.zoho_message_id)
+                    ).all()
+                    if email.zoho_message_id
+                    else [email]
+                )
+                for related_email in related:
+                    linked_by_id[related_email.id] = related_email
+            elif key.startswith("unassigned-"):
+                try:
+                    email_id = int(key.removeprefix("unassigned-"))
+                except ValueError:
+                    continue
+                email = self.db.get(HubMailboxEmail, email_id)
+                if email is not None:
+                    unassigned_by_id[email.id] = email
+
+        if not linked_by_id and not unassigned_by_id:
+            raise ValueError("Die ausgewählten E-Mails wurden nicht gefunden.")
+
+        for email in (*linked_by_id.values(), *unassigned_by_id.values()):
+            if action == "mark_read":
+                email.is_unread = False
+            elif action == "mark_unread":
+                email.is_unread = True
+            elif action == "move_trash":
+                email.mailbox_state = "trash"
+            elif action == "move_spam":
+                email.mailbox_state = "spam"
+        self.db.flush()
+        return len(linked_by_id) + len(unassigned_by_id)
+
+    def save_draft(
+        self,
+        *,
+        draft_id: int | None,
+        sender_email: str,
+        recipient_email: str,
+        recipient_key: str,
+        recipient_customer_id: int | None,
+        recipient_name: str,
+        subject: str,
+        content: str,
+        cc_emails: str,
+        template_id: str,
+        reply_to_email_id: str,
+        forward_from_email_id: str,
+    ) -> HubMailboxEmail:
+        """Persist the editable fields of an unsent mailbox message in encrypted storage."""
+        if draft_id is None:
+            draft = HubMailboxEmail(
+                source=_DRAFT_SOURCE,
+                direction="outbound",
+                is_unread=False,
+                mailbox_state=_DRAFT_MAILBOX_STATE,
+                fingerprint=sha256(token_hex(32).encode("ascii")).hexdigest(),
+                encrypted_payload_json="",
+                received_at=datetime.now(UTC),
+            )
+            self.db.add(draft)
+        else:
+            draft = self.db.get(HubMailboxEmail, draft_id)
+            if draft is None or draft.source != _DRAFT_SOURCE or draft.mailbox_state != _DRAFT_MAILBOX_STATE:
+                raise ValueError("Der Entwurf wurde nicht gefunden.")
+
+        payload = {
+            "subject": subject.strip()[:500],
+            "sender": sender_email.strip()[:320],
+            "recipient_email": recipient_email.strip()[:320],
+            "recipient_key": recipient_key.strip()[:255],
+            "recipient_customer_id": recipient_customer_id,
+            "recipient_name": recipient_name.strip()[:255],
+            "content": content[:500_000],
+            "cc_emails": cc_emails.strip()[:2_000],
+            "template_id": template_id.strip()[:255],
+            "reply_to_email_id": reply_to_email_id.strip()[:64],
+            "forward_from_email_id": forward_from_email_id.strip()[:64],
+        }
+        draft.direction = "outbound"
+        draft.is_unread = False
+        draft.mailbox_state = _DRAFT_MAILBOX_STATE
+        draft.encrypted_payload_json = self.cipher.encrypt(json.dumps(payload, ensure_ascii=False))
+        draft.received_at = datetime.now(UTC)
+        draft.last_error = None
+        self.db.flush()
+        return draft
+
+    def get_draft_compose_context(self, *, draft_id: int) -> dict[str, object]:
+        draft = self.db.get(HubMailboxEmail, draft_id)
+        if draft is None or draft.source != _DRAFT_SOURCE or draft.mailbox_state != _DRAFT_MAILBOX_STATE:
+            raise ValueError("Der Entwurf wurde nicht gefunden.")
+        payload = self._payload(draft.encrypted_payload_json)
+        recipient_key = self._text(payload.get("recipient_key")) or ""
+        recipient_email = self._text(payload.get("recipient_email")) or ""
+        recipient_name = self._text(payload.get("recipient_name")) or ""
+        customer_id_value = payload.get("recipient_customer_id")
+        try:
+            recipient_customer_id = int(customer_id_value) if customer_id_value is not None else None
+        except (TypeError, ValueError):
+            recipient_customer_id = None
+        recipient = (
+            {
+                "key": recipient_key,
+                "email": recipient_email,
+                "name": recipient_name or recipient_email,
+            }
+            if recipient_key and recipient_email and recipient_customer_id is not None
+            else None
+        )
+        return {
+            "action": "draft",
+            "draft_id": draft.id,
+            "sender_email": self._text(payload.get("sender")) or "",
+            "recipient": recipient,
+            "recipient_email": recipient_email,
+            "customer_id": recipient_customer_id,
+            "subject": self._text(payload.get("subject")) or "",
+            "content": self._text(payload.get("content")) or "",
+            "cc_emails": self._text(payload.get("cc_emails")) or "",
+            "template_id": self._text(payload.get("template_id")) or "",
+            "reply_to_email_id": self._text(payload.get("reply_to_email_id")) or "",
+            "forward_from_email_id": self._text(payload.get("forward_from_email_id")) or "",
+        }
+
+    def discard_draft(self, *, draft_id: int) -> bool:
+        draft = self.db.get(HubMailboxEmail, draft_id)
+        if draft is None or draft.source != _DRAFT_SOURCE or draft.mailbox_state != _DRAFT_MAILBOX_STATE:
+            return False
+        self.db.delete(draft)
+        self.db.flush()
+        return True
+
     def _linked_list_messages(
         self,
         *,
@@ -257,9 +424,10 @@ class HubMailboxService:
 
     def _unassigned_list_message(self, email: HubMailboxEmail) -> HubMailboxListItem:
         payload = self._payload(email.encrypted_payload_json)
+        kind = "draft" if email.source == _DRAFT_SOURCE and email.mailbox_state == _DRAFT_MAILBOX_STATE else "unassigned"
         return HubMailboxListItem(
             key=f"unassigned-{email.id}",
-            kind="unassigned",
+            kind=kind,
             subject=self._text(payload.get("betreff")) or self._text(payload.get("subject")) or "Ohne Betreff",
             sender=self._people(payload.get("absender") or payload.get("sender") or payload.get("from")),
             recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
@@ -284,11 +452,11 @@ class HubMailboxService:
             )
         }
         unassigned_rows = list(self.db.execute(
-            select(HubMailboxEmail.mailbox_state, HubMailboxEmail.direction, HubMailboxEmail.id)
+            select(HubMailboxEmail.mailbox_state, HubMailboxEmail.direction, HubMailboxEmail.source, HubMailboxEmail.id)
         ))
         active_unassigned_rows = [
             (direction, email_id)
-            for mailbox_state, direction, email_id in unassigned_rows
+            for mailbox_state, direction, _source, email_id in unassigned_rows
             if mailbox_state == _ACTIVE_MAILBOX_STATE
         ]
         return {
@@ -302,9 +470,13 @@ class HubMailboxService:
             ),
             "unassigned": len(active_unassigned_rows),
             "trash": sum(mailbox_state == "trash" for mailbox_state, _, _ in linked_keys)
-            + sum(mailbox_state == "trash" for mailbox_state, _, _ in unassigned_rows),
+            + sum(mailbox_state == "trash" for mailbox_state, _, _source, _ in unassigned_rows),
             "spam": sum(mailbox_state == "spam" for mailbox_state, _, _ in linked_keys)
-            + sum(mailbox_state == "spam" for mailbox_state, _, _ in unassigned_rows),
+            + sum(mailbox_state == "spam" for mailbox_state, _, _source, _ in unassigned_rows),
+            "drafts": sum(
+                mailbox_state == _DRAFT_MAILBOX_STATE and source == _DRAFT_SOURCE
+                for mailbox_state, _direction, source, _email_id in unassigned_rows
+            ),
         }
 
     def _email_list_header(self, email: CustomerZohoEmail) -> dict[str, object]:
@@ -343,9 +515,10 @@ class HubMailboxService:
     def _unassigned_message(self, email: HubMailboxEmail) -> HubMailboxMessage:
         payload = self._payload(email.encrypted_payload_json)
         content = self._unassigned_content(payload)
+        kind = "draft" if email.source == _DRAFT_SOURCE and email.mailbox_state == _DRAFT_MAILBOX_STATE else "unassigned"
         return HubMailboxMessage(
             key=f"unassigned-{email.id}",
-            kind="unassigned",
+            kind=kind,
             subject=self._text(payload.get("betreff")) or self._text(payload.get("subject")) or "Ohne Betreff",
             sender=self._people(payload.get("absender") or payload.get("sender") or payload.get("from")),
             recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
@@ -380,6 +553,8 @@ class HubMailboxService:
 
     @staticmethod
     def _matches_folder(message: HubMailboxMessage | HubMailboxListItem, folder: str) -> bool:
+        if folder == "drafts":
+            return message.kind == "draft" and message.mailbox_state == _DRAFT_MAILBOX_STATE
         if folder in _MAILBOX_STATE_BY_FOLDER:
             return message.mailbox_state == _MAILBOX_STATE_BY_FOLDER[folder]
         if folder == "unassigned":
