@@ -528,6 +528,19 @@ def test_zoho_customer_communication_helpers_follow_notes_email_and_sender_api_s
             "message_id": "zoho-parent-message-1",
             "owner": {"id": "zoho-owner-1"},
         }
+        assert service.send_account_email(
+            account_id="zoho-account-1",
+            sender_name="Hub Team",
+            sender_email="team@example.de",
+            recipient_name="Customer",
+            recipient_email="customer@example.de",
+            subject="Weiterleitung",
+            content="Inhalt",
+            cc_recipients=(("Office", "office@example.de"),),
+            attachment_ids=("zfs-file-1",),
+        ) == {"message_id": "zoho-mail-created"}
+        assert posted[3][1]["data"][0]["cc"] == [{"user_name": "Office", "email": "office@example.de"}]
+        assert posted[3][1]["data"][0]["attachments"] == [{"id": "zfs-file-1"}]
 
         downloaded_requests: list[tuple[str, dict[str, str]]] = []
 

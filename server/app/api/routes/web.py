@@ -455,6 +455,51 @@ def mailbox_compose_recipients(
     }
 
 
+@router.get("/emails/linked/{customer_id}/{email_id}/compose-context", response_class=JSONResponse)
+def mailbox_linked_email_compose_context(
+    customer_id: int,
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    action: str = "",
+):
+    """Prepare an editable composer context for an opened mailbox message."""
+    _require_hub_admin(request)
+    service = _customer_communication_service(db)
+    try:
+        if action in {"reply", "reply_all"}:
+            reply = service.get_email_reply(customer_id=customer_id, email_id=email_id)
+            return {
+                "action": action,
+                "customer_id": customer_id,
+                "recipient": {
+                    "key": reply.recipient_key,
+                    "name": reply.recipient_name,
+                    "email": reply.recipient_email,
+                },
+                "subject": reply.subject,
+                "content": "",
+                "cc_emails": list(reply.reply_all_cc_emails) if action == "reply_all" else [],
+                "reply_to_email_id": reply.email_id,
+                "forward_from_email_id": None,
+            }
+        if action == "forward":
+            forward = service.get_email_forward(customer_id=customer_id, email_id=email_id)
+            return {
+                "action": action,
+                "customer_id": customer_id,
+                "recipient": None,
+                "subject": forward.subject,
+                "content": forward.content,
+                "cc_emails": [],
+                "reply_to_email_id": None,
+                "forward_from_email_id": forward.email_id,
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=422, detail="Unknown mailbox compose action.")
+
+
 @router.post("/emails/unassigned/{email_id}/read")
 def mark_unassigned_mailbox_email_read(
     email_id: int,
@@ -637,6 +682,8 @@ def send_customer_communication_email(
     content: Annotated[str, Form()] = "",
     template_id: Annotated[str, Form()] = "",
     reply_to_email_id: Annotated[str, Form()] = "",
+    cc_emails: Annotated[str, Form()] = "",
+    forward_from_email_id: Annotated[str, Form()] = "",
     confirmed: Annotated[bool, Form()] = False,
     csrf_token: Annotated[str, Form()] = "",
 ):
@@ -644,6 +691,7 @@ def send_customer_communication_email(
     user = _require_hub_admin(request)
     try:
         reply_to_id = int(reply_to_email_id) if reply_to_email_id.strip() else None
+        forward_from_id = int(forward_from_email_id) if forward_from_email_id.strip() else None
         result = _customer_communication_service(db).send_email(
             customer_id=customer_id,
             actor=user.username,
@@ -654,6 +702,8 @@ def send_customer_communication_email(
             confirmed=confirmed,
             template_id=template_id,
             reply_to_email_id=reply_to_id,
+            cc_emails=cc_emails,
+            forward_from_email_id=forward_from_id,
         )
     except (ValueError, ZohoCrmError) as exc:
         db.rollback()

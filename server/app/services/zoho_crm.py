@@ -40,6 +40,7 @@ _ZOHO_CRM_SCOPE_VALUES = (
         "ZohoCRM.coql.READ",
         "ZohoCRM.apis.READ",
         "ZohoCRM.send_mail.all.CREATE",
+        "ZohoCRM.Files.CREATE",
         "ZohoCRM.templates.email.READ",
         "ZohoCRM.share.all",
         "ZohoCRM.signals.ALL",
@@ -47,9 +48,12 @@ _ZOHO_CRM_SCOPE_VALUES = (
 )
 ZOHO_CRM_SCOPES = ",".join(_ZOHO_CRM_SCOPE_VALUES)
 _ZOHO_COMMUNICATION_SCOPE_VALUES = frozenset(
-    scope for scope in _ZOHO_CRM_SCOPE_VALUES if scope != "ZohoCRM.templates.email.READ"
+    scope
+    for scope in _ZOHO_CRM_SCOPE_VALUES
+    if scope not in {"ZohoCRM.templates.email.READ", "ZohoCRM.Files.CREATE"}
 )
 _ZOHO_EMAIL_TEMPLATE_SCOPE = "ZohoCRM.templates.email.READ"
+_ZOHO_FILE_SCOPE = "ZohoCRM.Files.CREATE"
 _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -587,6 +591,8 @@ class ZohoCrmService:
         template_id: str | None = None,
         reply_to_message_id: str | None = None,
         reply_to_owner_id: str | None = None,
+        cc_recipients: tuple[tuple[str, str], ...] = (),
+        attachment_ids: tuple[str, ...] = (),
     ) -> dict[str, object]:
         """Send an explicit Hub message through the sender connected to Zoho CRM."""
         connection = self._require_communication_connection()
@@ -599,6 +605,13 @@ class ZohoCrmService:
         }
         if template_id:
             message["template"] = {"id": self._required_template_id(template_id)}
+        if cc_recipients:
+            message["cc"] = [
+                {"user_name": name, "email": email}
+                for name, email in cc_recipients
+            ]
+        if attachment_ids:
+            message["attachments"] = [{"id": attachment_id} for attachment_id in attachment_ids]
         if reply_to_message_id:
             in_reply_to: dict[str, object] = {"message_id": reply_to_message_id}
             if reply_to_owner_id:
@@ -610,6 +623,38 @@ class ZohoCrmService:
             {"data": [message]},
         )
         return self._response_record(response, "email")
+
+    def upload_file_to_zfs(self, *, filename: str, content: bytes, content_type: str) -> str:
+        """Upload one forwarded attachment and return Zoho's encrypted file ID."""
+        if not content:
+            raise ZohoCrmError("Ein leerer Anhang kann nicht weitergeleitet werden.")
+        if len(content) > 20 * 1024 * 1024:
+            raise ZohoCrmError("Ein weitergeleiteter Anhang überschreitet das Zoho-Limit von 20 MB.")
+        normalized_filename = re.sub(r"[\r\n\"]", "_", filename).strip() or "attachment"
+        normalized_content_type = content_type.casefold()
+        if not re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", normalized_content_type):
+            normalized_content_type = "application/octet-stream"
+        connection = self._require_communication_connection()
+        if not self._has_scope_grant(connection, frozenset({_ZOHO_FILE_SCOPE})):
+            raise ZohoCrmError("Reconnect Zoho CRM once to approve access for forwarded attachments.")
+        boundary = f"----KosmosHub{uuid.uuid4().hex}"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{normalized_filename}"\r\n'
+            f"Content-Type: {normalized_content_type}\r\n\r\n"
+        ).encode("utf-8") + content + f"\r\n--{boundary}--\r\n".encode("ascii")
+        response = self._api_post_multipart(
+            connection,
+            "/crm/v8/files",
+            body=body,
+            content_type=f"multipart/form-data; boundary={boundary}",
+        )
+        result = self._response_record(response, "file")
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        file_id = self._text(details.get("id")) or self._text(result.get("id"))
+        if not file_id:
+            raise ZohoCrmError("Zoho returned no encrypted file ID for the forwarded attachment.")
+        return file_id
 
     def remove_connection(self, *, actor: HubUser) -> None:
         self._require_admin(actor)
@@ -823,6 +868,25 @@ class ZohoCrmService:
             f"{api_domain}{path}",
             method="POST",
             json_body=payload,
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+        )
+
+    def _api_post_multipart(
+        self,
+        connection: ZohoConnection,
+        path: str,
+        *,
+        body: bytes,
+        content_type: str,
+    ) -> dict[str, object]:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        return self._request_json(
+            f"{api_domain}{path}",
+            method="POST",
+            raw_body=body,
+            content_type=content_type,
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
         )
 
@@ -1137,16 +1201,22 @@ class ZohoCrmService:
         method: str,
         form: dict[str, str] | None = None,
         json_body: dict[str, object] | None = None,
+        raw_body: bytes | None = None,
+        content_type: str | None = None,
         headers: dict[str, str] | None = None,
         allow_empty_response: bool = False,
     ) -> dict[str, object]:
-        if form is not None and json_body is not None:
-            raise ValueError("Provide either form data or a JSON body, not both.")
-        body = urlencode(form).encode("utf-8") if form is not None else None
+        if sum(value is not None for value in (form, json_body, raw_body)) > 1:
+            raise ValueError("Provide only one request body format.")
+        if raw_body is not None and not content_type:
+            raise ValueError("A raw request body requires a content type.")
+        body = raw_body if raw_body is not None else (urlencode(form).encode("utf-8") if form is not None else None)
         if json_body is not None:
             body = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
         request_headers = {"Accept": "application/json", **(headers or {})}
-        if form is not None:
+        if raw_body is not None:
+            request_headers["Content-Type"] = content_type or "application/octet-stream"
+        elif form is not None:
             request_headers["Content-Type"] = "application/x-www-form-urlencoded"
         elif json_body is not None:
             request_headers["Content-Type"] = "application/json"

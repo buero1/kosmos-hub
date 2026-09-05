@@ -19,11 +19,14 @@ class FakeZohoCommunications:
     def __init__(self):
         self.created_notes: list[tuple[str, str, str]] = []
         self.sent_emails: list[tuple[str, str, str, str, str, str, str, str | None]] = []
+        self.sent_cc_recipients: list[tuple[tuple[str, str], ...]] = []
+        self.sent_attachment_ids: list[tuple[str, ...]] = []
         self.reply_to_calls: list[tuple[str | None, str | None]] = []
         self.template_detail_requests: list[str] = []
         self.downloaded_attachments: list[tuple[str, str, str, str, str, str]] = []
         self.downloaded_inline_images: list[tuple[str, str, str, str, str]] = []
         self.email_content_requests: list[str | None] = []
+        self.uploaded_files: list[tuple[str, bytes, str]] = []
 
     def list_account_notes(self, account_id: str) -> list[dict[str, object]]:
         assert account_id == "zoho-account-1"
@@ -142,10 +145,18 @@ class FakeZohoCommunications:
         template_id: str | None = None,
         reply_to_message_id: str | None = None,
         reply_to_owner_id: str | None = None,
+        cc_recipients: tuple[tuple[str, str], ...] = (),
+        attachment_ids: tuple[str, ...] = (),
     ) -> dict[str, object]:
         self.sent_emails.append((account_id, sender_name, sender_email, recipient_name, recipient_email, subject, content, template_id))
+        self.sent_cc_recipients.append(cc_recipients)
+        self.sent_attachment_ids.append(attachment_ids)
         self.reply_to_calls.append((reply_to_message_id, reply_to_owner_id))
         return {"message_id": "zoho-email-hub-1"}
+
+    def upload_file_to_zfs(self, *, filename: str, content: bytes, content_type: str) -> str:
+        self.uploaded_files.append((filename, content, content_type))
+        return f"zfs-{len(self.uploaded_files)}"
 
 
 def test_note_title_uses_the_first_nonempty_content_line_when_omitted():
@@ -535,6 +546,7 @@ def test_customer_communications_replies_to_the_original_zoho_message():
                         "owner": {"id": "zoho-owner-1"},
                         "from": {"name": "Anna Example", "email": "anna@example.de"},
                         "to": [{"name": "Hub Team", "email": "team@example.de"}],
+                        "cc": [{"name": "Office", "email": "office@example.de"}],
                     }
                 )
             ),
@@ -547,7 +559,9 @@ def test_customer_communications_replies_to_the_original_zoho_message():
         reply = service.get_email_reply(customer_id=customer.id, email_id=original.id)
 
         assert reply.recipient_key.startswith(f"contact:{contact.id}:")
+        assert reply.recipient_email == "anna@example.de"
         assert reply.subject == "Re: Frage zur Rechnung"
+        assert reply.reply_all_cc_emails == ("office@example.de", "team@example.de")
 
         result = service.send_email(
             customer_id=customer.id,
@@ -558,16 +572,74 @@ def test_customer_communications_replies_to_the_original_zoho_message():
             content="Danke, wir melden uns.",
             confirmed=True,
             reply_to_email_id=original.id,
+            cc_emails=", ".join(reply.reply_all_cc_emails),
         )
 
         assert result.success is True
         assert fake_zoho.reply_to_calls == [("zoho-parent-message-1", "zoho-owner-1")]
+        assert fake_zoho.sent_cc_recipients == [(("office@example.de", "office@example.de"),)]
         sent_email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-hub-1"))
         assert sent_email is not None
         assert service._payload(sent_email.encrypted_payload_json)["in_reply_to"] == {
             "email_id": original.id,
             "message_id": "zoho-parent-message-1",
         }
+
+
+def test_customer_communications_forwards_loaded_content_and_attachments():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+        original = CustomerZohoEmail(
+            customer=customer,
+            zoho_message_id="zoho-forward-message-1",
+            zoho_module="Accounts",
+            zoho_record_id="zoho-account-1",
+            source="zoho",
+            direction="inbound",
+            sync_status="synced",
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Angebot",
+                        "owner": {"id": "zoho-owner-1"},
+                        "from": {"name": "Anna Example", "email": "anna@example.de"},
+                        "to": [{"name": "Hub Team", "email": "team@example.de"}],
+                        "content": "<p>Bitte das Angebot weiterleiten.</p>",
+                        "attachments": [{"id": "zoho-attachment-1", "name": "Angebot.pdf"}],
+                    }
+                )
+            ),
+        )
+        db.add(original)
+        db.commit()
+
+        fake_zoho = FakeZohoCommunications()
+        service = _service(db, fake_zoho)
+        forward = service.get_email_forward(customer_id=customer.id, email_id=original.id)
+        recipient = service.get_view(customer_id=customer.id).recipients[1]
+
+        assert forward.subject == "Fwd: Angebot"
+        assert "Weitergeleitete Nachricht" in forward.content
+        result = service.send_email(
+            customer_id=customer.id,
+            actor="operator",
+            sender_email="team@example.de",
+            recipient_key=recipient.key,
+            subject=forward.subject,
+            content=forward.content,
+            confirmed=True,
+            forward_from_email_id=original.id,
+        )
+
+        assert result.success is True
+        assert fake_zoho.uploaded_files == [("Angebot.pdf", b"%PDF-test", "application/pdf")]
+        assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
 
 
 def test_customer_communications_sends_sanitized_rich_email_html():

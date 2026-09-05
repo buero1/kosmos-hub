@@ -9,7 +9,7 @@ import ipaddress
 import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from html import escape, unescape
 from html.parser import HTMLParser
 from typing import Any
@@ -31,6 +31,7 @@ from app.services.zoho_crm import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, Zoho
 _EMAIL_IMAGE_CACHE_TTL = timedelta(days=30)
 _MAX_EXTERNAL_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_EMAIL_IMAGE_CACHE_BYTES = 250 * 1024 * 1024
+_MAX_FORWARDED_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024
 _EXTERNAL_IMAGE_TIMEOUT_SECONDS = 15
 _ALLOWED_IMAGE_CONTENT_TYPES = frozenset({"image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"})
 _IMAGE_SRC_PATTERN = re.compile(
@@ -278,7 +279,17 @@ class CustomerCommunicationEmailView:
 class CustomerCommunicationEmailReply:
     email_id: int
     recipient_key: str
+    recipient_name: str
+    recipient_email: str
     subject: str
+    reply_all_cc_emails: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CustomerCommunicationEmailForward:
+    email_id: int
+    subject: str
+    content: str
 
 
 @dataclass(frozen=True)
@@ -713,6 +724,8 @@ class CustomerCommunicationService:
         confirmed: bool,
         template_id: str = "",
         reply_to_email_id: int | None = None,
+        cc_emails: str = "",
+        forward_from_email_id: int | None = None,
     ) -> CustomerCommunicationActionResult:
         if not confirmed:
             raise ValueError("Bestätige bitte den Versand über Zoho CRM.")
@@ -726,6 +739,12 @@ class CustomerCommunicationService:
         recipient = next((item for item in self._recipients_for_customer(customer) if item.key == recipient_key), None)
         if recipient is None:
             raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
+        if reply_to_email_id is not None and forward_from_email_id is not None:
+            raise ValueError("Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein.")
+        cc_recipients = self._cc_recipients(
+            cc_emails,
+            excluded_emails={sender.email, recipient.email},
+        )
         reply_to_message_id: str | None = None
         reply_to_owner_id: str | None = None
         if reply_to_email_id is not None:
@@ -742,18 +761,26 @@ class CustomerCommunicationService:
         if normalized_template_id:
             template = self._stored_email_template(normalized_template_id)
             template_name = self._text(self._payload(template.encrypted_payload_json).get("name")) or ""
+        forwarded_attachment_ids: tuple[str, ...] = ()
+        if forward_from_email_id is not None:
+            forwarded_attachment_ids = self._forward_email_attachment_ids(
+                customer_id=customer.id,
+                email_id=forward_from_email_id,
+            )
         now = datetime.now(UTC)
         outbound_payload = {
             "subject": normalized_subject,
             "content": normalized_content,
             "from": {"name": sender.name, "email": sender.email},
             "to": {"name": recipient.name, "email": recipient.email},
+            "cc": [{"name": name, "email": email} for name, email in cc_recipients],
             "sent_time": now.isoformat(),
             "template": {"id": normalized_template_id, "name": template_name} if normalized_template_id else None,
             "in_reply_to": {
                 "email_id": reply_to_email_id,
                 "message_id": reply_to_message_id,
             } if reply_to_message_id else None,
+            "forwarded_from_email_id": forward_from_email_id,
         }
         email = CustomerZohoEmail(
             customer=customer,
@@ -781,6 +808,8 @@ class CustomerCommunicationService:
                 content=normalized_content,
                 reply_to_message_id=reply_to_message_id,
                 reply_to_owner_id=reply_to_owner_id,
+                cc_recipients=cc_recipients,
+                attachment_ids=forwarded_attachment_ids,
             )
         except ZohoCrmError as exc:
             email.sync_status = "failed"
@@ -820,8 +849,69 @@ class CustomerCommunicationService:
         return CustomerCommunicationEmailReply(
             email_id=email.id,
             recipient_key=recipient.key,
+            recipient_name=recipient.name,
+            recipient_email=recipient.email,
             subject=subject[:500],
+            reply_all_cc_emails=tuple(
+                sorted(
+                    (
+                        set(self._email_addresses(payload.get("to")))
+                        | set(self._email_addresses(payload.get("cc")))
+                    )
+                    - {sender_email}
+                )
+            ),
         )
+
+    def get_email_forward(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailForward:
+        """Prepare an editable forwarded copy without transmitting anything yet."""
+        email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
+        payload = self._payload(email.encrypted_payload_json)
+        original_content = self._text(payload.get("content"))
+        if original_content is None:
+            raise ValueError("Der Nachrichtentext muss vor dem Weiterleiten zuerst geladen werden.")
+        subject = self._text(payload.get("subject")) or "Ohne Betreff"
+        if not re.match(r"^\s*fwd\s*:", subject, flags=re.IGNORECASE):
+            subject = f"Fwd: {subject}"
+        original_sender = self._people_text(payload.get("from")) or "Unbekannt"
+        original_recipients = self._people_text(payload.get("to")) or "Unbekannt"
+        original_time = email.zoho_sent_at or email.created_at
+        metadata = (
+            "<hr><p><strong>Weitergeleitete Nachricht</strong><br>"
+            f"Von: {escape(original_sender)}<br>"
+            f"An: {escape(original_recipients)}<br>"
+            f"Datum: {escape(original_time.isoformat())}<br>"
+            f"Betreff: {escape(self._text(payload.get('subject')) or 'Ohne Betreff')}</p>"
+        )
+        content = f"<p><br></p>{metadata}{self._sanitized_email_content(original_content)}"
+        if len(content) > 50_000:
+            raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig weiterzuleiten.")
+        return CustomerCommunicationEmailForward(email_id=email.id, subject=subject[:500], content=content)
+
+    def _forward_email_attachment_ids(self, *, customer_id: int, email_id: int) -> tuple[str, ...]:
+        email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
+        attachments = self._email_attachments(self._payload(email.encrypted_payload_json))
+        if len(attachments) > 10:
+            raise ValueError("Zoho erlaubt höchstens zehn weitergeleitete Anhänge pro E-Mail.")
+        total_bytes = 0
+        uploaded_ids: list[str] = []
+        for attachment in attachments:
+            downloaded = self.download_email_attachment(
+                customer_id=customer_id,
+                email_id=email_id,
+                attachment_id=attachment.id,
+            )
+            total_bytes += len(downloaded.content)
+            if total_bytes > _MAX_FORWARDED_ATTACHMENT_TOTAL_BYTES:
+                raise ValueError("Die weitergeleiteten Anhänge überschreiten zusammen das Zoho-Limit von 10 MB.")
+            uploaded_ids.append(
+                self.zoho_service.upload_file_to_zfs(
+                    filename=downloaded.filename,
+                    content=downloaded.content,
+                    content_type=downloaded.content_type,
+                )
+            )
+        return tuple(uploaded_ids)
 
     def has_loaded_email_content(self, email: CustomerZohoEmail) -> bool:
         """Return whether a full Zoho body was already stored for this header."""
@@ -1628,6 +1718,35 @@ class CustomerCommunicationService:
             if candidate and "@" in candidate:
                 addresses.add(candidate.strip().casefold())
         return tuple(sorted(addresses))
+
+    @classmethod
+    def _cc_recipients(
+        cls,
+        value: str,
+        *,
+        excluded_emails: set[str],
+    ) -> tuple[tuple[str, str], ...]:
+        """Parse editable CC input while preventing duplicate primary recipients."""
+        if not value.strip():
+            return ()
+        excluded = {email.strip().casefold() for email in excluded_emails}
+        recipients: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for name, email in getaddresses([value.replace(";", ",")]):
+            normalized_email = email.strip().casefold()
+            if not normalized_email:
+                continue
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+", normalized_email):
+                raise ValueError("CC enthält keine gültige E-Mail-Adresse.")
+            if normalized_email in excluded or normalized_email in seen:
+                continue
+            seen.add(normalized_email)
+            recipients.append(((name.strip() or normalized_email)[:255], normalized_email))
+        if not recipients:
+            raise ValueError("CC enthält keine zusätzliche gültige E-Mail-Adresse.")
+        if len(recipients) > 20:
+            raise ValueError("CC darf höchstens 20 E-Mail-Adressen enthalten.")
+        return tuple(recipients)
 
     @classmethod
     def _people_text(cls, value: object) -> str | None:

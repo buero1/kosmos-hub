@@ -28,6 +28,8 @@
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
     .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
+    .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
+    .mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; font-size: 1.1rem; line-height: 1; }
     .mailbox-reading-meta { margin: 0.5rem 0 0; color: var(--muted); line-height: 1.45; }
     .mailbox-preview-timing { min-height: 1.1rem; margin: 0.55rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
     .mailbox-customer-links { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem; }
@@ -96,6 +98,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="template_id" value="" data-email-compose-template-id>
         <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
+        <input type="hidden" name="forward_from_email_id" value="" data-email-compose-forward-from>
         <input type="hidden" name="recipient_key" value="" data-email-compose-recipient-key>
         <div class="email-compose-recipient-fields">
           <label>Absender
@@ -108,6 +111,9 @@
             <div id="email-recipient-results" class="email-recipient-search-results" data-mailbox-compose-recipient-results role="listbox" hidden></div>
           </label>
         </div>
+        <label data-mailbox-compose-cc-field hidden>CC
+          <input name="cc_emails" type="text" autocomplete="off" placeholder="Weitere Empfänger, durch Komma getrennt" data-email-compose-cc>
+        </label>
         <label class="email-template-search">Zoho-Vorlage
           <div class="email-template-search-control">
             <input type="search" autocomplete="off" placeholder="Zoho-Vorlage suchen" data-mailbox-template-search aria-autocomplete="list" aria-controls="email-template-results">
@@ -203,6 +209,13 @@
       var mailboxComposerSender = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-sender]');
       var mailboxComposerRecipient = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient]');
       var mailboxComposerRecipientKey = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient-key]');
+      var mailboxComposerReplyTo = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-reply-to]');
+      var mailboxComposerForwardFrom = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-forward-from]');
+      var mailboxComposerCcField = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-cc-field]');
+      var mailboxComposerCc = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-cc]');
+      var mailboxComposerSubject = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-subject]');
+      var mailboxComposerContent = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-content]');
+      var mailboxComposerContentValue = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-content-value]');
       var mailboxComposerRecipientResults = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-recipient-results]');
       var mailboxComposerTemplate = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template]');
       var mailboxComposerTemplateId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template-id]');
@@ -222,6 +235,8 @@
       var mailboxComposerRecipientSearchController = null;
       var mailboxComposerTemplates = [];
       var mailboxComposerTemplateCategory = '';
+      var mailboxComposerPendingAction = null;
+      var mailboxComposerActionController = null;
 
       function mailboxComposerOption(select, value, label, dataEmail) {
         var option = document.createElement('option');
@@ -286,6 +301,7 @@
               setMailboxComposerStatus('Kontakt oder E-Mail-Adresse eingeben.');
             }
             updateMailboxComposerSubmit();
+            applyMailboxComposerPendingAction();
           })
           .catch(function (error) {
             setMailboxComposerStatus(error.message || 'Die E-Mail-Maske konnte nicht vorbereitet werden.');
@@ -302,6 +318,90 @@
         if (mailboxComposerRecipientKey) mailboxComposerRecipientKey.value = '';
         if (mailboxComposer) mailboxComposer.dataset.emailTemplateUrl = '';
         if (mailboxComposerForm) mailboxComposerForm.removeAttribute('action');
+      }
+
+      function clearMailboxComposerActionFields() {
+        if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = '';
+        if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = '';
+        if (mailboxComposerCc) mailboxComposerCc.value = '';
+        if (mailboxComposerCcField) mailboxComposerCcField.hidden = true;
+      }
+
+      function applyMailboxComposerPendingAction() {
+        var action = mailboxComposerPendingAction;
+        if (!action || !mailboxComposerLoaded || !mailboxComposer) return;
+        mailboxComposerPendingAction = null;
+        clearMailboxComposerTemplateSelection();
+        clearMailboxComposerActionFields();
+        if (action.recipient) {
+          selectMailboxComposerRecipient({
+            key: action.recipient.key,
+            name: action.recipient.name,
+            email: action.recipient.email,
+            customer_id: action.customer_id,
+            customer_name: 'Kundenkontakt'
+          });
+        } else {
+          clearMailboxComposerRecipientContext();
+          if (mailboxComposerRecipient) mailboxComposerRecipient.value = '';
+          clearMailboxComposerRecipientResults();
+          updateMailboxComposerSubmit();
+        }
+        if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = action.reply_to_email_id || '';
+        if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = action.forward_from_email_id || '';
+        if (mailboxComposerCc && Array.isArray(action.cc_emails) && action.cc_emails.length) {
+          mailboxComposerCc.value = action.cc_emails.join(', ');
+          if (mailboxComposerCcField) mailboxComposerCcField.hidden = false;
+        }
+        if (mailboxComposerSubject) mailboxComposerSubject.value = action.subject || '';
+        if (mailboxComposerContent) {
+          mailboxComposerContent.innerHTML = action.content || '';
+          mailboxComposerContent.dispatchEvent(new Event('input', { bubbles: true }));
+        } else if (mailboxComposerContentValue) {
+          mailboxComposerContentValue.value = action.content || '';
+        }
+        if (action.action === 'reply_all') {
+          setMailboxComposerStatus('Antwort an alle vorbereitet. CC kann vor dem Versand angepasst werden.');
+        } else if (action.action === 'forward') {
+          setMailboxComposerStatus('Weiterleitung vorbereitet. Anhänge werden erst beim bestätigten Versand aus Zoho übernommen.');
+        } else {
+          setMailboxComposerStatus('Antwort vorbereitet.');
+        }
+      }
+
+      function prepareMailboxComposerAction(button) {
+        if (!mailboxComposerTrigger) return;
+        var action = button.dataset.mailboxComposeAction || '';
+        var customerId = button.dataset.mailboxComposeCustomerId || '';
+        var emailId = button.dataset.mailboxComposeEmailId || '';
+        if (!action || !customerId || !emailId) return;
+        if (mailboxComposerActionController) mailboxComposerActionController.abort();
+        mailboxComposerActionController = new AbortController();
+        button.disabled = true;
+        window.fetch(
+          '/emails/linked/' + encodeURIComponent(customerId) + '/' + encodeURIComponent(emailId) + '/compose-context?action=' + encodeURIComponent(action),
+          { credentials: 'same-origin', signal: mailboxComposerActionController.signal }
+        )
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Die E-Mail-Aktion konnte nicht vorbereitet werden.');
+              return payload;
+            });
+          })
+          .then(function (payload) {
+            mailboxComposerPendingAction = payload;
+            mailboxComposerTrigger.click();
+            if (mailboxComposerLoaded) {
+              window.setTimeout(applyMailboxComposerPendingAction, 0);
+            }
+          })
+          .catch(function (error) {
+            if (error.name !== 'AbortError') window.alert(error.message || 'Die E-Mail-Aktion konnte nicht vorbereitet werden.');
+          })
+          .finally(function () {
+            button.disabled = false;
+            mailboxComposerActionController = null;
+          });
       }
 
       function selectMailboxComposerRecipient(recipient) {
@@ -506,7 +606,10 @@
       }
 
       if (mailboxComposerTrigger) {
-        mailboxComposerTrigger.addEventListener('click', loadMailboxComposerOptions);
+        mailboxComposerTrigger.addEventListener('click', function () {
+          if (!mailboxComposerPendingAction) clearMailboxComposerActionFields();
+          loadMailboxComposerOptions();
+        });
       }
       if (mailboxComposerSender || mailboxComposerRecipient) {
         [mailboxComposerSender, mailboxComposerRecipient].filter(Boolean).forEach(function (control) {
@@ -553,6 +656,12 @@
           setMailboxComposerStatus('Bitte einen bekannten Kontakt aus der Ergebnisliste auswählen.');
         });
       }
+      document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-mailbox-compose-action]');
+        if (!button) return;
+        event.preventDefault();
+        prepareMailboxComposerAction(button);
+      });
 
       function updateMailboxHeight() {
         if (!shell) return;
