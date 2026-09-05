@@ -106,11 +106,8 @@
                     </div>
                   {% endfor %}
                 </dl>
-                {% if detail.following_profile_fields %}
-                  <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
-                {% endif %}
               {% endif %}
-              <div data-expandable-content{% if detail.following_profile_fields %} data-expandable-start-collapsed hidden{% else %} class="is-expanded"{% endif %}>
+              <div data-expandable-content{% if detail.following_profile_fields %} data-expandable-start-collapsed data-expandable-more-label="Mehr anzeigen ..." hidden{% else %} class="is-expanded"{% endif %}>
                 {% if detail.display_profile_fields %}
                   {% if detail.following_profile_fields %}
                     <dl class="customer-fields-grid customer-fields-grid-following">
@@ -148,6 +145,9 @@
                   {% endif %}
                 </div>
               </div>
+              {% if detail.following_profile_fields %}
+                <button class="button button-secondary customer-expand-toggle customer-fields-expand-toggle" type="button" data-expandable-toggle hidden>Mehr anzeigen ...</button>
+              {% endif %}
             </div>
             {% if can_manage_customer_fields and detail.display_profile_fields %}
               <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>

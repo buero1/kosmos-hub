@@ -2061,6 +2061,24 @@
       }
       .customer-expand-toggle { margin-top: 0.7rem; }
       .customer-expand-toggle[hidden] { display: none; }
+      button.button.customer-fields-expand-toggle {
+        display: inline;
+        height: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--accent);
+        font: inherit;
+        font-weight: 700;
+        line-height: 1.35;
+        text-decoration: none;
+      }
+      button.button.customer-fields-expand-toggle:hover {
+        color: var(--accent);
+        opacity: 0.74;
+        text-decoration: none;
+      }
       .customer-contacts-table { min-width: 43rem; }
       .customer-note-composer {
         display: grid;
@@ -3193,6 +3211,8 @@
           var toggle = section.querySelector("[data-expandable-toggle]");
           if (!content || !toggle) { return; }
           var startsCollapsed = content.hasAttribute("data-expandable-start-collapsed");
+          var moreLabel = content.getAttribute("data-expandable-more-label") || "Weiter lesen ...";
+          var lessLabel = content.getAttribute("data-expandable-less-label") || "Weniger anzeigen";
 
           function updateExpandableSection() {
             if (section.classList.contains("is-editing") || section.classList.contains("is-layout-editing")) {
@@ -3202,7 +3222,7 @@
             if (startsCollapsed && !content.classList.contains("is-expanded")) {
               content.hidden = true;
               toggle.hidden = false;
-              toggle.textContent = "Weiter lesen ...";
+              toggle.textContent = moreLabel;
               return;
             }
             content.hidden = false;
@@ -3221,7 +3241,7 @@
           toggle.addEventListener("click", function () {
             var expanded = content.classList.toggle("is-expanded");
             if (startsCollapsed) { content.hidden = !expanded; }
-            toggle.textContent = expanded ? "Weniger anzeigen" : "Weiter lesen ...";
+            toggle.textContent = expanded ? lessLabel : moreLabel;
             window.requestAnimationFrame(updateExpandableSection);
           });
           if (window.ResizeObserver) {
@@ -3241,7 +3261,7 @@
           content.classList.add("is-expanded");
           if (toggle) {
             toggle.hidden = false;
-            toggle.textContent = "Weniger anzeigen";
+            toggle.textContent = content.getAttribute("data-expandable-less-label") || "Weniger anzeigen";
           }
         }, true);
 
@@ -3300,6 +3320,8 @@
           var hiddenWhileEditing = document.querySelectorAll("[data-layout-hide-while-editing]");
           var originalOrder = itemKeys();
           var originalExpanded = content.classList.contains("is-expanded");
+          var moreLabel = content.getAttribute("data-expandable-more-label") || "Weiter lesen ...";
+          var lessLabel = content.getAttribute("data-expandable-less-label") || "Weniger anzeigen";
           if (!openers.length || !actions.length || !cancels.length) { return; }
 
           function items() {
@@ -3359,7 +3381,7 @@
             hiddenWhileEditing.forEach(function (control) { control.hidden = editing; });
             if (toggle) {
               toggle.hidden = editing;
-              toggle.textContent = originalExpanded ? "Weniger anzeigen" : "Weiter lesen ...";
+              toggle.textContent = originalExpanded ? lessLabel : moreLabel;
             }
             if (!editing) { restoreOriginalOrder(); }
             window.dispatchEvent(new Event("resize"));
