@@ -32,7 +32,11 @@ from app.services.maintenance_worker import (
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CustomerDirectoryService
-from app.services.customer_communications import CustomerCommunicationImageError, CustomerCommunicationService
+from app.services.customer_communications import (
+    CustomerCommunicationAttachmentUpload,
+    CustomerCommunicationImageError,
+    CustomerCommunicationService,
+)
 from app.services.hub_mailbox import HubMailboxService, MAILBOX_FOLDERS
 from app.models.customer import Customer
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
@@ -678,7 +682,7 @@ def create_customer_communication_note(
 
 
 @router.post("/customers/{customer_id}/communications/emails")
-def send_customer_communication_email(
+async def send_customer_communication_email(
     customer_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
@@ -690,6 +694,7 @@ def send_customer_communication_email(
     reply_to_email_id: Annotated[str, Form()] = "",
     cc_emails: Annotated[str, Form()] = "",
     forward_from_email_id: Annotated[str, Form()] = "",
+    attachments: Annotated[list[UploadFile] | None, File()] = None,
     confirmed: Annotated[bool, Form()] = False,
     csrf_token: Annotated[str, Form()] = "",
 ):
@@ -698,6 +703,15 @@ def send_customer_communication_email(
     try:
         reply_to_id = int(reply_to_email_id) if reply_to_email_id.strip() else None
         forward_from_id = int(forward_from_email_id) if forward_from_email_id.strip() else None
+        uploaded_attachments = tuple(
+            CustomerCommunicationAttachmentUpload(
+                filename=attachment.filename or "",
+                content=await attachment.read(),
+                content_type=attachment.content_type or "application/octet-stream",
+            )
+            for attachment in (attachments or [])
+            if attachment.filename
+        )
         result = _customer_communication_service(db).send_email(
             customer_id=customer_id,
             actor=user.username,
@@ -710,10 +724,14 @@ def send_customer_communication_email(
             reply_to_email_id=reply_to_id,
             cc_emails=cc_emails,
             forward_from_email_id=forward_from_id,
+            attachments=uploaded_attachments,
         )
     except (ValueError, ZohoCrmError) as exc:
         db.rollback()
         return _customer_communication_redirect(customer_id, "error", str(exc))
+    finally:
+        for attachment in attachments or []:
+            await attachment.close()
 
     write_audit_log(
         db,

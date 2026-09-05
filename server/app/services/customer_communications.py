@@ -31,7 +31,8 @@ from app.services.zoho_crm import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, Zoho
 _EMAIL_IMAGE_CACHE_TTL = timedelta(days=30)
 _MAX_EXTERNAL_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_EMAIL_IMAGE_CACHE_BYTES = 250 * 1024 * 1024
-_MAX_FORWARDED_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024
+_MAX_OUTBOUND_ATTACHMENT_TOTAL_BYTES = 10 * 1024 * 1024
+_MAX_OUTBOUND_ATTACHMENT_COUNT = 10
 _EXTERNAL_IMAGE_TIMEOUT_SECONDS = 15
 _ALLOWED_IMAGE_CONTENT_TYPES = frozenset({"image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"})
 _IMAGE_SRC_PATTERN = re.compile(
@@ -232,6 +233,13 @@ class CustomerCommunicationAttachmentDownload:
     content: bytes
     content_type: str
     filename: str
+
+
+@dataclass(frozen=True)
+class CustomerCommunicationAttachmentUpload:
+    filename: str
+    content: bytes
+    content_type: str
 
 
 @dataclass(frozen=True)
@@ -726,6 +734,7 @@ class CustomerCommunicationService:
         reply_to_email_id: int | None = None,
         cc_emails: str = "",
         forward_from_email_id: int | None = None,
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
     ) -> CustomerCommunicationActionResult:
         if not confirmed:
             raise ValueError("Bestätige bitte den Versand über Zoho CRM.")
@@ -761,12 +770,11 @@ class CustomerCommunicationService:
         if normalized_template_id:
             template = self._stored_email_template(normalized_template_id)
             template_name = self._text(self._payload(template.encrypted_payload_json).get("name")) or ""
-        forwarded_attachment_ids: tuple[str, ...] = ()
-        if forward_from_email_id is not None:
-            forwarded_attachment_ids = self._forward_email_attachment_ids(
-                customer_id=customer.id,
-                email_id=forward_from_email_id,
-            )
+        attachment_ids = self._outbound_email_attachment_ids(
+            customer_id=customer.id,
+            forward_from_email_id=forward_from_email_id,
+            attachments=attachments,
+        )
         now = datetime.now(UTC)
         outbound_payload = {
             "subject": normalized_subject,
@@ -809,7 +817,7 @@ class CustomerCommunicationService:
                 reply_to_message_id=reply_to_message_id,
                 reply_to_owner_id=reply_to_owner_id,
                 cc_recipients=cc_recipients,
-                attachment_ids=forwarded_attachment_ids,
+                attachment_ids=attachment_ids,
             )
         except ZohoCrmError as exc:
             email.sync_status = "failed"
@@ -892,27 +900,45 @@ class CustomerCommunicationService:
             raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig weiterzuleiten.")
         return CustomerCommunicationEmailForward(email_id=email.id, subject=subject[:500], content=content)
 
-    def _forward_email_attachment_ids(self, *, customer_id: int, email_id: int) -> tuple[str, ...]:
-        email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
-        attachments = self._email_attachments(self._payload(email.encrypted_payload_json))
-        if len(attachments) > 10:
-            raise ValueError("Zoho erlaubt höchstens zehn weitergeleitete Anhänge pro E-Mail.")
+    def _outbound_email_attachment_ids(
+        self,
+        *,
+        customer_id: int,
+        forward_from_email_id: int | None,
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+    ) -> tuple[str, ...]:
+        uploads = list(attachments)
+        if forward_from_email_id is not None:
+            email = self._require_customer_email(customer_id=customer_id, email_id=forward_from_email_id)
+            for attachment in self._email_attachments(self._payload(email.encrypted_payload_json)):
+                downloaded = self.download_email_attachment(
+                    customer_id=customer_id,
+                    email_id=email.id,
+                    attachment_id=attachment.id,
+                )
+                uploads.append(
+                    CustomerCommunicationAttachmentUpload(
+                        filename=downloaded.filename,
+                        content=downloaded.content,
+                        content_type=downloaded.content_type,
+                    )
+                )
+        if len(uploads) > _MAX_OUTBOUND_ATTACHMENT_COUNT:
+            raise ValueError("Zoho erlaubt höchstens zehn Anhänge pro E-Mail.")
         total_bytes = 0
         uploaded_ids: list[str] = []
-        for attachment in attachments:
-            downloaded = self.download_email_attachment(
-                customer_id=customer_id,
-                email_id=email_id,
-                attachment_id=attachment.id,
-            )
-            total_bytes += len(downloaded.content)
-            if total_bytes > _MAX_FORWARDED_ATTACHMENT_TOTAL_BYTES:
-                raise ValueError("Die weitergeleiteten Anhänge überschreiten zusammen das Zoho-Limit von 10 MB.")
+        for attachment in uploads:
+            filename = self._required_text(attachment.filename, "Dateiname", maximum=255)
+            if not attachment.content:
+                raise ValueError("Ein leerer Anhang kann nicht versendet werden.")
+            total_bytes += len(attachment.content)
+            if total_bytes > _MAX_OUTBOUND_ATTACHMENT_TOTAL_BYTES:
+                raise ValueError("Die Anhänge überschreiten zusammen das Zoho-Limit von 10 MB.")
             uploaded_ids.append(
                 self.zoho_service.upload_file_to_zfs(
-                    filename=downloaded.filename,
-                    content=downloaded.content,
-                    content_type=downloaded.content_type,
+                    filename=filename,
+                    content=attachment.content,
+                    content_type=attachment.content_type or "application/octet-stream",
                 )
             )
         return tuple(uploaded_ids)

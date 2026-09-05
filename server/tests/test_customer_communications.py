@@ -11,7 +11,7 @@ from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.customer_contact import CustomerContact
-from app.services.customer_communications import CustomerCommunicationService
+from app.services.customer_communications import CustomerCommunicationAttachmentUpload, CustomerCommunicationService
 from app.services.zoho_crm import ZohoCrmError
 
 
@@ -643,6 +643,41 @@ def test_customer_communications_forwards_loaded_content_and_attachments():
 
         assert result.success is True
         assert fake_zoho.uploaded_files == [("Angebot.pdf", b"%PDF-test", "application/pdf")]
+        assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
+
+
+def test_customer_communications_sends_new_email_attachments():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        fake_zoho = FakeZohoCommunications()
+        service = _service(db, fake_zoho)
+        recipient = service.get_view(customer_id=customer.id).recipients[1]
+        result = service.send_email(
+            customer_id=customer.id,
+            actor="operator",
+            sender_email="team@example.de",
+            recipient_key=recipient.key,
+            subject="Unterlagen",
+            content="Anbei die Unterlagen.",
+            confirmed=True,
+            attachments=(
+                CustomerCommunicationAttachmentUpload(
+                    filename="Unterlagen.txt",
+                    content=b"Anbei",
+                    content_type="text/plain",
+                ),
+            ),
+        )
+
+        assert result.success is True
+        assert fake_zoho.uploaded_files == [("Unterlagen.txt", b"Anbei", "text/plain")]
         assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
 
 

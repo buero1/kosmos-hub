@@ -74,6 +74,15 @@
     .email-template-library-list { min-height: 0; overflow-y: auto; border-top: 1px solid var(--border); }
     .email-template-library-group { display: grid; gap: 0.35rem; padding-top: 0.75rem; }
     .email-template-library-group h4 { margin: 0; color: var(--muted); font-size: 0.82rem; }
+    .email-compose-attachments { display: grid; gap: 0.45rem; padding-top: 0.15rem; }
+    .email-compose-attachment-controls { display: flex; align-items: center; gap: 0.55rem; }
+    .email-compose-attachment-trigger { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; font-size: 1.08rem; line-height: 1; }
+    .email-compose-attachment-summary { color: var(--muted); font-size: 0.82rem; }
+    .email-compose-attachment-list { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+    .email-compose-attachment-list[hidden] { display: none; }
+    .email-compose-attachment-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); color: var(--muted); font-size: 0.8rem; }
+    .email-compose-attachment-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .email-compose-attachment-remove { flex: 0 0 auto; min-width: 1.55rem; height: 1.55rem; margin: 0; padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 1rem; line-height: 1; }
     @media (max-width: 780px) { .mailbox-shell { display: block; height: auto; min-height: 0; } .mailbox-folders { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-folders a { flex: 0 0 auto; } .mailbox-list { max-height: 24rem; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-reading-pane { overflow: visible; } .email-template-library-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .email-template-library-categories { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .email-template-library-category { flex: 0 0 auto; width: auto; } }
   </style>
   <section class="mailbox-header">
@@ -94,7 +103,7 @@
         </div>
         <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
       </div>
-      <form method="post" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
+      <form method="post" enctype="multipart/form-data" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="template_id" value="" data-email-compose-template-id>
         <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
@@ -154,6 +163,14 @@
           </div>
           <textarea name="content" hidden data-email-compose-content-value></textarea>
         </label>
+        <div class="email-compose-attachments">
+          <input id="email-compose-attachments" type="file" name="attachments" multiple hidden data-email-compose-attachments>
+          <div class="email-compose-attachment-controls">
+            <button class="button button-variant-1 email-compose-attachment-trigger" type="button" data-email-compose-attachments-open aria-label="Anhänge hinzufügen" title="Anhänge hinzufügen">&#128206;</button>
+            <span class="email-compose-attachment-summary" data-email-compose-attachment-summary>Keine Anhänge ausgewählt</span>
+          </div>
+          <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
+        </div>
         <label class="bulk-action-confirmation"><input type="checkbox" name="confirmed" value="true" required> Ich bestätige den Versand dieser E-Mail über Zoho CRM.</label>
         <div class="email-compose-actions">
           <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
@@ -216,6 +233,10 @@
       var mailboxComposerSubject = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-subject]');
       var mailboxComposerContent = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-content]');
       var mailboxComposerContentValue = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-content-value]');
+      var mailboxComposerAttachmentInput = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-attachments]');
+      var mailboxComposerAttachmentOpen = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-attachments-open]');
+      var mailboxComposerAttachmentSummary = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-attachment-summary]');
+      var mailboxComposerAttachmentList = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-attachment-list]');
       var mailboxComposerRecipientResults = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-recipient-results]');
       var mailboxComposerTemplate = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template]');
       var mailboxComposerTemplateId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template-id]');
@@ -237,6 +258,7 @@
       var mailboxComposerTemplateCategory = '';
       var mailboxComposerPendingAction = null;
       var mailboxComposerActionController = null;
+      var mailboxComposerAttachments = [];
 
       function mailboxComposerOption(select, value, label, dataEmail) {
         var option = document.createElement('option');
@@ -325,6 +347,42 @@
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = '';
         if (mailboxComposerCc) mailboxComposerCc.value = '';
         if (mailboxComposerCcField) mailboxComposerCcField.hidden = true;
+        setMailboxComposerAttachments([]);
+      }
+
+      function setMailboxComposerAttachments(attachments) {
+        mailboxComposerAttachments = attachments.slice();
+        if (mailboxComposerAttachmentInput) {
+          var transfer = new DataTransfer();
+          mailboxComposerAttachments.forEach(function (attachment) { transfer.items.add(attachment); });
+          mailboxComposerAttachmentInput.files = transfer.files;
+        }
+        if (mailboxComposerAttachmentSummary) {
+          mailboxComposerAttachmentSummary.textContent = mailboxComposerAttachments.length
+            ? mailboxComposerAttachments.length + (mailboxComposerAttachments.length === 1 ? ' Anhang ausgewählt' : ' Anhänge ausgewählt')
+            : 'Keine Anhänge ausgewählt';
+        }
+        if (!mailboxComposerAttachmentList) return;
+        mailboxComposerAttachmentList.replaceChildren();
+        mailboxComposerAttachments.forEach(function (attachment, index) {
+          var item = document.createElement('li');
+          var name = document.createElement('span');
+          var remove = document.createElement('button');
+          name.textContent = attachment.name;
+          remove.type = 'button';
+          remove.className = 'email-compose-attachment-remove';
+          remove.setAttribute('aria-label', attachment.name + ' entfernen');
+          remove.title = 'Anhang entfernen';
+          remove.innerHTML = '&times;';
+          remove.addEventListener('click', function () {
+            setMailboxComposerAttachments(mailboxComposerAttachments.filter(function (_attachment, itemIndex) {
+              return itemIndex !== index;
+            }));
+          });
+          item.append(name, remove);
+          mailboxComposerAttachmentList.append(item);
+        });
+        mailboxComposerAttachmentList.hidden = !mailboxComposerAttachments.length;
       }
 
       function applyMailboxComposerPendingAction() {
@@ -648,6 +706,15 @@
       }
       if (mailboxComposerTemplateLibrarySearch) {
         mailboxComposerTemplateLibrarySearch.addEventListener('input', renderMailboxComposerTemplateLibrary);
+      }
+      if (mailboxComposerAttachmentOpen && mailboxComposerAttachmentInput) {
+        mailboxComposerAttachmentOpen.addEventListener('click', function () {
+          mailboxComposerAttachmentInput.click();
+        });
+        mailboxComposerAttachmentInput.addEventListener('change', function () {
+          var selected = Array.from(mailboxComposerAttachmentInput.files || []);
+          if (selected.length) setMailboxComposerAttachments(mailboxComposerAttachments.concat(selected));
+        });
       }
       if (mailboxComposerForm) {
         mailboxComposerForm.addEventListener('submit', function (event) {
