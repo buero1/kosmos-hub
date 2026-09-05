@@ -46,6 +46,24 @@
     .email-recipient-search-result:hover, .email-recipient-search-result:focus-visible { background: var(--accent-soft); outline: none; }
     .email-recipient-search-result strong, .email-recipient-search-result span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .email-recipient-search-result span { margin-top: 0.14rem; color: var(--muted); font-size: 0.78rem; }
+    .email-template-search { position: relative; }
+    .email-template-search-control { display: grid; grid-template-columns: minmax(0, 1fr) var(--control-v1-height); gap: 0; }
+    .email-template-search-control input { min-width: 0; margin: 0; border-radius: var(--control-v1-radius) 0 0 var(--control-v1-radius); }
+    .email-template-search-open { min-height: var(--control-v1-height); margin: 0; border-radius: 0 var(--control-v1-radius) var(--control-v1-radius) 0; font-size: 1.15rem; line-height: 1; }
+    .email-template-search-results { position: absolute; z-index: 3; inset: calc(100% + 0.3rem) 0 auto; display: grid; max-height: 15rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.16); }
+    .email-template-search-results[hidden] { display: none; }
+    .email-template-search-result { width: 100%; padding: 0.62rem 0.72rem; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+    .email-template-search-result:last-child { border-bottom: 0; }
+    .email-template-search-result:hover, .email-template-search-result:focus-visible { background: var(--accent-soft); outline: none; }
+    .email-template-search-result strong, .email-template-search-result span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .email-template-search-result span { margin-top: 0.14rem; color: var(--muted); font-size: 0.78rem; }
+    .email-template-library { display: grid; gap: 1rem; padding-top: 1rem; }
+    .email-template-library[hidden] { display: none; }
+    .email-template-library-header { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; }
+    .email-template-library-header h3 { margin: 0; }
+    .email-template-library-list { display: grid; gap: 1rem; }
+    .email-template-library-group { display: grid; gap: 0.35rem; }
+    .email-template-library-group h4 { margin: 0; color: var(--muted); font-size: 0.82rem; }
     @media (max-width: 780px) { .mailbox-shell { display: block; height: auto; min-height: 0; } .mailbox-folders { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-folders a { flex: 0 0 auto; } .mailbox-list { max-height: 24rem; border-right: 0; border-bottom: 1px solid var(--border); } .mailbox-reading-pane { overflow: visible; } }
   </style>
   <section class="mailbox-header">
@@ -66,7 +84,7 @@
         </div>
         <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
       </div>
-      <form method="post" class="communication-form email-compose-form" data-mailbox-compose-form>
+      <form method="post" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="template_id" value="" data-email-compose-template-id>
         <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
@@ -82,8 +100,13 @@
             <div id="email-recipient-results" class="email-recipient-search-results" data-mailbox-compose-recipient-results role="listbox" hidden></div>
           </label>
         </div>
-        <label>Zoho-Vorlage
-          <select data-email-compose-template disabled>
+        <label class="email-template-search">Zoho-Vorlage
+          <div class="email-template-search-control">
+            <input type="search" autocomplete="off" placeholder="Zoho-Vorlage suchen" data-mailbox-template-search aria-autocomplete="list" aria-controls="email-template-results" disabled>
+            <button class="button button-secondary email-template-search-open" type="button" data-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen" disabled>↑</button>
+          </div>
+          <div id="email-template-results" class="email-template-search-results" data-mailbox-template-search-results role="listbox" hidden></div>
+          <select data-email-compose-template hidden disabled>
             <option value="">Keine Vorlage verwenden</option>
           </select>
         </label>
@@ -123,6 +146,19 @@
           <button class="button" type="submit" data-mailbox-compose-submit disabled>E-Mail senden</button>
         </div>
       </form>
+      <section class="email-template-library" data-mailbox-template-library hidden aria-label="Zoho-E-Mail-Vorlagen">
+        <div class="email-template-library-header">
+          <button class="button button-secondary" type="button" data-mailbox-template-library-back>← Zurück</button>
+          <div>
+            <p class="eyebrow">Zoho CRM</p>
+            <h3>Vorlage wählen</h3>
+          </div>
+        </div>
+        <label>Vorlagen durchsuchen
+          <input type="search" autocomplete="off" placeholder="Name, Betreff oder Kategorie" data-mailbox-template-library-search>
+        </label>
+        <div class="email-template-library-list" data-mailbox-template-library-list></div>
+      </section>
     </aside>
   </div>
 
@@ -157,12 +193,20 @@
       var mailboxComposerRecipientResults = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-recipient-results]');
       var mailboxComposerTemplate = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template]');
       var mailboxComposerTemplateId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template-id]');
+      var mailboxComposerTemplateSearch = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-search]');
+      var mailboxComposerTemplateSearchResults = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-search-results]');
+      var mailboxComposerTemplateLibrary = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library]');
+      var mailboxComposerTemplateLibraryOpen = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library-open]');
+      var mailboxComposerTemplateLibraryBack = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library-back]');
+      var mailboxComposerTemplateLibrarySearch = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library-search]');
+      var mailboxComposerTemplateLibraryList = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library-list]');
       var mailboxComposerStatus = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template-status]');
       var mailboxComposerSubmit = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-submit]');
       var mailboxComposerLoaded = false;
       var mailboxComposerRecipientRequest = 0;
       var mailboxComposerRecipientSearchTimer = 0;
       var mailboxComposerRecipientSearchController = null;
+      var mailboxComposerTemplates = [];
 
       function mailboxComposerOption(select, value, label, dataEmail) {
         var option = document.createElement('option');
@@ -206,10 +250,17 @@
             if (mailboxComposerTemplate) {
               mailboxComposerTemplate.replaceChildren();
               mailboxComposerOption(mailboxComposerTemplate, '', 'Keine Vorlage verwenden');
-              (payload.templates || []).forEach(function (template) {
-                var label = template.module + ' · ' + template.name;
-                if (template.subject) label += ' · ' + template.subject;
-                mailboxComposerOption(mailboxComposerTemplate, template.id, label);
+              mailboxComposerTemplates = (payload.templates || []).map(function (template) {
+                return {
+                  id: template.id,
+                  name: template.name,
+                  module: template.module,
+                  category: template.category || template.module,
+                  subject: template.subject || ''
+                };
+              });
+              mailboxComposerTemplates.forEach(function (template) {
+                mailboxComposerOption(mailboxComposerTemplate, template.id, template.name);
               });
             }
 
@@ -234,11 +285,7 @@
 
       function clearMailboxComposerRecipientContext() {
         if (mailboxComposerRecipientKey) mailboxComposerRecipientKey.value = '';
-        if (mailboxComposerTemplate) {
-          mailboxComposerTemplate.value = '';
-          mailboxComposerTemplate.disabled = true;
-        }
-        if (mailboxComposerTemplateId) mailboxComposerTemplateId.value = '';
+        setMailboxComposerTemplateAvailability(false);
         if (mailboxComposer) mailboxComposer.dataset.emailTemplateUrl = '';
         if (mailboxComposerForm) mailboxComposerForm.removeAttribute('action');
       }
@@ -249,7 +296,7 @@
         mailboxComposerRecipientKey.value = recipient.key;
         mailboxComposerForm.action = '/customers/' + encodeURIComponent(recipient.customer_id) + '/communications/emails';
         mailboxComposer.dataset.emailTemplateUrl = '/customers/' + encodeURIComponent(recipient.customer_id) + '/communications/email-templates';
-        if (mailboxComposerTemplate) mailboxComposerTemplate.disabled = false;
+        setMailboxComposerTemplateAvailability(true);
         clearMailboxComposerRecipientResults();
         setMailboxComposerStatus(recipient.name + ' · ' + recipient.customer_name + ' ausgewählt.');
         updateMailboxComposerSubmit();
@@ -272,6 +319,116 @@
           mailboxComposerRecipientResults.append(result);
         });
         mailboxComposerRecipientResults.hidden = !recipients.length;
+      }
+
+      function clearMailboxComposerTemplateSearchResults() {
+        if (!mailboxComposerTemplateSearchResults) return;
+        mailboxComposerTemplateSearchResults.replaceChildren();
+        mailboxComposerTemplateSearchResults.hidden = true;
+      }
+
+      function closeMailboxComposerTemplateLibrary() {
+        if (!mailboxComposerTemplateLibrary || !mailboxComposerForm) return;
+        mailboxComposerTemplateLibrary.hidden = true;
+        mailboxComposerForm.hidden = false;
+      }
+
+      function clearMailboxComposerTemplateSelection() {
+        if (mailboxComposerTemplate) mailboxComposerTemplate.value = '';
+        if (mailboxComposerTemplateId) mailboxComposerTemplateId.value = '';
+        if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.value = '';
+        clearMailboxComposerTemplateSearchResults();
+        closeMailboxComposerTemplateLibrary();
+      }
+
+      function setMailboxComposerTemplateAvailability(enabled) {
+        clearMailboxComposerTemplateSelection();
+        if (mailboxComposerTemplate) mailboxComposerTemplate.disabled = !enabled;
+        if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.disabled = !enabled;
+        if (mailboxComposerTemplateLibraryOpen) mailboxComposerTemplateLibraryOpen.disabled = !enabled;
+      }
+
+      function matchingMailboxComposerTemplates(query) {
+        var normalizedQuery = query.trim().toLowerCase();
+        if (!normalizedQuery) return mailboxComposerTemplates;
+        var terms = normalizedQuery.split(/\s+/).filter(Boolean);
+        return mailboxComposerTemplates.filter(function (template) {
+          var searchable = [template.name, template.subject, template.category, template.module].join(' ').toLowerCase();
+          return terms.every(function (term) { return searchable.indexOf(term) !== -1; });
+        });
+      }
+
+      function selectMailboxComposerTemplate(template) {
+        if (!mailboxComposerTemplate || mailboxComposerTemplate.disabled) return;
+        mailboxComposerTemplate.value = template.id;
+        if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.value = template.name;
+        clearMailboxComposerTemplateSearchResults();
+        closeMailboxComposerTemplateLibrary();
+        mailboxComposerTemplate.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      function createMailboxComposerTemplateResult(template) {
+        var result = document.createElement('button');
+        var name = document.createElement('strong');
+        var detail = document.createElement('span');
+        result.type = 'button';
+        result.className = 'email-template-search-result';
+        result.setAttribute('role', 'option');
+        name.textContent = template.name;
+        detail.textContent = template.category + ' · ' + (template.subject || template.module);
+        result.append(name, detail);
+        result.addEventListener('click', function () { selectMailboxComposerTemplate(template); });
+        return result;
+      }
+
+      function renderMailboxComposerTemplateSearchResults() {
+        if (!mailboxComposerTemplateSearch || !mailboxComposerTemplateSearchResults) return;
+        var query = mailboxComposerTemplateSearch.value;
+        clearMailboxComposerTemplateSearchResults();
+        if (!query.trim()) return;
+        matchingMailboxComposerTemplates(query).slice(0, 8).forEach(function (template) {
+          mailboxComposerTemplateSearchResults.append(createMailboxComposerTemplateResult(template));
+        });
+        mailboxComposerTemplateSearchResults.hidden = !mailboxComposerTemplateSearchResults.childElementCount;
+      }
+
+      function renderMailboxComposerTemplateLibrary() {
+        if (!mailboxComposerTemplateLibraryList) return;
+        var query = mailboxComposerTemplateLibrarySearch ? mailboxComposerTemplateLibrarySearch.value : '';
+        var groups = new Map();
+        matchingMailboxComposerTemplates(query).forEach(function (template) {
+          var category = template.category || template.module || 'Weitere Vorlagen';
+          if (!groups.has(category)) groups.set(category, []);
+          groups.get(category).push(template);
+        });
+        mailboxComposerTemplateLibraryList.replaceChildren();
+        groups.forEach(function (templates, category) {
+          var group = document.createElement('section');
+          var heading = document.createElement('h4');
+          group.className = 'email-template-library-group';
+          heading.textContent = category;
+          group.append(heading);
+          templates.forEach(function (template) { group.append(createMailboxComposerTemplateResult(template)); });
+          mailboxComposerTemplateLibraryList.append(group);
+        });
+        if (!mailboxComposerTemplateLibraryList.childElementCount) {
+          var empty = document.createElement('p');
+          empty.className = 'subtle';
+          empty.textContent = 'Keine passende Vorlage gefunden.';
+          mailboxComposerTemplateLibraryList.append(empty);
+        }
+      }
+
+      function openMailboxComposerTemplateLibrary() {
+        if (!mailboxComposerTemplateLibrary || !mailboxComposerForm || !mailboxComposerTemplateLibraryOpen || mailboxComposerTemplateLibraryOpen.disabled) return;
+        clearMailboxComposerTemplateSearchResults();
+        mailboxComposerForm.hidden = true;
+        mailboxComposerTemplateLibrary.hidden = false;
+        if (mailboxComposerTemplateLibrarySearch) {
+          mailboxComposerTemplateLibrarySearch.value = '';
+          mailboxComposerTemplateLibrarySearch.focus();
+        }
+        renderMailboxComposerTemplateLibrary();
       }
 
       function searchMailboxComposerRecipients() {
@@ -325,6 +482,25 @@
         mailboxComposerRecipient.addEventListener('blur', function () {
           window.setTimeout(clearMailboxComposerRecipientResults, 160);
         });
+      }
+      if (mailboxComposerTemplateSearch) {
+        mailboxComposerTemplateSearch.addEventListener('input', function () {
+          if (mailboxComposerTemplate) mailboxComposerTemplate.value = '';
+          if (mailboxComposerTemplateId) mailboxComposerTemplateId.value = '';
+          renderMailboxComposerTemplateSearchResults();
+        });
+        mailboxComposerTemplateSearch.addEventListener('blur', function () {
+          window.setTimeout(clearMailboxComposerTemplateSearchResults, 160);
+        });
+      }
+      if (mailboxComposerTemplateLibraryOpen) {
+        mailboxComposerTemplateLibraryOpen.addEventListener('click', openMailboxComposerTemplateLibrary);
+      }
+      if (mailboxComposerTemplateLibraryBack) {
+        mailboxComposerTemplateLibraryBack.addEventListener('click', closeMailboxComposerTemplateLibrary);
+      }
+      if (mailboxComposerTemplateLibrarySearch) {
+        mailboxComposerTemplateLibrarySearch.addEventListener('input', renderMailboxComposerTemplateLibrary);
       }
       if (mailboxComposerForm) {
         mailboxComposerForm.addEventListener('submit', function (event) {

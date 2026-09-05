@@ -420,7 +420,13 @@ def mailbox_compose_options(
     return {
         "senders": [{"name": sender.name, "email": sender.email} for sender in senders],
         "templates": [
-            {"id": template.id, "name": template.name, "module": template.module, "subject": template.subject}
+            {
+                "id": template.id,
+                "name": template.name,
+                "module": template.module,
+                "category": template.category,
+                "subject": template.subject,
+            }
             for template in service.list_email_templates()
         ],
         "sender_error": sender_error,

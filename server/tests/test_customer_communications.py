@@ -623,6 +623,7 @@ def test_customer_communications_loads_and_sends_an_editable_zoho_email_template
             ("zoho-template-1", "Statusvorlage", "Accounts"),
             ("zoho-template-2", "Kontaktvorlage", "Contacts"),
         ]
+        assert [item.category for item in service.list_email_templates()] == ["Kunden", "Kunden"]
         template = service.get_email_template(customer_id=customer.id, template_id="zoho-template-1")
         assert template.subject == "Aktueller Stand für Example Customer"
         assert template.content == '<table style="width: 100%"><tr><td><strong>Hallo Example Customer zoho-account-1 2026-09-02 Bitte nachfassen</strong></td></tr></table>'

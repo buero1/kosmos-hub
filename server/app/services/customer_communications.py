@@ -201,6 +201,7 @@ class CustomerCommunicationEmailTemplate:
     name: str
     subject: str
     module: str
+    category: str
 
 
 @dataclass(frozen=True)
@@ -424,12 +425,14 @@ class CustomerCommunicationService:
             name = self._text(payload.get("name"))
             if not template_id or not name:
                 continue
+            category = self._text(payload.get("folder_name")) or template.module
             templates.append(
                 CustomerCommunicationEmailTemplate(
                     id=template_id,
                     name=name,
                     subject=self._text(payload.get("subject")) or "",
                     module=template.module,
+                    category=category,
                 )
             )
         return tuple(sorted(templates, key=lambda item: (item.module.casefold(), item.name.casefold())))
