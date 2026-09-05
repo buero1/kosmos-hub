@@ -2219,6 +2219,23 @@
       .email-rich-editor-content div:first-child { margin-top: 0; }
       .email-rich-editor-content p:last-child,
       .email-rich-editor-content div:last-child { margin-bottom: 0; }
+      /* Zoho layouts use tables for visual containers; keep their email-native styling intact. */
+      [data-email-compose-content] table {
+        width: auto;
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      [data-email-compose-content] th,
+      [data-email-compose-content] td {
+        padding: 0;
+        border-bottom: 0;
+        text-align: initial;
+        vertical-align: initial;
+      }
       .email-compose-actions {
         display: flex;
         align-items: center;
