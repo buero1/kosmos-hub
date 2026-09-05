@@ -191,6 +191,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
                         "fields": {
                             "Kunde-Name": "Example Customer",
                             "Status": "Aktuell",
+                            "Kunde Typ": "Kunde",
                             "Rechnungsadresse - Straße": "Musterstraße 1",
                             "Rechnungsadresse - PLZ": "82319",
                             "Rechnungsadresse - Stadt": "Starnberg",
@@ -203,6 +204,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
                         "field_metadata": {
                             "customer_name": {"label": "Kunde-Name"},
                             "account_status": {"label": "Status"},
+                            "customer_type": {"label": "Kunde Typ"},
                             "billing_street": {"label": "Rechnungsadresse - Straße"},
                             "billing_postal_code": {"label": "Rechnungsadresse - PLZ"},
                             "billing_city": {"label": "Rechnungsadresse - Stadt"},
@@ -222,20 +224,19 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
         detail = _service(db).get_detail(customer_id=customer.id)
 
         assert detail is not None
-        assert [field.label for field in detail.priority_profile_fields_left] == [
+        assert [field.label for field in detail.priority_profile_fields] == [
             "Kunde-Name",
-            "Status",
-            "Rechnungsadresse - Straße",
-            "PLZ Ort",
-        ]
-        assert detail.priority_profile_fields_left[-1].value == "82319 Starnberg"
-        assert detail.priority_profile_fields_left[-1].display_type == "Hub-Feld"
-        assert [field.label for field in detail.priority_profile_fields_right] == [
             "Tel.",
+            "Status",
+            "Kunde Typ",
             "Webseite",
             "Arbeitsdomain-Login",
+            "Rechnungsadresse - Straße",
+            "PLZ Ort",
             "Options an WP senden",
         ]
+        assert detail.priority_profile_fields[-2].value == "82319 Starnberg"
+        assert detail.priority_profile_fields[-2].display_type == "Hub-Feld"
         assert [field.label for field in detail.remaining_profile_fields] == ["Branche"]
 
 

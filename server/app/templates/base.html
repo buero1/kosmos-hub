@@ -1925,31 +1925,17 @@
         gap: 1rem 1.5rem;
         margin: 0;
       }
-      .customer-fields-priority-layout {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 1rem 1.5rem;
-      }
-      .customer-fields-column {
-        display: grid;
-        align-content: start;
-        gap: 1rem;
-        margin: 0;
-      }
       .customer-fields-grid-following {
         margin-top: 1rem;
         padding-top: 1rem;
         border-top: 1px solid var(--border);
       }
-      .customer-fields-grid div,
-      .customer-fields-column div { min-width: 0; }
-      .customer-fields-grid dt,
-      .customer-fields-column dt {
+      .customer-fields-grid div { min-width: 0; }
+      .customer-fields-grid dt {
         color: var(--muted);
         font-size: 0.78rem;
       }
-      .customer-fields-grid dd,
-      .customer-fields-column dd {
+      .customer-fields-grid dd {
         margin: 0.32rem 0 0;
         overflow-wrap: anywhere;
       }
@@ -2723,7 +2709,6 @@
           grid-template-columns: 1fr;
         }
         .customer-fields-grid,
-        .customer-fields-priority-layout,
         .customer-field-editor-grid { grid-template-columns: 1fr; }
         .styling-page-layout { grid-template-columns: 1fr; }
         .styling-settings-grid-foundation,
