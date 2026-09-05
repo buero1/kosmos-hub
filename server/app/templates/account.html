@@ -246,7 +246,7 @@
           {% if zoho_status.configured %}
             <div class="zoho-connection-status">
               <p class="subtle">Rechenzentrum: <strong>{{ zoho_status.data_center.label }}</strong>. {% if zoho_status.connected %}Verbunden seit {{ zoho_status.connected_at | berlin_time }}.{% else %}Noch nicht verbunden.{% endif %}</p>
-              <a class="button button-secondary zoho-reconnect-action" href="/account/zoho/connect">{% if zoho_status.connected %}Zoho CRM erneut verbinden{% else %}Zoho CRM verbinden{% endif %}</a>
+              <a class="button button-variant-1 zoho-reconnect-action" href="/account/zoho/connect">{% if zoho_status.connected %}Zoho CRM erneut verbinden{% else %}Zoho CRM verbinden{% endif %}</a>
             </div>
             {% if zoho_status.requires_scope_reconnect %}<p class="notice-error">Verbinde Zoho CRM vor dem nächsten Abgleich erneut, um den vollständigen CRM-Zugriff zu bestätigen.</p>{% endif %}
           {% else %}
@@ -260,9 +260,9 @@
           <div class="zoho-area-content">
             <p class="subtle">Übernimmt Änderungen an Zoho-Accounts und ihren Kontakten. Sichtbar bleiben Kunden mit dem Status Aktuell, Neu, gekündigt oder Kündigung liegt vor.</p>
             {% if not zoho_status.requires_scope_reconnect %}
-              <form method="post" action="/account/zoho/sync">
+              <form class="zoho-area-action" method="post" action="/account/zoho/sync">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="button" type="submit">Kunden und Kontakte synchronisieren</button>
+                <button class="button button-secondary" type="submit">Kunden und Kontakte synchronisieren</button>
               </form>
             {% endif %}
           </div>
