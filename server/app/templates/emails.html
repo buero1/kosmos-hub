@@ -76,7 +76,7 @@
     .email-template-library-group h4 { margin: 0; color: var(--muted); font-size: 0.82rem; }
     .email-compose-attachments { display: grid; gap: 0.45rem; padding-top: 0.15rem; }
     .email-compose-attachment-controls { display: flex; align-items: center; gap: 0.55rem; }
-    .email-compose-attachment-trigger { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; font-size: 1.08rem; line-height: 1; }
+    button.email-compose-attachment-trigger { display: grid; width: var(--control-v2-height); min-width: var(--control-v2-height); height: var(--control-v2-height); min-height: var(--control-v2-height); place-items: center; margin: 0; padding: 0; font-size: 24px; line-height: 1; }
     .email-compose-attachment-summary { color: var(--muted); font-size: 0.82rem; }
     .email-compose-attachment-list { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
     .email-compose-attachment-list[hidden] { display: none; }
@@ -166,7 +166,7 @@
         <div class="email-compose-attachments">
           <input id="email-compose-attachments" type="file" name="attachments" multiple hidden data-email-compose-attachments>
           <div class="email-compose-attachment-controls">
-            <button class="button button-secondary button-variant-1 email-compose-attachment-trigger" type="button" data-email-compose-attachments-open aria-label="Anhänge hinzufügen" title="Anhänge hinzufügen">&#128206;</button>
+            <button class="button button-secondary button-variant-2 email-compose-attachment-trigger" type="button" data-email-compose-attachments-open aria-label="Anhänge hinzufügen" title="Anhänge hinzufügen">&#128206;</button>
             <span class="email-compose-attachment-summary" data-email-compose-attachment-summary>Keine Anhänge ausgewählt</span>
           </div>
           <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
