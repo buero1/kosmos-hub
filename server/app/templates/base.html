@@ -1924,6 +1924,10 @@
       .customer-detail-panel-heading h3,
       .customer-detail-panel-heading p { margin: 0; }
       .customer-detail-panel-heading .subtle { margin-top: 0.35rem; }
+      .customer-email-compose-open {
+        width: 150px;
+        justify-content: center;
+      }
       .customer-fields-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3188,12 +3192,20 @@
           var content = section.querySelector("[data-expandable-content]");
           var toggle = section.querySelector("[data-expandable-toggle]");
           if (!content || !toggle) { return; }
+          var startsCollapsed = content.hasAttribute("data-expandable-start-collapsed");
 
           function updateExpandableSection() {
             if (section.classList.contains("is-editing") || section.classList.contains("is-layout-editing")) {
               toggle.hidden = true;
               return;
             }
+            if (startsCollapsed && !content.classList.contains("is-expanded")) {
+              content.hidden = true;
+              toggle.hidden = false;
+              toggle.textContent = "Weiter lesen ...";
+              return;
+            }
+            content.hidden = false;
             if (content.classList.contains("is-expanded")) {
               toggle.hidden = false;
               return;
@@ -3208,6 +3220,7 @@
 
           toggle.addEventListener("click", function () {
             var expanded = content.classList.toggle("is-expanded");
+            if (startsCollapsed) { content.hidden = !expanded; }
             toggle.textContent = expanded ? "Weniger anzeigen" : "Weiter lesen ...";
             window.requestAnimationFrame(updateExpandableSection);
           });

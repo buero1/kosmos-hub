@@ -110,7 +110,7 @@
                   <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
                 {% endif %}
               {% endif %}
-              <div data-expandable-content{% if not detail.following_profile_fields %} class="is-expanded"{% endif %}>
+              <div data-expandable-content{% if detail.following_profile_fields %} data-expandable-start-collapsed hidden{% else %} class="is-expanded"{% endif %}>
                 {% if detail.display_profile_fields %}
                   {% if detail.following_profile_fields %}
                     <dl class="customer-fields-grid customer-fields-grid-following">
@@ -212,10 +212,9 @@
             <div>
               <p class="eyebrow">Zoho CRM</p>
               <h3>E-Mails</h3>
-              <p class="subtle">Synchronisierte E-Mail-Verläufe. Inhalte werden bei Bedarf verschlüsselt geladen.</p>
             </div>
             {% if can_manage_communications and communication.recipients and communication_senders %}
-              <button class="button button-variant-2" type="button" data-email-compose-open>E-Mail schreiben</button>
+              <button class="button button-variant-2 customer-email-compose-open" type="button" data-email-compose-open>E-Mail schreiben</button>
             {% endif %}
           </div>
           <div class="customer-section-expandable" data-expandable-section>
@@ -257,6 +256,52 @@
                 </article>
               {% else %}
                 <p class="subtle">Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.</p>
+              {% endfor %}
+            </div>
+            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+        </article>
+
+      </div>
+
+      <aside class="customer-detail-side-column">
+        <article class="card customer-detail-panel customer-notes-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Notizen</h3>
+              <p class="subtle">Notizen aus Zoho und aus dem Hub.</p>
+            </div>
+          </div>
+          {% if can_manage_communications %}
+            <div class="customer-note-composer" data-note-composer>
+              <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
+              <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/notes" class="communication-form" data-note-composer-form hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <textarea name="content" rows="5" maxlength="30000" required aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
+                <div class="customer-note-composer-actions">
+                  <button class="button button-secondary" type="button" data-note-composer-cancel>Abbrechen</button>
+                  <button class="button" type="submit">Senden</button>
+                </div>
+              </form>
+            </div>
+          {% endif %}
+          <div class="customer-section-expandable" data-expandable-section>
+            <div data-expandable-content>
+              {% for note in communication.notes %}
+                <article class="communication-entry">
+                  <div class="communication-entry-heading">
+                    <strong>{{ note.title }}</strong>
+                    <span class="pill">{% if note.source == "hub" %}Hub{% else %}Zoho{% endif %}</span>
+                  </div>
+                  {% if note.author or note.occurred_at %}
+                    <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
+                  {% endif %}
+                  <p class="communication-note-content">{{ note.content }}</p>
+                  {% if note.last_error %}<p class="notice-warning">{{ note.last_error }}</p>{% endif %}
+                </article>
+              {% else %}
+                <p class="subtle">Noch keine Notizen gespeichert.</p>
               {% endfor %}
             </div>
             <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
@@ -306,51 +351,6 @@
                 </tbody>
                 </table>
               </div>
-            </div>
-            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
-          </div>
-        </article>
-      </div>
-
-      <aside class="customer-detail-side-column">
-        <article class="card customer-detail-panel customer-notes-panel">
-          <div class="customer-detail-panel-heading">
-            <div>
-              <p class="eyebrow">Zoho CRM</p>
-              <h3>Notizen</h3>
-              <p class="subtle">Notizen aus Zoho und aus dem Hub.</p>
-            </div>
-          </div>
-          {% if can_manage_communications %}
-            <div class="customer-note-composer" data-note-composer>
-              <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
-              <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/notes" class="communication-form" data-note-composer-form hidden>
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <textarea name="content" rows="5" maxlength="30000" required aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
-                <div class="customer-note-composer-actions">
-                  <button class="button button-secondary" type="button" data-note-composer-cancel>Abbrechen</button>
-                  <button class="button" type="submit">Senden</button>
-                </div>
-              </form>
-            </div>
-          {% endif %}
-          <div class="customer-section-expandable" data-expandable-section>
-            <div data-expandable-content>
-              {% for note in communication.notes %}
-                <article class="communication-entry">
-                  <div class="communication-entry-heading">
-                    <strong>{{ note.title }}</strong>
-                    <span class="pill">{% if note.source == "hub" %}Hub{% else %}Zoho{% endif %}</span>
-                  </div>
-                  {% if note.author or note.occurred_at %}
-                    <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
-                  {% endif %}
-                  <p class="communication-note-content">{{ note.content }}</p>
-                  {% if note.last_error %}<p class="notice-warning">{{ note.last_error }}</p>{% endif %}
-                </article>
-              {% else %}
-                <p class="subtle">Noch keine Notizen gespeichert.</p>
-              {% endfor %}
             </div>
             <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
           </div>
