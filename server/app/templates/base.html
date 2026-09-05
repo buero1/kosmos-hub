@@ -2442,7 +2442,6 @@
         background: rgba(217, 239, 232, 0.34);
       }
       a.button {
-        display: inline-block;
         margin-top: 1rem;
         background: var(--accent);
         color: white;
@@ -2477,6 +2476,13 @@
         border-radius: var(--hub-control-radius, var(--control-v1-radius));
         font-size: var(--hub-control-font-size, var(--control-v1-font-size));
         line-height: 1.2;
+      }
+      button.button,
+      a.button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
       }
       textarea {
         min-height: var(--hub-control-height, var(--control-v1-height));
