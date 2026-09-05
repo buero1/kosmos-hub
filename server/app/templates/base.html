@@ -2912,8 +2912,13 @@
                 setEmailComposerTemplateStatus("");
                 return;
               }
+              var templateBaseUrl = emailComposerLayer.dataset.emailTemplateUrl;
+              if (!templateBaseUrl) {
+                setEmailComposerTemplateStatus("Vorlage ausgewählt. Bitte einen Kontakt aus der Ergebnisliste wählen, damit Platzhalter gesetzt werden.");
+                return;
+              }
               setEmailComposerTemplateStatus("Vorlage wird geladen ...");
-              var templateUrl = emailComposerLayer.dataset.emailTemplateUrl + "/" + encodeURIComponent(templateId);
+              var templateUrl = templateBaseUrl + "/" + encodeURIComponent(templateId);
               var recipientKey = emailComposerRecipientKey && emailComposerRecipientKey.value
                 ? emailComposerRecipientKey.value
                 : (emailComposerRecipient && emailComposerRecipient.tagName === "SELECT" ? emailComposerRecipient.value : "");

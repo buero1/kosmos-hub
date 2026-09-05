@@ -102,11 +102,11 @@
         </div>
         <label class="email-template-search">Zoho-Vorlage
           <div class="email-template-search-control">
-            <input type="search" autocomplete="off" placeholder="Zoho-Vorlage suchen" data-mailbox-template-search aria-autocomplete="list" aria-controls="email-template-results" disabled>
-            <button class="button button-secondary email-template-search-open" type="button" data-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen" disabled>↑</button>
+            <input type="search" autocomplete="off" placeholder="Zoho-Vorlage suchen" data-mailbox-template-search aria-autocomplete="list" aria-controls="email-template-results">
+            <button class="button button-secondary email-template-search-open" type="button" data-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen">↑</button>
           </div>
           <div id="email-template-results" class="email-template-search-results" data-mailbox-template-search-results role="listbox" hidden></div>
-          <select data-email-compose-template hidden disabled>
+          <select data-email-compose-template hidden>
             <option value="">Keine Vorlage verwenden</option>
           </select>
         </label>
@@ -285,7 +285,6 @@
 
       function clearMailboxComposerRecipientContext() {
         if (mailboxComposerRecipientKey) mailboxComposerRecipientKey.value = '';
-        setMailboxComposerTemplateAvailability(false);
         if (mailboxComposer) mailboxComposer.dataset.emailTemplateUrl = '';
         if (mailboxComposerForm) mailboxComposerForm.removeAttribute('action');
       }
@@ -296,9 +295,11 @@
         mailboxComposerRecipientKey.value = recipient.key;
         mailboxComposerForm.action = '/customers/' + encodeURIComponent(recipient.customer_id) + '/communications/emails';
         mailboxComposer.dataset.emailTemplateUrl = '/customers/' + encodeURIComponent(recipient.customer_id) + '/communications/email-templates';
-        setMailboxComposerTemplateAvailability(true);
         clearMailboxComposerRecipientResults();
         setMailboxComposerStatus(recipient.name + ' · ' + recipient.customer_name + ' ausgewählt.');
+        if (mailboxComposerTemplate && mailboxComposerTemplate.value) {
+          mailboxComposerTemplate.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         updateMailboxComposerSubmit();
       }
 
@@ -341,13 +342,6 @@
         closeMailboxComposerTemplateLibrary();
       }
 
-      function setMailboxComposerTemplateAvailability(enabled) {
-        clearMailboxComposerTemplateSelection();
-        if (mailboxComposerTemplate) mailboxComposerTemplate.disabled = !enabled;
-        if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.disabled = !enabled;
-        if (mailboxComposerTemplateLibraryOpen) mailboxComposerTemplateLibraryOpen.disabled = !enabled;
-      }
-
       function matchingMailboxComposerTemplates(query) {
         var normalizedQuery = query.trim().toLowerCase();
         if (!normalizedQuery) return mailboxComposerTemplates;
@@ -359,7 +353,7 @@
       }
 
       function selectMailboxComposerTemplate(template) {
-        if (!mailboxComposerTemplate || mailboxComposerTemplate.disabled) return;
+        if (!mailboxComposerTemplate) return;
         mailboxComposerTemplate.value = template.id;
         if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.value = template.name;
         clearMailboxComposerTemplateSearchResults();
@@ -420,7 +414,7 @@
       }
 
       function openMailboxComposerTemplateLibrary() {
-        if (!mailboxComposerTemplateLibrary || !mailboxComposerForm || !mailboxComposerTemplateLibraryOpen || mailboxComposerTemplateLibraryOpen.disabled) return;
+        if (!mailboxComposerTemplateLibrary || !mailboxComposerForm) return;
         clearMailboxComposerTemplateSearchResults();
         mailboxComposerForm.hidden = true;
         mailboxComposerTemplateLibrary.hidden = false;
