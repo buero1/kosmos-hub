@@ -237,6 +237,33 @@ def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_e
             "Unbekannte Nachricht",
             "Gemeinsame Nachricht",
         }
+        assert service.apply_batch_action(
+            keys=[f"linked-{first_customer.id}-{first_copy.id}", f"unassigned-{unassigned.id}"],
+            action="restore",
+        ) == 3
+        assert first_copy.mailbox_state == "active"
+        assert second_copy.mailbox_state == "active"
+        assert unassigned.mailbox_state == "active"
+        assert service.get_folder_view(folder="spam", unread_only=False).messages == ()
+
+        assert service.apply_batch_action(
+            keys=[f"linked-{first_customer.id}-{first_copy.id}"],
+            action="move_sent",
+        ) == 2
+        assert first_copy.direction == "outbound"
+        assert second_copy.direction == "outbound"
+        assert [message.subject for message in service.get_folder_view(folder="sent", unread_only=False).messages] == [
+            "Gemeinsame Nachricht"
+        ]
+
+        assert service.apply_batch_action(
+            keys=[f"unassigned-{unassigned.id}"],
+            action="move_trash",
+        ) == 1
+        assert unassigned.mailbox_state == "trash"
+        assert [message.subject for message in service.get_folder_view(folder="trash", unread_only=False).messages] == [
+            "Unbekannte Nachricht"
+        ]
 
 
 def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():

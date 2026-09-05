@@ -23,7 +23,9 @@ _ACTIVE_MAILBOX_STATE = "active"
 _DRAFT_MAILBOX_STATE = "draft"
 _DRAFT_SOURCE = "hub-draft"
 _MAILBOX_STATE_BY_FOLDER = {"drafts": _DRAFT_MAILBOX_STATE, "trash": "trash", "spam": "spam"}
-_BATCH_ACTIONS = frozenset({"mark_read", "mark_unread", "move_trash", "move_spam"})
+_BATCH_ACTIONS = frozenset(
+    {"mark_read", "mark_unread", "move_inbox", "move_sent", "move_trash", "move_spam", "restore"}
+)
 
 
 @dataclass(frozen=True)
@@ -243,10 +245,18 @@ class HubMailboxService:
                 email.is_unread = False
             elif action == "mark_unread":
                 email.is_unread = True
+            elif action == "move_inbox":
+                email.mailbox_state = _ACTIVE_MAILBOX_STATE
+                email.direction = "inbound"
+            elif action == "move_sent":
+                email.mailbox_state = _ACTIVE_MAILBOX_STATE
+                email.direction = "outbound"
             elif action == "move_trash":
                 email.mailbox_state = "trash"
             elif action == "move_spam":
                 email.mailbox_state = "spam"
+            elif action == "restore":
+                email.mailbox_state = _ACTIVE_MAILBOX_STATE
         self.db.flush()
         return len(linked_by_id) + len(unassigned_by_id)
 

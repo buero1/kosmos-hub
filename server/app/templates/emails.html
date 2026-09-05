@@ -30,16 +30,22 @@
     .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
     .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
     .mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; font-size: 1.1rem; line-height: 1; }
-    .mailbox-context-menu { position: fixed; z-index: 30; display: grid; width: min(16rem, calc(100vw - 1.5rem)); overflow: hidden; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 1rem 2.4rem rgba(29, 42, 47, 0.2); }
+    .mailbox-context-menu { position: fixed; z-index: 30; display: grid; width: min(16rem, calc(100vw - 1.5rem)); overflow: visible; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 1rem 2.4rem rgba(29, 42, 47, 0.2); }
     .mailbox-context-menu[hidden] { display: none; }
     .mailbox-context-menu-heading { margin: 0; padding: 0.62rem 0.8rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 0.78rem; font-weight: 700; }
     .mailbox-context-menu-group { display: grid; padding: 0.3rem; border-bottom: 1px solid var(--border); }
     .mailbox-context-menu-group:last-child { border-bottom: 0; }
     .mailbox-context-menu button { display: flex; align-items: center; width: 100%; min-height: 2.2rem; padding: 0.45rem 0.6rem; border: 0; border-radius: var(--control-v1-radius); background: transparent; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+    .mailbox-context-menu button[hidden] { display: none; }
     .mailbox-context-menu button:hover, .mailbox-context-menu button:focus-visible { background: var(--accent-soft); outline: none; }
     .mailbox-context-menu button.is-danger { color: #a93030; }
     .mailbox-context-menu button:disabled { cursor: not-allowed; opacity: 0.45; }
     .mailbox-context-menu button:disabled:hover { background: transparent; }
+    .mailbox-context-submenu-wrap { position: relative; }
+    .mailbox-context-submenu-toggle { justify-content: space-between; }
+    .mailbox-context-submenu { position: absolute; top: -0.3rem; left: calc(100% + 0.3rem); z-index: 1; display: none; width: 11rem; padding: 0.3rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 1rem 2.4rem rgba(29, 42, 47, 0.2); }
+    .mailbox-context-submenu-wrap:hover .mailbox-context-submenu, .mailbox-context-submenu-wrap:focus-within .mailbox-context-submenu, .mailbox-context-submenu-wrap.is-open .mailbox-context-submenu { display: grid; }
+    .mailbox-context-submenu-wrap.opens-left .mailbox-context-submenu { right: calc(100% + 0.3rem); left: auto; }
     .mailbox-reading-meta { margin: 0.5rem 0 0; color: var(--muted); line-height: 1.45; }
     .mailbox-preview-timing { min-height: 1.1rem; margin: 0.55rem 0 0; color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
     .mailbox-customer-links { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem; }
@@ -236,8 +242,21 @@
       <button type="button" role="menuitem" data-mailbox-context-compose="forward">Weiterleiten</button>
     </div>
     <div class="mailbox-context-menu-group">
-      <button class="is-danger" type="button" role="menuitem" data-mailbox-batch-action="move_trash">Löschen</button>
-      <button class="is-danger" type="button" role="menuitem" data-mailbox-batch-action="move_spam">Als Spam kennzeichnen</button>
+      <div class="mailbox-context-submenu-wrap" data-mailbox-context-submenu-wrap>
+        <button class="mailbox-context-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" data-mailbox-context-move-toggle>Verschieben <span aria-hidden="true">›</span></button>
+        <div class="mailbox-context-submenu" role="menu" aria-label="Zielordner">
+          <button type="button" role="menuitem" data-mailbox-batch-action="move_inbox">Posteingang</button>
+          <button type="button" role="menuitem" data-mailbox-batch-action="move_sent">Gesendet</button>
+          <button type="button" role="menuitem" data-mailbox-batch-action="move_trash">Papierkorb</button>
+          <button type="button" role="menuitem" data-mailbox-batch-action="move_spam">Spam</button>
+        </div>
+      </div>
+    </div>
+    <div class="mailbox-context-menu-group">
+      <button class="is-danger" type="button" role="menuitem" data-mailbox-batch-action="move_trash" data-mailbox-context-delete>Löschen</button>
+      <button class="is-danger" type="button" role="menuitem" data-mailbox-batch-action="move_spam" data-mailbox-context-mark-spam>Als Spam kennzeichnen</button>
+      <button type="button" role="menuitem" data-mailbox-batch-action="restore" data-mailbox-context-restore hidden>Wiederherstellen</button>
+      <button type="button" role="menuitem" data-mailbox-batch-action="restore" data-mailbox-context-not-spam hidden>Als keine Spam-Nachricht kennzeichnen</button>
     </div>
   </div>
   <script>
@@ -994,7 +1013,13 @@
       }
 
       function hideMailboxContextMenu() {
-        if (mailboxContextMenu) mailboxContextMenu.hidden = true;
+        if (!mailboxContextMenu) return;
+        mailboxContextMenu.hidden = true;
+        mailboxContextMenu.querySelectorAll('[data-mailbox-context-submenu-wrap]').forEach(function (wrapper) {
+          wrapper.classList.remove('is-open');
+          var toggle = wrapper.querySelector('[data-mailbox-context-move-toggle]');
+          if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        });
       }
 
       function openMailboxContextMenu(list, clientX, clientY, anchor) {
@@ -1005,6 +1030,7 @@
         var unreadable = messages.some(function (message) { return !message.is_unread; });
         var single = messages.length === 1 ? messages[0] : null;
         var canCompose = !!(single && single.kind === 'linked' && single.direction === 'inbound');
+        var folder = list.dataset.mailboxFolderName || 'inbox';
         if (mailboxContextMenuHeading) {
           mailboxContextMenuHeading.textContent = messages.length + (messages.length === 1 ? ' E-Mail ausgewählt' : ' E-Mails ausgewählt');
         }
@@ -1015,6 +1041,14 @@
         mailboxContextMenu.querySelectorAll('[data-mailbox-context-compose]').forEach(function (button) {
           button.disabled = !canCompose;
         });
+        var deleteButton = mailboxContextMenu.querySelector('[data-mailbox-context-delete]');
+        var spamButton = mailboxContextMenu.querySelector('[data-mailbox-context-mark-spam]');
+        var restoreButton = mailboxContextMenu.querySelector('[data-mailbox-context-restore]');
+        var notSpamButton = mailboxContextMenu.querySelector('[data-mailbox-context-not-spam]');
+        if (deleteButton) deleteButton.hidden = folder === 'trash';
+        if (spamButton) spamButton.hidden = folder === 'spam';
+        if (restoreButton) restoreButton.hidden = folder !== 'trash';
+        if (notSpamButton) notSpamButton.hidden = folder !== 'spam';
         mailboxContextMenu.hidden = false;
         mailboxContextMenu.style.left = '0px';
         mailboxContextMenu.style.top = '0px';
@@ -1026,6 +1060,13 @@
         y = Math.max(12, Math.min(y, window.innerHeight - menuRect.height - 12));
         mailboxContextMenu.style.left = x + 'px';
         mailboxContextMenu.style.top = y + 'px';
+        menuRect = mailboxContextMenu.getBoundingClientRect();
+        mailboxContextMenu.querySelectorAll('[data-mailbox-context-submenu-wrap]').forEach(function (wrapper) {
+          wrapper.classList.remove('is-open');
+          wrapper.classList.toggle('opens-left', menuRect.right + 184 > window.innerWidth - 12);
+          var toggle = wrapper.querySelector('[data-mailbox-context-move-toggle]');
+          if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        });
       }
 
       function applyMailboxContextAction(list, action) {
@@ -1062,7 +1103,7 @@
             var unread = list.dataset.mailboxUnread === 'true';
             folderCache.clear();
             folderMarkedMessages.delete(mailboxFolderKey(folder, unread));
-            if (action === 'move_trash' || action === 'move_spam') {
+            if (action !== 'mark_read' && action !== 'mark_unread') {
               folderSelections.delete(mailboxFolderKey(folder, unread));
             }
             refreshCurrentMailboxFolder(folder);
@@ -1077,8 +1118,18 @@
         mailboxContextMenu.addEventListener('click', function (event) {
           var batchButton = event.target.closest('[data-mailbox-batch-action]');
           var composeButton = event.target.closest('[data-mailbox-context-compose]');
+          var moveToggle = event.target.closest('[data-mailbox-context-move-toggle]');
           var list = document.querySelector('[data-mailbox-list]');
           if (!list) return;
+          if (moveToggle) {
+            event.preventDefault();
+            var wrapper = moveToggle.closest('[data-mailbox-context-submenu-wrap]');
+            if (!wrapper) return;
+            var isOpen = !wrapper.classList.contains('is-open');
+            wrapper.classList.toggle('is-open', isOpen);
+            moveToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            return;
+          }
           if (batchButton && !batchButton.disabled) {
             event.preventDefault();
             hideMailboxContextMenu();
