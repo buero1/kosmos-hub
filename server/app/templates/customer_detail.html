@@ -34,19 +34,25 @@
     <div class="section-heading customer-detail-heading">
       <div>
         <p class="eyebrow">CRM customer</p>
-        <h2>{{ detail.entry.customer.name }}</h2>
-        <p class="subtle">Customer and linked contact data are imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
+        <div class="customer-heading-title-row">
+          <h2>{{ detail.entry.customer.name }}</h2>
+          <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
+        </div>
       </div>
       <div class="customer-detail-heading-actions">
-        <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
+        {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
+          <button class="button button-secondary button-variant-2" type="button" data-customer-edit-open>Bearbeiten</button>
+        {% endif %}
         {% if can_manage_communications %}
-          {% if communication.recipients and communication_senders %}
-            <button class="button" type="button" data-email-compose-open>E-Mail schreiben</button>
-          {% endif %}
-          <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="button button-secondary" type="submit">Aus Zoho synchronisieren</button>
-          </form>
+          <details class="customer-actions-menu">
+            <summary class="customer-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
+            <div class="customer-actions-menu-popover">
+              <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary button-variant-2" type="submit">Aus Zoho synchronisieren</button>
+              </form>
+            </div>
+          </details>
         {% endif %}
       </div>
     </div>
@@ -73,55 +79,57 @@
           </div>
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>
-              <dl class="customer-fields-grid">
-                {% for field in detail.profile_fields if field.value %}
-                  <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
-                {% else %}
-                  <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
-                {% endfor %}
-              </dl>
+              <div data-customer-fields-readonly>
+                <dl class="customer-fields-grid">
+                  {% for field in detail.profile_fields if field.value %}
+                    <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
+                  {% else %}
+                    <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
+                  {% endfor %}
+                </dl>
+              </div>
               {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
-                <details class="customer-field-editor">
-                  <summary>Kundendaten bearbeiten</summary>
-                  <form method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    {% if detail.editable_profile_fields %}
-                      <div class="customer-field-editor-grid">
-                        {% for field in detail.editable_profile_fields %}
-                          {{ customer_field_control(field, "customer_field__" ~ field.key) }}
-                        {% endfor %}
-                      </div>
-                    {% endif %}
-                    {% for subform in detail.subforms %}
-                      <section class="customer-subform-editor">
-                        <h4>{{ subform.label }}</h4>
-                        {% for row in subform.records %}
-                          {% set row_index = loop.index0 %}
-                          <fieldset class="customer-subform-row">
-                            <legend>Eintrag {{ loop.index }}</legend>
-                            <div class="customer-field-editor-grid">
-                              {% for field in row.fields if field.editable %}
-                                {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key) }}
-                              {% endfor %}
-                            </div>
-                            <label class="customer-subform-delete"><input type="checkbox" name="customer_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
-                          </fieldset>
-                        {% endfor %}
-                        {% if subform.fields %}
-                          <fieldset class="customer-subform-row">
-                            <legend>Neuer Eintrag</legend>
-                            <div class="customer-field-editor-grid">
-                              {% for field in subform.fields if field.editable %}
-                                {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__new__" ~ field.key) }}
-                              {% endfor %}
-                            </div>
-                          </fieldset>
-                        {% endif %}
-                      </section>
-                    {% endfor %}
-                    <button class="button button-secondary button-variant-2" type="submit">Kundendaten in Zoho speichern</button>
-                  </form>
-                </details>
+                <form method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  {% if detail.editable_profile_fields %}
+                    <div class="customer-field-editor-grid">
+                      {% for field in detail.editable_profile_fields %}
+                        {{ customer_field_control(field, "customer_field__" ~ field.key) }}
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                  {% for subform in detail.subforms %}
+                    <section class="customer-subform-editor">
+                      <h4>{{ subform.label }}</h4>
+                      {% for row in subform.records %}
+                        {% set row_index = loop.index0 %}
+                        <fieldset class="customer-subform-row">
+                          <legend>Eintrag {{ loop.index }}</legend>
+                          <div class="customer-field-editor-grid">
+                            {% for field in row.fields if field.editable %}
+                              {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key) }}
+                            {% endfor %}
+                          </div>
+                          <label class="customer-subform-delete"><input type="checkbox" name="customer_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
+                        </fieldset>
+                      {% endfor %}
+                      {% if subform.fields %}
+                        <fieldset class="customer-subform-row">
+                          <legend>Neuer Eintrag</legend>
+                          <div class="customer-field-editor-grid">
+                            {% for field in subform.fields if field.editable %}
+                              {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__new__" ~ field.key) }}
+                            {% endfor %}
+                          </div>
+                        </fieldset>
+                      {% endif %}
+                    </section>
+                  {% endfor %}
+                  <div class="customer-field-editor-actions">
+                    <button class="button button-secondary button-variant-2" type="button" data-customer-edit-cancel>Abbrechen</button>
+                    <button class="button button-variant-2" type="submit">Kundendaten in Zoho speichern</button>
+                  </div>
+                </form>
               {% endif %}
               <div class="customer-system-details">
                 <p class="eyebrow">Hub-Daten</p>
@@ -155,6 +163,9 @@
               <h3>E-Mails</h3>
               <p class="subtle">Synchronisierte E-Mail-Verläufe. Inhalte werden bei Bedarf verschlüsselt geladen.</p>
             </div>
+            {% if can_manage_communications and communication.recipients and communication_senders %}
+              <button class="button button-variant-2" type="button" data-email-compose-open>E-Mail schreiben</button>
+            {% endif %}
           </div>
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>

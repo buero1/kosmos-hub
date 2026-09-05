@@ -1837,6 +1837,13 @@
         align-items: flex-start;
         margin-bottom: 1.25rem;
       }
+      .customer-heading-title-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+      }
+      .customer-heading-title-row h2 { margin: 0; }
       .customer-detail-heading-actions {
         display: flex;
         align-items: center;
@@ -1846,6 +1853,37 @@
       }
       .customer-detail-heading-actions form { margin: 0; }
       .customer-detail-heading-actions .button { margin: 0; }
+      .customer-actions-menu {
+        position: relative;
+      }
+      .customer-actions-menu-trigger {
+        display: grid;
+        width: var(--control-v2-height);
+        height: var(--control-v2-height);
+        padding: 0;
+        place-items: center;
+        border: 1px solid var(--accent);
+        border-radius: var(--control-v2-radius);
+        color: var(--accent);
+        cursor: pointer;
+        font-size: 1.3rem;
+        line-height: 1;
+        list-style: none;
+      }
+      .customer-actions-menu-trigger::-webkit-details-marker { display: none; }
+      .customer-actions-menu-popover {
+        position: absolute;
+        z-index: 4;
+        top: calc(100% + 0.45rem);
+        right: 0;
+        min-width: max-content;
+        padding: 0.45rem;
+        border: 1px solid var(--border);
+        border-radius: var(--control-v2-radius);
+        background: var(--panel);
+        box-shadow: 0 0.65rem 1.5rem rgba(29, 42, 47, 0.14);
+      }
+      .customer-actions-menu-popover form { margin: 0; }
       .customer-detail-layout {
         display: grid;
         grid-template-columns: minmax(0, 1.55fr) minmax(17.5rem, 0.85fr);
@@ -1897,16 +1935,8 @@
         padding-top: 1rem;
         border-top: 1px solid var(--border);
       }
-      .customer-field-editor summary {
-        color: var(--accent);
-        cursor: pointer;
-        font-weight: 700;
-      }
-      .customer-field-editor form {
-        display: grid;
-        gap: 1rem;
-        margin-top: 1rem;
-      }
+      .customer-field-editor[hidden] { display: none; }
+      .customer-field-editor { display: grid; gap: 1rem; }
       .customer-field-editor-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1948,6 +1978,12 @@
         font-size: 0.82rem;
       }
       .customer-subform-delete { font-size: 0.88rem; }
+      .customer-field-editor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.55rem;
+      }
       .customer-system-details {
         display: grid;
         gap: 0.9rem;
@@ -3120,6 +3156,10 @@
           if (!content || !toggle) { return; }
 
           function updateExpandableSection() {
+            if (section.classList.contains("is-editing")) {
+              toggle.hidden = true;
+              return;
+            }
             if (content.classList.contains("is-expanded")) {
               toggle.hidden = false;
               return;
@@ -3157,6 +3197,37 @@
             toggle.textContent = "Weniger anzeigen";
           }
         }, true);
+
+        document.querySelectorAll("[data-customer-field-editor]").forEach(function (editor) {
+          var section = editor.closest("[data-expandable-section]");
+          var content = editor.closest("[data-expandable-content]");
+          var readonly = content && content.querySelector("[data-customer-fields-readonly]");
+          var toggle = section && section.querySelector("[data-expandable-toggle]");
+          var openers = document.querySelectorAll("[data-customer-edit-open]");
+          var cancel = editor.querySelector("[data-customer-edit-cancel]");
+          if (!section || !content || !readonly || !openers.length || !cancel) { return; }
+
+          function setEditing(editing) {
+            section.classList.toggle("is-editing", editing);
+            content.classList.add("is-expanded");
+            readonly.hidden = editing;
+            editor.hidden = !editing;
+            openers.forEach(function (opener) { opener.hidden = editing; });
+            if (toggle) { toggle.hidden = true; }
+            if (editing) {
+              var firstControl = editor.querySelector("input:not([type=hidden]), select, textarea");
+              if (firstControl) { firstControl.focus(); }
+            } else {
+              editor.reset();
+            }
+            window.dispatchEvent(new Event("resize"));
+          }
+
+          openers.forEach(function (opener) {
+            opener.addEventListener("click", function () { setEditing(true); });
+          });
+          cancel.addEventListener("click", function () { setEditing(false); });
+        });
       }());
     </script>
   </body>
