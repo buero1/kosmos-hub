@@ -563,6 +563,23 @@ class CustomerCommunicationService:
     ) -> CustomerCommunicationSyncResult:
         customer = self._require_zoho_customer(customer_id)
         synced_at = datetime.now(UTC)
+        note_count = self._sync_customer_notes(customer=customer, synced_at=synced_at)
+
+        email_result = self._sync_customer_email_headers(
+            customer=customer,
+            synced_at=synced_at,
+            mark_new_emails_unread=mark_new_emails_unread,
+            load_new_inbound_content=load_new_inbound_content,
+        )
+        return CustomerCommunicationSyncResult(notes=note_count, emails=email_result.emails)
+
+    def sync_customer_notes(self, *, customer_id: int) -> int:
+        """Synchronize only Account notes, without reloading email histories."""
+        customer = self._require_zoho_customer(customer_id)
+        return self._sync_customer_notes(customer=customer, synced_at=datetime.now(UTC))
+
+    def _sync_customer_notes(self, *, customer: Customer, synced_at: datetime) -> int:
+        """Upsert every Zoho Account note for one customer and return new-note count."""
         note_count = 0
         known_notes = {
             note.zoho_note_id: note
@@ -579,14 +596,8 @@ class CustomerCommunicationService:
                 known_notes=known_notes,
             ):
                 note_count += 1
-
-        email_result = self._sync_customer_email_headers(
-            customer=customer,
-            synced_at=synced_at,
-            mark_new_emails_unread=mark_new_emails_unread,
-            load_new_inbound_content=load_new_inbound_content,
-        )
-        return CustomerCommunicationSyncResult(notes=note_count, emails=email_result.emails)
+        self.db.flush()
+        return note_count
 
     def sync_customer_email_headers(
         self,
@@ -1116,7 +1127,7 @@ class CustomerCommunicationService:
         record: dict[str, object],
         synced_at: datetime,
         known_notes: dict[str, CustomerZohoNote],
-    ) -> CustomerZohoEmail | None:
+    ) -> bool:
         note_id = self._text(record.get("id"))
         if not note_id:
             return False

@@ -64,6 +64,12 @@
     {% if request.query_params.get("zoho") == "email-history-import-running" %}
       <p class="notice-success" data-account-notice-section="account-zoho">Der vollständige Zoho-E-Mail-Import läuft bereits weiter.</p>
     {% endif %}
+    {% if request.query_params.get("zoho") == "note-history-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Die bestehenden Zoho-Notizen werden jetzt im Hintergrund importiert.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "note-history-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der vollständige Zoho-Notizimport läuft bereits weiter.</p>
+    {% endif %}
     {% if request.query_params.get("zoho") == "email-content-import-started" %}
       <p class="notice-success" data-account-notice-section="account-zoho">Die 500er-Charge vollständiger Zoho-E-Mails läuft jetzt im Hintergrund.</p>
     {% endif %}
@@ -254,6 +260,10 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button class="button button-secondary" type="submit">Alle Zoho-E-Mail-Verläufe importieren</button>
             </form>
+            <form method="post" action="/account/zoho/note-history/import">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button button-secondary" type="submit">Alle Zoho-Notizen importieren</button>
+            </form>
           </div>
         {% endif %}
         {% if zoho_status.configured %}
@@ -277,6 +287,58 @@
             {% endif %}
           </div>
         </div>
+        <div class="zoho-notification-test">
+          <div>
+            <h4>Zoho-Notizen</h4>
+            <p class="subtle">Der Import lädt alle vorhandenen Account-Notizen fortsetzbar im Hintergrund. Bereits gespeicherte Notizen werden über ihre Zoho-ID aktualisiert und nicht doppelt angelegt.</p>
+          </div>
+          <div class="zoho-notification-test-status">
+            {% if zoho_note_history_import %}
+              <p data-zoho-note-history-import-status><strong>{{ zoho_note_history_import.processed_customers }} von {{ zoho_note_history_import.total_customers }} Kunden</strong> · {{ zoho_note_history_import.imported_notes }} neue Notizen · Status: {{ zoho_note_history_import.status }}{% if zoho_note_history_import.started_at %} · gestartet {{ zoho_note_history_import.started_at | berlin_time }}{% endif %}{% if zoho_note_history_import.completed_at %} · beendet {{ zoho_note_history_import.completed_at | berlin_time }}{% endif %}{% if zoho_note_history_import.last_error %} · {{ zoho_note_history_import.last_error }}{% endif %}</p>
+            {% else %}
+              <p class="subtle">Noch kein vollständiger Zoho-Notizimport ausgeführt.</p>
+            {% endif %}
+          </div>
+        </div>
+        {% if zoho_note_history_import and zoho_note_history_import.status in ["pending", "running"] %}
+          <script>
+            (function () {
+              var statusLine = document.querySelector('[data-zoho-note-history-import-status]');
+              if (!statusLine) return;
+
+              function renderStatus(status) {
+                statusLine.replaceChildren();
+                var progress = document.createElement('strong');
+                progress.textContent = status.processed_customers + ' von ' + status.total_customers + ' Kunden';
+                statusLine.append(progress);
+                statusLine.append(' · ' + status.imported_notes + ' neue Notizen · Status: ' + status.status);
+                if (status.last_error) statusLine.append(' · ' + status.last_error);
+              }
+
+              function refreshStatus() {
+                window.fetch('/account/zoho/note-history/import/status', { credentials: 'same-origin' })
+                  .then(function (response) {
+                    if (!response.ok) throw new Error('Import status response failed.');
+                    return response.json();
+                  })
+                  .then(function (status) {
+                    if (!status.status) return;
+                    renderStatus(status);
+                    if (!status.active) {
+                      window.setTimeout(function () { window.location.reload(); }, 750);
+                      return;
+                    }
+                    window.setTimeout(refreshStatus, 3000);
+                  })
+                  .catch(function () {
+                    window.setTimeout(refreshStatus, 6000);
+                  });
+              }
+
+              window.setTimeout(refreshStatus, 3000);
+            }());
+          </script>
+        {% endif %}
         <div class="zoho-notification-test zoho-email-workflow-webhook">
           <div>
             <h4>Manueller E-Mail-Webhook</h4>

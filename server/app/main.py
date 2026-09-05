@@ -28,6 +28,7 @@ from app.models.zoho_email_workflow_delivery import ZohoEmailWorkflowDelivery
 from app.models.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhook
 from app.models.zoho_email_content_import import ZohoEmailContentImport, ZohoEmailContentImportItem
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
+from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.services.hub_accounts import HubAccountService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
@@ -39,6 +40,7 @@ from app.services.maintenance_worker import (
     schedule_pending_user_deletions,
     schedule_pending_zoho_email_content_import,
     schedule_pending_zoho_email_history_import,
+    schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_email_workflow_deliveries,
 )
 
@@ -220,6 +222,10 @@ def _ensure_phase_one_schema() -> None:
     if "zoho_email_history_imports" not in table_names:
         ZohoEmailHistoryImport.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created zoho_email_history_imports table.")
+
+    if "zoho_note_history_imports" not in table_names:
+        ZohoNoteHistoryImport.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_note_history_imports table.")
 
     if "zoho_email_content_imports" not in table_names:
         ZohoEmailContentImport.__table__.create(bind=engine, checkfirst=True)
@@ -403,6 +409,7 @@ async def lifespan(_: FastAPI):
         schedule_pending_user_deletions()
         schedule_pending_zoho_email_content_import()
         schedule_pending_zoho_email_history_import()
+        schedule_pending_zoho_note_history_import()
         schedule_pending_zoho_email_workflow_deliveries()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:

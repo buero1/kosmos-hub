@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.services.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhookService
 from app.services.zoho_email_content_import import ZohoEmailContentImportService
 from app.services.zoho_email_history_import import ZohoEmailHistoryImportService
+from app.services.zoho_note_history_import import ZohoNoteHistoryImportService
 
 
 _direct_update_poll_lock = Lock()
@@ -20,6 +21,7 @@ _user_deletion_poll_lock = Lock()
 _zoho_email_workflow_poll_lock = Lock()
 _zoho_email_content_import_poll_lock = Lock()
 _zoho_email_history_import_poll_lock = Lock()
+_zoho_note_history_import_poll_lock = Lock()
 logger = logging.getLogger(__name__)
 
 
@@ -257,6 +259,48 @@ def schedule_pending_zoho_email_history_import() -> None:
     Thread(
         target=process_pending_zoho_email_history_import,
         name="kosmos-zoho-email-history-import-worker",
+        daemon=True,
+    ).start()
+
+
+def process_pending_zoho_note_history_import() -> dict[str, int]:
+    """Import historical Account notes serially to keep Zoho API pressure predictable."""
+    summary = {"checked": 0, "succeeded": 0, "failed": 0}
+    if not _zoho_note_history_import_poll_lock.acquire(blocking=False):
+        return summary
+
+    try:
+        while True:
+            try:
+                with SessionLocal() as db:
+                    outcome = ZohoNoteHistoryImportService(
+                        db=db,
+                        cipher=get_secret_cipher(),
+                        public_base_url=get_settings().public_base_url,
+                    ).process_next_customer()
+            except Exception:
+                logger.exception("Zoho note history import worker failed unexpectedly.")
+                summary["failed"] += 1
+                return summary
+
+            if outcome is None or outcome == "completed":
+                return summary
+            summary["checked"] += 1
+            if outcome == "failed":
+                summary["failed"] += 1
+                return summary
+            summary["succeeded"] += 1
+            # A small delay preserves Zoho capacity for interactive Hub actions.
+            sleep(0.25)
+    finally:
+        _zoho_note_history_import_poll_lock.release()
+
+
+def schedule_pending_zoho_note_history_import() -> None:
+    """Resume an active note import after startup or a user request."""
+    Thread(
+        target=process_pending_zoho_note_history_import,
+        name="kosmos-zoho-note-history-import-worker",
         daemon=True,
     ).start()
 

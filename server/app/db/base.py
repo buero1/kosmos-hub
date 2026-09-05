@@ -28,6 +28,7 @@ from app.models.zoho_email_workflow_delivery import ZohoEmailWorkflowDelivery
 from app.models.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhook
 from app.models.zoho_email_content_import import ZohoEmailContentImport, ZohoEmailContentImportItem
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
+from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.models.zoho_connection import ZohoConnection
 from app.models.base import Base
@@ -71,4 +72,5 @@ __all__ = [
     "ZohoEmailContentImport",
     "ZohoEmailContentImportItem",
     "ZohoEmailHistoryImport",
+    "ZohoNoteHistoryImport",
 ]

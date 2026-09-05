@@ -23,10 +23,12 @@ from app.services.customer_communications import CustomerCommunicationService
 from app.services.maintenance_worker import (
     schedule_pending_zoho_email_content_import,
     schedule_pending_zoho_email_history_import,
+    schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_email_workflow_deliveries,
 )
 from app.services.zoho_email_history_import import ZohoEmailHistoryImportService
 from app.services.zoho_email_content_import import ZohoEmailContentImportService
+from app.services.zoho_note_history_import import ZohoNoteHistoryImportService
 from app.services.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhookService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -686,6 +688,71 @@ def import_zoho_email_history(
     return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
 
 
+@router.post("/zoho/note-history/import")
+def import_zoho_note_history(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoNoteHistoryImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).start(requested_by=user.username)
+    except (ValueError, ZohoCrmError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="import-all-zoho-notes",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho note history import {status.id} {'started' if started else 'was already active'} "
+            f"for {status.total_customers} customers."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_note_history_import()
+    state = "note-history-import-started" if started else "note-history-import-running"
+    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+
+
+@router.get("/zoho/note-history/import/status")
+def zoho_note_history_import_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_admin_user(request)
+    status = ZohoNoteHistoryImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).status()
+    if status is None:
+        return JSONResponse({"active": False, "status": None})
+    return JSONResponse(
+        {
+            "active": status.status in {"pending", "running"},
+            "status": status.status,
+            "processed_customers": status.processed_customers,
+            "total_customers": status.total_customers,
+            "imported_notes": status.imported_notes,
+            "last_error": status.last_error,
+        }
+    )
+
+
 @router.post("/zoho/email-content/import")
 @router.post("/zoho/email-content/import-test", include_in_schema=False)
 def import_zoho_email_content_batch(
@@ -971,6 +1038,11 @@ def _account_context(
         "new_mcp_token_name": new_mcp_token_name,
         "zoho_email_workflow_webhook": _zoho_email_workflow_webhook_service(service.db).status(),
         "zoho_email_history_import": ZohoEmailHistoryImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).status(),
+        "zoho_note_history_import": ZohoNoteHistoryImportService(
             db=service.db,
             cipher=get_secret_cipher(),
             public_base_url=get_settings().public_base_url,
