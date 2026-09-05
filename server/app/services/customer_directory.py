@@ -29,6 +29,26 @@ class CustomerDirectoryEntry:
 class CustomerProfileField:
     label: str
     value: str | None
+    key: str = ""
+    display_type: str = "Einzelzeile"
+    form_value: str = ""
+    options: tuple[tuple[str, str], ...] = ()
+    editable: bool = False
+    sensitive: bool = False
+
+
+@dataclass(frozen=True)
+class CustomerProfileSubformRow:
+    id: str | None
+    fields: tuple[CustomerProfileField, ...]
+
+
+@dataclass(frozen=True)
+class CustomerProfileSubform:
+    key: str
+    label: str
+    fields: tuple[CustomerProfileField, ...]
+    records: tuple[CustomerProfileSubformRow, ...]
 
 
 @dataclass(frozen=True)
@@ -36,6 +56,8 @@ class CustomerDirectoryDetail:
     entry: CustomerDirectoryEntry
     profile_fields: tuple[CustomerProfileField, ...]
     contacts: tuple["CustomerContactProfile", ...]
+    editable_profile_fields: tuple[CustomerProfileField, ...] = ()
+    subforms: tuple[CustomerProfileSubform, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -77,6 +99,7 @@ class CustomerDirectoryService:
         status: str | None = None,
         industry: str | None = None,
         unread_email_only: bool = False,
+        include_sensitive: bool = False,
     ) -> list[CustomerDirectoryEntry]:
         customers = list(self.db.scalars(select(Customer).order_by(Customer.name.asc(), Customer.id.asc())).all())
         linked_by_customer, unlinked_by_domain = self._site_maps()
@@ -95,7 +118,7 @@ class CustomerDirectoryService:
         phone_query_forms = self._phone_search_forms(query)
         entries: list[CustomerDirectoryEntry] = []
         for customer in customers:
-            profile_fields = self._profile_fields(customer)
+            profile_fields = self._profile_fields(customer, include_sensitive=include_sensitive)
             contacts = contacts_by_customer.get(customer.id, ())
             entry = self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields)
             if status is not None and (entry.account_status or "").casefold() != status.casefold():
@@ -137,16 +160,19 @@ class CustomerDirectoryService:
                 industries_by_key.setdefault(industry.casefold(), industry)
         return sorted(industries_by_key.values(), key=str.casefold)
 
-    def get_detail(self, *, customer_id: int) -> CustomerDirectoryDetail | None:
+    def get_detail(self, *, customer_id: int, include_sensitive: bool = False) -> CustomerDirectoryDetail | None:
         customer = self.db.get(Customer, customer_id)
         if customer is None:
             return None
         linked_by_customer, unlinked_by_domain = self._site_maps()
-        profile_fields = self._profile_fields(customer)
+        profile = self._profile_data(customer)
+        profile_fields = self._profile_fields_from_data(profile, include_sensitive=include_sensitive)
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
+            editable_profile_fields=tuple(field for field in profile_fields if field.editable),
+            subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
         )
 
     def get_contact_detail(self, *, customer_id: int, contact_id: int) -> CustomerContactDetail | None:
@@ -227,19 +253,127 @@ class CustomerDirectoryService:
             exact_match_candidate=candidate_sites[0] if len(candidate_sites) == 1 else None,
         )
 
-    def _profile_fields(self, customer: Customer) -> tuple[CustomerProfileField, ...]:
+    def _profile_fields(self, customer: Customer, *, include_sensitive: bool = False) -> tuple[CustomerProfileField, ...]:
+        return self._profile_fields_from_data(self._profile_data(customer), include_sensitive=include_sensitive)
+
+    def _profile_data(self, customer: Customer) -> dict[str, object]:
         if not customer.encrypted_profile_json:
-            return ()
+            return {}
         try:
             profile = json.loads(self.cipher.decrypt(customer.encrypted_profile_json))
         except (TypeError, ValueError, json.JSONDecodeError):
-            return ()
-        values = profile.get("fields") if isinstance(profile, dict) else None
+            return {}
+        return profile if isinstance(profile, dict) else {}
+
+    def _profile_fields_from_data(
+        self,
+        profile: dict[str, object],
+        *,
+        include_sensitive: bool,
+    ) -> tuple[CustomerProfileField, ...]:
+        values = profile.get("fields")
+        metadata = profile.get("field_metadata")
         if not isinstance(values, dict):
             return ()
-        return tuple(
-            CustomerProfileField(label=str(label), value=self._format_profile_value(value))
-            for label, value in values.items()
+        metadata_by_label = {
+            str(definition.get("label")): (str(key), definition)
+            for key, definition in metadata.items()
+            if isinstance(metadata, dict) and isinstance(key, str) and isinstance(definition, dict)
+        } if isinstance(metadata, dict) else {}
+        fields: list[CustomerProfileField] = []
+        for label, raw_value in values.items():
+            key, definition = metadata_by_label.get(str(label), (str(label), {}))
+            sensitive = bool(definition.get("sensitive")) if isinstance(definition, dict) else False
+            if sensitive and not include_sensitive:
+                continue
+            fields.append(self._profile_field(str(label), key, raw_value, definition, sensitive=sensitive))
+        return tuple(fields)
+
+    def _profile_subforms(
+        self,
+        profile: dict[str, object],
+        *,
+        include_sensitive: bool,
+    ) -> tuple[CustomerProfileSubform, ...]:
+        stored_subforms = profile.get("subforms")
+        if not isinstance(stored_subforms, dict):
+            return ()
+        subforms: list[CustomerProfileSubform] = []
+        for key, source in stored_subforms.items():
+            if not isinstance(key, str) or not isinstance(source, dict):
+                continue
+            metadata = source.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            definitions = tuple(
+                self._profile_field(
+                    str(definition.get("label") or field_key),
+                    str(field_key),
+                    None,
+                    definition,
+                    sensitive=bool(definition.get("sensitive")),
+                )
+                for field_key, definition in metadata.items()
+                if isinstance(field_key, str)
+                and isinstance(definition, dict)
+                and (include_sensitive or not definition.get("sensitive"))
+            )
+            records = source.get("records")
+            rows: list[CustomerProfileSubformRow] = []
+            if isinstance(records, list):
+                for record in records:
+                    if not isinstance(record, dict):
+                        continue
+                    values = record.get("values") if isinstance(record.get("values"), dict) else {}
+                    row_fields = tuple(
+                        self._profile_field(
+                            field.label,
+                            field.key,
+                            values.get(field.key),
+                            metadata.get(field.key) if isinstance(metadata.get(field.key), dict) else {},
+                            sensitive=field.sensitive,
+                        )
+                        for field in definitions
+                    )
+                    rows.append(CustomerProfileSubformRow(id=self._format_profile_value(record.get("id")), fields=row_fields))
+            subforms.append(
+                CustomerProfileSubform(
+                    key=key,
+                    label=str(source.get("label") or key),
+                    fields=definitions,
+                    records=tuple(rows),
+                )
+            )
+        return tuple(subforms)
+
+    def _profile_field(
+        self,
+        label: str,
+        key: str,
+        raw_value: object,
+        definition: object,
+        *,
+        sensitive: bool,
+    ) -> CustomerProfileField:
+        source = definition if isinstance(definition, dict) else {}
+        options = source.get("pick_list_values")
+        option_rows = options if isinstance(options, list) else ()
+        option_values = tuple(
+            (str(option.get("value")), str(option.get("label") or option.get("value")))
+            for option in option_rows
+            if isinstance(option, dict)
+            and isinstance(option.get("value"), str)
+        )
+        text_value = self._format_profile_value(raw_value)
+        return CustomerProfileField(
+            label=label,
+            value="Geschützt" if sensitive and raw_value is not None else text_value,
+            key=key,
+            display_type=str(source.get("display_type") or "Einzelzeile"),
+            form_value="" if sensitive else (text_value or ""),
+            options=option_values,
+            editable=bool(source.get("editable")),
+            sensitive=sensitive,
         )
 
     @staticmethod

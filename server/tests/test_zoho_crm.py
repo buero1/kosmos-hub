@@ -19,6 +19,7 @@ from app.models.site import Site, SiteStatus
 from app.schemas.registration import RegistrationHeaders, RegistrationRequest
 from app.services.hub_accounts import hash_password
 from app.services.site_registration import SiteRegistrationService
+from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_crm import ZOHO_CRM_SCOPES, ZohoBinaryDownload, ZohoCrmError, ZohoCrmService
 
 
@@ -106,8 +107,60 @@ def test_zoho_mapping_uses_field_labels_and_does_not_guess_duplicates():
     assert mapping["fields"]["account_status"] == "Account_Status"
     assert mapping["fields"]["customer_type"] == "Customer_Type"
     assert mapping["fields"]["duration_minutes"] == "Duration_Minutes"
-    assert mapping["fields"]["website"] is None
+    assert mapping["fields"]["website"] == "Website"
     assert mapping["fields"]["record_id"] == "id"
+
+
+def test_zoho_account_catalog_matches_the_reviewed_field_selection():
+    root_fields = tuple(field for field in ZOHO_ACCOUNT_FIELDS if field.key != "record_id" and not field.subform_parent)
+    from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_SUBFORMS
+
+    assert len(root_fields) == 60
+    assert sum(len(subform.fields) for subform in ZOHO_ACCOUNT_SUBFORMS) == 7
+
+
+def test_zoho_field_metadata_keeps_picklist_options_and_respects_zoho_write_permissions():
+    definitions = tuple(field for field in ZOHO_ACCOUNT_FIELDS if field.key in {"industry", "annual_cycle"})
+    metadata = ZohoCrmService._field_metadata_by_key(
+        definitions,
+        [
+            {
+                "api_name": "Industry",
+                "data_type": "picklist",
+                "pick_list_values": [{"actual_value": "Handwerk", "display_value": "Handwerk"}],
+            },
+            {"api_name": "Jahresturnus", "data_type": "formula", "field_read_only": True},
+        ],
+        {"industry": "Industry", "annual_cycle": "Jahresturnus"},
+    )
+
+    assert metadata["industry"]["pick_list_values"] == [{"value": "Handwerk", "label": "Handwerk"}]
+    assert metadata["industry"]["editable"] is True
+    assert metadata["annual_cycle"]["editable"] is False
+
+
+def test_zoho_field_changes_skip_empty_sensitive_values_and_validate_picklists():
+    service = ZohoCrmService(db=SimpleNamespace(), cipher=SecretCipher("c" * 32), public_base_url="https://hub.example")
+    profile = {"fields": {"Branche": "Handwerk", "IBAN": "DE02120300000000202051"}}
+    metadata = {
+        "industry": {
+            "api_name": "Industry",
+            "editable": True,
+            "display_type": "Auswahlliste",
+            "pick_list_values": [{"value": "Handwerk", "label": "Handwerk"}, {"value": "Beratung", "label": "Beratung"}],
+        },
+        "iban": {"api_name": "iban", "editable": True, "display_type": "Einzelzeile", "sensitive": True},
+    }
+
+    changes = service._root_field_changes(
+        metadata,
+        profile,
+        {"customer_field__industry": "Beratung", "customer_field__iban": ""},
+    )
+    assert changes == {"Industry": "Beratung"}
+
+    with pytest.raises(ZohoCrmError, match="selection list"):
+        service._root_field_changes(metadata, profile, {"customer_field__industry": "Other"})
 
 
 def test_zoho_sync_prepares_visible_customer_sites_for_bridge_onboarding():

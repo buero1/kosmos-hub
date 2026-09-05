@@ -9,6 +9,25 @@
     {% endif %}
   {% endif %}
 {% endmacro %}
+{% macro customer_field_control(field, name) %}
+  <label class="customer-field-control">
+    <span>{{ field.label }}{% if field.sensitive %} <small>geschützt</small>{% endif %}</span>
+    {% if field.options %}
+      <select name="{{ name }}">
+        <option value=""></option>
+        {% for value, label in field.options %}
+          <option value="{{ value }}"{% if field.form_value == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    {% elif field.display_type == "Boolesch" %}
+      <input type="checkbox" name="{{ name }}" value="true"{% if field.form_value | lower == "true" %} checked{% endif %}>
+    {% elif "Multizeilen" in field.display_type %}
+      <textarea name="{{ name }}" rows="3">{{ field.form_value }}</textarea>
+    {% else %}
+      <input name="{{ name }}" value="{{ field.form_value }}"{% if field.sensitive %} type="password" autocomplete="new-password" placeholder="Unverändert lassen"{% elif field.display_type == "Telefon" %} type="tel"{% elif field.display_type == "URL" %} type="url"{% else %} type="text"{% endif %}>
+    {% endif %}
+  </label>
+{% endmacro %}
 {% block content %}
   <section>
     <a class="button button-secondary" href="/customers">Back to customers</a>
@@ -38,10 +57,13 @@
     {% if email_reply_error %}
       <p class="notice-warning">{{ email_reply_error }}</p>
     {% endif %}
+    {% if fields_state and fields_message %}
+      <p class="notice-{{ fields_state }}">{{ fields_message }}</p>
+    {% endif %}
 
     <div id="customer-communications" class="customer-detail-layout">
       <div class="customer-detail-main-column">
-        <article class="card customer-detail-panel">
+        <article id="customer-fields" class="card customer-detail-panel">
           <div class="customer-detail-panel-heading">
             <div>
               <p class="eyebrow">Zoho CRM</p>
@@ -53,11 +75,54 @@
             <div data-expandable-content>
               <dl class="customer-fields-grid">
                 {% for field in detail.profile_fields if field.value %}
-                  <div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>
+                  <div><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value }}</dd></div>
                 {% else %}
                   <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
                 {% endfor %}
               </dl>
+              {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
+                <details class="customer-field-editor">
+                  <summary>Kundendaten bearbeiten</summary>
+                  <form method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    {% if detail.editable_profile_fields %}
+                      <div class="customer-field-editor-grid">
+                        {% for field in detail.editable_profile_fields %}
+                          {{ customer_field_control(field, "customer_field__" ~ field.key) }}
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    {% for subform in detail.subforms %}
+                      <section class="customer-subform-editor">
+                        <h4>{{ subform.label }}</h4>
+                        {% for row in subform.records %}
+                          {% set row_index = loop.index0 %}
+                          <fieldset class="customer-subform-row">
+                            <legend>Eintrag {{ loop.index }}</legend>
+                            <div class="customer-field-editor-grid">
+                              {% for field in row.fields if field.editable %}
+                                {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key) }}
+                              {% endfor %}
+                            </div>
+                            <label class="customer-subform-delete"><input type="checkbox" name="customer_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
+                          </fieldset>
+                        {% endfor %}
+                        {% if subform.fields %}
+                          <fieldset class="customer-subform-row">
+                            <legend>Neuer Eintrag</legend>
+                            <div class="customer-field-editor-grid">
+                              {% for field in subform.fields if field.editable %}
+                                {{ customer_field_control(field, "customer_subform__" ~ subform.key ~ "__new__" ~ field.key) }}
+                              {% endfor %}
+                            </div>
+                          </fieldset>
+                        {% endif %}
+                      </section>
+                    {% endfor %}
+                    <button class="button button-secondary button-variant-2" type="submit">Kundendaten in Zoho speichern</button>
+                  </form>
+                </details>
+              {% endif %}
               <div class="customer-system-details">
                 <p class="eyebrow">Hub-Daten</p>
                 <dl class="customer-fields-grid">

@@ -42,7 +42,7 @@ from app.models.customer import Customer
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
 from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsError, StylingSettingsService
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
-from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError
+from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -248,12 +248,14 @@ def customers_page(
     if email not in {"all", "unread"}:
         raise HTTPException(status_code=422, detail="Unknown customer email filter.")
     service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
+    can_manage_customer_fields = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
     industry_options = service.list_industries()
     entries = service.list_entries(
         query=q,
         status=None if status == "all" else status,
         industry=None if industry == "all" else industry,
         unread_email_only=email == "unread",
+        include_sensitive=can_manage_customer_fields,
     )
     candidate_count = sum(entry.exact_match_candidate is not None for entry in entries)
     return templates.TemplateResponse(
@@ -682,11 +684,17 @@ def customer_detail_page(
     db: Annotated[Session, Depends(get_db)],
     communication: str = "",
     message: str = "",
+    fields: str = "",
+    fields_message: str = "",
     compose_email: bool = False,
     reply_email: int | None = None,
 ):
     cipher = get_secret_cipher()
-    detail = CustomerDirectoryService(db=db, cipher=cipher).get_detail(customer_id=customer_id)
+    can_manage_customer_fields = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
+    detail = CustomerDirectoryService(db=db, cipher=cipher).get_detail(
+        customer_id=customer_id,
+        include_sensitive=can_manage_customer_fields,
+    )
     if detail is None:
         raise HTTPException(status_code=404, detail="Customer not found.")
     communication_service = CustomerCommunicationService(
@@ -724,12 +732,54 @@ def customer_detail_page(
             "communication_state": communication_state,
             "communication_message": message[:500] if communication_state else "",
             "can_manage_communications": can_manage_communications,
+            "can_manage_customer_fields": can_manage_customer_fields,
+            "fields_state": fields if fields in {"success", "error"} else "",
+            "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
             "open_email_composer": compose_email or reply_context is not None,
             "email_reply": reply_context,
             "email_reply_error": reply_error,
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.post("/customers/{customer_id}/fields")
+async def update_customer_fields(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    csrf_token = form.get("csrf_token")
+    require_csrf(request, csrf_token if isinstance(csrf_token, str) else "")
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): value
+        for key, value in form.multi_items()
+        if isinstance(value, str)
+    }
+    try:
+        customer = ZohoCrmService(db=db, cipher=get_secret_cipher()).update_customer_fields(
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+    except ZohoCrmError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-zoho-customer-fields",
+        result="ok",
+        detail=f"Updated selected Zoho Account fields for {customer.name} ({customer.zoho_id}).",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Kundendaten wurden in Zoho CRM gespeichert."})
+    return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
 
 
 @router.post("/customers/{customer_id}/communications/sync")

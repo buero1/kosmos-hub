@@ -23,6 +23,7 @@ from app.models.customer_contact import CustomerContact
 from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
+from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS, ZOHO_ACCOUNT_SUBFORMS, ZohoAccountField
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
@@ -56,6 +57,7 @@ _ZOHO_EMAIL_TEMPLATE_SCOPE = "ZohoCRM.templates.email.READ"
 _ZOHO_FILE_SCOPE = "ZohoCRM.Files.CREATE"
 _REQUEST_TIMEOUT_SECONDS = 20
 _MAX_PAGE_REQUESTS = 10
+_MAX_FIELDS_PER_ZOHO_REQUEST = 50
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
 _DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 3_600
@@ -80,42 +82,6 @@ ZOHO_DATA_CENTERS = {
     "jp": ZohoDataCenter("jp", "Japan (zoho.jp)", "https://accounts.zoho.jp", "https://www.zohoapis.jp"),
     "ca": ZohoDataCenter("ca", "Canada (zoho.ca)", "https://accounts.zohocloud.ca", "https://www.zohoapis.ca"),
 }
-
-
-@dataclass(frozen=True)
-class ZohoAccountField:
-    key: str
-    label: str
-    required_for_identity: bool = False
-
-
-ZOHO_ACCOUNT_FIELDS = (
-    ZohoAccountField("record_id", "Eintrag-ID", True),
-    ZohoAccountField("customer_name", "Kunde-Name", True),
-    ZohoAccountField("account_status", "Status", True),
-    ZohoAccountField("phone", "Tel."),
-    ZohoAccountField("website", "Webseite"),
-    ZohoAccountField("customer_number", "Kunde-Nummer"),
-    ZohoAccountField("customer_type", "Kunde Typ"),
-    ZohoAccountField("industry", "Branche"),
-    ZohoAccountField("billing_street", "Rechnungsadresse - Straße"),
-    ZohoAccountField("billing_city", "Rechnungsadresse - Stadt"),
-    ZohoAccountField("billing_postal_code", "Rechnungsadresse - PLZ"),
-    ZohoAccountField("billing_country", "Rechnungsadresse - Land"),
-    ZohoAccountField("work_domain_login", "Arbeitsdomain-Login"),
-    ZohoAccountField("compact_phone", "Tel_komprimiert"),
-    ZohoAccountField("previous_website", "Bisherige (alte) Website"),
-    ZohoAccountField("dialfire_id", "Dialfire-ID"),
-    ZohoAccountField("important_info", "Wichtige Infos"),
-    ZohoAccountField("contact_email", "Kontakt-E-Mail"),
-    ZohoAccountField("contact_salutation", "Kontakt-Briefanrede"),
-    ZohoAccountField("contact_last_name", "Kontakt-Nachname"),
-    ZohoAccountField("duration_minutes", "Dauer in Minuten"),
-    ZohoAccountField("update_note", "Update-Notiz"),
-    ZohoAccountField("update_date", "Update-Datum"),
-    ZohoAccountField("last_update_date", "Letztes Update-Datum"),
-    ZohoAccountField("contact_first_name", "Kontakt-Vorname"),
-)
 
 
 class ZohoCrmError(ValueError):
@@ -292,6 +258,8 @@ class ZohoCrmService:
             raise ZohoCrmError("Zoho returned no field metadata for Accounts.")
 
         field_map = self.resolve_account_field_mapping(fields)
+        field_map["metadata"] = self._field_metadata_by_key(ZOHO_ACCOUNT_FIELDS, fields, field_map["fields"])
+        field_map["subforms"] = self._subform_field_maps(connection, fields)
         connection.field_map_json = json.dumps(field_map, ensure_ascii=True, sort_keys=True)
         connection.last_metadata_at = datetime.now(UTC)
         connection.last_error = None
@@ -303,6 +271,7 @@ class ZohoCrmService:
         if not self._has_current_scope_grant(connection):
             raise ZohoCrmError("Reconnect Zoho CRM once to approve the full CRM scope before full Account synchronization.")
         mapping_rows = self.refresh_field_mapping()
+        field_map = self._stored_field_map(connection)
         mapping = {row.key: row.api_name for row in mapping_rows}
         required_fields = ("customer_name", "account_status")
         missing_required = [next(field.label for field in ZOHO_ACCOUNT_FIELDS if field.key == key) for key in required_fields if mapping[key] is None]
@@ -310,7 +279,8 @@ class ZohoCrmService:
             raise ZohoCrmError(f"The required Zoho Account field(s) {', '.join(missing_required)} were not found. No customers were changed.")
 
         contact_records = self._get_all_contact_records(connection)
-        records = self._get_all_account_records(connection, mapping)
+        records = self._get_all_account_records(connection, mapping, field_map)
+        subform_rows = self._get_all_subform_records(connection, field_map)
         created_customers = 0
         updated_customers = 0
         visible_accounts = 0
@@ -327,7 +297,16 @@ class ZohoCrmService:
                 continue
             synchronized_zoho_ids.add(record_id)
 
-            profile = self._build_profile(record, mapping, synced_at)
+            profile = self._build_profile(
+                record,
+                mapping,
+                field_map,
+                synced_at,
+                subform_rows={
+                    key: rows_by_account.get(record_id, [])
+                    for key, rows_by_account in subform_rows.items()
+                },
+            )
             name = self._as_text(record.get(mapping["customer_name"])) or f"Zoho Account {record_id}"
             account_status = self._as_text(record.get(mapping["account_status"]))
             is_visible = self._is_relevant_account_status(account_status)
@@ -685,12 +664,14 @@ class ZohoCrmService:
     @staticmethod
     def resolve_account_field_mapping(fields: list[object]) -> dict[str, object]:
         available: dict[str, set[str]] = {}
+        available_by_api_name: set[str] = set()
         for field in fields:
             if not isinstance(field, dict):
                 continue
             api_name = field.get("api_name")
             if not isinstance(api_name, str) or not api_name.strip():
                 continue
+            available_by_api_name.add(api_name)
             for candidate in (field.get("field_label"), field.get("display_label"), api_name):
                 normalized = ZohoCrmService._normalize_field_label(candidate)
                 if normalized:
@@ -701,9 +682,120 @@ class ZohoCrmService:
             if field.key == "record_id":
                 mapped[field.key] = "id"
                 continue
+            if field.api_name in available_by_api_name:
+                mapped[field.key] = field.api_name
+                continue
             matches = available.get(ZohoCrmService._normalize_field_label(field.label), set())
             mapped[field.key] = next(iter(matches)) if len(matches) == 1 else None
         return {"module": ZOHO_ACCOUNT_MODULE, "fields": mapped}
+
+    @classmethod
+    def _field_metadata_by_key(
+        cls,
+        definitions: tuple[ZohoAccountField, ...],
+        raw_fields: list[object],
+        mapped_fields: object,
+    ) -> dict[str, dict[str, object]]:
+        raw_by_api_name = {
+            api_name: field
+            for field in raw_fields
+            if isinstance(field, dict)
+            and isinstance((api_name := field.get("api_name")), str)
+            and api_name
+        }
+        mapping = mapped_fields if isinstance(mapped_fields, dict) else {}
+        return {
+            definition.key: cls._serialize_field_metadata(
+                definition,
+                raw_by_api_name.get(cls._as_text(mapping.get(definition.key)) or ""),
+            )
+            for definition in definitions
+        }
+
+    def _subform_field_maps(self, connection: ZohoConnection, account_fields: list[object]) -> dict[str, dict[str, object]]:
+        account_by_api_name = {
+            api_name: field
+            for field in account_fields
+            if isinstance(field, dict)
+            and isinstance((api_name := field.get("api_name")), str)
+            and api_name
+        }
+        subforms: dict[str, dict[str, object]] = {}
+        for subform in ZOHO_ACCOUNT_SUBFORMS:
+            parent = account_by_api_name.get(subform.parent_api_name)
+            associated_module = parent.get("associated_module") if isinstance(parent, dict) else None
+            module_name = self._as_text(associated_module.get("module")) if isinstance(associated_module, dict) else None
+            module_name = module_name or subform.parent_api_name
+            response = self._api_get(connection, "/crm/v8/settings/fields", {"module": module_name})
+            raw_fields = response.get("fields")
+            if not isinstance(raw_fields, list):
+                raise ZohoCrmError(f"Zoho returned no field metadata for the subform {subform.label}.")
+            field_mapping = self.resolve_subform_field_mapping(subform.fields, raw_fields)
+            subforms[subform.key] = {
+                "label": subform.label,
+                "parent_api_name": subform.parent_api_name,
+                "module": module_name,
+                "fields": field_mapping,
+                "metadata": self._field_metadata_by_key(subform.fields, raw_fields, field_mapping),
+            }
+        return subforms
+
+    @staticmethod
+    def resolve_subform_field_mapping(definitions: tuple[ZohoAccountField, ...], fields: list[object]) -> dict[str, str | None]:
+        available_by_api_name = {
+            api_name
+            for field in fields
+            if isinstance(field, dict)
+            and isinstance((api_name := field.get("api_name")), str)
+            and api_name
+        }
+        labels: dict[str, set[str]] = {}
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            api_name = field.get("api_name")
+            if not isinstance(api_name, str):
+                continue
+            for candidate in (field.get("field_label"), field.get("display_label"), api_name):
+                normalized = ZohoCrmService._normalize_field_label(candidate)
+                if normalized:
+                    labels.setdefault(normalized, set()).add(api_name)
+        mapping: dict[str, str | None] = {}
+        for definition in definitions:
+            if definition.api_name in available_by_api_name:
+                mapping[definition.key] = definition.api_name
+                continue
+            matches = labels.get(ZohoCrmService._normalize_field_label(definition.label), set())
+            mapping[definition.key] = next(iter(matches)) if len(matches) == 1 else None
+        return mapping
+
+    @classmethod
+    def _serialize_field_metadata(cls, definition: ZohoAccountField, raw: object) -> dict[str, object]:
+        source = raw if isinstance(raw, dict) else {}
+        operation_type = source.get("operation_type")
+        can_update = not source.get("read_only") and not source.get("field_read_only")
+        if isinstance(operation_type, dict) and operation_type.get("api_update") is False:
+            can_update = False
+        pick_list_values: list[dict[str, str]] = []
+        raw_options = source.get("pick_list_values")
+        if isinstance(raw_options, list):
+            for option in raw_options:
+                if not isinstance(option, dict):
+                    continue
+                value = cls._as_text(option.get("actual_value")) or cls._as_text(option.get("display_value"))
+                if value:
+                    pick_list_values.append({"value": value, "label": cls._as_text(option.get("display_value")) or value})
+        return {
+            "key": definition.key,
+            "label": definition.label,
+            "api_name": cls._as_text(source.get("api_name")),
+            "display_type": definition.display_type,
+            "zoho_type": cls._as_text(source.get("data_type")) or definition.display_type,
+            "pick_list_values": pick_list_values,
+            "editable": bool(source) and bool(can_update) and definition.key != "record_id",
+            "sensitive": definition.sensitive,
+            "subform_parent": definition.subform_parent,
+        }
 
     @staticmethod
     def normalize_website_domain(value: object) -> str | None:
@@ -716,36 +808,90 @@ class ZohoCrmService:
             hostname = hostname[4:]
         return hostname or None
 
-    def _get_all_account_records(self, connection: ZohoConnection, mapping: dict[str, str | None]) -> list[dict[str, object]]:
+    def _get_all_account_records(
+        self,
+        connection: ZohoConnection,
+        mapping: dict[str, str | None],
+        field_map: dict[str, Any] | None = None,
+    ) -> list[dict[str, object]]:
         requested_fields = sorted({api_name for api_name in mapping.values() if api_name and api_name != "id"} | {"Modified_Time"})
-        records_by_id: dict[str, dict[str, object]] = {}
-        for page in range(1, _MAX_PAGE_REQUESTS + 1):
-            response = self._api_get(
-                connection,
-                f"/crm/v8/{ZOHO_ACCOUNT_MODULE}",
-                {
-                    "fields": ",".join(requested_fields),
-                    "per_page": "200",
-                    "page": str(page),
-                },
-                allow_empty_response=True,
+        subforms = field_map.get("subforms") if isinstance(field_map, dict) else {}
+        if isinstance(subforms, dict):
+            requested_fields.extend(
+                parent_api_name
+                for subform in subforms.values()
+                if isinstance(subform, dict)
+                and isinstance((parent_api_name := subform.get("parent_api_name")), str)
+                and parent_api_name
             )
-            data = response.get("data")
-            if not isinstance(data, list):
-                raise ZohoCrmError("Zoho returned an invalid Accounts response. No customers were changed.")
-            for record in data:
-                if not isinstance(record, dict):
-                    continue
-                record_id = self._as_text(record.get("id"))
-                if record_id:
-                    records_by_id[record_id] = record
-            info = response.get("info")
-            more_records = isinstance(info, dict) and info.get("more_records") is True
-            if not more_records:
-                break
-        else:
-            raise ZohoCrmError("Zoho returned more than 2,000 Accounts. Bulk synchronization must be enabled before importing them.")
+        requested_fields = sorted(set(requested_fields))
+        records_by_id: dict[str, dict[str, object]] = {}
+        for offset in range(0, len(requested_fields), _MAX_FIELDS_PER_ZOHO_REQUEST):
+            field_chunk = requested_fields[offset : offset + _MAX_FIELDS_PER_ZOHO_REQUEST]
+            for page in range(1, _MAX_PAGE_REQUESTS + 1):
+                response = self._api_get(
+                    connection,
+                    f"/crm/v8/{ZOHO_ACCOUNT_MODULE}",
+                    {"fields": ",".join(field_chunk), "per_page": "200", "page": str(page)},
+                    allow_empty_response=True,
+                )
+                data = response.get("data")
+                if not isinstance(data, list):
+                    raise ZohoCrmError("Zoho returned an invalid Accounts response. No customers were changed.")
+                for record in data:
+                    if not isinstance(record, dict):
+                        continue
+                    record_id = self._as_text(record.get("id"))
+                    if record_id:
+                        records_by_id.setdefault(record_id, {"id": record_id}).update(record)
+                info = response.get("info")
+                if not (isinstance(info, dict) and info.get("more_records") is True):
+                    break
+            else:
+                raise ZohoCrmError("Zoho returned more than 2,000 Accounts. Bulk synchronization must be enabled before importing them.")
         return list(records_by_id.values())
+
+    def _get_all_subform_records(
+        self,
+        connection: ZohoConnection,
+        field_map: dict[str, Any],
+    ) -> dict[str, dict[str, list[dict[str, object]]]]:
+        subforms = field_map.get("subforms") if isinstance(field_map, dict) else {}
+        if not isinstance(subforms, dict):
+            return {}
+        records_by_subform: dict[str, dict[str, list[dict[str, object]]]] = {}
+        for key, subform in subforms.items():
+            if not isinstance(key, str) or not isinstance(subform, dict):
+                continue
+            module = self._as_text(subform.get("module"))
+            fields = subform.get("fields")
+            if not module or not isinstance(fields, dict):
+                continue
+            requested_fields = sorted({api_name for api_name in fields.values() if isinstance(api_name, str) and api_name} | {"Parent_Id"})
+            rows_by_account: dict[str, list[dict[str, object]]] = {}
+            for page in range(1, _MAX_PAGE_REQUESTS + 1):
+                response = self._api_get(
+                    connection,
+                    f"/crm/v8/{module}",
+                    {"fields": ",".join(requested_fields), "per_page": "200", "page": str(page)},
+                    allow_empty_response=True,
+                )
+                data = response.get("data")
+                if not isinstance(data, list):
+                    raise ZohoCrmError(f"Zoho returned an invalid {subform.get('label', key)} response.")
+                for row in data:
+                    if not isinstance(row, dict):
+                        continue
+                    parent_id = self._lookup_record_id(row.get("Parent_Id"))
+                    if parent_id:
+                        rows_by_account.setdefault(parent_id, []).append(row)
+                info = response.get("info")
+                if not (isinstance(info, dict) and info.get("more_records") is True):
+                    break
+            else:
+                raise ZohoCrmError(f"Zoho returned too many {subform.get('label', key)} rows for a regular synchronization.")
+            records_by_subform[key] = rows_by_account
+        return records_by_subform
 
     def _synchronize_contacts(
         self,
@@ -871,6 +1017,22 @@ class ZohoCrmService:
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
         )
 
+    def _api_put_json(
+        self,
+        connection: ZohoConnection,
+        path: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        return self._request_json(
+            f"{api_domain}{path}",
+            method="PUT",
+            json_body=payload,
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+        )
+
     def _api_post_multipart(
         self,
         connection: ZohoConnection,
@@ -958,20 +1120,254 @@ class ZohoCrmService:
                 if cache_key.startswith(prefix):
                     del _ACCESS_TOKEN_CACHE[cache_key]
 
-    def _build_profile(self, record: dict[str, object], mapping: dict[str, str | None], synced_at: datetime) -> dict[str, object]:
+    def _build_profile(
+        self,
+        record: dict[str, object],
+        mapping: dict[str, str | None],
+        field_map: dict[str, Any],
+        synced_at: datetime,
+        *,
+        subform_rows: dict[str, list[dict[str, object]]] | None = None,
+    ) -> dict[str, object]:
         profile: dict[str, object] = {
             "source": "zoho-crm-accounts",
+            "schema_version": 2,
             "record_id": self._as_text(record.get("id")),
             "modified_time": self._as_text(record.get("Modified_Time")),
             "synced_at": synced_at.isoformat(),
             "fields": {},
+            "field_metadata": field_map.get("metadata", {}) if isinstance(field_map, dict) else {},
+            "subforms": {},
         }
         values = profile["fields"]
         assert isinstance(values, dict)
         for field in ZOHO_ACCOUNT_FIELDS:
+            if field.subform_parent:
+                continue
             api_name = mapping.get(field.key)
             values[field.label] = record.get(api_name) if api_name else None
+        stored_subforms = profile["subforms"]
+        assert isinstance(stored_subforms, dict)
+        configured_subforms = field_map.get("subforms") if isinstance(field_map, dict) else {}
+        if not isinstance(configured_subforms, dict):
+            return profile
+        for subform in ZOHO_ACCOUNT_SUBFORMS:
+            definition = configured_subforms.get(subform.key)
+            if not isinstance(definition, dict):
+                continue
+            subform_mapping = definition.get("fields")
+            if not isinstance(subform_mapping, dict):
+                continue
+            raw_rows = (subform_rows or {}).get(subform.key)
+            if raw_rows is None:
+                parent_api_name = self._as_text(definition.get("parent_api_name"))
+                nested_rows = record.get(parent_api_name) if parent_api_name else None
+                raw_rows = [row for row in nested_rows if isinstance(row, dict)] if isinstance(nested_rows, list) else []
+            rows: list[dict[str, object]] = []
+            for raw_row in raw_rows:
+                if not isinstance(raw_row, dict):
+                    continue
+                rows.append(
+                    {
+                        "id": self._as_text(raw_row.get("id")),
+                        "values": {
+                            field.key: raw_row.get(api_name)
+                            for field in subform.fields
+                            if isinstance((api_name := subform_mapping.get(field.key)), str) and api_name
+                        },
+                    }
+                )
+            stored_subforms[subform.key] = {
+                "label": definition.get("label", subform.label),
+                "parent_api_name": definition.get("parent_api_name", subform.parent_api_name),
+                "metadata": definition.get("metadata", {}),
+                "records": rows,
+            }
         return profile
+
+    def update_customer_fields(self, *, customer_id: int, submitted_values: dict[str, str]) -> Customer:
+        """Write permitted Account and subform changes to Zoho, then refresh the encrypted Hub profile."""
+        connection = self._require_connected_connection()
+        customer = self.db.get(Customer, customer_id)
+        if customer is None or not customer.zoho_id:
+            raise ZohoCrmError("This customer is not linked to a Zoho Account.")
+        profile = self._customer_profile(customer)
+        metadata = profile.get("field_metadata")
+        if not isinstance(metadata, dict):
+            raise ZohoCrmError("Synchronize the customer data once before editing Zoho fields.")
+
+        changes = self._root_field_changes(metadata, profile, submitted_values)
+        changes.update(self._subform_changes(profile, submitted_values))
+        if not changes:
+            return customer
+
+        response = self._api_put_json(
+            connection,
+            f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{customer.zoho_id}",
+            {"data": [{"id": customer.zoho_id, **changes}]},
+        )
+        result = self._response_record(response, "Account update")
+        code = self._as_text(result.get("code"))
+        if code and code.casefold() != "success":
+            raise ZohoCrmError(self._as_text(result.get("message")) or "Zoho could not save the Account fields.")
+
+        refreshed = self._api_get(
+            connection,
+            f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{customer.zoho_id}",
+            {},
+        )
+        data = refreshed.get("data")
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise ZohoCrmError("Zoho saved the Account but did not return the refreshed data.")
+        field_map = self._stored_field_map(connection)
+        mapping = field_map.get("fields") if isinstance(field_map.get("fields"), dict) else {}
+        synced_at = datetime.now(UTC)
+        self._apply_customer_record(customer, data[0], mapping, field_map, synced_at)
+        connection.last_sync_at = synced_at
+        connection.last_error = None
+        self.db.flush()
+        return customer
+
+    def _root_field_changes(
+        self,
+        metadata: dict[str, object],
+        profile: dict[str, object],
+        submitted_values: dict[str, str],
+    ) -> dict[str, object]:
+        stored_values = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
+        changes: dict[str, object] = {}
+        for field in ZOHO_ACCOUNT_FIELDS:
+            if field.key == "record_id" or field.subform_parent:
+                continue
+            definition = metadata.get(field.key)
+            if not isinstance(definition, dict) or not definition.get("editable"):
+                continue
+            input_name = f"customer_field__{field.key}"
+            if input_name not in submitted_values and field.display_type != "Boolesch":
+                continue
+            api_name = self._as_text(definition.get("api_name"))
+            if not api_name:
+                continue
+            submitted = submitted_values.get(input_name, "false" if field.display_type == "Boolesch" else "")
+            if field.sensitive and not submitted.strip():
+                continue
+            value = self._normalize_field_value(submitted, definition)
+            previous = stored_values.get(field.label) if isinstance(stored_values, dict) else None
+            if self._profile_value_key(previous) != self._profile_value_key(value):
+                changes[api_name] = value
+        return changes
+
+    def _subform_changes(self, profile: dict[str, object], submitted_values: dict[str, str]) -> dict[str, object]:
+        stored_subforms = profile.get("subforms")
+        if not isinstance(stored_subforms, dict):
+            return {}
+        changes: dict[str, object] = {}
+        for subform_key, source in stored_subforms.items():
+            if not isinstance(subform_key, str) or not isinstance(source, dict):
+                continue
+            parent_api_name = self._as_text(source.get("parent_api_name"))
+            metadata = source.get("metadata")
+            records = source.get("records")
+            if not parent_api_name or not isinstance(metadata, dict) or not isinstance(records, list):
+                continue
+            rows: list[dict[str, object]] = []
+            for index, record in enumerate(records):
+                if not isinstance(record, dict):
+                    continue
+                row_id = self._as_text(record.get("id"))
+                if not row_id:
+                    continue
+                prefix = f"customer_subform__{subform_key}__{index}"
+                if submitted_values.get(f"{prefix}__delete") == "true":
+                    rows.append({"id": row_id, "_delete": None})
+                    continue
+                row_values = record.get("values") if isinstance(record.get("values"), dict) else {}
+                changed_row: dict[str, object] = {"id": row_id}
+                for field_key, definition in metadata.items():
+                    if not isinstance(field_key, str) or not isinstance(definition, dict) or not definition.get("editable"):
+                        continue
+                    input_name = f"{prefix}__{field_key}"
+                    if input_name not in submitted_values:
+                        continue
+                    submitted = submitted_values[input_name]
+                    if definition.get("sensitive") and not submitted.strip():
+                        continue
+                    value = self._normalize_field_value(submitted, definition)
+                    if self._profile_value_key(row_values.get(field_key)) != self._profile_value_key(value):
+                        api_name = self._as_text(definition.get("api_name"))
+                        if api_name:
+                            changed_row[api_name] = value
+                if len(changed_row) > 1:
+                    rows.append(changed_row)
+
+            new_prefix = f"customer_subform__{subform_key}__new"
+            new_row: dict[str, object] = {}
+            for field_key, definition in metadata.items():
+                if not isinstance(field_key, str) or not isinstance(definition, dict) or not definition.get("editable"):
+                    continue
+                submitted = submitted_values.get(f"{new_prefix}__{field_key}", "")
+                if not submitted.strip():
+                    continue
+                api_name = self._as_text(definition.get("api_name"))
+                if api_name:
+                    new_row[api_name] = self._normalize_field_value(submitted, definition)
+            if new_row:
+                rows.append(new_row)
+            if rows:
+                changes[parent_api_name] = rows
+        return changes
+
+    @staticmethod
+    def _normalize_field_value(value: str, definition: dict[str, object]) -> object:
+        normalized = value.strip()
+        if definition.get("display_type") == "Boolesch":
+            return normalized.casefold() in {"true", "1", "on", "yes"}
+        options = definition.get("pick_list_values")
+        if isinstance(options, list) and normalized:
+            allowed = {
+                option.get("value")
+                for option in options
+                if isinstance(option, dict) and isinstance(option.get("value"), str)
+            }
+            if allowed and normalized not in allowed:
+                raise ZohoCrmError("Choose a current value from the Zoho selection list.")
+        return normalized or None
+
+    @staticmethod
+    def _profile_value_key(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value).strip()
+
+    def _customer_profile(self, customer: Customer) -> dict[str, object]:
+        if not customer.encrypted_profile_json:
+            return {}
+        try:
+            parsed = json.loads(self.cipher.decrypt(customer.encrypted_profile_json))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ZohoCrmError("The stored Zoho customer profile cannot be read.") from exc
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _apply_customer_record(
+        self,
+        customer: Customer,
+        record: dict[str, object],
+        mapping: dict[str, object],
+        field_map: dict[str, Any],
+        synced_at: datetime,
+    ) -> None:
+        profile_mapping = {key: self._as_text(value) for key, value in mapping.items() if isinstance(key, str)}
+        profile = self._build_profile(record, profile_mapping, field_map, synced_at)
+        customer.name = self._as_text(record.get(profile_mapping.get("customer_name"))) or f"Zoho Account {customer.zoho_id}"
+        customer.external_id = self._as_text(record.get(profile_mapping.get("customer_number")))
+        customer.zoho_status = self._as_text(record.get(profile_mapping.get("account_status")))
+        customer.is_visible = self._is_relevant_account_status(customer.zoho_status)
+        customer.website_domain = self.normalize_website_domain(record.get(profile_mapping.get("website")))
+        customer.encrypted_profile_json = self.cipher.encrypt(json.dumps(profile, ensure_ascii=False, default=str))
+        customer.zoho_modified_at = self._parse_datetime(record.get("Modified_Time"))
+        customer.zoho_synced_at = synced_at
 
     def _build_contact_profile(
         self,

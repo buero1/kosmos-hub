@@ -207,6 +207,40 @@ def test_customer_directory_lists_and_filters_zoho_industries():
         assert service.list_entries(industry="Nicht vorhanden") == []
 
 
+def test_customer_directory_masks_sensitive_zoho_profile_values_for_admins_and_hides_them_for_others():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Protected Customer",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {"IBAN": "DE02120300000000202051", "Webseite": "https://example.test"},
+                        "field_metadata": {
+                            "iban": {"label": "IBAN", "sensitive": True, "editable": True},
+                            "website": {"label": "Webseite", "editable": True},
+                        },
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.commit()
+
+        public_detail = _service(db).get_detail(customer_id=customer.id)
+        admin_detail = _service(db).get_detail(customer_id=customer.id, include_sensitive=True)
+
+        assert public_detail is not None
+        assert [field.label for field in public_detail.profile_fields] == ["Webseite"]
+        assert admin_detail is not None
+        iban = next(field for field in admin_detail.profile_fields if field.label == "IBAN")
+        assert iban.value == "Geschützt"
+        assert iban.form_value == ""
+
+
 def test_customer_directory_filters_customers_with_unread_inbound_emails():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
