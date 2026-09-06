@@ -176,6 +176,24 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
             ("Telefon alternativ", "+49 89 123456-2"),
             ("Telefon privat", "+49 89 123456-3"),
         ]
+        assert [(tab.label, [field.label for field in tab.fields]) for tab in contact_detail.profile_field_tabs] == [
+            (
+                "Kontakt",
+                [
+                    "Name",
+                    "Anrede",
+                    "Position",
+                    "E-Mail",
+                    "Zweite E-Mail-Adresse",
+                    "Dritte E-Mail-Adresse",
+                    "Telefon",
+                    "Telefon alternativ",
+                    "Telefon privat",
+                ],
+            ),
+            ("Postadresse", []),
+            ("Weitere Daten", []),
+        ]
         assert _service(db).get_contact_detail(customer_id=customer.id + 1, contact_id=first_contact.id) is None
 
 

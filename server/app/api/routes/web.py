@@ -1230,11 +1230,13 @@ def customer_contact_detail_page(
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="Contact not found for this customer.")
+    can_manage_contacts = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
     return templates.TemplateResponse(
         request,
         "customer_contact_detail.html",
         {
             "detail": detail,
+            "can_manage_contacts": can_manage_contacts,
             "csrf_token": get_csrf_token(request),
         },
     )

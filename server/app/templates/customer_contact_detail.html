@@ -1,48 +1,86 @@
 {% extends "base.html" %}
-{% block title %}Contact · {{ detail.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% block title %}{{ detail.name }} · Kontakte · kosmos-hub{% endblock %}
 {% block content %}
   <section>
-    <a class="button button-secondary" href="/customers/{{ detail.customer.id }}">Back to {{ detail.customer.name }}</a>
-    <div class="section-heading">
+    <a class="button button-secondary" href="/customers/{{ detail.customer.id }}">Zurück zu {{ detail.customer.name }}</a>
+    <div class="section-heading customer-detail-heading">
       <div>
-        <p class="eyebrow">Zoho CRM contact</p>
+        <p class="eyebrow">Zoho CRM Kontakt</p>
         <h2>{{ detail.name }}</h2>
-        <p class="subtle">Imported from Zoho CRM and stored encrypted on Kosmos Hub.</p>
+        <p class="subtle">Mit {{ detail.customer.name }} verknüpft und verschlüsselt im Kosmos Hub gespeichert.</p>
       </div>
+      {% if can_manage_contacts %}
+        <div class="customer-detail-heading-actions">
+          <a class="button button-variant-1" href="/contacts/new?customer_id={{ detail.customer.id }}">Kontakt neu anlegen</a>
+        </div>
+      {% endif %}
     </div>
 
-    <section class="detail-list">
-      <article class="card">
-        <h3>Hub data</h3>
-        <dl class="metadata-list">
-          <div><dt>Customer</dt><dd><a href="/customers/{{ detail.customer.id }}">{{ detail.customer.name }}</a></dd></div>
-          <div><dt>Zoho contact ID</dt><dd>{{ detail.contact.zoho_id }}</dd></div>
-          <div><dt>Last changed in Zoho</dt><dd>{{ (detail.contact.zoho_modified_at or "-") | berlin_time }}</dd></div>
-          <div><dt>Last synchronized</dt><dd>{{ (detail.contact.zoho_synced_at or "-") | berlin_time }}</dd></div>
-        </dl>
-      </article>
-    </section>
+    <div class="customer-detail-layout">
+      <div class="customer-detail-main-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Kontaktfelder</h3>
+              <p class="subtle">Aktuelle Stammdaten und Kontaktwege.</p>
+            </div>
+          </div>
+          <div class="customer-section-expandable">
+            <div class="field-tabs contact-field-tabs" data-field-tabs>
+              <div class="field-tabs-list" role="tablist" aria-label="Kontaktfelder filtern">
+                <button id="contact-fields-tab-all" class="field-tab" type="button" role="tab" aria-controls="contact-fields-panel-all" aria-selected="true" tabindex="0" data-field-tab="all">Alle Felder</button>
+                {% for tab in detail.profile_field_tabs %}
+                  <button id="contact-fields-tab-{{ tab.key }}" class="field-tab" type="button" role="tab" aria-controls="contact-fields-panel-{{ tab.key }}" aria-selected="false" tabindex="-1" data-field-tab="{{ tab.key }}">{{ tab.label }}</button>
+                {% endfor %}
+              </div>
+            </div>
 
-    <section>
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Zoho CRM</p>
-          <h3>Contact data</h3>
-          <p class="subtle">All fields currently synchronized for this contact.</p>
-        </div>
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead><tr><th>Field</th><th>Value</th></tr></thead>
-          <tbody>
-            {% for field in detail.profile_fields %}
-              <tr><td><strong>{{ field.label }}</strong></td><td>{{ field.value or "-" }}</td></tr>
-            {% else %}
-              <tr><td colspan="2">No Zoho contact data is available for this record.</td></tr>
+            <div id="contact-fields-panel-all" role="tabpanel" aria-labelledby="contact-fields-tab-all" data-field-tab-panel="all">
+              {% if detail.profile_fields %}
+                <dl class="customer-fields-grid">
+                  {% for field in detail.profile_fields %}
+                    <div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
+                  {% endfor %}
+                </dl>
+              {% else %}
+                <dl class="customer-fields-grid"><div><dt>Kontaktdaten</dt><dd>Keine Zoho-Kontaktdaten verfügbar.</dd></div></dl>
+              {% endif %}
+            </div>
+
+            {% for tab in detail.profile_field_tabs %}
+              <div id="contact-fields-panel-{{ tab.key }}" role="tabpanel" aria-labelledby="contact-fields-tab-{{ tab.key }}" data-field-tab-panel="{{ tab.key }}" hidden>
+                {% if tab.fields %}
+                  <dl class="customer-fields-grid">
+                    {% for field in tab.fields %}
+                      <div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
+                    {% endfor %}
+                  </dl>
+                {% else %}
+                  <p class="subtle">Für diesen Bereich sind keine Werte vorhanden.</p>
+                {% endif %}
+              </div>
             {% endfor %}
-          </tbody>
-        </table>
+          </div>
+        </article>
       </div>
-    </section>
+
+      <aside class="customer-detail-side-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Hub-Daten</p>
+              <h3>Verknüpfung</h3>
+            </div>
+          </div>
+          <dl class="customer-fields-grid">
+            <div><dt>Kunde</dt><dd><a href="/customers/{{ detail.customer.id }}">{{ detail.customer.name }}</a></dd></div>
+            <div><dt>Zoho Kontakt-ID</dt><dd>{{ detail.contact.zoho_id }}</dd></div>
+            <div><dt>Letzte Änderung in Zoho</dt><dd>{{ (detail.contact.zoho_modified_at or "-") | berlin_time }}</dd></div>
+            <div><dt>Letzte Synchronisierung</dt><dd>{{ (detail.contact.zoho_synced_at or "-") | berlin_time }}</dd></div>
+          </dl>
+        </article>
+      </aside>
+    </div>
   </section>
 {% endblock %}

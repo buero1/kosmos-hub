@@ -101,6 +101,7 @@ class CustomerContactDetail:
     contact: CustomerContact
     name: str
     profile_fields: tuple[CustomerProfileField, ...]
+    profile_field_tabs: tuple[CustomerProfileFieldTab, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,44 @@ class CustomerContactDirectoryEntry:
 
 class CustomerDirectoryService:
     """Presents CRM customers without ever assigning sites automatically."""
+
+    _CONTACT_PROFILE_FIELD_TAB_GROUPS = (
+        (
+            "contact-details",
+            "Kontakt",
+            frozenset((
+                "name",
+                "anrede",
+                "briefanrede",
+                "vorname",
+                "nachname",
+                "titel",
+                "position",
+                "funktion",
+                "e-mail",
+                "zweite e-mail-adresse",
+                "dritte e-mail-adresse",
+                "tel.",
+                "telefon",
+                "telefon alternativ",
+                "telefon privat",
+                "telefon sekr.",
+                "mobil",
+            )),
+        ),
+        (
+            "postal-address",
+            "Postadresse",
+            frozenset((
+                "postadresse straße",
+                "postadresse plz",
+                "postadresse stadt",
+                "postadresse bundesland",
+                "postadresse land",
+            )),
+        ),
+        ("additional", "Weitere Daten", frozenset(("status kunde", "tag"))),
+    )
 
     _PROFILE_FIELD_TAB_GROUPS = (
         (
@@ -263,6 +302,7 @@ class CustomerDirectoryService:
             contact=contact,
             name=next((field.value for field in profile_fields if field.label == "Name" and field.value), "Zoho contact"),
             profile_fields=profile_fields,
+            profile_field_tabs=self._contact_profile_field_tabs(profile_fields),
         )
 
     def list_contact_entries(self) -> tuple[CustomerContactDirectoryEntry, ...]:
@@ -602,6 +642,23 @@ class CustomerDirectoryService:
         return tuple(
             CustomerProfileField(label=str(label), value=self._format_profile_value(value))
             for label, value in values.items()
+        )
+
+    @classmethod
+    def _contact_profile_field_tabs(
+        cls,
+        profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[CustomerProfileFieldTab, ...]:
+        """Present the same encrypted fields in focused contact views without duplicating data."""
+        return tuple(
+            CustomerProfileFieldTab(
+                key=key,
+                label=label,
+                fields=tuple(
+                    field for field in profile_fields if field.label.casefold() in field_labels
+                ),
+            )
+            for key, label, field_labels in cls._CONTACT_PROFILE_FIELD_TAB_GROUPS
         )
 
     @staticmethod
