@@ -4,12 +4,14 @@ import hmac
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
+from email.utils import parseaddr
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.hub_access_token import HubAccessToken
+from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 
@@ -18,6 +20,7 @@ _SETUP_TOKEN_LIFETIME = timedelta(minutes=20)
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _MCP_TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{2,79}$")
 _MCP_TOKEN_PREFIX = "khmcp_"
+_DESKTOP_DEVICE_TOKEN_PREFIX = "khdsk_"
 
 
 class HubAccountService:
@@ -95,6 +98,14 @@ class HubAccountService:
         user.session_version += 1
         self.db.commit()
 
+    def configure_reminder_email(self, *, user: HubUser, reminder_email: str) -> HubUser:
+        _name, parsed_email = parseaddr(reminder_email.strip())
+        if not parsed_email or "@" not in parsed_email or len(parsed_email) > 320:
+            raise ValueError("Bitte eine gültige E-Mail-Adresse für Erinnerungen eingeben.")
+        user.reminder_email = parsed_email.casefold()
+        self.db.flush()
+        return user
+
     def list_mcp_access_tokens(self, *, user: HubUser) -> list[HubAccessToken]:
         statement = (
             select(HubAccessToken)
@@ -102,6 +113,32 @@ class HubAccountService:
             .order_by(HubAccessToken.created_at.desc())
         )
         return list(self.db.scalars(statement))
+
+    def list_desktop_devices(self, *, user: HubUser) -> list[HubDesktopDevice]:
+        statement = (
+            select(HubDesktopDevice)
+            .where(HubDesktopDevice.user_id == user.id)
+            .order_by(HubDesktopDevice.created_at.desc())
+        )
+        return list(self.db.scalars(statement))
+
+    def create_desktop_device(self, *, user: HubUser, name: str) -> tuple[HubDesktopDevice, str]:
+        normalized_name = self.normalize_desktop_device_name(name)
+        token = _DESKTOP_DEVICE_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        device = HubDesktopDevice(
+            user_id=user.id,
+            name=normalized_name,
+            token_prefix=token[:18],
+            token_digest=self._digest_token(token),
+        )
+        self.db.add(device)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise ValueError("Ein Windows-Gerät mit diesem Namen besteht bereits.") from None
+        self.db.refresh(device)
+        return device, token
 
     def create_mcp_access_token(self, *, user: HubUser, name: str) -> tuple[HubAccessToken, str]:
         normalized_name = self.normalize_mcp_token_name(name)
@@ -141,6 +178,26 @@ class HubAccountService:
         self.db.commit()
         return user, access_token
 
+    def authenticate_desktop_device(self, token: str) -> tuple[HubUser, HubDesktopDevice] | None:
+        if not token.startswith(_DESKTOP_DEVICE_TOKEN_PREFIX) or len(token) > 256:
+            return None
+
+        device = self.db.scalar(
+            select(HubDesktopDevice)
+            .where(HubDesktopDevice.token_digest == self._digest_token(token))
+            .where(HubDesktopDevice.revoked_at.is_(None))
+        )
+        if device is None:
+            return None
+
+        user = self.get_user(device.user_id)
+        if user is None or not user.is_active:
+            return None
+
+        device.last_seen_at = datetime.now(UTC)
+        self.db.commit()
+        return user, device
+
     def revoke_mcp_access_token(self, *, user: HubUser, token_id: int) -> HubAccessToken:
         access_token = self.db.scalar(
             select(HubAccessToken)
@@ -154,6 +211,20 @@ class HubAccountService:
         access_token.revoked_at = datetime.now(UTC)
         self.db.commit()
         return access_token
+
+    def revoke_desktop_device(self, *, user: HubUser, device_id: int) -> HubDesktopDevice:
+        device = self.db.scalar(
+            select(HubDesktopDevice)
+            .where(HubDesktopDevice.id == device_id)
+            .where(HubDesktopDevice.user_id == user.id)
+            .where(HubDesktopDevice.revoked_at.is_(None))
+        )
+        if device is None:
+            raise ValueError("Dieses aktive Windows-Gerät wurde nicht gefunden.")
+
+        device.revoked_at = datetime.now(UTC)
+        self.db.commit()
+        return device
 
     @staticmethod
     def normalize_username(username: str) -> str:
@@ -172,6 +243,16 @@ class HubAccountService:
         normalized = " ".join(name.strip().split())
         if not _MCP_TOKEN_NAME_RE.fullmatch(normalized):
             raise ValueError("Use 3-80 letters, numbers, spaces, dots, hyphens or underscores for the MCP token name.")
+        return normalized
+
+    @staticmethod
+    def normalize_desktop_device_name(name: str) -> str:
+        normalized = " ".join(name.strip().split())
+        allowed_characters = all(character.isalnum() or character in " ._-" for character in normalized)
+        if not 3 <= len(normalized) <= 80 or not allowed_characters:
+            raise ValueError(
+                "Der Gerätename muss 3 bis 80 Buchstaben, Zahlen, Leerzeichen, Punkte, Bindestriche oder Unterstriche enthalten."
+            )
         return normalized
 
     def _digest_token(self, token: str) -> str:

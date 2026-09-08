@@ -23,15 +23,18 @@
 
     <form id="customer-filter-form" class="filter-panel customer-filter-panel" method="get" action="/customers">
       {% if filters.email == "unread" %}<input type="hidden" name="email" value="unread">{% endif %}
-      <label>
-        <span>Search customer data</span>
-        <span class="customer-search-input">
-          <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, email, phone, note, or domain">
-          <button class="customer-filter-search-submit" type="submit" aria-label="Search customer data" title="Search customer data">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
-          </button>
-        </span>
-      </label>
+      <div class="customer-search-field">
+        <label>
+          <span>Search customer data</span>
+          <span class="customer-search-input">
+            <input type="search" name="q" value="{{ filters.q }}" placeholder="Name, email, phone, note, or domain" autocomplete="off" aria-autocomplete="list" aria-controls="customer-search-suggestions" aria-expanded="false">
+            <button class="customer-filter-search-submit" type="submit" aria-label="Search customer data" title="Search customer data">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+            </button>
+          </span>
+        </label>
+        <div id="customer-search-suggestions" class="customer-search-suggestions" role="listbox" aria-label="Passende Kunden" hidden></div>
+      </div>
       <label>
         <span>Branche</span>
         <select name="industry" data-customer-auto-filter>
@@ -108,6 +111,74 @@
       const form = document.getElementById("customer-filter-form");
       form?.querySelectorAll("[data-customer-auto-filter]").forEach((filter) => {
         filter.addEventListener("change", () => form.requestSubmit());
+      });
+
+      const searchField = form?.querySelector(".customer-search-field");
+      const input = form?.querySelector('input[name="q"]');
+      const suggestions = document.getElementById("customer-search-suggestions");
+      if (!searchField || !input || !suggestions) return;
+
+      let requestTimer;
+      let pendingRequest;
+      const closeSuggestions = () => {
+        suggestions.replaceChildren();
+        suggestions.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+      };
+      const showSuggestions = (items) => {
+        suggestions.replaceChildren();
+        for (const item of items) {
+          const link = document.createElement("a");
+          link.href = `/customers/${item.id}`;
+          link.setAttribute("role", "option");
+          link.className = "customer-search-suggestion";
+
+          const name = document.createElement("strong");
+          name.textContent = item.name;
+          link.append(name);
+
+          const details = [item.website, item.status].filter(Boolean).join(" · ");
+          if (details) {
+            const meta = document.createElement("small");
+            meta.textContent = details;
+            link.append(meta);
+          }
+          suggestions.append(link);
+        }
+        suggestions.hidden = items.length === 0;
+        input.setAttribute("aria-expanded", String(items.length > 0));
+      };
+      const loadSuggestions = () => {
+        const query = input.value.trim();
+        window.clearTimeout(requestTimer);
+        if (query.length < 2) {
+          pendingRequest?.abort();
+          closeSuggestions();
+          return;
+        }
+        requestTimer = window.setTimeout(async () => {
+          pendingRequest?.abort();
+          pendingRequest = new AbortController();
+          const parameters = new URLSearchParams(new FormData(form));
+          parameters.set("q", query);
+          try {
+            const response = await fetch(`/customers/suggestions?${parameters}`, { signal: pendingRequest.signal });
+            if (!response.ok || input.value.trim() !== query) return;
+            const result = await response.json();
+            showSuggestions(Array.isArray(result.suggestions) ? result.suggestions : []);
+          } catch (error) {
+            if (error.name !== "AbortError") closeSuggestions();
+          }
+        }, 220);
+      };
+
+      input.addEventListener("input", loadSuggestions);
+      input.addEventListener("focus", loadSuggestions);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeSuggestions();
+      });
+      document.addEventListener("pointerdown", (event) => {
+        if (!searchField.contains(event.target)) closeSuggestions();
       });
     })();
   </script>

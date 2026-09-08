@@ -3,11 +3,12 @@ from starlette.templating import Jinja2Templates
 from sqlalchemy import func, select
 
 from app.core.csrf import get_csrf_token
-from app.core.timezones import format_berlin_time
+from app.core.timezones import format_berlin_time, format_berlin_time_short
 from app.db.session import SessionLocal
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.site_admin_launch import SiteAdminLaunchService
+from app.services.email_composer_settings import EmailComposerRuntimeSettings, EmailComposerSettingsService
 from app.services.styling_settings import StylingRuntimeSettings, StylingSettingsService
 
 
@@ -16,7 +17,9 @@ def _shared_template_context(request: Request) -> dict[str, object]:
     return {
         "csrf_token": get_csrf_token(request),
         "can_launch_wordpress_admin": user is not None and user.role == "admin",
+        "can_use_global_email_composer": user is not None and user.role == "admin",
         "unread_email_count": _unread_email_count(user),
+        "email_composer_settings": _email_composer_settings(),
         "styling": _styling_settings(),
     }
 
@@ -28,6 +31,15 @@ def _styling_settings() -> StylingRuntimeSettings:
             return StylingSettingsService(db=db).get_runtime_settings()
     except Exception:
         return StylingRuntimeSettings()
+
+
+def _email_composer_settings() -> EmailComposerRuntimeSettings:
+    """Let all composer variants share the persisted defaults without route plumbing."""
+    try:
+        with SessionLocal() as db:
+            return EmailComposerSettingsService(db=db).get_runtime_settings()
+    except Exception:
+        return EmailComposerRuntimeSettings()
 
 
 def _unread_email_count(user) -> int:
@@ -83,5 +95,6 @@ def _unread_email_count_for_db(db) -> int:
 def create_templates(*, directory: str) -> Jinja2Templates:
     templates = Jinja2Templates(directory=directory, context_processors=[_shared_template_context])
     templates.env.filters["berlin_time"] = format_berlin_time
+    templates.env.filters["berlin_time_short"] = format_berlin_time_short
     templates.env.globals["bridge_supports_admin_launch"] = SiteAdminLaunchService.bridge_supports_launch
     return templates

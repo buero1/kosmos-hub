@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from hashlib import sha256
 from secrets import token_hex
 
@@ -14,17 +15,35 @@ from sqlalchemy.orm import Session, load_only, selectinload
 from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
-from app.models.hub_mailbox_email import HubMailboxEmail
-from app.services.customer_communications import CustomerCommunicationAttachment, CustomerCommunicationService
+from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.services.customer_communications import (
+    CustomerCommunicationAttachment,
+    CustomerCommunicationAttachmentDownload,
+    CustomerCommunicationAttachmentUpload,
+    CustomerCommunicationService,
+)
+from app.services.email_attachment_storage import EmailAttachmentStorage, EmailAttachmentStorageError
+from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
+from app.services.email_composer_settings import EmailComposerSettingsService
+from app.services.email_html_compiler import EmailHtmlCompiler
+from app.services.hub_mailbox_transport import (
+    HubMailboxTransportAttachment,
+    HubMailboxTransportError,
+    HubMailboxTransportInlineImage,
+    HubMailboxTransportService,
+)
 
 
 MAILBOX_FOLDERS = frozenset({"inbox", "sent", "drafts", "unassigned", "trash", "spam"})
 _ACTIVE_MAILBOX_STATE = "active"
 _DRAFT_MAILBOX_STATE = "draft"
 _DRAFT_SOURCE = "hub-draft"
+_DIRECT_SEND_SOURCE = "hub-direct-send"
+TASK_EMAIL_REMINDER_SOURCE = "hub-task-reminder"
+MAILBOX_HEALTH_ALERT_SOURCE = "hub-mailbox-health-alert"
 _MAILBOX_STATE_BY_FOLDER = {"drafts": _DRAFT_MAILBOX_STATE, "trash": "trash", "spam": "spam"}
 _BATCH_ACTIONS = frozenset(
-    {"mark_read", "mark_unread", "move_inbox", "move_sent", "move_trash", "move_spam", "restore"}
+    {"mark_read", "mark_unread", "move_inbox", "move_sent", "move_trash", "move_spam", "restore", "permanently_delete"}
 )
 
 
@@ -41,6 +60,7 @@ class HubMailboxMessage:
     subject: str
     sender: str | None
     recipients: str | None
+    cc_recipients: str | None
     direction: str
     is_unread: bool
     mailbox_state: str
@@ -80,13 +100,21 @@ class HubMailboxView:
 class HubMailboxService:
     """Present one mailbox while keeping customer email storage and permissions intact."""
 
-    def __init__(self, *, db: Session, cipher: SecretCipher, public_base_url: str) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        cipher: SecretCipher,
+        public_base_url: str,
+        attachment_storage: EmailAttachmentStorage | None = None,
+    ) -> None:
         self.db = db
         self.cipher = cipher
         self.communications = CustomerCommunicationService(
             db=db,
             cipher=cipher,
             public_base_url=public_base_url,
+            attachment_storage=attachment_storage,
         )
 
     def get_view(self, *, folder: str, unread_only: bool, selected_key: str = "") -> HubMailboxView:
@@ -112,7 +140,11 @@ class HubMailboxService:
             raise ValueError("Unbekannter E-Mail-Ordner.")
 
         if folder == "unassigned":
-            messages = self._unassigned_list_messages(mailbox_state=_ACTIVE_MAILBOX_STATE)
+            messages = [
+                message
+                for message in self._unassigned_list_messages(mailbox_state=_ACTIVE_MAILBOX_STATE)
+                if message.kind == "unassigned"
+            ]
         elif folder == "drafts":
             messages = self._unassigned_list_messages(mailbox_state=_DRAFT_MAILBOX_STATE)
         elif folder in _MAILBOX_STATE_BY_FOLDER:
@@ -240,7 +272,23 @@ class HubMailboxService:
         if not linked_by_id and not unassigned_by_id:
             raise ValueError("Die ausgewählten E-Mails wurden nicht gefunden.")
 
-        for email in (*linked_by_id.values(), *unassigned_by_id.values()):
+        selected_emails = (*linked_by_id.values(), *unassigned_by_id.values())
+        if action == "permanently_delete":
+            if any(email.mailbox_state != "trash" for email in selected_emails):
+                raise ValueError("Nur E-Mails im Papierkorb können endgültig gelöscht werden.")
+            storage_keys = [
+                attachment.storage_key
+                for email in selected_emails
+                for attachment in email.stored_attachments
+            ]
+            for email in selected_emails:
+                self.db.delete(email)
+            self.db.flush()
+            for storage_key in storage_keys:
+                self.communications.attachment_storage.remove(storage_key)
+            return len(selected_emails)
+
+        for email in selected_emails:
             if action == "mark_read":
                 email.is_unread = False
             elif action == "mark_unread":
@@ -314,6 +362,148 @@ class HubMailboxService:
         draft.last_error = None
         self.db.flush()
         return draft
+
+    def send_direct_email(
+        self,
+        *,
+        sender_email: str,
+        recipient_email: str,
+        subject: str,
+        content: str,
+        cc_emails: str,
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
+        source: str = _DIRECT_SEND_SOURCE,
+        message_id: str | None = None,
+    ) -> HubMailboxEmail:
+        """Send an email without a customer link and retain a local sent copy."""
+        if source not in {_DIRECT_SEND_SOURCE, TASK_EMAIL_REMINDER_SOURCE, MAILBOX_HEALTH_ALERT_SOURCE}:
+            raise ValueError("Unbekannte Quelle für die Hub-E-Mail.")
+        recipient_name, parsed_recipient_email = parseaddr(recipient_email.strip())
+        normalized_recipient_email = parsed_recipient_email.strip().casefold()
+        if not normalized_recipient_email or "@" not in normalized_recipient_email:
+            raise ValueError("Gib eine gültige Empfängeradresse ein.")
+
+        transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
+        sender = next(
+            (item for item in transport.list_senders() if item.email.casefold() == sender_email.strip().casefold()),
+            None,
+        )
+        if sender is None:
+            raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
+
+        normalized_subject = self.communications._required_text(subject, "Betreff", maximum=500)
+        composer_settings_service = EmailComposerSettingsService(db=self.db)
+        composer_settings = composer_settings_service.get_runtime_settings()
+        normalized_content = composer_settings_service.apply_default_style(
+            self.communications._sanitized_email_content(content)
+        )
+        source_stylesheet = EmailHtmlCompiler.extract_stylesheet(content)
+        delivery_content, inline_images = EmailComposeImageService(
+            db=self.db,
+            cipher=self.cipher,
+        ).prepare_inline_images(normalized_content)
+        compilation = EmailHtmlCompiler().compile(
+            delivery_content,
+            source_stylesheet=source_stylesheet,
+            font_family=composer_settings.font_family,
+            font_size=composer_settings.font_size,
+            line_height=composer_settings.line_height,
+        )
+        cc_recipients = self.communications._cc_recipients(
+            cc_emails,
+            excluded_emails={sender.email, normalized_recipient_email},
+        )
+        normalized_attachments = self._validated_direct_attachments(attachments)
+        now = datetime.now(UTC)
+        payload_attachments = [
+            {
+                "id": sha256(token_hex(32).encode("ascii")).hexdigest(),
+                "name": attachment.filename.strip()[:255],
+            }
+            for attachment in normalized_attachments
+        ]
+        email = HubMailboxEmail(
+            source=source,
+            direction="outbound",
+            is_unread=False,
+            mailbox_state=_ACTIVE_MAILBOX_STATE,
+            fingerprint=sha256(token_hex(32).encode("ascii")).hexdigest(),
+            encrypted_payload_json="",
+            received_at=now,
+        )
+        self.db.add(email)
+        self.db.flush()
+
+        storage_keys: list[str] = []
+        try:
+            if normalized_attachments:
+                self.communications.ensure_email_attachment_storage()
+            for metadata, attachment in zip(payload_attachments, normalized_attachments, strict=True):
+                storage_key = self.communications.attachment_storage.store(attachment.content)
+                storage_keys.append(storage_key)
+                self.db.add(
+                    HubMailboxAttachment(
+                        email_id=email.id,
+                        source=source,
+                        source_attachment_id=metadata["id"],
+                        storage_key=storage_key,
+                        content_type=(attachment.content_type or "application/octet-stream")[:128],
+                        byte_size=len(attachment.content),
+                        stored_at=now,
+                    )
+                )
+            delivery = transport.send(
+                sender_email=sender.email,
+                recipient_name=(recipient_name.strip() or normalized_recipient_email)[:255],
+                recipient_email=normalized_recipient_email,
+                subject=normalized_subject,
+                html_content=compilation.compiled_html,
+                cc_recipients=cc_recipients,
+                reply_to_message_id=None,
+                attachments=tuple(
+                    HubMailboxTransportAttachment(
+                        filename=attachment.filename,
+                        content=attachment.content,
+                        content_type=attachment.content_type,
+                    )
+                    for attachment in normalized_attachments
+                ),
+                inline_images=tuple(
+                    HubMailboxTransportInlineImage(
+                        content_id=image.content_id,
+                        filename=image.filename,
+                        content=image.content,
+                        content_type=image.content_type,
+                    )
+                    for image in inline_images
+                ),
+                message_id=message_id,
+            )
+        except (EmailAttachmentStorageError, EmailComposeImageError, HubMailboxTransportError, ValueError) as exc:
+            for storage_key in storage_keys:
+                self.communications.attachment_storage.remove(storage_key)
+            self.db.delete(email)
+            self.db.flush()
+            raise ValueError(str(exc)) from exc
+
+        email.encrypted_payload_json = self.cipher.encrypt(json.dumps({
+            "subject": normalized_subject,
+            "content": normalized_content,
+            "outbound_html": compilation.compiled_html,
+            "email_compiler": {
+                "mode": "hub",
+                "version": compilation.version,
+                "warnings": list(compilation.warnings),
+            },
+            "from": {"name": sender.name, "email": sender.email},
+            "to": {"name": (recipient_name.strip() or normalized_recipient_email)[:255], "email": normalized_recipient_email},
+            "cc": [{"name": name, "email": address} for name, address in cc_recipients],
+            "attachments": payload_attachments,
+            "message_id": delivery.message_id,
+            "sent_time": delivery.sent_at.isoformat(),
+        }, ensure_ascii=False))
+        self.db.flush()
+        return email
 
     def get_draft_compose_context(self, *, draft_id: int) -> dict[str, object]:
         draft = self.db.get(HubMailboxEmail, draft_id)
@@ -434,7 +624,7 @@ class HubMailboxService:
 
     def _unassigned_list_message(self, email: HubMailboxEmail) -> HubMailboxListItem:
         payload = self._payload(email.encrypted_payload_json)
-        kind = "draft" if email.source == _DRAFT_SOURCE and email.mailbox_state == _DRAFT_MAILBOX_STATE else "unassigned"
+        kind = self._unassigned_kind(email)
         return HubMailboxListItem(
             key=f"unassigned-{email.id}",
             kind=kind,
@@ -465,20 +655,20 @@ class HubMailboxService:
             select(HubMailboxEmail.mailbox_state, HubMailboxEmail.direction, HubMailboxEmail.source, HubMailboxEmail.id)
         ))
         active_unassigned_rows = [
-            (direction, email_id)
-            for mailbox_state, direction, _source, email_id in unassigned_rows
+            (direction, source, email_id)
+            for mailbox_state, direction, source, email_id in unassigned_rows
             if mailbox_state == _ACTIVE_MAILBOX_STATE
         ]
         return {
             "inbox": sum(
                 mailbox_state == _ACTIVE_MAILBOX_STATE and direction == "inbound"
                 for mailbox_state, direction, _ in linked_keys
-            ) + sum(direction == "inbound" for direction, _ in active_unassigned_rows),
+            ) + sum(direction == "inbound" for direction, _source, _ in active_unassigned_rows),
             "sent": sum(
                 mailbox_state == _ACTIVE_MAILBOX_STATE and direction == "outbound"
                 for mailbox_state, direction, _ in linked_keys
-            ),
-            "unassigned": len(active_unassigned_rows),
+            ) + sum(direction == "outbound" for direction, _source, _ in active_unassigned_rows),
+            "unassigned": sum(direction == "inbound" for direction, _source, _ in active_unassigned_rows),
             "trash": sum(mailbox_state == "trash" for mailbox_state, _, _ in linked_keys)
             + sum(mailbox_state == "trash" for mailbox_state, _, _source, _ in unassigned_rows),
             "spam": sum(mailbox_state == "spam" for mailbox_state, _, _ in linked_keys)
@@ -509,6 +699,7 @@ class HubMailboxService:
             subject=view.subject,
             sender=view.sender,
             recipients=view.recipients,
+            cc_recipients=self._people(self._payload(winner.encrypted_payload_json).get("cc")),
             direction=view.direction,
             is_unread=any(email.is_unread and email.direction == "inbound" for email in emails),
             mailbox_state=winner.mailbox_state,
@@ -525,13 +716,14 @@ class HubMailboxService:
     def _unassigned_message(self, email: HubMailboxEmail) -> HubMailboxMessage:
         payload = self._payload(email.encrypted_payload_json)
         content = self._unassigned_content(payload)
-        kind = "draft" if email.source == _DRAFT_SOURCE and email.mailbox_state == _DRAFT_MAILBOX_STATE else "unassigned"
+        kind = self._unassigned_kind(email)
         return HubMailboxMessage(
             key=f"unassigned-{email.id}",
             kind=kind,
             subject=self._text(payload.get("betreff")) or self._text(payload.get("subject")) or "Ohne Betreff",
             sender=self._people(payload.get("absender") or payload.get("sender") or payload.get("from")),
             recipients=self._people(payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")),
+            cc_recipients=self._people(payload.get("cc")),
             direction=email.direction,
             is_unread=email.is_unread,
             mailbox_state=email.mailbox_state,
@@ -541,9 +733,43 @@ class HubMailboxService:
             customer_email_id=email.id,
             # Deluge can send an unknown email body directly; render it only inside the sandboxed preview.
             preview_html=CustomerCommunicationService._email_preview_document(content),
-            attachments=(),
+            attachments=self.communications._email_attachments(payload),
             can_load_content=False,
             last_error=email.last_error,
+        )
+
+    def download_unassigned_attachment(
+        self,
+        *,
+        email_id: int,
+        attachment_id: str,
+    ) -> CustomerCommunicationAttachmentDownload:
+        email = self.db.get(HubMailboxEmail, email_id)
+        if email is None:
+            raise ValueError("Die E-Mail wurde nicht gefunden.")
+        payload = self._payload(email.encrypted_payload_json)
+        attachment = next(
+            (item for item in self.communications._email_attachments(payload) if item.id == attachment_id),
+            None,
+        )
+        if attachment is None:
+            raise ValueError("Der angeforderte Anhang gehört nicht zu dieser E-Mail.")
+        stored = self.db.scalar(
+            select(HubMailboxAttachment).where(
+                HubMailboxAttachment.email_id == email.id,
+                HubMailboxAttachment.source_attachment_id == attachment.id,
+            )
+        )
+        if stored is None:
+            raise ValueError("Für diesen Anhang liegt keine lokale Sicherung vor.")
+        try:
+            content = self.communications.attachment_storage.load(stored.storage_key)
+        except EmailAttachmentStorageError as exc:
+            raise ValueError("Die lokale Sicherung dieses Anhangs ist nicht lesbar.") from exc
+        return CustomerCommunicationAttachmentDownload(
+            content=content,
+            content_type=stored.content_type,
+            filename=attachment.filename,
         )
 
     @staticmethod
@@ -572,6 +798,32 @@ class HubMailboxService:
         if folder == "sent":
             return message.mailbox_state == _ACTIVE_MAILBOX_STATE and message.direction == "outbound"
         return message.mailbox_state == _ACTIVE_MAILBOX_STATE and message.direction == "inbound"
+
+    @staticmethod
+    def _unassigned_kind(email: HubMailboxEmail) -> str:
+        if email.source == _DRAFT_SOURCE and email.mailbox_state == _DRAFT_MAILBOX_STATE:
+            return "draft"
+        if email.source == _DIRECT_SEND_SOURCE:
+            return "direct"
+        if email.source in {TASK_EMAIL_REMINDER_SOURCE, MAILBOX_HEALTH_ALERT_SOURCE}:
+            return "system"
+        return "unassigned"
+
+    @staticmethod
+    def _validated_direct_attachments(
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+    ) -> tuple[CustomerCommunicationAttachmentUpload, ...]:
+        if len(attachments) > 20:
+            raise ValueError("Es können höchstens 20 Anhänge pro E-Mail versendet werden.")
+        total_bytes = 0
+        for attachment in attachments:
+            CustomerCommunicationService._required_text(attachment.filename, "Dateiname", maximum=255)
+            if not attachment.content:
+                raise ValueError("Ein leerer Anhang kann nicht versendet werden.")
+            total_bytes += len(attachment.content)
+            if total_bytes > 50 * 1024 * 1024:
+                raise ValueError("Die Anhänge sind zusammen größer als 50 MB.")
+        return attachments
 
     def _payload(self, encrypted_payload_json: str) -> dict[str, object]:
         try:

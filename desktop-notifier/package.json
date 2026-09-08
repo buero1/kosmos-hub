@@ -1,0 +1,32 @@
+{
+  "name": "kosmos-notifier",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Windows tray notifier for Kosmos Hub activities",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "de.kosmoshub.notifier",
+    "productName": "Kosmos Notifier",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "Kosmos-Notifier-${version}-Windows.${ext}"
+    }
+  }
+}

@@ -7,6 +7,9 @@
       <nav class="account-section-nav" aria-label="Account sections">
         <a href="#account-security" aria-current="page">Security</a>
         <a href="#account-mcp">MCP access</a>
+        <a href="#account-desktop-notifier">Windows Erinnerungen</a>
+        <a href="#account-task-reminders">E-Mail-Erinnerungen</a>
+        {% if user.role == "admin" %}<a href="#account-mailbox">E-Mail-Postfächer</a>{% endif %}
         <a href="#account-openai">OpenAI</a>
         <a href="#account-provider-licenses">Provider licenses</a>
         <a href="#account-zoho">Zoho CRM</a>
@@ -27,6 +30,24 @@
     {% endif %}
     {% if request.query_params.get("mcp_token") == "revoked" %}
       <p class="notice-success" data-account-notice-section="account-mcp">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
+    {% endif %}
+    {% if request.query_params.get("desktop_device") == "revoked" %}
+      <p class="notice-success" data-account-notice-section="account-desktop-notifier">Das Windows-Erinnerungsgerät wurde getrennt.</p>
+    {% endif %}
+    {% if request.query_params.get("task_reminder_email") == "saved" %}
+      <p class="notice-success" data-account-notice-section="account-task-reminders">Die persönliche Adresse für Aufgaben-Erinnerungen wurde gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("mailbox") == "connected" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Das Mittwald-Postfach wurde per IMAP und SMTP erfolgreich getestet und verschlüsselt gespeichert. Der Abruf und Versand über Mittwald sind noch nicht aktiviert.</p>
+    {% endif %}
+    {% if request.query_params.get("email_composer") == "saved" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die Standardformatierung für neue E-Mails wurde gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("email_signature") == "saved" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die E-Mail-Signatur wurde gespeichert und steht in Vorlagen als <code>${userSignature}</code> bereit.</p>
+    {% endif %}
+    {% if request.query_params.get("mailbox") == "import-started" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Der Mittwald-Erstimport wurde im Hintergrund gestartet. Er liest nur Posteingang und Gesendet und verändert im Postfach nichts.</p>
     {% endif %}
     {% if request.query_params.get("openai") == "configured" %}
       <p class="notice-success" data-account-notice-section="account-openai">OpenAI is connected. The API key is encrypted and never shown again.</p>
@@ -78,6 +99,15 @@
     {% endif %}
     {% if request.query_params.get("zoho") == "email-content-import-cancel-requested" %}
       <p class="notice-success" data-account-notice-section="account-zoho">Der Abbruch wurde vorgemerkt. Die aktuell laufende E-Mail wird noch sicher abgeschlossen.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-attachment-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Die Zoho-Anhänge werden jetzt verschlüsselt auf dem Hub-Server gesichert. Weitere Chargen folgen automatisch.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-attachment-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Zoho-Anhangsimport läuft bereits weiter.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho") == "email-attachment-import-cancel-requested" %}
+      <p class="notice-success" data-account-notice-section="account-zoho">Der Abbruch wurde vorgemerkt. Die aktuell laufende Datei wird noch sicher abgeschlossen.</p>
     {% endif %}
     {% if request.query_params.get("zoho") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho">The Zoho OAuth connection was removed. Imported customer data was not deleted.</p>
@@ -150,7 +180,197 @@
           </tbody>
         </table>
       </div>
+      {% if mittwald_mailbox_accounts %}
+      <div class="account-panel-inset">
+        <h4>Automatischer E-Mail-Abruf</h4>
+        <p class="subtle">Der Hub übernimmt neue INBOX-Nachrichten sofort per IMAP IDLE und gleicht sie zusätzlich jede Minute ab. INBOX.Sent wird jede Minute geprüft. Zoho-Webhooks werden dafür nicht benötigt.</p>
+      </div>
+      <div class="account-panel-inset">
+        <h4>Einmaliger Erstimport</h4>
+        <p class="subtle">Es werden nur Nachrichten aus <strong>INBOX</strong> und <strong>INBOX.Sent</strong> ab dem gewählten Datum gelesen. Bereits aus Zoho vorhandene Nachrichten mit derselben Message-ID werden übersprungen; Mittwald wird dabei nicht verändert.</p>
+        <form method="post" action="/account/mailboxes/import" class="account-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label><span>Importieren seit</span><input type="date" name="since_date" value="2026-09-05" required></label>
+          <button class="button" type="submit">E-Mails seit diesem Datum importieren</button>
+        </form>
+        {% if mittwald_mailbox_import %}
+          <p class="subtle">Letzter Import: <strong>{{ mittwald_mailbox_import.status }}</strong> · {{ mittwald_mailbox_import.processed_messages }} von {{ mittwald_mailbox_import.total_messages }} verarbeitet · {{ mittwald_mailbox_import.imported_messages }} übernommen · {{ mittwald_mailbox_import.skipped_messages }} bereits vorhanden · {{ mittwald_mailbox_import.stored_attachments }} Anhänge gesichert.</p>
+          {% if mittwald_mailbox_import.last_error %}<p class="notice-warning">{{ mittwald_mailbox_import.last_error }}</p>{% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
     </section>
+    <section id="account-desktop-notifier" class="account-panel account-section" data-account-section>
+      <div>
+        <p class="eyebrow">Windows Erinnerungen</p>
+        <h3>Kosmos Notifier koppeln</h3>
+        <p class="subtle">Der Notifier zeigt fällige Popup-Erinnerungen auch bei geschlossenem Browser. Jedes Windows-Gerät erhält einen eigenen, widerrufbaren Zugang.</p>
+      </div>
+      {% if new_desktop_device_token %}
+        <p class="notice-success">Kopplungscode für <strong>{{ new_desktop_device_name }}</strong> erstellt. Jetzt in der Windows-App einfügen; er wird nicht erneut angezeigt.</p>
+        <code class="token-value">{{ new_desktop_device_token }}</code>
+      {% endif %}
+      <form method="post" action="/account/desktop-devices">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>Gerätename</span>
+          <input type="text" name="name" placeholder="Mein Arbeits-PC" minlength="3" maxlength="80" required>
+        </label>
+        <button class="button button-secondary" type="submit">Windows-Gerät koppeln</button>
+      </form>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Gerät</th><th>Zugang</th><th>Erstellt</th><th>Zuletzt verbunden</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for device in desktop_devices %}
+              <tr>
+                <td>{{ device.name }}</td>
+                <td><code>{{ device.token_prefix }}...</code></td>
+                <td>{{ device.created_at | berlin_time }}</td>
+                <td>{% if device.last_seen_at %}{{ device.last_seen_at | berlin_time }}{% else %}Noch nie{% endif %}</td>
+                <td>
+                  {% if device.revoked_at %}
+                    <span class="pill pill-missing">Getrennt</span>
+                  {% else %}
+                    <form method="post" action="/account/desktop-devices/{{ device.id }}/revoke">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-secondary" type="submit">Trennen</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">Noch kein Windows-Erinnerungsgerät gekoppelt.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section id="account-task-reminders" class="account-panel account-section" data-account-section>
+      <div>
+        <p class="eyebrow">Aufgaben</p>
+        <h3>E-Mail-Erinnerungen</h3>
+        <p class="subtle">Aufgaben mit Erinnerung „E-Mail“ werden an diese persönliche Adresse gesendet. Der Versand erfolgt über das eingerichtete Mittwald-Postfach <code>info@kosmos-medien.de</code>.</p>
+      </div>
+      <form method="post" action="/account/task-reminder-email" class="account-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>Meine Erinnerungsadresse</span>
+          <input type="email" name="reminder_email" value="{{ user.reminder_email or '' }}" autocomplete="email" placeholder="name@ihre-domain.de" required>
+        </label>
+        <button class="button button-secondary" type="submit">Adresse speichern</button>
+      </form>
+    </section>
+    {% if user.role == "admin" %}
+    <section id="account-mailbox" class="account-panel account-section" data-account-section>
+      <div>
+        <p class="eyebrow">E-Mail-Postfächer</p>
+        <h3>Mittwald-Postfach einrichten</h3>
+        <p class="subtle">Der Hub prüft die Anmeldung bei IMAP und SMTP, speichert die Zugangsdaten verschlüsselt und lässt Zoho bis zur späteren Umstellung unverändert aktiv. Der Posteingang wird sofort über IMAP IDLE und zusätzlich jede Minute abgesichert; Gesendet wird jede Minute abgeglichen.</p>
+      </div>
+      <form method="post" action="/account/mailboxes/mittwald">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>E-Mail-Adresse</span>
+          <input type="email" name="email_address" autocomplete="email" placeholder="info@ihre-domain.de" required>
+        </label>
+        <label>
+          <span>Anzeigename</span>
+          <input type="text" name="display_name" autocomplete="organization" placeholder="Kosmos Medien">
+        </label>
+        <label>
+          <span>Postfach-Benutzername</span>
+          <input type="text" name="username" autocomplete="username" placeholder="Leer lassen = E-Mail-Adresse">
+          <small>Bei Mittwald ist das meist die E-Mail-Adresse, bei älteren Postfächern gegebenenfalls die Postfachnummer.</small>
+        </label>
+        <label>
+          <span>Postfach-Passwort</span>
+          <input type="password" name="password" autocomplete="current-password" maxlength="1024" required>
+          <small>Das Passwort wird nur verschlüsselt gespeichert und danach nicht mehr angezeigt.</small>
+        </label>
+        <p class="subtle">Voreinstellung: <code>mail.agenturserver.de</code> · IMAP SSL <code>993</code> · SMTP SSL <code>465</code> · IMAP-Pfad <code>INBOX</code>.</p>
+        <button class="button" type="submit">Verbindung testen und speichern</button>
+      </form>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Postfach</th><th>Benutzername</th><th>Verbindung</th><th>Zuletzt getestet</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for mailbox in mittwald_mailbox_accounts %}
+              <tr>
+                <td><strong>{{ mailbox.display_name }}</strong><br><span class="subtle">{{ mailbox.email_address }}</span></td>
+                <td>{{ mailbox.username }}</td>
+                <td>IMAP {{ mailbox.imap_port }} · SMTP {{ mailbox.smtp_port }}</td>
+                <td>{% if mailbox.last_tested_at %}{{ mailbox.last_tested_at | berlin_time }}{% else %}Noch nie{% endif %}</td>
+                <td>
+                  {% if mailbox.last_error %}<span class="pill pill-missing">Verbindungstest fehlgeschlagen</span><br><span class="subtle">{{ mailbox.last_error }}</span>
+                  {% elif not mailbox.verified_at %}<span class="pill pill-missing">Nicht getestet</span>
+                  {% elif mailbox.inbox_alerted_at %}<span class="pill pill-missing">INBOX-Abruf gestört</span><br><span class="subtle">{{ mailbox.inbox_last_error or "Kein erfolgreicher Abruf seit mindestens 5 Minuten." }}</span>
+                  {% else %}<span class="pill">INBOX aktiv</span>{% endif %}
+                  {% if mailbox.inbox_last_success_at %}<br><span class="subtle">INBOX zuletzt erfolgreich: {{ mailbox.inbox_last_success_at | berlin_time }}</span>{% endif %}
+                  {% if mailbox.inbox_consecutive_failures %}<br><span class="subtle">{{ mailbox.inbox_consecutive_failures }} Fehler in Folge</span>{% endif %}
+                  {% if mailbox.sent_last_error %}<br><span class="subtle">Gesendet: {{ mailbox.sent_last_error }}</span>
+                  {% elif mailbox.sent_last_success_at %}<br><span class="subtle">Gesendet zuletzt erfolgreich: {{ mailbox.sent_last_success_at | berlin_time }}</span>{% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">Noch kein Mittwald-Postfach eingerichtet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="account-panel-inset">
+        <h4>E-Mail-Editor</h4>
+        <p class="subtle">Diese Vorgaben gelten im Editor, in Signaturen, in Hub-Vorlagen und beim Versand. Enter erzeugt einen Zeilenumbruch; einzelne, bewusst formatierte Textstellen dürfen die Vorgaben weiterhin überschreiben.</p>
+        <form method="post" action="/account/mail-composer-settings" class="account-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>
+            <span>Standardschrift</span>
+            <select name="font_family_key">
+              {% for key, label, css_value in email_composer_font_options %}
+                <option value="{{ key }}" {% if email_composer_settings.font_family_key == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Standardgröße</span>
+            <select name="font_size">
+              {% for size in email_composer_font_size_options %}
+                <option value="{{ size }}" {% if email_composer_settings.font_size == size %}selected{% endif %}>{{ size }} px</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Zeilenhöhe</span>
+            <select name="line_height">
+              {% for value in email_composer_line_height_options %}
+                <option value="{{ value }}" {% if email_composer_settings.line_height == value %}selected{% endif %}>{{ value }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button class="button button-secondary" type="submit">Standard speichern</button>
+        </form>
+      </div>
+      <div class="account-panel-inset">
+        <h4>E-Mail-Signatur</h4>
+        <p class="subtle">Die gemeinsame Hub-Signatur kann Logo, Text, Links und Formatierung enthalten. In einer E-Mail-Vorlage wird sie mit <code>${userSignature}</code> an der gewünschten Stelle eingefügt.</p>
+        <form method="post" action="/account/mail-signature">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>E-Mail-Signatur
+            <div class="email-rich-editor" data-email-rich-editor>
+              <textarea class="email-rich-editor-content" aria-label="E-Mail-Signatur" data-email-compose-content>{{ email_composer_settings.signature_html }}</textarea>
+            </div>
+            <textarea name="signature_html" hidden data-email-compose-content-value>{{ email_composer_settings.signature_html }}</textarea>
+          </label>
+          <p class="subtle">Für ein Logo in der Werkzeugleiste auf das Bild-Symbol klicken. Das Bild wird lokal im Hub gespeichert und beim Versand eingebettet.</p>
+          <button class="button button-secondary" type="submit">Signatur speichern</button>
+        </form>
+      </div>
+    </section>
+    {% endif %}
     <section id="account-openai" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">AI provider</p>
@@ -299,7 +519,7 @@
             {% endif %}
           </div>
         </details>
-        <details class="account-details zoho-area" {% if (zoho_note_history_import and zoho_note_history_import.status in ["pending", "running"]) or (zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"]) %}open{% endif %}>
+        <details class="account-details zoho-area" {% if (zoho_note_history_import and zoho_note_history_import.status in ["pending", "running"]) or (zoho_email_content_import and zoho_email_content_import.status in ["pending", "running"]) or (zoho_email_attachment_import and zoho_email_attachment_import.status in ["pending", "running"]) %}open{% endif %}>
           <summary>Datenübernahmen</summary>
           <div class="zoho-area-content">
             <div class="zoho-import-row">
@@ -337,6 +557,29 @@
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="limit" value="500">
                   <button class="button button-secondary" type="submit">Verbleibende Inhalte laden</button>
+                </form>
+              {% endif %}
+            </div>
+            <div class="zoho-import-row">
+              <div>
+                <h4>E-Mail-Anhänge sichern</h4>
+                <p class="subtle">Kopiert die in Zoho vorhandenen Dateien verschlüsselt in den Hub-Dateispeicher. Bereits gesicherte Anhänge werden nicht erneut geladen.</p>
+                {% if zoho_email_attachment_import %}
+                  <p class="zoho-import-status" data-zoho-email-attachment-import-status><strong>{{ zoho_email_attachment_import.processed_attachments }} von {{ zoho_email_attachment_import.total_attachments }} Anhängen</strong> · {{ zoho_email_attachment_import.stored_attachments }} gesichert · {{ zoho_email_attachment_import.failed_attachments }} fehlgeschlagen · {{ (zoho_email_attachment_import.stored_bytes / 1024 / 1024) | round(1) }} MB{% if zoho_email_attachment_import.consecutive_failures %} · {{ zoho_email_attachment_import.consecutive_failures }} Fehler in Folge{% endif %}{% if zoho_email_attachment_import.continue_automatically %} · weitere Chargen folgen automatisch{% endif %} · Status: {% if zoho_email_attachment_import.status == "cancelled" %}abgebrochen{% elif zoho_email_attachment_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_email_attachment_import.status }}{% endif %}{% if zoho_email_attachment_import.completed_at %} · beendet {{ zoho_email_attachment_import.completed_at | berlin_time }}{% endif %}{% if zoho_email_attachment_import.last_error %} · letzte Meldung: {{ zoho_email_attachment_import.last_error }}{% endif %}</p>
+                {% else %}
+                  <p class="zoho-import-status">Noch kein Anhangsimport ausgeführt.</p>
+                {% endif %}
+              </div>
+              {% if zoho_email_attachment_import and zoho_email_attachment_import.status in ["pending", "running"] %}
+                <form method="post" action="/account/zoho/email-attachments/import/cancel">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="button button-secondary" type="submit" {% if zoho_email_attachment_import.cancel_requested %}disabled{% endif %}>{% if zoho_email_attachment_import.cancel_requested %}Abbruch vorgemerkt{% else %}Import abbrechen{% endif %}</button>
+                </form>
+              {% else %}
+                <form method="post" action="/account/zoho/email-attachments/import">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="limit" value="100">
+                  <button class="button button-secondary" type="submit">Verbleibende Anhänge sichern</button>
                 </form>
               {% endif %}
             </div>
@@ -423,6 +666,55 @@
 
               function refreshStatus() {
                 window.fetch('/account/zoho/email-content/import/status', { credentials: 'same-origin' })
+                  .then(function (response) {
+                    if (!response.ok) throw new Error('Import status response failed.');
+                    return response.json();
+                  })
+                  .then(function (status) {
+                    if (!status.status) return;
+                    renderStatus(status);
+                    if (!status.active) {
+                      window.setTimeout(function () { window.location.reload(); }, 750);
+                      return;
+                    }
+                    window.setTimeout(refreshStatus, 3000);
+                  })
+                  .catch(function () {
+                    window.setTimeout(refreshStatus, 6000);
+                  });
+              }
+
+              window.setTimeout(refreshStatus, 3000);
+            }());
+          </script>
+        {% endif %}
+        {% if zoho_email_attachment_import and zoho_email_attachment_import.status in ["pending", "running"] %}
+          <script>
+            (function () {
+              var statusLine = document.querySelector('[data-zoho-email-attachment-import-status]');
+              if (!statusLine) return;
+
+              function statusLabel(status) {
+                if (status === 'cancelled') return 'abgebrochen';
+                if (status === 'stopped') return 'automatisch angehalten';
+                return status;
+              }
+
+              function renderStatus(status) {
+                statusLine.replaceChildren();
+                var progress = document.createElement('strong');
+                progress.textContent = status.processed_attachments + ' von ' + status.total_attachments + ' Anhängen';
+                statusLine.append(progress);
+                statusLine.append(' · ' + status.stored_attachments + ' gesichert · ' + status.failed_attachments + ' fehlgeschlagen · ' + (status.stored_bytes / 1024 / 1024).toFixed(1) + ' MB');
+                if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+                if (status.continue_automatically) statusLine.append(' · weitere Chargen folgen automatisch');
+                statusLine.append(' · Status: ' + statusLabel(status.status));
+                if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
+                if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
+              }
+
+              function refreshStatus() {
+                window.fetch('/account/zoho/email-attachments/import/status', { credentials: 'same-origin' })
                   .then(function (response) {
                     if (!response.ok) throw new Error('Import status response failed.');
                     return response.json();

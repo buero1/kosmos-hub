@@ -16,15 +16,27 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import SecretCipher
 from app.models.customer import Customer
-from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
+from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.customer_contact import CustomerContact
 from app.models.zoho_email_template import ZohoEmailTemplate
+from app.services.email_attachment_storage import EmailAttachmentStorage, EmailAttachmentStorageError
+from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
+from app.services.email_composer_settings import EmailComposerSettingsService
+from app.services.email_html_compiler import EmailHtmlCompiler
+from app.services.hub_mailbox_transport import (
+    HubMailboxTransportAttachment,
+    HubMailboxTransportError,
+    HubMailboxTransportInlineImage,
+    HubMailboxTransportService,
+)
 from app.services.zoho_crm import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZohoCrmError, ZohoCrmService
 
 
@@ -37,6 +49,11 @@ _EXTERNAL_IMAGE_TIMEOUT_SECONDS = 15
 _ALLOWED_IMAGE_CONTENT_TYPES = frozenset({"image/avif", "image/gif", "image/jpeg", "image/png", "image/webp"})
 _IMAGE_SRC_PATTERN = re.compile(
     r"(?P<prefix><img\b[^>]*?\bsrc\s*=\s*)(?P<quote>['\"])(?P<source>.*?)(?P=quote)",
+    flags=re.IGNORECASE,
+)
+_LOCAL_COMPOSE_IMAGE_PATH_PATTERN = re.compile(r"^/emails/compose/images/[A-Za-z0-9_-]{32,64}$")
+_LOCAL_COMPOSE_IMAGE_SRC_PATTERN = re.compile(
+    r"\bsrc\s*=\s*['\"]/emails/compose/images/[A-Za-z0-9_-]{32,64}['\"]",
     flags=re.IGNORECASE,
 )
 _ZOHO_INLINE_IMAGE_SOURCE_PATTERN = re.compile(r"^crm\\img_id:(?P<image_id>[A-Za-z0-9_-]{1,255})$", flags=re.IGNORECASE)
@@ -54,16 +71,32 @@ _COMPOSER_STYLE_PROPERTIES = frozenset({
     "padding-right", "padding-top", "text-align", "text-decoration", "vertical-align", "width",
 })
 _COMPOSER_STYLE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9#%(),.\s/+_-]+$")
+_TEMPLATE_HREF_PLACEHOLDER_PATTERN = re.compile(
+    r"^(?:\$\{\s*!?[A-Za-z][A-Za-z0-9_]*\.[^{}]+\s*\}|\{\{\s*[A-Za-z][A-Za-z0-9_]*\.[^{}]+\s*\}\})$"
+)
+_CUSTOMER_FIELD_LABEL_ALIASES = {
+    "Webseite": "Website",
+    "Website": "Webseite",
+}
+_EMAIL_RECIPIENT_CUSTOMER_TYPE_FIELD = "Kunde Typ"
+_EMAIL_RECIPIENT_ADDITIONAL_CUSTOMER_TYPE = "analyst"
+_CONTACT_FIELD_LEGACY_ALIASES = {
+    "Name": ("Full Name", "Full_Name"),
+    "Vorname": ("First Name", "First_Name"),
+    "Nachname": ("Last Name", "Last_Name"),
+    "E-Mail": ("Email",),
+}
 
 
 class _EmailComposerHtmlSanitizer(HTMLParser):
     """Keep safe rich-text and layout markup emitted by the Hub or Zoho templates."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_template_href_placeholders: bool = False) -> None:
         super().__init__(convert_charrefs=True)
         self._parts: list[str] = []
         self._open_tags: list[str] = []
         self._ignored_tag_depth = 0
+        self._allow_template_href_placeholders = allow_template_href_placeholders
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         normalized_tag = tag.casefold()
@@ -76,6 +109,8 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
             return
         rendered_attrs = self._render_attributes(normalized_tag, attrs)
         if normalized_tag == "a" and not rendered_attrs:
+            return
+        if normalized_tag == "img" and not rendered_attrs:
             return
         self._parts.append(f"<{normalized_tag}{rendered_attrs}>")
         if normalized_tag not in _COMPOSER_VOID_TAGS:
@@ -110,25 +145,38 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
             self._parts.append(f"</{self._open_tags.pop()}>")
         return "".join(self._parts)
 
-    @staticmethod
-    def _render_attributes(tag: str, attrs: list[tuple[str, str | None]]) -> str:
+    def _render_attributes(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
         values = {name.casefold(): (value or "").strip() for name, value in attrs}
         if tag == "a":
             href = values.get("href", "")
             scheme = urlsplit(href).scheme.casefold()
-            if scheme in {"http", "https", "mailto"}:
-                return f' href="{escape(href, quote=True)}"'
+            is_template_href = self._allow_template_href_placeholders and bool(
+                _TEMPLATE_HREF_PLACEHOLDER_PATTERN.fullmatch(href)
+            )
+            if scheme in {"http", "https", "mailto"} or is_template_href:
+                attributes = [f' href="{escape(href, quote=True)}"']
+                if values.get("target", "").casefold() == "_blank":
+                    attributes.append(' target="_blank" rel="noopener noreferrer"')
+                attributes.extend(_EmailComposerHtmlSanitizer._identity_attributes(values))
+                style = _EmailComposerHtmlSanitizer._safe_style(values.get("style", ""))
+                if style:
+                    attributes.append(f' style="{escape(style, quote=True)}"')
+                return "".join(attributes)
             return ""
         if tag == "img":
             source = values.get("src", "")
             scheme = urlsplit(source).scheme.casefold()
-            if scheme not in {"http", "https", "data"}:
+            if scheme not in {"http", "https", "data"} and not _LOCAL_COMPOSE_IMAGE_PATH_PATTERN.fullmatch(source):
                 return ""
             attributes = [f' src="{escape(source, quote=True)}"']
             for attribute in ("alt", "title", "width", "height"):
                 value = values.get(attribute, "")
                 if value:
                     attributes.append(f' {attribute}="{escape(value, quote=True)}"')
+            attributes.extend(_EmailComposerHtmlSanitizer._identity_attributes(values))
+            style = _EmailComposerHtmlSanitizer._safe_style(values.get("style", ""))
+            if style:
+                attributes.append(f' style="{escape(style, quote=True)}"')
             return "".join(attributes)
         if tag == "font":
             attributes: list[str] = []
@@ -140,6 +188,7 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
                 attributes.append(f' size="{size}"')
             return "".join(attributes)
         attributes: list[str] = []
+        attributes.extend(_EmailComposerHtmlSanitizer._identity_attributes(values))
         style = _EmailComposerHtmlSanitizer._safe_style(values.get("style", ""))
         if style:
             attributes.append(f' style="{escape(style, quote=True)}"')
@@ -148,6 +197,21 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
             if value and re.fullmatch(r"[A-Za-z0-9.% -]{1,40}", value):
                 attributes.append(f' {attribute}="{escape(value, quote=True)}"')
         return "".join(attributes)
+
+    @staticmethod
+    def _identity_attributes(values: dict[str, str]) -> list[str]:
+        """Keep only selector identifiers that the local compiler can safely target."""
+        attributes: list[str] = []
+        identifier = values.get("id", "")
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", identifier):
+            attributes.append(f' id="{escape(identifier, quote=True)}"')
+        classes = [
+            item for item in values.get("class", "").split()
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", item)
+        ][:12]
+        if classes:
+            attributes.append(f' class="{escape(" ".join(classes), quote=True)}"')
+        return attributes
 
     @staticmethod
     def _safe_style(style: str) -> str:
@@ -204,6 +268,7 @@ class CustomerCommunicationEmailTemplate:
     subject: str
     module: str
     category: str
+    compiler_mode: str
 
 
 @dataclass(frozen=True)
@@ -213,6 +278,7 @@ class CustomerCommunicationEmailTemplateDetail:
     subject: str
     content: str
     unresolved_placeholders: tuple[str, ...]
+    compiler_mode: str
 
 
 @dataclass(frozen=True)
@@ -290,6 +356,7 @@ class CustomerCommunicationEmailReply:
     recipient_name: str
     recipient_email: str
     subject: str
+    content: str
     reply_all_cc_emails: tuple[str, ...]
 
 
@@ -336,9 +403,16 @@ class CustomerCommunicationService:
         cipher: SecretCipher,
         public_base_url: str,
         zoho_service: ZohoCrmService | None = None,
+        attachment_storage: EmailAttachmentStorage | None = None,
     ):
         self.db = db
         self.cipher = cipher
+        settings = get_settings()
+        self.attachment_storage = attachment_storage or EmailAttachmentStorage(
+            root=settings.email_attachment_storage_dir,
+            cipher=cipher,
+            min_free_bytes=settings.email_attachment_import_min_free_bytes,
+        )
         self.zoho_service = zoho_service or ZohoCrmService(
             db=db,
             cipher=cipher,
@@ -357,11 +431,17 @@ class CustomerCommunicationService:
             .where(CustomerZohoEmail.customer_id == customer.id)
             .order_by(CustomerZohoEmail.zoho_sent_at.desc(), CustomerZohoEmail.created_at.desc(), CustomerZohoEmail.id.desc())
         ).all()]
-        last_synced_at = max(
-            (timestamp for timestamp in (
+        timestamps = [
+            timestamp
+            for timestamp in (
                 *(note.occurred_at for note in notes),
                 *(email.occurred_at for email in emails),
-            ) if timestamp is not None),
+            )
+            if timestamp is not None
+        ]
+        last_synced_at = max(
+            timestamps,
+            key=lambda timestamp: timestamp.replace(tzinfo=UTC) if timestamp.tzinfo is None else timestamp.astimezone(UTC),
             default=None,
         )
         return CustomerCommunicationView(
@@ -372,7 +452,13 @@ class CustomerCommunicationService:
         )
 
     def list_senders(self) -> tuple[CustomerCommunicationSender, ...]:
-        """Read the current Zoho-approved sender list immediately before composing."""
+        """Use configured Mittwald addresses, retaining Zoho only for an unconfigured legacy install."""
+        mittwald_senders = HubMailboxTransportService(db=self.db, cipher=self.cipher).list_senders()
+        if mittwald_senders:
+            return tuple(
+                CustomerCommunicationSender(name=sender.name, email=sender.email)
+                for sender in mittwald_senders
+            )
         senders: list[CustomerCommunicationSender] = []
         seen: set[str] = set()
         for record in self.zoho_service.list_allowed_from_addresses():
@@ -395,6 +481,11 @@ class CustomerCommunicationService:
         customer = self._require_zoho_customer(customer_id)
         return tuple(self._recipients_for_customer(customer))
 
+    def list_contact_recipients(self, *, customer_id: int) -> tuple[CustomerCommunicationRecipient, ...]:
+        """List the linked contacts' individual email addresses for an empty customer composer."""
+        customer = self._require_customer(customer_id)
+        return tuple(self._recipients_for_customer(customer, include_account_email=False))
+
     def search_recipients(self, *, query: str, limit: int = 12) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
         """Find known recipient addresses without sending a new request to Zoho."""
         normalized_query = " ".join(query.casefold().split())
@@ -404,9 +495,11 @@ class CustomerCommunicationService:
         matches: list[CustomerCommunicationRecipientSearchMatch] = []
         for customer in self.db.scalars(
             select(Customer)
-            .where(Customer.is_visible.is_(True), Customer.zoho_id.is_not(None))
+            .where(Customer.zoho_id.is_not(None))
             .order_by(Customer.name.asc(), Customer.id.asc())
         ).all():
+            if not self._is_available_for_recipient_search(customer):
+                continue
             for recipient in self._recipients_for_customer(customer):
                 searchable = " ".join((recipient.name, recipient.email, customer.name)).casefold()
                 if not all(token in searchable for token in tokens):
@@ -431,6 +524,16 @@ class CustomerCommunicationService:
 
         return tuple(sorted(matches, key=sort_key)[:max(1, min(limit, 30))])
 
+    def _is_available_for_recipient_search(self, customer: Customer) -> bool:
+        """Keep standard visibility, with explicit access for email-only customer types."""
+        if customer.is_visible:
+            return True
+        profile = self._payload(customer.encrypted_profile_json)
+        fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
+        customer_type = self._text(fields.get(_EMAIL_RECIPIENT_CUSTOMER_TYPE_FIELD))
+        normalized_type = " ".join((customer_type or "").casefold().split())
+        return normalized_type == _EMAIL_RECIPIENT_ADDITIONAL_CUSTOMER_TYPE
+
     def list_email_templates(self) -> tuple[CustomerCommunicationEmailTemplate, ...]:
         """List the local, encrypted Zoho templates without querying Zoho."""
         templates: list[CustomerCommunicationEmailTemplate] = []
@@ -452,6 +555,7 @@ class CustomerCommunicationService:
                     subject=self._text(payload.get("subject")) or "",
                     module=template.module,
                     category=category,
+                    compiler_mode=self._email_compiler_mode(payload),
                 )
             )
         return tuple(sorted(templates, key=lambda item: (item.module.casefold(), item.name.casefold())))
@@ -477,17 +581,146 @@ class CustomerCommunicationService:
             html=False,
         )
         content, content_placeholders = self._resolve_template_placeholders(
-            self._sanitized_email_content(self._text(payload.get("content")) or ""),
+            self._sanitized_email_content(
+                self._text(payload.get("content")) or "",
+                allow_template_href_placeholders=True,
+            ),
             context=context,
             html=True,
+            html_replacements=self._template_html_replacements(),
         )
+        content = self._sanitized_email_content(content)
+        content = self._template_compose_content(payload, content)
         return CustomerCommunicationEmailTemplateDetail(
             id=template.zoho_template_id,
             name=name,
             subject=subject,
             content=content,
             unresolved_placeholders=tuple(sorted({*subject_placeholders, *content_placeholders})),
+            compiler_mode=self._email_compiler_mode(payload),
         )
+
+    def get_email_template_preview(
+        self,
+        *,
+        template_id: str,
+    ) -> CustomerCommunicationEmailTemplateDetail:
+        """Load a local template before a customer contact has been selected."""
+        template = self._stored_email_template(template_id)
+        payload = self._payload(template.encrypted_payload_json)
+        name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
+        subject, subject_placeholders = self._resolve_template_placeholders(
+            self._text(payload.get("subject")) or "",
+            context={},
+            html=False,
+        )
+        content, content_placeholders = self._resolve_template_placeholders(
+            self._sanitized_email_content(
+                self._text(payload.get("content")) or "",
+                allow_template_href_placeholders=True,
+            ),
+            context={},
+            html=True,
+            html_replacements=self._template_html_replacements(),
+        )
+        content = self._template_compose_content(payload, content)
+        return CustomerCommunicationEmailTemplateDetail(
+            id=template.zoho_template_id,
+            name=name,
+            subject=subject,
+            content=content,
+            unresolved_placeholders=tuple(sorted({*subject_placeholders, *content_placeholders})),
+            compiler_mode=self._email_compiler_mode(payload),
+        )
+
+    def get_email_template_source(
+        self,
+        *,
+        template_id: str,
+    ) -> CustomerCommunicationEmailTemplateDetail:
+        """Load the persisted template source for editing without resolving placeholders."""
+        template = self._stored_email_template(template_id)
+        payload = self._payload(template.encrypted_payload_json)
+        name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
+        return CustomerCommunicationEmailTemplateDetail(
+            id=template.zoho_template_id,
+            name=name,
+            subject=self._text(payload.get("subject")) or "",
+            content=self._sanitized_email_content(
+                self._text(payload.get("content")) or "",
+                allow_template_href_placeholders=True,
+            ),
+            unresolved_placeholders=(),
+            compiler_mode=self._email_compiler_mode(payload),
+        )
+
+    def update_email_template(
+        self,
+        *,
+        template_id: str,
+        name: str,
+        subject: str,
+        content: str,
+    ) -> CustomerCommunicationEmailTemplateDetail:
+        """Persist a Hub-managed edit without changing the source template in Zoho."""
+        template = self._stored_email_template(template_id)
+        payload = self._payload(template.encrypted_payload_json)
+        payload.update({
+            "name": self._required_text(name, "Vorlagenname", maximum=255),
+            "subject": self._required_text(subject, "Betreff", maximum=500),
+            "content": self._sanitized_email_content(content, allow_template_href_placeholders=True),
+            "compiler_stylesheet": EmailHtmlCompiler.sanitize_stylesheet(content),
+            "hub_edited_at": datetime.now(UTC).isoformat(),
+        })
+        template.encrypted_payload_json = self._encrypt_payload(payload)
+        self.db.flush()
+        return self.get_email_template_source(template_id=template.zoho_template_id)
+
+    def clone_email_template(
+        self,
+        *,
+        template_id: str,
+        name: str,
+    ) -> CustomerCommunicationEmailTemplateDetail:
+        """Create an independent local copy of a stored email template."""
+        source = self._stored_email_template(template_id)
+        payload = self._payload(source.encrypted_payload_json)
+        cloned_at = datetime.now(UTC)
+        cloned_id = f"hub-template-{uuid4().hex}"
+        payload.update({
+            "name": self._required_text(name, "Vorlagenname", maximum=255),
+            "hub_edited_at": cloned_at.isoformat(),
+            "hub_created_at": cloned_at.isoformat(),
+            "hub_cloned_from": source.zoho_template_id,
+            # A clone still contains a Zoho document and must keep its proven markup.
+            "email_compiler_mode": self._email_compiler_mode(payload),
+        })
+        self.db.add(
+            ZohoEmailTemplate(
+                zoho_template_id=cloned_id,
+                module=source.module,
+                encrypted_payload_json=self._encrypt_payload(payload),
+                zoho_modified_at=None,
+                zoho_synced_at=cloned_at,
+                is_active=True,
+            )
+        )
+        self.db.flush()
+        return self.get_email_template_source(template_id=cloned_id)
+
+    def delete_email_template(self, *, template_id: str) -> None:
+        """Hide a Zoho template locally or permanently remove a Hub-only clone."""
+        template = self._stored_email_template(template_id)
+        payload = self._payload(template.encrypted_payload_json)
+        if self._text(payload.get("hub_created_at")):
+            self.db.delete(template)
+            self.db.flush()
+            return
+
+        payload["hub_deleted_at"] = datetime.now(UTC).isoformat()
+        template.encrypted_payload_json = self._encrypt_payload(payload)
+        template.is_active = False
+        self.db.flush()
 
     def sync_email_templates(self) -> CustomerCommunicationEmailTemplateSyncResult:
         """Synchronize all Zoho email-template modules once for local composition."""
@@ -514,6 +747,8 @@ class CustomerCommunicationService:
                 "category": self._text(record.get("category")) or "",
                 "folder_id": self._text(folder.get("id")) or "",
                 "folder_name": self._text(folder.get("name")) or "",
+                # Imported documents are kept byte-for-byte compatible until adopted in the Hub.
+                "email_compiler_mode": "legacy",
             }
             template_module = self._template_module_from_record(record, fallback=summary_module)
             modified_at = self._datetime(record.get("modified_time") or record.get("Modified_Time"))
@@ -533,6 +768,14 @@ class CustomerCommunicationService:
                 created += 1
                 continue
             previous_payload = self._payload(template.encrypted_payload_json)
+            if self._text(previous_payload.get("hub_deleted_at")):
+                # A Hub deletion must not be undone when the source still exists in Zoho.
+                template.is_active = False
+                continue
+            if self._text(previous_payload.get("hub_edited_at")):
+                # Hub edits are intentional local copies and must survive a later Zoho refresh.
+                template.is_active = True
+                continue
             if (
                 previous_payload != payload
                 or template.module != template_module
@@ -548,7 +791,12 @@ class CustomerCommunicationService:
 
         archived = 0
         for template_id, template in existing.items():
-            if template.is_active and template_id not in synchronized_ids:
+            payload = self._payload(template.encrypted_payload_json)
+            if (
+                template.is_active
+                and template_id not in synchronized_ids
+                and not self._text(payload.get("hub_edited_at"))
+            ):
                 template.is_active = False
                 archived += 1
         self.db.flush()
@@ -731,6 +979,57 @@ class CustomerCommunicationService:
         self.db.flush()
         return CustomerCommunicationActionResult(True, "Notiz wurde an Zoho CRM übertragen.")
 
+    def update_note(
+        self,
+        *,
+        customer_id: int,
+        note_id: int,
+        title: str,
+        content: str,
+    ) -> CustomerCommunicationActionResult:
+        customer = self._require_zoho_customer(customer_id)
+        note = self._note_or_error(customer_id=customer.id, note_id=note_id)
+        normalized_title = self._required_text(title, "Titel", maximum=255)
+        normalized_content = self._required_text(content, "Notiz", maximum=30_000)
+        now = datetime.now(UTC)
+        if note.zoho_note_id:
+            self.zoho_service.update_note(
+                note_id=note.zoho_note_id,
+                title=normalized_title,
+                content=normalized_content,
+            )
+        else:
+            created = self.zoho_service.create_account_note(
+                account_id=customer.zoho_id,
+                title=normalized_title,
+                content=normalized_content,
+            )
+            note.zoho_note_id = self._text(created.get("id"))
+
+        payload = self._payload(note.encrypted_payload_json)
+        payload.update({
+            "Note_Title": normalized_title,
+            "Note_Content": normalized_content,
+            "title": normalized_title,
+            "content": normalized_content,
+        })
+        note.encrypted_payload_json = self._encrypt_payload(payload)
+        note.zoho_modified_at = now
+        note.zoho_synced_at = now
+        note.sync_status = "synced"
+        note.last_error = None
+        self.db.flush()
+        return CustomerCommunicationActionResult(True, "Notiz wurde in Zoho CRM aktualisiert.")
+
+    def delete_note(self, *, customer_id: int, note_id: int) -> CustomerCommunicationActionResult:
+        customer = self._require_zoho_customer(customer_id)
+        note = self._note_or_error(customer_id=customer.id, note_id=note_id)
+        if note.zoho_note_id:
+            self.zoho_service.delete_note(note_id=note.zoho_note_id)
+        self.db.delete(note)
+        self.db.flush()
+        return CustomerCommunicationActionResult(True, "Notiz wurde aus Zoho CRM gelöscht.")
+
     def send_email(
         self,
         *,
@@ -740,15 +1039,28 @@ class CustomerCommunicationService:
         recipient_key: str,
         subject: str,
         content: str,
-        confirmed: bool,
         template_id: str = "",
         reply_to_email_id: int | None = None,
         cc_emails: str = "",
         forward_from_email_id: int | None = None,
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
     ) -> CustomerCommunicationActionResult:
-        if not confirmed:
-            raise ValueError("Bestätige bitte den Versand über Zoho CRM.")
+        mittwald_transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
+        if mittwald_transport.is_configured():
+            return self._send_email_via_mittwald(
+                transport=mittwald_transport,
+                customer_id=customer_id,
+                actor=actor,
+                sender_email=sender_email,
+                recipient_key=recipient_key,
+                subject=subject,
+                content=content,
+                template_id=template_id,
+                reply_to_email_id=reply_to_email_id,
+                cc_emails=cc_emails,
+                forward_from_email_id=forward_from_email_id,
+                attachments=attachments,
+            )
         customer = self._require_zoho_customer(customer_id)
         sender = next(
             (item for item in self.list_senders() if item.email.casefold() == sender_email.strip().casefold()),
@@ -775,8 +1087,17 @@ class CustomerCommunicationService:
             reply_to_message_id = parent.zoho_message_id
             reply_to_owner_id = self._email_owner_id(self._payload(parent.encrypted_payload_json))
         normalized_subject = self._required_text(subject, "Betreff", maximum=500)
-        normalized_content = self._sanitized_email_content(content)
+        normalized_content = self._outbound_email_content(content)
+        source_stylesheet = EmailHtmlCompiler.extract_stylesheet(content)
+        if _LOCAL_COMPOSE_IMAGE_SRC_PATTERN.search(normalized_content):
+            raise ValueError("Lokale Bilder können erst über ein eingerichtetes Mittwald-Postfach versendet werden.")
         normalized_template_id = self._required_template_id(template_id) if template_id.strip() else None
+        compiler_mode = self._email_compiler_mode_for_template(normalized_template_id)
+        delivery_content, compiler_version, compiler_warnings = self._compile_outbound_email(
+            normalized_content,
+            compiler_mode=compiler_mode,
+            source_stylesheet=source_stylesheet,
+        )
         template_name = ""
         if normalized_template_id:
             template = self._stored_email_template(normalized_template_id)
@@ -800,6 +1121,12 @@ class CustomerCommunicationService:
                 "message_id": reply_to_message_id,
             } if reply_to_message_id else None,
             "forwarded_from_email_id": forward_from_email_id,
+            "outbound_html": delivery_content,
+            "email_compiler": {
+                "mode": compiler_mode,
+                "version": compiler_version,
+                "warnings": list(compiler_warnings),
+            },
         }
         email = CustomerZohoEmail(
             customer=customer,
@@ -824,7 +1151,7 @@ class CustomerCommunicationService:
                 recipient_name=recipient.name,
                 recipient_email=recipient.email,
                 subject=normalized_subject,
-                content=normalized_content,
+                content=delivery_content,
                 reply_to_message_id=reply_to_message_id,
                 reply_to_owner_id=reply_to_owner_id,
                 cc_recipients=cc_recipients,
@@ -843,6 +1170,164 @@ class CustomerCommunicationService:
         self.db.flush()
         return CustomerCommunicationActionResult(True, "E-Mail wurde über Zoho CRM versendet.")
 
+    def _send_email_via_mittwald(
+        self,
+        *,
+        transport: HubMailboxTransportService,
+        customer_id: int,
+        actor: str,
+        sender_email: str,
+        recipient_key: str,
+        subject: str,
+        content: str,
+        template_id: str,
+        reply_to_email_id: int | None,
+        cc_emails: str,
+        forward_from_email_id: int | None,
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+    ) -> CustomerCommunicationActionResult:
+        """Send through Mittwald and save the exact outgoing message before IMAP sees Sent."""
+        customer = self._require_customer(customer_id)
+        sender = next(
+            (item for item in transport.list_senders() if item.email.casefold() == sender_email.strip().casefold()),
+            None,
+        )
+        if sender is None:
+            raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
+        recipient = next((item for item in self._recipients_for_customer(customer) if item.key == recipient_key), None)
+        if recipient is None:
+            raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
+        if reply_to_email_id is not None and forward_from_email_id is not None:
+            raise ValueError("Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein.")
+        cc_recipients = self._cc_recipients(
+            cc_emails,
+            excluded_emails={sender.email, recipient.email},
+        )
+        reply_to_message_id: str | None = None
+        if reply_to_email_id is not None:
+            reply = self.get_email_reply(customer_id=customer.id, email_id=reply_to_email_id)
+            if reply.recipient_key != recipient.key:
+                raise ValueError("Eine Antwort muss an den Absender der ursprünglichen E-Mail gesendet werden.")
+            reply_to_message_id = self._require_customer_email(
+                customer_id=customer.id,
+                email_id=reply_to_email_id,
+            ).zoho_message_id
+        normalized_subject = self._required_text(subject, "Betreff", maximum=500)
+        normalized_content = self._outbound_email_content(content)
+        source_stylesheet = EmailHtmlCompiler.extract_stylesheet(content)
+        normalized_template_id = self._required_template_id(template_id) if template_id.strip() else None
+        compiler_mode = self._email_compiler_mode_for_template(normalized_template_id)
+        template_name = ""
+        if normalized_template_id:
+            template = self._stored_email_template(normalized_template_id)
+            template_name = self._text(self._payload(template.encrypted_payload_json).get("name")) or ""
+        outgoing_attachments = self._outbound_email_attachments(
+            customer_id=customer.id,
+            forward_from_email_id=forward_from_email_id,
+            attachments=attachments,
+        )
+        now = datetime.now(UTC)
+        payload_attachments = [
+            {
+                "id": hashlib.sha256(
+                    f"outbound:{now.isoformat()}:{index}:{attachment.filename}:{hashlib.sha256(attachment.content).hexdigest()}".encode("utf-8")
+                ).hexdigest(),
+                "name": attachment.filename,
+            }
+            for index, attachment in enumerate(outgoing_attachments, start=1)
+        ]
+        outbound_payload = {
+            "subject": normalized_subject,
+            "content": normalized_content,
+            "from": {"name": sender.name, "email": sender.email},
+            "to": {"name": recipient.name, "email": recipient.email},
+            "cc": [{"name": name, "email": email} for name, email in cc_recipients],
+            "sent_time": now.isoformat(),
+            "template": {"id": normalized_template_id, "name": template_name} if normalized_template_id else None,
+            "in_reply_to": {"email_id": reply_to_email_id, "message_id": reply_to_message_id} if reply_to_message_id else None,
+            "forwarded_from_email_id": forward_from_email_id,
+            "attachments": payload_attachments,
+            "mittwald_mailbox": sender.email,
+            "email_compiler": {
+                "mode": compiler_mode,
+                "version": None,
+                "warnings": [],
+            },
+        }
+        email = CustomerZohoEmail(
+            customer=customer,
+            source="hub",
+            direction="outbound",
+            is_unread=False,
+            sync_status="pending",
+            encrypted_payload_json=self._encrypt_payload(outbound_payload),
+            encrypted_header_json=self._encrypt_email_list_header(outbound_payload),
+            created_by_username=actor[:64],
+            zoho_sent_at=now,
+        )
+        self.db.add(email)
+        self.db.flush()
+        try:
+            delivery_content, inline_images = EmailComposeImageService(
+                db=self.db,
+                cipher=self.cipher,
+            ).prepare_inline_images(normalized_content)
+            delivery_content, compiler_version, compiler_warnings = self._compile_outbound_email(
+                delivery_content,
+                compiler_mode=compiler_mode,
+                source_stylesheet=source_stylesheet,
+            )
+            outbound_payload["outbound_html"] = delivery_content
+            outbound_payload["email_compiler"] = {
+                "mode": compiler_mode,
+                "version": compiler_version,
+                "warnings": list(compiler_warnings),
+            }
+            email.encrypted_payload_json = self._encrypt_payload(outbound_payload)
+            self._store_outbound_email_attachments(
+                email=email,
+                payload_attachments=payload_attachments,
+                attachments=outgoing_attachments,
+            )
+            delivery = transport.send(
+                sender_email=sender.email,
+                recipient_name=recipient.name,
+                recipient_email=recipient.email,
+                subject=normalized_subject,
+                html_content=delivery_content,
+                cc_recipients=cc_recipients,
+                reply_to_message_id=reply_to_message_id,
+                attachments=tuple(
+                    HubMailboxTransportAttachment(
+                        filename=attachment.filename,
+                        content=attachment.content,
+                        content_type=attachment.content_type,
+                    )
+                    for attachment in outgoing_attachments
+                ),
+                inline_images=tuple(
+                    HubMailboxTransportInlineImage(
+                        content_id=image.content_id,
+                        filename=image.filename,
+                        content=image.content,
+                        content_type=image.content_type,
+                    )
+                    for image in inline_images
+                ),
+            )
+        except (EmailAttachmentStorageError, EmailComposeImageError, HubMailboxTransportError, ValueError) as exc:
+            email.sync_status = "failed"
+            email.last_error = str(exc)[:1000]
+            self.db.flush()
+            return CustomerCommunicationActionResult(False, "E-Mail wurde nicht über Mittwald versendet. Der Entwurf bleibt verschlüsselt im Hub gespeichert.")
+
+        email.zoho_message_id = delivery.message_id
+        email.sync_status = "sent"
+        email.zoho_synced_at = delivery.sent_at
+        email.last_error = None
+        self.db.flush()
+        return CustomerCommunicationActionResult(True, "E-Mail wurde über Mittwald versendet.")
+
     def get_email_reply(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailReply:
         """Build a safe reply context only for a known inbound Zoho email."""
         email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
@@ -851,7 +1336,7 @@ class CustomerCommunicationService:
         if not email.zoho_message_id:
             raise ValueError("Für diese E-Mail fehlt die Zoho-Nachrichten-ID.")
         customer = self._require_customer(customer_id)
-        payload = self._payload(email.encrypted_payload_json)
+        payload, original_content = self._email_content_for_composer(email)
         sender_addresses = self._email_addresses(payload.get("from"))
         if len(sender_addresses) != 1:
             raise ValueError("Der Absender dieser E-Mail ist nicht eindeutig.")
@@ -865,12 +1350,27 @@ class CustomerCommunicationService:
         subject = self._text(payload.get("subject")) or "Ohne Betreff"
         if not re.match(r"^\s*re\s*:", subject, flags=re.IGNORECASE):
             subject = f"Re: {subject}"
+        original_sender = self._people_text(payload.get("from")) or "Unbekannt"
+        original_time = email.zoho_sent_at or email.created_at
+        signature_html = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
+        signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
+        content = (
+            "<p><br><br></p>"
+            f"{signature_section}"
+            f"<p><strong>Am {escape(original_time.isoformat())} schrieb {escape(original_sender)}:</strong></p>"
+            "<p><br></p>"
+            '<blockquote style="margin: 0 0 0 0.8ex; border-left: 1px solid #c7c7c7; padding-left: 1em;">'
+            f"{self._sanitized_email_content(original_content)}</blockquote>"
+        )
+        if len(content) > 50_000:
+            raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig zu zitieren.")
         return CustomerCommunicationEmailReply(
             email_id=email.id,
             recipient_key=recipient.key,
             recipient_name=recipient.name,
             recipient_email=recipient.email,
             subject=subject[:500],
+            content=content,
             reply_all_cc_emails=tuple(
                 sorted(
                     (
@@ -885,14 +1385,7 @@ class CustomerCommunicationService:
     def get_email_forward(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailForward:
         """Prepare an editable forwarded copy, fetching its body only when needed."""
         email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
-        payload = self._payload(email.encrypted_payload_json)
-        original_content = self._text(payload.get("content"))
-        if original_content is None:
-            self._load_email_content_for_email(email, mark_as_read=False)
-            payload = self._payload(email.encrypted_payload_json)
-            original_content = self._text(payload.get("content"))
-        if original_content is None:
-            raise ZohoCrmError("Zoho hat die E-Mail ohne Nachrichtentext geliefert.")
+        payload, original_content = self._email_content_for_composer(email)
         subject = self._text(payload.get("subject")) or "Ohne Betreff"
         if not re.match(r"^\s*fwd\s*:", subject, flags=re.IGNORECASE):
             subject = f"Fwd: {subject}"
@@ -910,6 +1403,18 @@ class CustomerCommunicationService:
         if len(content) > 50_000:
             raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig weiterzuleiten.")
         return CustomerCommunicationEmailForward(email_id=email.id, subject=subject[:500], content=content)
+
+    def _email_content_for_composer(self, email: CustomerZohoEmail) -> tuple[dict[str, object], str]:
+        """Load the original body on demand for explicit reply and forward actions."""
+        payload = self._payload(email.encrypted_payload_json)
+        original_content = self._text(payload.get("content"))
+        if original_content is None:
+            self._load_email_content_for_email(email, mark_as_read=False)
+            payload = self._payload(email.encrypted_payload_json)
+            original_content = self._text(payload.get("content"))
+        if original_content is None:
+            raise ZohoCrmError("Zoho hat die E-Mail ohne Nachrichtentext geliefert.")
+        return payload, original_content
 
     def _outbound_email_attachment_ids(
         self,
@@ -953,6 +1458,77 @@ class CustomerCommunicationService:
                 )
             )
         return tuple(uploaded_ids)
+
+    def _outbound_email_attachments(
+        self,
+        *,
+        customer_id: int,
+        forward_from_email_id: int | None,
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+    ) -> tuple[CustomerCommunicationAttachmentUpload, ...]:
+        """Collect direct binary attachments for Mittwald instead of uploading them to Zoho."""
+        uploads = list(attachments)
+        if forward_from_email_id is not None:
+            email = self._require_customer_email(customer_id=customer_id, email_id=forward_from_email_id)
+            for attachment in self._email_attachments(self._payload(email.encrypted_payload_json)):
+                downloaded = self.download_email_attachment(
+                    customer_id=customer_id,
+                    email_id=email.id,
+                    attachment_id=attachment.id,
+                )
+                uploads.append(
+                    CustomerCommunicationAttachmentUpload(
+                        filename=downloaded.filename,
+                        content=downloaded.content,
+                        content_type=downloaded.content_type,
+                    )
+                )
+        if len(uploads) > 20:
+            raise ValueError("Es können höchstens 20 Anhänge pro E-Mail versendet werden.")
+        total_bytes = 0
+        for attachment in uploads:
+            self._required_text(attachment.filename, "Dateiname", maximum=255)
+            if not attachment.content:
+                raise ValueError("Ein leerer Anhang kann nicht versendet werden.")
+            total_bytes += len(attachment.content)
+            if total_bytes > 50 * 1024 * 1024:
+                raise ValueError("Die Anhänge sind zusammen größer als 50 MB.")
+        return tuple(uploads)
+
+    def _store_outbound_email_attachments(
+        self,
+        *,
+        email: CustomerZohoEmail,
+        payload_attachments: list[dict[str, str]],
+        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+    ) -> None:
+        if not attachments:
+            return
+        self.ensure_email_attachment_storage()
+        storage_keys: list[str] = []
+        try:
+            for metadata, attachment in zip(payload_attachments, attachments, strict=True):
+                attachment_id = self._text(metadata.get("id"))
+                if attachment_id is None:
+                    raise ValueError("Ein ausgehender Anhang besitzt keine gültige Kennung.")
+                storage_key = self.attachment_storage.store(attachment.content)
+                storage_keys.append(storage_key)
+                self.db.add(
+                    CustomerEmailAttachment(
+                        email_id=email.id,
+                        source="hub",
+                        source_attachment_id=attachment_id,
+                        storage_key=storage_key,
+                        content_type=(attachment.content_type or "application/octet-stream")[:128],
+                        byte_size=len(attachment.content),
+                        stored_at=datetime.now(UTC),
+                    )
+                )
+            self.db.flush()
+        except Exception:
+            for storage_key in storage_keys:
+                self.attachment_storage.remove(storage_key)
+            raise
 
     def has_loaded_email_content(self, email: CustomerZohoEmail) -> bool:
         """Return whether a full Zoho body was already stored for this header."""
@@ -1032,13 +1608,95 @@ class CustomerCommunicationService:
         )
         if email is None:
             raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
-        if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
-            raise ValueError("Für diese E-Mail ist kein Zoho-Anhang verfügbar.")
 
         payload = self._payload(email.encrypted_payload_json)
         attachment = next((item for item in self._email_attachments(payload) if item.id == attachment_id), None)
         if attachment is None:
             raise ValueError("Der angeforderte Anhang gehört nicht zu dieser E-Mail.")
+        stored_attachment = self._stored_email_attachment(email_id=email.id, attachment_id=attachment.id)
+        if stored_attachment is not None:
+            try:
+                content = self.attachment_storage.load(stored_attachment.storage_key)
+            except EmailAttachmentStorageError as exc:
+                raise ValueError("Die lokale Sicherung dieses Anhangs ist nicht lesbar.") from exc
+            return CustomerCommunicationAttachmentDownload(
+                content=content,
+                content_type=stored_attachment.content_type,
+                filename=attachment.filename,
+            )
+        if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
+            raise ValueError("Für diese E-Mail liegt kein lokal gespeicherter Anhang vor.")
+        return self._download_zoho_email_attachment(email=email, payload=payload, attachment=attachment)
+
+    def ensure_email_attachment_storage(self) -> None:
+        """Verify the encrypted attachment store before a background import starts."""
+        self.attachment_storage.ensure_ready()
+
+    def email_attachments_for_import(self, email: CustomerZohoEmail) -> tuple[CustomerCommunicationAttachment, ...]:
+        """Return the attachment references already held in an imported email payload."""
+        return self._email_attachments(self._payload(email.encrypted_payload_json))
+
+    def is_email_attachment_stored(self, *, email_id: int, attachment_id: str) -> bool:
+        return self._stored_email_attachment(email_id=email_id, attachment_id=attachment_id) is not None
+
+    def store_email_attachment(
+        self,
+        *,
+        customer_id: int,
+        email_id: int,
+        attachment_id: str,
+    ) -> CustomerEmailAttachment:
+        """Download one Zoho attachment and atomically register its encrypted local copy."""
+        email = self.db.scalar(
+            select(CustomerZohoEmail).where(
+                CustomerZohoEmail.id == email_id,
+                CustomerZohoEmail.customer_id == customer_id,
+            )
+        )
+        if email is None:
+            raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
+        payload = self._payload(email.encrypted_payload_json)
+        attachment = next((item for item in self._email_attachments(payload) if item.id == attachment_id), None)
+        if attachment is None:
+            raise ValueError("Der angeforderte Anhang gehört nicht zu dieser E-Mail.")
+        stored_attachment = self._stored_email_attachment(email_id=email.id, attachment_id=attachment.id)
+        if stored_attachment is not None:
+            return stored_attachment
+
+        downloaded = self._download_zoho_email_attachment(email=email, payload=payload, attachment=attachment)
+        storage_key = self.attachment_storage.store(downloaded.content)
+        try:
+            stored_attachment = CustomerEmailAttachment(
+                email_id=email.id,
+                source="zoho",
+                source_attachment_id=attachment.id,
+                storage_key=storage_key,
+                content_type=downloaded.content_type[:128] or "application/octet-stream",
+                byte_size=len(downloaded.content),
+                stored_at=datetime.now(UTC),
+            )
+            self.db.add(stored_attachment)
+            self.db.flush()
+        except Exception:
+            self.attachment_storage.remove(storage_key)
+            raise
+        return stored_attachment
+
+    def _stored_email_attachment(self, *, email_id: int, attachment_id: str) -> CustomerEmailAttachment | None:
+        return self.db.scalar(
+            select(CustomerEmailAttachment).where(
+                CustomerEmailAttachment.email_id == email_id,
+                CustomerEmailAttachment.source_attachment_id == attachment_id,
+            )
+        )
+
+    def _download_zoho_email_attachment(
+        self,
+        *,
+        email: CustomerZohoEmail,
+        payload: dict[str, object],
+        attachment: CustomerCommunicationAttachment,
+    ) -> CustomerCommunicationAttachmentDownload:
         owner_id = self._email_owner_id(payload)
         if owner_id is None:
             raise ValueError("Zoho hat für diesen Anhang keine abrufbare E-Mail-Owner-ID geliefert.")
@@ -1287,6 +1945,12 @@ class CustomerCommunicationService:
             last_error=note.last_error,
         )
 
+    def _note_or_error(self, *, customer_id: int, note_id: int) -> CustomerZohoNote:
+        note = self.db.get(CustomerZohoNote, note_id)
+        if note is None or note.customer_id != customer_id:
+            raise ValueError("Die Notiz wurde nicht gefunden.")
+        return note
+
     def _email_view(self, email: CustomerZohoEmail) -> CustomerCommunicationEmailView:
         payload = self._payload(email.encrypted_payload_json)
         content = self._text(payload.get("content"))
@@ -1526,7 +2190,12 @@ class CustomerCommunicationService:
                     return owner_id
         return None
 
-    def _recipients_for_customer(self, customer: Customer) -> list[CustomerCommunicationRecipient]:
+    def _recipients_for_customer(
+        self,
+        customer: Customer,
+        *,
+        include_account_email: bool = True,
+    ) -> list[CustomerCommunicationRecipient]:
         recipients: list[CustomerCommunicationRecipient] = []
         seen: set[str] = set()
 
@@ -1544,9 +2213,14 @@ class CustomerCommunicationService:
                 )
             )
 
-        profile = self._payload(customer.encrypted_profile_json)
-        fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
-        add_recipient(key=f"account:{self._text(fields.get('Kontakt-E-Mail')) or ''}", name=customer.name, email=fields.get("Kontakt-E-Mail"))
+        if include_account_email:
+            profile = self._payload(customer.encrypted_profile_json)
+            fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
+            add_recipient(
+                key=f"account:{self._text(fields.get('Kontakt-E-Mail')) or ''}",
+                name=customer.name,
+                email=fields.get("Kontakt-E-Mail"),
+            )
         for contact in self.db.scalars(
             select(CustomerContact).where(CustomerContact.customer_id == customer.id)
         ).all():
@@ -1631,7 +2305,7 @@ class CustomerCommunicationService:
             "Accounts.Account_Name",
             "Customer.Name",
         )
-        add(customer.zoho_id, "id", "Accounts.id", "Account.id")
+        add(customer.zoho_id, "id", "Accounts.id", "Account.id", "Customer.id", "Customer.Id")
         profile = self._payload(customer.encrypted_profile_json)
         fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
         aliases_by_label = {
@@ -1642,11 +2316,45 @@ class CustomerCommunicationService:
         for label, value in fields.items():
             if not isinstance(label, str):
                 continue
-            add(value, label, f"Accounts.{label}", f"Account.{label}", *aliases_by_label.get(label, ()))
+            aliases = tuple(dict.fromkeys((label, _CUSTOMER_FIELD_LABEL_ALIASES.get(label, label))))
+            add(
+                value,
+                *aliases,
+                *(f"Customer.{alias}" for alias in aliases),
+                *(f"Accounts.{alias}" for alias in aliases),
+                *(f"Account.{alias}" for alias in aliases),
+                *aliases_by_label.get(label, ()),
+            )
         if recipient is not None:
             add(recipient.name, "Full Name", "Full_Name", "Contacts.Full Name", "Contacts.Full_Name", "Contact.Name")
-            add(recipient.email, "Email", "Contacts.Email", "Contact.Email")
+            add(recipient.email, "Email", "Contacts.Email", "Contact.Email", "Contact.E-Mail")
+            contact = self._contact_for_recipient(customer=customer, recipient=recipient)
+            if contact is not None:
+                contact_profile = self._payload(contact.encrypted_profile_json)
+                contact_fields = contact_profile.get("fields") if isinstance(contact_profile.get("fields"), dict) else {}
+                for label, value in contact_fields.items():
+                    if not isinstance(label, str):
+                        continue
+                    aliases = (label, *_CONTACT_FIELD_LEGACY_ALIASES.get(label, ()))
+                    add(
+                        value,
+                        *(f"Contact.{alias}" for alias in aliases),
+                        *(f"Contacts.{alias}" for alias in aliases),
+                    )
         return context
+
+    def _contact_for_recipient(
+        self,
+        *,
+        customer: Customer,
+        recipient: CustomerCommunicationRecipient,
+    ) -> CustomerContact | None:
+        """Return the selected contact only when its opaque recipient key belongs to this customer."""
+        key_parts = recipient.key.split(":", 2)
+        if len(key_parts) != 3 or key_parts[0] != "contact" or not key_parts[1].isdigit():
+            return None
+        contact = self.db.get(CustomerContact, int(key_parts[1]))
+        return contact if contact is not None and contact.customer_id == customer.id else None
 
     @staticmethod
     def _normalized_template_key(value: str) -> str:
@@ -1659,12 +2367,16 @@ class CustomerCommunicationService:
         *,
         context: dict[str, str],
         html: bool,
+        html_replacements: dict[str, str] | None = None,
     ) -> tuple[str, tuple[str, ...]]:
         unresolved: list[str] = []
 
         def replace(match: re.Match[str]) -> str:
             key = (match.group("dollar") or match.group("brace") or "").strip()
-            replacement = context.get(cls._normalized_template_key(key))
+            normalized_key = cls._normalized_template_key(key)
+            if html and html_replacements is not None and normalized_key in html_replacements:
+                return html_replacements[normalized_key]
+            replacement = context.get(normalized_key)
             if replacement is None:
                 unresolved.append(key)
                 return match.group(0)
@@ -1676,6 +2388,14 @@ class CustomerCommunicationService:
             value,
         )
         return resolved, tuple(unresolved)
+
+    def _template_html_replacements(self) -> dict[str, str]:
+        """Return Hub-authored HTML that is safe to inject into a template body."""
+        return {
+            self._normalized_template_key("userSignature"): EmailComposerSettingsService(
+                db=self.db,
+            ).get_runtime_settings().signature_html,
+        }
 
     def _encrypt_payload(self, payload: dict[str, object]) -> str:
         return self.cipher.encrypt(json.dumps(payload, ensure_ascii=False, default=str))
@@ -1723,17 +2443,64 @@ class CustomerCommunicationService:
         return normalized
 
     @classmethod
-    def _sanitized_email_content(cls, value: str) -> str:
-        sanitizer = _EmailComposerHtmlSanitizer()
+    def _sanitized_email_content(
+        cls,
+        value: str,
+        *,
+        allow_template_href_placeholders: bool = False,
+    ) -> str:
+        sanitizer = _EmailComposerHtmlSanitizer(
+            allow_template_href_placeholders=allow_template_href_placeholders,
+        )
         sanitizer.feed(value)
         sanitizer.close()
         normalized = sanitizer.content().strip()
-        plain_text = unescape(re.sub(r"<[^>]+>", "", normalized)).strip()
+        plain_text = unescape(re.sub(r"<img\b[^>]*>", " [Bild] ", normalized, flags=re.IGNORECASE))
+        plain_text = re.sub(r"<[^>]+>", "", plain_text).strip()
         if not plain_text:
             raise ValueError("Nachricht darf nicht leer sein.")
         if len(normalized) > 50_000:
             raise ValueError("Nachricht darf höchstens 50,000 Zeichen enthalten.")
         return normalized
+
+    def _outbound_email_content(self, content: str) -> str:
+        return EmailComposerSettingsService(db=self.db).apply_default_style(self._sanitized_email_content(content))
+
+    def _email_compiler_mode_for_template(self, template_id: str | None) -> str:
+        if not template_id:
+            return "hub"
+        template = self._stored_email_template(template_id)
+        return self._email_compiler_mode(self._payload(template.encrypted_payload_json))
+
+    @staticmethod
+    def _email_compiler_mode(payload: dict[str, object]) -> str:
+        """Old imports stay on their known-good Zoho HTML until explicitly adopted."""
+        return "hub" if payload.get("email_compiler_mode") == "hub" else "legacy"
+
+    def _template_compose_content(self, payload: dict[str, object], content: str) -> str:
+        if self._email_compiler_mode(payload) != "hub":
+            return content
+        stylesheet = self._text(payload.get("compiler_stylesheet"))
+        return f"<style>{stylesheet}</style>{content}" if stylesheet else content
+
+    def _compile_outbound_email(
+        self,
+        content: str,
+        *,
+        compiler_mode: str,
+        source_stylesheet: str = "",
+    ) -> tuple[str, str | None, tuple[str, ...]]:
+        if compiler_mode == "legacy":
+            return content, None, ()
+        settings = EmailComposerSettingsService(db=self.db).get_runtime_settings()
+        compilation = EmailHtmlCompiler().compile(
+            content,
+            source_stylesheet=source_stylesheet,
+            font_family=settings.font_family,
+            font_size=settings.font_size,
+            line_height=settings.line_height,
+        )
+        return compilation.compiled_html, compilation.version, compilation.warnings
 
     @staticmethod
     def _text(value: object) -> str | None:

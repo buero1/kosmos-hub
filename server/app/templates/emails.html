@@ -3,6 +3,7 @@
 {% block content %}
   <style>
     .mailbox-header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+    .mailbox-header-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.55rem; }
     .mailbox-header h2 { margin: 0.18rem 0 0; }
     .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
     .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
@@ -12,24 +13,39 @@
     .mailbox-list { --mailbox-row-height: 94px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--border); }
     .mailbox-list-heading { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1rem; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 0.82rem; }
     .mailbox-list-canvas { position: relative; min-height: 0; }
-    .mailbox-message { display: block; padding: 0.9rem 1rem; border-bottom: 1px solid var(--border); color: var(--ink); text-decoration: none; }
+    .mailbox-message { position: relative; display: block; padding: 0; border-bottom: 1px solid var(--border); color: var(--ink); }
     .mailbox-list-canvas .mailbox-message { position: absolute; inset-inline: 0; height: var(--mailbox-row-height); box-sizing: border-box; overflow: hidden; }
+    a.mailbox-message-open, a.mailbox-message-open:visited { display: block; padding: 0.9rem 1rem; color: var(--ink); font-weight: 400; text-decoration: none; }
+    a.mailbox-message-open:hover { color: var(--ink); opacity: 1; text-decoration: none; }
+    .mailbox-message-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .mailbox-message:hover { background: color-mix(in srgb, var(--accent-soft) 45%, var(--panel)); }
     .mailbox-message.is-marked { background: color-mix(in srgb, var(--accent-soft) 52%, var(--panel)); }
     .mailbox-message.is-selected { background: color-mix(in srgb, var(--accent-soft) 72%, var(--panel)); }
-    .mailbox-message.is-unread { border-left: 3px solid #1d63b8; padding-left: calc(1rem - 3px); }
+    .mailbox-message.is-unread { border-left: 3px solid #1d63b8; }
+    .mailbox-message.is-unread .mailbox-message-open { padding-left: calc(1rem - 3px); }
     .mailbox-message-row { display: flex; justify-content: space-between; gap: 0.65rem; align-items: baseline; }
-    .mailbox-message strong { display: block; overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
-    .mailbox-message p { margin: 0.28rem 0 0; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mailbox-message-open strong { display: block; overflow: hidden; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+    .mailbox-message-subject-row { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+    .mailbox-message-subject { flex: 1 1 auto; min-width: 0; padding-right: 2.3rem; }
+    button.mailbox-message-trash { position: absolute; z-index: 1; top: 1.75rem; right: 0.65rem; display: grid; width: 1.9rem; min-width: 1.9rem; height: 1.9rem; min-height: 1.9rem; place-items: center; margin: 0; padding: 0; border: 0; border-radius: var(--control-v1-radius); background: transparent; color: var(--ink); cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }
+    .mailbox-message:hover .mailbox-message-trash, .mailbox-message:focus-within .mailbox-message-trash { opacity: 1; pointer-events: auto; }
+    button.mailbox-message-trash:hover { background: color-mix(in srgb, #a93030 12%, var(--panel)); color: #a93030; }
+    button.mailbox-message-trash:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; opacity: 1; pointer-events: auto; }
+    button.mailbox-message-trash:disabled { cursor: wait; opacity: 0.5; pointer-events: none; }
+    .mailbox-message-trash svg { display: block; width: 1.3rem; height: 1.3rem; }
+    @media (hover: none) { button.mailbox-message-trash { opacity: 1; pointer-events: auto; } }
+    .mailbox-message-open p { margin: 0.28rem 0 0; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mailbox-message time { color: var(--muted); font-size: 0.74rem; white-space: nowrap; }
-    .mailbox-message.is-unread strong, .mailbox-message.is-unread time { font-weight: 700; }
-    .mailbox-message.is-unread .mailbox-message-subject, .mailbox-message.is-unread time { color: #1d63b8; }
+    .mailbox-message.is-unread .mailbox-message-subject, .mailbox-message.is-unread time { color: #1d63b8; font-weight: 700; }
     .mailbox-message .pill { font-size: 0.7rem; }
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
     .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
     .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
-    .mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; font-size: 1.1rem; line-height: 1; }
+    button.mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; background: transparent; color: var(--accent); line-height: 1; }
+    button.mailbox-reading-action:hover { background: var(--accent-soft); }
+    button.mailbox-reading-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .mailbox-reading-action-icon { display: block; width: 1.65rem; height: 1.65rem; }
     .mailbox-context-menu { position: fixed; z-index: 30; display: grid; width: min(16rem, calc(100vw - 1.5rem)); overflow: visible; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 1rem 2.4rem rgba(29, 42, 47, 0.2); }
     .mailbox-context-menu[hidden] { display: none; }
     .mailbox-context-menu-heading { margin: 0; padding: 0.62rem 0.8rem; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 0.78rem; font-weight: 700; }
@@ -106,8 +122,15 @@
       <p class="eyebrow">Zoho CRM</p>
       <h2>E-Mail-Zentrale</h2>
     </div>
-    <button class="button button-variant-1" type="button" data-email-compose-open data-mailbox-email-compose-open>Neue E-Mail</button>
+    <div class="mailbox-header-actions">
+      <a class="button button-secondary" href="/email-templates">Vorlagen verwalten</a>
+      <button class="button button-variant-1" type="button" data-email-compose-open data-mailbox-email-compose-open>Neue E-Mail</button>
+    </div>
   </section>
+
+  {% if email_state and email_message %}
+    <p class="notice {% if email_state == 'error' %}notice-error{% endif %}">{{ email_message }}</p>
+  {% endif %}
 
   <div class="email-compose-layer" data-email-compose-layer data-email-template-url="" hidden>
     <button class="email-compose-backdrop" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen"></button>
@@ -119,7 +142,7 @@
         </div>
         <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
       </div>
-      <form method="post" enctype="multipart/form-data" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
+      <form method="post" action="/emails/send" enctype="multipart/form-data" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="template_id" value="" data-email-compose-template-id>
         <input type="hidden" name="draft_id" value="" data-email-compose-draft-id>
@@ -156,29 +179,7 @@
         <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
         <label>Nachricht
           <div class="email-rich-editor" data-email-rich-editor>
-            <div class="email-rich-editor-toolbar" role="toolbar" aria-label="Text formatieren">
-              <button type="button" data-rich-command="bold" title="Fett" aria-label="Fett"><strong>B</strong></button>
-              <button type="button" data-rich-command="italic" title="Kursiv" aria-label="Kursiv"><em>I</em></button>
-              <button type="button" data-rich-command="underline" title="Unterstrichen" aria-label="Unterstrichen"><u>U</u></button>
-              <span class="email-rich-editor-divider" aria-hidden="true"></span>
-              <label class="email-rich-editor-select">Schriftgröße
-                <select data-rich-command="fontSize" aria-label="Schriftgröße">
-                  <option value="2">Klein</option>
-                  <option value="3" selected>Standard</option>
-                  <option value="4">Groß</option>
-                  <option value="5">Sehr groß</option>
-                </select>
-              </label>
-              <label class="email-rich-editor-color">Schriftfarbe<input type="color" value="#1d2a2f" data-rich-color></label>
-              <span class="email-rich-editor-divider" aria-hidden="true"></span>
-              <button type="button" data-rich-command="justifyLeft" title="Linksbündig" aria-label="Linksbündig">L</button>
-              <button type="button" data-rich-command="justifyCenter" title="Zentriert" aria-label="Zentriert">C</button>
-              <button type="button" data-rich-command="justifyRight" title="Rechtsbündig" aria-label="Rechtsbündig">R</button>
-              <span class="email-rich-editor-divider" aria-hidden="true"></span>
-              <button type="button" data-rich-command="insertUnorderedList" title="Aufzählung" aria-label="Aufzählung">UL</button>
-              <button type="button" data-rich-command="insertOrderedList" title="Nummerierung" aria-label="Nummerierung">OL</button>
-            </div>
-            <div class="email-rich-editor-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Nachricht" data-email-compose-content data-placeholder="Nachricht schreiben ..."></div>
+            <textarea class="email-rich-editor-content" aria-label="Nachricht" data-email-compose-content></textarea>
           </div>
           <textarea name="content" hidden data-email-compose-content-value></textarea>
         </label>
@@ -190,7 +191,6 @@
           </div>
           <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
         </div>
-        <label class="bulk-action-confirmation"><input type="checkbox" name="confirmed" value="true" required> Ich bestätige den Versand dieser E-Mail über Zoho CRM.</label>
         <div class="email-compose-actions">
           <button class="button button-secondary" type="button" data-mailbox-compose-save-draft>Entwurf speichern</button>
           <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
@@ -259,6 +259,16 @@
       <button type="button" role="menuitem" data-mailbox-batch-action="restore" data-mailbox-context-not-spam hidden>Als keine Spam-Nachricht kennzeichnen</button>
     </div>
   </div>
+  <dialog class="update-confirmation-dialog" data-mailbox-permanent-delete-dialog aria-labelledby="mailbox-permanent-delete-heading">
+    <div>
+      <h3 id="mailbox-permanent-delete-heading">E-Mail endgültig löschen?</h3>
+      <p data-mailbox-permanent-delete-description></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" data-mailbox-permanent-delete-cancel>Nein</button>
+        <button class="button button-danger" type="button" data-mailbox-permanent-delete-confirm>Ja, endgültig löschen</button>
+      </div>
+    </div>
+  </dialog>
   <script>
     (function () {
       var shell = document.querySelector('[data-mailbox-shell]');
@@ -308,6 +318,11 @@
       var mailboxComposerSaveDraft = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-save-draft]');
       var mailboxContextMenu = document.querySelector('[data-mailbox-context-menu]');
       var mailboxContextMenuHeading = mailboxContextMenu && mailboxContextMenu.querySelector('[data-mailbox-context-menu-heading]');
+      var mailboxPermanentDeleteDialog = document.querySelector('[data-mailbox-permanent-delete-dialog]');
+      var mailboxPermanentDeleteDescription = mailboxPermanentDeleteDialog && mailboxPermanentDeleteDialog.querySelector('[data-mailbox-permanent-delete-description]');
+      var mailboxPermanentDeleteConfirm = mailboxPermanentDeleteDialog && mailboxPermanentDeleteDialog.querySelector('[data-mailbox-permanent-delete-confirm]');
+      var mailboxPermanentDeleteCancel = mailboxPermanentDeleteDialog && mailboxPermanentDeleteDialog.querySelector('[data-mailbox-permanent-delete-cancel]');
+      var mailboxPermanentDeletePending = null;
       var mailboxComposerLoaded = false;
       var mailboxComposerRecipientRequest = 0;
       var mailboxComposerRecipientSearchTimer = 0;
@@ -316,7 +331,17 @@
       var mailboxComposerTemplateCategory = '';
       var mailboxComposerPendingAction = null;
       var mailboxComposerActionController = null;
+      var mailboxComposerDefaultSenderEmail = '';
+      var mailboxComposerDefaultTemplateId = '';
+      var mailboxComposerNeedsNewEmailDefaults = false;
+      var mailboxComposerTemplateRequest = 0;
       var mailboxComposerAttachments = [];
+      var mailboxComposerDraftTimer = 0;
+       var mailboxComposerDraftSavePromise = null;
+       var mailboxComposerDraftDirty = false;
+       var mailboxComposerDraftSession = 0;
+       var mailboxComposerDraftStartedAt = 0;
+       var mailboxComposerSubmitting = false;
 
       function mailboxComposerOption(select, value, label, dataEmail) {
         var option = document.createElement('option');
@@ -334,8 +359,7 @@
         if (!mailboxComposerSubmit) return;
         mailboxComposerSubmit.disabled = !(
           mailboxComposerSender && mailboxComposerSender.value &&
-          mailboxComposerRecipient && mailboxComposerRecipient.validity.valid &&
-          mailboxComposerRecipientKey && mailboxComposerRecipientKey.value
+          mailboxComposerRecipient && mailboxComposerRecipient.validity.valid
         );
       }
 
@@ -374,7 +398,10 @@
               });
             }
 
+            mailboxComposerDefaultSenderEmail = payload.default_sender_email || '';
+            mailboxComposerDefaultTemplateId = payload.default_template_id || '';
             mailboxComposerLoaded = true;
+            applyMailboxComposerNewEmailDefaults();
             if (payload.sender_error) {
               setMailboxComposerStatus(payload.sender_error);
             } else {
@@ -399,7 +426,7 @@
         if (mailboxComposerRecipientCustomerId) mailboxComposerRecipientCustomerId.value = '';
         if (mailboxComposerRecipientName) mailboxComposerRecipientName.value = '';
         if (mailboxComposer) mailboxComposer.dataset.emailTemplateUrl = '';
-        if (mailboxComposerForm) mailboxComposerForm.removeAttribute('action');
+        if (mailboxComposerForm) mailboxComposerForm.action = '/emails/send';
       }
 
       function clearMailboxComposerActionFields() {
@@ -446,10 +473,80 @@
         mailboxComposerAttachmentList.hidden = !mailboxComposerAttachments.length;
       }
 
+      function syncMailboxComposerContent() {
+        if (!mailboxComposerContent || !mailboxComposerContentValue) return;
+        mailboxComposerContentValue.value = window.KosmosEmailEditors
+          ? window.KosmosEmailEditors.getHTML(mailboxComposerContent)
+          : mailboxComposerContent.innerHTML;
+      }
+
+      function mailboxComposerHasDraftContent() {
+        syncMailboxComposerContent();
+        var messageText = (mailboxComposerContentValue && mailboxComposerContentValue.value || '')
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;/gi, ' ')
+          .trim();
+        return Boolean(
+          (mailboxComposerRecipient && mailboxComposerRecipient.value.trim()) ||
+          (mailboxComposerCc && mailboxComposerCc.value.trim()) ||
+          (mailboxComposerSubject && mailboxComposerSubject.value.trim()) ||
+          messageText ||
+          (mailboxComposerTemplateId && mailboxComposerTemplateId.value)
+        );
+      }
+
+      function clearMailboxComposerDraftTimer() {
+        if (!mailboxComposerDraftTimer) return;
+        window.clearTimeout(mailboxComposerDraftTimer);
+        mailboxComposerDraftTimer = 0;
+      }
+
+       function beginMailboxComposerDraftSession() {
+         mailboxComposerDraftSession += 1;
+         mailboxComposerDraftDirty = false;
+         mailboxComposerDraftStartedAt = 0;
+         clearMailboxComposerDraftTimer();
+       }
+
+       function scheduleMailboxComposerDraftSave() {
+         if (!mailboxComposerHasDraftContent()) return;
+         if (!mailboxComposerDraftStartedAt) mailboxComposerDraftStartedAt = Date.now();
+         mailboxComposerDraftDirty = true;
+        if (mailboxComposerDraftTimer || mailboxComposerDraftSavePromise) return;
+        mailboxComposerDraftTimer = window.setTimeout(function () {
+          mailboxComposerDraftTimer = 0;
+          saveMailboxDraft({ automatic: true });
+        }, 30000);
+      }
+
+      function resetMailboxComposerForNewEmail() {
+        beginMailboxComposerDraftSession();
+        mailboxComposerNeedsNewEmailDefaults = true;
+        clearMailboxComposerTemplateSelection();
+        clearMailboxComposerActionFields();
+        clearMailboxComposerRecipientContext();
+        clearMailboxComposerRecipientResults();
+        if (mailboxComposerSender) mailboxComposerSender.value = '';
+        if (mailboxComposerRecipient) mailboxComposerRecipient.value = '';
+        if (mailboxComposerSubject) mailboxComposerSubject.value = '';
+        if (mailboxComposerContent) {
+          if (window.KosmosEmailEditors) {
+            window.KosmosEmailEditors.setHTML(mailboxComposerContent, '');
+          } else {
+            mailboxComposerContent.innerHTML = '';
+          }
+        }
+        if (mailboxComposerContentValue) mailboxComposerContentValue.value = '';
+        setMailboxComposerStatus(mailboxComposerLoaded ? 'Kontakt oder E-Mail-Adresse eingeben.' : 'Absender werden geladen ...');
+        applyMailboxComposerNewEmailDefaults();
+        updateMailboxComposerSubmit();
+      }
+
       function applyMailboxComposerPendingAction() {
         var action = mailboxComposerPendingAction;
         if (!action || !mailboxComposerLoaded || !mailboxComposer) return;
         mailboxComposerPendingAction = null;
+        mailboxComposerNeedsNewEmailDefaults = false;
         clearMailboxComposerTemplateSelection();
         clearMailboxComposerActionFields();
         if (action.recipient && action.recipient.key && action.customer_id) {
@@ -467,11 +564,18 @@
           updateMailboxComposerSubmit();
         }
         if (mailboxComposerDraftId) mailboxComposerDraftId.value = action.draft_id || '';
-        if (mailboxComposerSender && action.sender_email) mailboxComposerSender.value = action.sender_email;
+        if (mailboxComposerSender) {
+          mailboxComposerSender.value = action.sender_email || mailboxComposerDefaultSenderEmail || (
+            Array.from(mailboxComposerSender.options).find(function (option) { return option.value; }) || {}
+          ).value || '';
+        }
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = action.reply_to_email_id || '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = action.forward_from_email_id || '';
-        if (mailboxComposerCc && Array.isArray(action.cc_emails) && action.cc_emails.length) {
-          mailboxComposerCc.value = action.cc_emails.join(', ');
+        var ccEmails = Array.isArray(action.cc_emails)
+          ? action.cc_emails.join(', ')
+          : (action.cc_emails || '');
+        if (mailboxComposerCc && ccEmails) {
+          mailboxComposerCc.value = ccEmails;
           if (mailboxComposerCcField) mailboxComposerCcField.hidden = false;
         }
         if (mailboxComposerSubject) mailboxComposerSubject.value = action.subject || '';
@@ -482,17 +586,21 @@
           if (mailboxComposerTemplateSearch && savedTemplate) mailboxComposerTemplateSearch.value = savedTemplate.name;
         }
         if (mailboxComposerContent) {
-          mailboxComposerContent.innerHTML = action.content || '';
-          mailboxComposerContent.dispatchEvent(new Event('input', { bubbles: true }));
+          if (window.KosmosEmailEditors) {
+            window.KosmosEmailEditors.setHTML(mailboxComposerContent, action.content || '');
+          } else {
+            mailboxComposerContent.innerHTML = action.content || '';
+            mailboxComposerContent.dispatchEvent(new Event('input', { bubbles: true }));
+          }
         } else if (mailboxComposerContentValue) {
           mailboxComposerContentValue.value = action.content || '';
         }
         if (action.action === 'draft') {
-          setMailboxComposerStatus('Entwurf geladen. Änderungen können gespeichert oder über Zoho CRM versendet werden.');
+          setMailboxComposerStatus('Entwurf geladen. Änderungen können gespeichert oder über Mittwald versendet werden.');
         } else if (action.action === 'reply_all') {
           setMailboxComposerStatus('Antwort an alle vorbereitet. CC kann vor dem Versand angepasst werden.');
         } else if (action.action === 'forward') {
-          setMailboxComposerStatus('Weiterleitung vorbereitet. Anhänge werden erst beim bestätigten Versand aus Zoho übernommen.');
+          setMailboxComposerStatus('Weiterleitung vorbereitet. Anhänge werden beim Versand über Mittwald übernommen.');
         } else {
           setMailboxComposerStatus('Antwort vorbereitet.');
         }
@@ -504,6 +612,7 @@
         var customerId = button.dataset.mailboxComposeCustomerId || '';
         var emailId = button.dataset.mailboxComposeEmailId || '';
         if (!action || !customerId || !emailId) return;
+        beginMailboxComposerDraftSession();
         if (mailboxComposerActionController) mailboxComposerActionController.abort();
         mailboxComposerActionController = new AbortController();
         button.disabled = true;
@@ -537,6 +646,7 @@
         if (!mailboxComposerTrigger) return;
         var draftId = button.dataset.mailboxDraftId || '';
         if (!/^\d+$/.test(draftId)) return;
+        beginMailboxComposerDraftSession();
         if (mailboxComposerActionController) mailboxComposerActionController.abort();
         mailboxComposerActionController = new AbortController();
         button.disabled = true;
@@ -564,14 +674,29 @@
           });
       }
 
-      function saveMailboxDraft() {
-        if (!mailboxComposerForm || !mailboxComposerSaveDraft) return;
-        if (mailboxComposerContent) mailboxComposerContent.dispatchEvent(new Event('input', { bubbles: true }));
+      function saveMailboxDraft(options) {
+        options = options || {};
+        if (!mailboxComposerForm || !mailboxComposerHasDraftContent()) {
+          mailboxComposerDraftDirty = false;
+          return Promise.resolve(false);
+        }
+        var session = mailboxComposerDraftSession;
+        if (mailboxComposerDraftSavePromise) {
+          mailboxComposerDraftDirty = true;
+          return mailboxComposerDraftSavePromise.then(function () {
+            return options.force && session === mailboxComposerDraftSession
+              ? saveMailboxDraft(options)
+              : true;
+          });
+        }
+        clearMailboxComposerDraftTimer();
+        mailboxComposerDraftDirty = false;
         var formData = new FormData(mailboxComposerForm);
-        // Attachments are uploaded to Zoho only with a confirmed send, never retained in a Hub draft.
+        // Drafts retain text only; attachments are stored once the email is actually sent.
         formData.delete('attachments');
-        mailboxComposerSaveDraft.disabled = true;
-        window.fetch('/emails/drafts', {
+        if (!options.automatic && mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = true;
+        if (!options.quiet) setMailboxComposerStatus('Entwurf wird gespeichert ...');
+        var saving = window.fetch('/emails/drafts', {
           method: 'POST',
           body: formData,
           credentials: 'same-origin'
@@ -583,6 +708,7 @@
             });
           })
           .then(function (payload) {
+            if (session !== mailboxComposerDraftSession) return true;
             if (mailboxComposerDraftId) mailboxComposerDraftId.value = String(payload.draft_id || '');
             if (payload.folder_counts) {
               mailboxStatus.folderCounts = payload.folder_counts;
@@ -596,18 +722,49 @@
             folderCache.delete(mailboxFolderKey('drafts', true));
             var list = document.querySelector('[data-mailbox-list]');
             if (list && (list.dataset.mailboxFolderName || '') === 'drafts') refreshCurrentMailboxFolder('drafts');
-            setMailboxComposerStatus(
-              mailboxComposerAttachments.length
-                ? 'Entwurf gespeichert. Anhänge werden erst beim bestätigten Versand über Zoho übertragen.'
-                : 'Entwurf gespeichert.'
-            );
+            if (!options.quiet) {
+              setMailboxComposerStatus(
+                mailboxComposerAttachments.length
+                  ? 'Entwurf gespeichert. Anhänge werden erst beim Versand über Mittwald übertragen.'
+                  : 'Entwurf gespeichert.'
+              );
+            }
+            return true;
           })
           .catch(function (error) {
-            setMailboxComposerStatus(error.message || 'Der Entwurf konnte nicht gespeichert werden.');
-          })
-          .finally(function () {
-            mailboxComposerSaveDraft.disabled = false;
+            mailboxComposerDraftDirty = true;
+            if (session === mailboxComposerDraftSession && !options.quiet) {
+              setMailboxComposerStatus(error.message || 'Der Entwurf konnte nicht gespeichert werden.');
+            }
+            return false;
           });
+        var completed = saving.finally(function () {
+          if (mailboxComposerDraftSavePromise === completed) mailboxComposerDraftSavePromise = null;
+          if (!options.automatic && mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = false;
+          if (mailboxComposerDraftDirty) scheduleMailboxComposerDraftSave();
+        });
+        mailboxComposerDraftSavePromise = completed;
+        return completed;
+      }
+
+       function persistMailboxComposerDraftOnClose() {
+         if (!mailboxComposer || mailboxComposer.hidden) return;
+         var hasSavedDraft = Boolean(mailboxComposerDraftId && mailboxComposerDraftId.value);
+         var autosaveIsDue = mailboxComposerDraftStartedAt && Date.now() - mailboxComposerDraftStartedAt >= 30000;
+         if (!hasSavedDraft && !autosaveIsDue) return;
+         saveMailboxDraft({ force: true, quiet: true });
+       }
+
+      function submitMailboxComposerForm(event) {
+        syncMailboxComposerContent();
+        if (mailboxComposerSubmitting || !mailboxComposerHasDraftContent()) return;
+        event.preventDefault();
+        mailboxComposerSubmitting = true;
+        clearMailboxComposerDraftTimer();
+        if (mailboxComposerSubmit) mailboxComposerSubmit.disabled = true;
+        saveMailboxDraft({ force: true, quiet: true }).finally(function () {
+          HTMLFormElement.prototype.submit.call(mailboxComposerForm);
+        });
       }
 
       function selectMailboxComposerRecipient(recipient) {
@@ -624,6 +781,7 @@
           mailboxComposerTemplate.dispatchEvent(new Event('change', { bubbles: true }));
         }
         updateMailboxComposerSubmit();
+        scheduleMailboxComposerDraftSave();
       }
 
       function renderMailboxComposerRecipientResults(recipients) {
@@ -658,6 +816,7 @@
       }
 
       function clearMailboxComposerTemplateSelection() {
+        mailboxComposerTemplateRequest += 1;
         if (mailboxComposerTemplate) mailboxComposerTemplate.value = '';
         if (mailboxComposerTemplateId) mailboxComposerTemplateId.value = '';
         if (mailboxComposerTemplateSearch) mailboxComposerTemplateSearch.value = '';
@@ -716,6 +875,72 @@
         clearMailboxComposerTemplateSearchResults();
         closeMailboxComposerTemplateLibrary();
         mailboxComposerTemplate.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+
+      function applyMailboxComposerNewEmailDefaults() {
+        if (!mailboxComposerNeedsNewEmailDefaults || !mailboxComposerLoaded) return;
+        mailboxComposerNeedsNewEmailDefaults = false;
+        applyMailboxComposerDefaultSender();
+        var template = mailboxComposerTemplates.find(function (item) {
+          return String(item.id) === String(mailboxComposerDefaultTemplateId);
+        });
+        if (template) selectMailboxComposerTemplate(template);
+        updateMailboxComposerSubmit();
+      }
+
+      function applyMailboxComposerDefaultSender() {
+        if (!mailboxComposerSender) return;
+        mailboxComposerSender.value = mailboxComposerDefaultSenderEmail || (
+          Array.from(mailboxComposerSender.options).find(function (option) { return option.value; }) || {}
+        ).value || '';
+      }
+
+      function loadMailboxComposerTemplate() {
+        if (!mailboxComposerTemplate || !mailboxComposerTemplateId) return;
+        var templateId = mailboxComposerTemplate.value;
+        mailboxComposerTemplateId.value = templateId;
+        if (!templateId) return;
+        var requestId = ++mailboxComposerTemplateRequest;
+        var baseUrl = mailboxComposer.dataset.emailTemplateUrl;
+        var isPreview = !baseUrl || !mailboxComposerRecipientKey.value;
+        var templateUrl = isPreview
+          ? '/emails/compose/templates/' + encodeURIComponent(templateId)
+          : baseUrl + '/' + encodeURIComponent(templateId) + '?recipient_key=' + encodeURIComponent(mailboxComposerRecipientKey.value);
+        setMailboxComposerStatus(isPreview ? 'Vorlage wird als Entwurf geladen ...' : 'Vorlage wird geladen ...');
+        window.fetch(templateUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Die E-Mail-Vorlage konnte nicht geladen werden.');
+              return payload;
+            });
+          })
+          .then(function (template) {
+            if (requestId !== mailboxComposerTemplateRequest) return;
+            if (mailboxComposerSubject) mailboxComposerSubject.value = template.subject || '';
+            if (mailboxComposerContent) {
+              if (window.KosmosEmailEditors) {
+                window.KosmosEmailEditors.setHTML(mailboxComposerContent, template.content || '');
+              } else {
+                mailboxComposerContent.innerHTML = template.content || '';
+                mailboxComposerContent.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+            syncMailboxComposerContent();
+            scheduleMailboxComposerDraftSave();
+            var unresolved = Array.isArray(template.unresolved_placeholders) ? template.unresolved_placeholders : [];
+            setMailboxComposerStatus(
+              isPreview && unresolved.length
+                ? 'Vorlage als Entwurf geladen. Nach Auswahl eines Kontakts werden Platzhalter automatisch ersetzt.'
+                : unresolved.length
+                  ? 'Vorlage geladen. Nicht aufgelöste Platzhalter: ' + unresolved.join(', ')
+                  : 'Vorlage wurde als bearbeitbarer Entwurf geladen.'
+            );
+          })
+          .catch(function (error) {
+            if (requestId === mailboxComposerTemplateRequest) {
+              setMailboxComposerStatus(error.message || 'Die E-Mail-Vorlage konnte nicht geladen werden.');
+            }
+          });
       }
 
       function createMailboxComposerTemplateResult(template) {
@@ -815,7 +1040,7 @@
 
       if (mailboxComposerTrigger) {
         mailboxComposerTrigger.addEventListener('click', function () {
-          if (!mailboxComposerPendingAction) clearMailboxComposerActionFields();
+          if (!mailboxComposerPendingAction) resetMailboxComposerForNewEmail();
           loadMailboxComposerOptions();
         });
       }
@@ -829,7 +1054,7 @@
           clearMailboxComposerRecipientContext();
           updateMailboxComposerSubmit();
           if (mailboxComposerRecipient.validity.valid) {
-            setMailboxComposerStatus('Freie E-Mail-Adresse eingegeben. Für den Zoho-Versand ist noch eine Kontaktzuordnung nötig.');
+            setMailboxComposerStatus('Freie E-Mail-Adresse eingegeben. Die E-Mail wird direkt über Mittwald versendet.');
           }
           window.clearTimeout(mailboxComposerRecipientSearchTimer);
           mailboxComposerRecipientSearchTimer = window.setTimeout(searchMailboxComposerRecipients, 180);
@@ -840,6 +1065,7 @@
       }
       if (mailboxComposerTemplateSearch) {
         mailboxComposerTemplateSearch.addEventListener('input', function () {
+          mailboxComposerTemplateRequest += 1;
           if (mailboxComposerTemplate) mailboxComposerTemplate.value = '';
           if (mailboxComposerTemplateId) mailboxComposerTemplateId.value = '';
           renderMailboxComposerTemplateSearchResults();
@@ -847,6 +1073,9 @@
         mailboxComposerTemplateSearch.addEventListener('blur', function () {
           window.setTimeout(clearMailboxComposerTemplateSearchResults, 160);
         });
+      }
+      if (mailboxComposerTemplate) {
+        mailboxComposerTemplate.addEventListener('change', loadMailboxComposerTemplate);
       }
       if (mailboxComposerTemplateLibraryOpen) {
         mailboxComposerTemplateLibraryOpen.addEventListener('click', openMailboxComposerTemplateLibrary);
@@ -867,15 +1096,25 @@
         });
       }
       if (mailboxComposerSaveDraft) {
-        mailboxComposerSaveDraft.addEventListener('click', saveMailboxDraft);
+        mailboxComposerSaveDraft.addEventListener('click', function () { saveMailboxDraft({ force: true }); });
       }
       if (mailboxComposerForm) {
-        mailboxComposerForm.addEventListener('submit', function (event) {
-          if (mailboxComposerRecipientKey && mailboxComposerRecipientKey.value) return;
-          event.preventDefault();
-          setMailboxComposerStatus('Bitte einen bekannten Kontakt aus der Ergebnisliste auswählen.');
+        mailboxComposerForm.addEventListener('submit', submitMailboxComposerForm);
+        mailboxComposerForm.querySelectorAll('input, select, textarea').forEach(function (control) {
+          if (control.type === 'hidden' || control === mailboxComposerContentValue) return;
+          control.addEventListener('input', scheduleMailboxComposerDraftSave);
+          control.addEventListener('change', scheduleMailboxComposerDraftSave);
         });
       }
+      if (mailboxComposerContent) {
+        mailboxComposerContent.addEventListener('input', scheduleMailboxComposerDraftSave);
+      }
+      document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-email-compose-close]')) persistMailboxComposerDraftOnClose();
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') persistMailboxComposerDraftOnClose();
+      });
       document.addEventListener('click', function (event) {
         var button = event.target.closest('[data-mailbox-compose-action]');
         if (!button) return;
@@ -1114,6 +1353,60 @@
           });
       }
 
+      function selectMailboxMessageForAction(list, messageKey) {
+        var marked = markedMailboxMessages(list);
+        if (!marked.keys.has(messageKey)) {
+          marked.keys.clear();
+          marked.keys.add(messageKey);
+        }
+        marked.anchorKey = messageKey;
+        renderMailboxListWindow(list);
+        return selectedMailboxMessages(list);
+      }
+
+      function moveMailboxMessageToTrash(list, messageKey) {
+        selectMailboxMessageForAction(list, messageKey);
+        applyMailboxContextAction(list, 'move_trash');
+      }
+
+      function permanentlyDeleteMailboxMessage(list, messageKey) {
+        selectMailboxMessageForAction(list, messageKey);
+        applyMailboxContextAction(list, 'permanently_delete');
+      }
+
+      function openMailboxPermanentDeleteDialog(list, message) {
+        var subject = message.subject || 'ohne Betreff';
+        var selected = selectMailboxMessageForAction(list, message.key);
+        var description = selected.length === 1
+          ? 'Die E-Mail „' + subject + '“ wird einschließlich lokal gespeicherter Anhänge endgültig gelöscht.'
+          : selected.length + ' ausgewählte E-Mails werden einschließlich lokal gespeicherter Anhänge endgültig gelöscht.';
+        if (!mailboxPermanentDeleteDialog || typeof mailboxPermanentDeleteDialog.showModal !== 'function') {
+          if (window.confirm(description + ' Fortfahren?')) {
+            permanentlyDeleteMailboxMessage(list, message.key);
+          }
+          return;
+        }
+        mailboxPermanentDeletePending = { list: list, messageKey: message.key };
+        if (mailboxPermanentDeleteDescription) mailboxPermanentDeleteDescription.textContent = description;
+        mailboxPermanentDeleteDialog.showModal();
+      }
+
+      if (mailboxPermanentDeleteDialog) {
+        mailboxPermanentDeleteCancel.addEventListener('click', function () {
+          mailboxPermanentDeletePending = null;
+          mailboxPermanentDeleteDialog.close();
+        });
+        mailboxPermanentDeleteConfirm.addEventListener('click', function () {
+          var pending = mailboxPermanentDeletePending;
+          mailboxPermanentDeletePending = null;
+          mailboxPermanentDeleteDialog.close();
+          if (pending) permanentlyDeleteMailboxMessage(pending.list, pending.messageKey);
+        });
+        mailboxPermanentDeleteDialog.addEventListener('close', function () {
+          mailboxPermanentDeletePending = null;
+        });
+      }
+
       if (mailboxContextMenu) {
         mailboxContextMenu.addEventListener('click', function (event) {
           var batchButton = event.target.closest('[data-mailbox-batch-action]');
@@ -1189,15 +1482,18 @@
       }
 
       function createMailboxMessage(list, message, index) {
+        var item = document.createElement('article');
+        item.className = 'mailbox-message';
+        if (markedMailboxMessages(list).keys.has(message.key)) item.classList.add('is-marked');
+        if (list.dataset.mailboxSelectedKey === message.key) item.classList.add('is-selected');
+        if (message.is_unread) item.classList.add('is-unread');
+        item.style.top = (index * parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'))) + 'px';
+
         var link = document.createElement('a');
-        link.className = 'mailbox-message';
-        if (markedMailboxMessages(list).keys.has(message.key)) link.classList.add('is-marked');
-        if (list.dataset.mailboxSelectedKey === message.key) link.classList.add('is-selected');
-        if (message.is_unread) link.classList.add('is-unread');
+        link.className = 'mailbox-message-open';
         link.href = mailboxMessageUrl(list, message.key);
         link.dataset.mailboxMessage = '';
         link.dataset.mailboxKey = message.key;
-        link.style.top = (index * parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'))) + 'px';
 
         var header = document.createElement('div');
         header.className = 'mailbox-message-row';
@@ -1211,23 +1507,47 @@
         }
         link.append(header);
 
+        var subjectRow = document.createElement('div');
+        subjectRow.className = 'mailbox-message-subject-row';
         var subject = document.createElement('strong');
         subject.className = 'mailbox-message-subject';
         subject.textContent = message.subject;
-        link.append(subject);
+        subjectRow.append(subject);
+        var trash = null;
+        var isTrashFolder = (list.dataset.mailboxFolderName || 'inbox') === 'trash';
+        trash = document.createElement('button');
+        trash.className = 'mailbox-message-trash';
+        trash.type = 'button';
+        trash.setAttribute('aria-label', isTrashFolder ? 'E-Mail endgültig löschen' : 'E-Mail in den Papierkorb verschieben');
+        trash.title = isTrashFolder ? 'Endgültig löschen' : 'In den Papierkorb verschieben';
+        trash.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 5.1h5.6"/><path d="M7 7.25h10"/><path d="M8 7.25v-1.1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1.1"/><path d="M6.9 10 7.9 18.15a1.3 1.3 0 0 0 1.29 1.15h5.84a1.3 1.3 0 0 0 1.29-1.15L17.1 10"/><path d="M10 11.3v5.6M12 11.3v5.6M14 11.3v5.6"/></g></svg>';
+        trash.addEventListener('click', function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (trash.disabled) return;
+          if (isTrashFolder) {
+            openMailboxPermanentDeleteDialog(list, message);
+            return;
+          }
+          trash.disabled = true;
+          moveMailboxMessageToTrash(list, message.key);
+        });
+        link.append(subjectRow);
 
         var context = document.createElement('p');
-        if (message.kind === 'unassigned' || message.kind === 'draft') {
+        if (message.kind === 'unassigned' || message.kind === 'draft' || message.kind === 'direct' || message.kind === 'system') {
           var badge = document.createElement('span');
           badge.className = 'pill';
-          badge.textContent = message.kind === 'draft' ? 'Entwurf' : 'Unbekannt';
+          badge.textContent = message.kind === 'draft' ? 'Entwurf' : message.kind === 'direct' ? 'Direkt versendet' : message.kind === 'system' ? 'System-Erinnerung' : 'Unbekannt';
           context.append(badge);
         } else {
           context.textContent = message.context;
         }
         link.append(context);
+        item.append(link);
+        if (trash) item.append(trash);
         attachMessageListener(link);
-        return link;
+        return item;
       }
 
       function renderMailboxListWindow(list) {

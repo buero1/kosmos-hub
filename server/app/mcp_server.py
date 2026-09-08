@@ -24,7 +24,6 @@ from app.services.site_inventory import SiteInventoryService
 from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError, SiteMcpProxyService
 from app.services.site_updates import SiteUpdateService
-from app.services.update_plans import UpdatePlanService
 
 MCP_ALLOWED_HOSTS = (
     "localhost",
@@ -99,64 +98,6 @@ def _write_mcp_tool_audit(tool_name: str, result: str) -> None:
             detail=f"MCP tool {tool_name} completed with result {result}.",
         )
         db.commit()
-
-
-def _update_plan_payload(service: UpdatePlanService, plan: Any) -> dict[str, Any]:
-    preflight = service.build_preflight(plan)
-    return {
-        "id": plan.id,
-        "name": plan.name,
-        "status": plan.status,
-        "created_by": plan.created_by,
-        "notes": plan.notes,
-        "items": [
-            {
-                "site_id": item.site_id,
-                "site_domain": item.site.domain,
-                "update_type": item.update_type,
-                "plugin_file": item.update_identifier,
-                "update_name": item.update_name,
-                "current_version": item.current_version,
-                "target_version": item.target_version,
-                "active": item.is_active,
-            }
-            for item in plan.items
-        ],
-        "preflight": [
-            {
-                "site_id": check.item.site_id,
-                "site_domain": check.item.site.domain,
-                "execution_ready": check.execution_ready,
-                "backup_status": check.backup_status,
-                "update_still_available": check.update_still_available,
-                "next_step": check.next_step,
-            }
-            for check in preflight
-        ],
-    }
-
-
-def _confirmed_update_plan(
-    service: UpdatePlanService,
-    *,
-    plan_id: int,
-    confirmed_site: str,
-    confirmed_plugin_file: str,
-) -> tuple[Any | None, dict[str, Any] | None]:
-    plan = service.get_plan(plan_id)
-    if plan is None:
-        return None, _proxy_error_payload(SiteMcpProxyError("UPDATE_PLAN_NOT_FOUND", "Update plan was not found.", status_code=404))
-
-    confirmation_error = service.plugin_update_confirmation_error(
-        plan,
-        confirmed_site=confirmed_site,
-        confirmed_plugin_file=confirmed_plugin_file,
-    )
-    if confirmation_error:
-        return None, _proxy_error_payload(
-            SiteMcpProxyError("UPDATE_PLAN_CONFIRMATION_REQUIRED", confirmation_error, status_code=409)
-        )
-    return plan, None
 
 
 @audited_mcp_tool()
@@ -463,72 +404,3 @@ def refresh_verified_site_updates(limit: int = 25) -> dict[str, Any]:
     with SessionLocal() as db:
         service = FleetInventoryService(db=db, cipher=get_secret_cipher())
         return {"ok": True, "payload": service.refresh_verified_site_updates(limit=limit)}
-
-
-@audited_mcp_tool()
-def get_update_plan(plan_id: int) -> dict[str, Any]:
-    """Read one Hub update plan, including its current backup and update preflight evidence."""
-    with SessionLocal() as db:
-        service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-        plan = service.get_plan(plan_id)
-        if plan is None:
-            return _proxy_error_payload(SiteMcpProxyError("UPDATE_PLAN_NOT_FOUND", "Update plan was not found.", status_code=404))
-        return {"ok": True, "payload": _update_plan_payload(service, plan)}
-
-
-@audited_mcp_tool()
-def approve_plugin_update_plan(
-    plan_id: int,
-    confirmed_site: str,
-    confirmed_plugin_file: str,
-) -> dict[str, Any]:
-    """Approve one exact plugin update plan after the caller confirms its site domain and plugin file."""
-    with SessionLocal() as db:
-        service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-        plan, error = _confirmed_update_plan(
-            service,
-            plan_id=plan_id,
-            confirmed_site=confirmed_site,
-            confirmed_plugin_file=confirmed_plugin_file,
-        )
-        if error is not None:
-            return error
-        outcome = service.approve_plugin_update(plan_id=plan.id, actor=get_mcp_actor())
-        refreshed_plan = service.get_plan(plan.id)
-        return {
-            "ok": outcome.result == "approved",
-            "payload": {
-                "result": outcome.result,
-                "message": outcome.message,
-                "plan": _update_plan_payload(service, refreshed_plan) if refreshed_plan is not None else None,
-            },
-        }
-
-
-@audited_mcp_tool()
-def execute_approved_plugin_update_plan(
-    plan_id: int,
-    confirmed_site: str,
-    confirmed_plugin_file: str,
-) -> dict[str, Any]:
-    """Execute only an already approved exact plugin plan after site and plugin confirmation."""
-    with SessionLocal() as db:
-        service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-        plan, error = _confirmed_update_plan(
-            service,
-            plan_id=plan_id,
-            confirmed_site=confirmed_site,
-            confirmed_plugin_file=confirmed_plugin_file,
-        )
-        if error is not None:
-            return error
-        outcome = service.execute_plugin_update(plan_id=plan.id, actor=get_mcp_actor())
-        refreshed_plan = service.get_plan(plan.id)
-        return {
-            "ok": outcome.result == "executed",
-            "payload": {
-                "result": outcome.result,
-                "message": outcome.message,
-                "plan": _update_plan_payload(service, refreshed_plan) if refreshed_plan is not None else None,
-            },
-        }

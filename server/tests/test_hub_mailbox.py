@@ -3,7 +3,8 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect
+import pytest
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
@@ -11,7 +12,10 @@ from app.core.templates import _unread_email_count_for_db, create_templates
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
-from app.models.hub_mailbox_email import HubMailboxEmail
+from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.services.customer_communications import CustomerCommunicationAttachmentUpload
+from app.services.email_attachment_storage import EmailAttachmentStorage
 from app.services.hub_mailbox import HubMailboxService
 
 
@@ -89,6 +93,14 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         serialized_messages = re.search(r'<script type="application/json" data-mailbox-list-data>(.*?)</script>', rendered_list)
         assert serialized_messages is not None
         assert json.loads(serialized_messages.group(1))[0]["subject"] == "Noch unbekannt"
+
+        rendered_pane = template.get_template("emails_reading_pane.html").render(
+            selected=inbox.selected,
+            folder="inbox",
+            unread=False,
+            csrf_token="test-token",
+        )
+        assert 'sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"' in rendered_pane
 
         folder_view = service.get_folder_view(folder="inbox", unread_only=False)
         assert [message.subject for message in folder_view.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
@@ -218,15 +230,19 @@ def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_e
         db.commit()
 
         service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        first_copy_key = f"linked-{first_customer.id}-{first_copy.id}"
+        unassigned_key = f"unassigned-{unassigned.id}"
+        with pytest.raises(ValueError, match="Papierkorb"):
+            service.apply_batch_action(keys=[first_copy_key], action="permanently_delete")
         assert service.apply_batch_action(
-            keys=[f"linked-{first_customer.id}-{first_copy.id}"],
+            keys=[first_copy_key],
             action="mark_read",
         ) == 2
         assert not first_copy.is_unread
         assert not second_copy.is_unread
 
         assert service.apply_batch_action(
-            keys=[f"linked-{first_customer.id}-{first_copy.id}", f"unassigned-{unassigned.id}"],
+            keys=[first_copy_key, unassigned_key],
             action="move_spam",
         ) == 3
         assert first_copy.mailbox_state == "spam"
@@ -238,7 +254,7 @@ def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_e
             "Gemeinsame Nachricht",
         }
         assert service.apply_batch_action(
-            keys=[f"linked-{first_customer.id}-{first_copy.id}", f"unassigned-{unassigned.id}"],
+            keys=[first_copy_key, unassigned_key],
             action="restore",
         ) == 3
         assert first_copy.mailbox_state == "active"
@@ -247,7 +263,7 @@ def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_e
         assert service.get_folder_view(folder="spam", unread_only=False).messages == ()
 
         assert service.apply_batch_action(
-            keys=[f"linked-{first_customer.id}-{first_copy.id}"],
+            keys=[first_copy_key],
             action="move_sent",
         ) == 2
         assert first_copy.direction == "outbound"
@@ -257,13 +273,22 @@ def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_e
         ]
 
         assert service.apply_batch_action(
-            keys=[f"unassigned-{unassigned.id}"],
+            keys=[unassigned_key],
             action="move_trash",
         ) == 1
         assert unassigned.mailbox_state == "trash"
         assert [message.subject for message in service.get_folder_view(folder="trash", unread_only=False).messages] == [
             "Unbekannte Nachricht"
         ]
+
+        assert service.apply_batch_action(keys=[first_copy_key], action="move_trash") == 2
+        assert service.apply_batch_action(
+            keys=[first_copy_key, unassigned_key],
+            action="permanently_delete",
+        ) == 3
+        assert db.get(CustomerZohoEmail, first_copy.id) is None
+        assert db.get(CustomerZohoEmail, second_copy.id) is None
+        assert db.get(HubMailboxEmail, unassigned.id) is None
 
 
 def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():
@@ -299,6 +324,82 @@ def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():
         assert context["content"] == "<p>Bearbeitbarer Entwurf</p>"
         assert service.discard_draft(draft_id=draft.id)
         assert service.get_folder_counts()["drafts"] == 0
+
+
+def test_mailbox_sends_direct_email_via_mittwald_and_keeps_a_local_attachment(monkeypatch, tmp_path):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    sent_messages = []
+
+    class FakeSmtp:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def login(self, _username, _password):
+            return None
+
+        def send_message(self, message, from_addr, to_addrs):
+            sent_messages.append((message, from_addr, to_addrs))
+
+        def quit(self):
+            return None
+
+    monkeypatch.setattr("app.services.hub_mailbox_transport.smtplib.SMTP_SSL", FakeSmtp)
+    with Session(engine) as db:
+        db.add(
+            HubMailboxAccount(
+                email_address="info@kosmos.example",
+                display_name="Kosmos Hub",
+                username="info@kosmos.example",
+                encrypted_password=cipher.encrypt("mittwald-secret"),
+                verified_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+        storage = EmailAttachmentStorage(root=tmp_path / "attachments", cipher=cipher, min_free_bytes=0)
+        service = HubMailboxService(
+            db=db,
+            cipher=cipher,
+            public_base_url="https://hub.example.test",
+            attachment_storage=storage,
+        )
+
+        sent = service.send_direct_email(
+            sender_email="info@kosmos.example",
+            recipient_email="Example Contact <contact@example.de>",
+            subject="Unterlagen",
+            content="<p>Im Anhang.</p>",
+            cc_emails="Buchhaltung <buchhaltung@example.de>",
+            attachments=(
+                CustomerCommunicationAttachmentUpload(
+                    filename="unterlagen.txt",
+                    content=b"Inhalt",
+                    content_type="text/plain",
+                ),
+            ),
+        )
+        db.commit()
+
+        sent_view = service.get_folder_view(folder="sent", unread_only=False, selected_key=f"unassigned-{sent.id}")
+        assert sent_view.selected is not None
+        assert sent_view.selected.kind == "direct"
+        assert sent_view.selected.subject == "Unterlagen"
+        assert sent_view.selected.cc_recipients == "Buchhaltung <buchhaltung@example.de>"
+        assert service.get_folder_counts() == {"inbox": 0, "sent": 1, "drafts": 0, "unassigned": 0, "trash": 0, "spam": 0}
+        attachment = db.scalar(select(HubMailboxAttachment).where(HubMailboxAttachment.email_id == sent.id))
+        assert attachment is not None
+        downloaded = service.download_unassigned_attachment(email_id=sent.id, attachment_id=attachment.source_attachment_id)
+        assert downloaded.filename == "unterlagen.txt"
+        assert downloaded.content == b"Inhalt"
+
+    message, from_addr, to_addrs = sent_messages[0]
+    assert from_addr == "info@kosmos.example"
+    assert to_addrs == ["contact@example.de", "buchhaltung@example.de"]
+    html_part = next(part for part in message.walk() if part.get_content_type() == "text/html")
+    assert 'meta name="viewport" content="width=device-width, initial-scale=1"' in html_part.get_content()
+    assert "Im Anhang." in html_part.get_content()
+    assert any(part.get_filename() == "unterlagen.txt" for part in message.walk())
 
 
 def test_mailbox_list_reads_compact_header_without_full_email_payload():

@@ -15,7 +15,6 @@ from app.models.site_connection import SiteConnection
 from app.models.site_snapshot import SiteSnapshot
 from app.models.site_update_snapshot import SiteUpdateSnapshot
 from app.models.site_user_snapshot import SiteUserSnapshot
-from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService, UpdateWorkbenchEntry
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.fleet_refresh_settings import FleetRefreshRuntimeSettings

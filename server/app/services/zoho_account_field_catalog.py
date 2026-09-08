@@ -82,7 +82,7 @@ ZOHO_ACCOUNT_FIELDS = (
     ZohoAccountField("update_date", "Update-Datum", "Update_Datum", "Datum"),
     ZohoAccountField("contract_start", "Vertragsbeginn", "Vertragsbeginn", "Datum"),
     ZohoAccountField("contract_duration", "Vertragsdauer (in Jahren)", "Vertragsdauer", "Einzelzeile"),
-    ZohoAccountField("website", "Webseite", "Website", "URL"),
+    ZohoAccountField("website", "Website", "Website", "URL"),
     ZohoAccountField("website_package", "Website-Paket", "Website_Paket", "Auswahlliste"),
     ZohoAccountField("important_info", "Wichtige Infos", "Wichtige_Infos", "Multizeilen (klein)"),
     ZohoAccountField("ws_updates", "WS-Updates", "WS_Updates", "Unterformular", subform_parent=True),

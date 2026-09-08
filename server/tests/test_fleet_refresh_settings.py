@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.services.fleet_refresh as fleet_refresh_module
 from app.api.routes.web import _direct_update_batch_status_payload, _fleet_refresh_status_payload
-from app.core.timezones import format_berlin_time
+from app.core.timezones import format_berlin_time, format_berlin_time_short
 from app.db.base import Base
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshRunStatus, FleetRefreshSiteResult
 from app.models.fleet_refresh_settings import FleetRefreshSettings
@@ -348,6 +348,8 @@ def test_automatic_refresh_enables_crocoblock_provider_activation(monkeypatch):
 def test_berlin_time_format_handles_summer_winter_and_naive_database_values():
     assert format_berlin_time(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)) == "27.08.2026 14:00:00 CEST"
     assert format_berlin_time(datetime(2026, 1, 15, 12, 0)) == "15.01.2026 13:00:00 CET"
+    assert format_berlin_time_short(datetime(2026, 8, 27, 12, 0, tzinfo=UTC)) == "27.08.2026 14:00"
+    assert format_berlin_time_short(datetime(2026, 1, 15, 12, 0)) == "15.01.2026 13:00"
 
 
 def test_cancel_queued_fleet_refresh_finishes_without_worker_starting():

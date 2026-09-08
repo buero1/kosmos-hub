@@ -1,0 +1,20 @@
+{% macro contact_field_control(field, value="", required=false) %}
+  {% set is_required = field.required or required %}
+  <label class="customer-field-control">
+    <span>{{ field.label }}{% if is_required %} <small>erforderlich</small>{% endif %}</span>
+    {% if field.key == "salutation" %}
+      <select name="contact_field__{{ field.key }}"{% if is_required %} required{% endif %}>
+        <option value="">Auswählen</option>
+        {% for option in ("Frau", "Herr", "Divers") %}
+          <option value="{{ option }}"{% if value == option %} selected{% endif %}>{{ option }}</option>
+        {% endfor %}
+      </select>
+    {% elif field.display_type == "E-Mail" %}
+      <input type="email" name="contact_field__{{ field.key }}" value="{{ value }}" autocomplete="email">
+    {% elif field.display_type == "Telefon" %}
+      <input type="tel" name="contact_field__{{ field.key }}" value="{{ value }}" autocomplete="tel">
+    {% else %}
+      <input type="text" name="contact_field__{{ field.key }}" value="{{ value }}"{% if is_required %} required{% endif %}>
+    {% endif %}
+  </label>
+{% endmacro %}

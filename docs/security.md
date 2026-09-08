@@ -184,7 +184,7 @@ verschluesselten Wert. Klartext-Keys gehoeren weder in den Browser-Code, in Git
 noch in Audit-Daten.
 
 Fuer eine Assistant-Antwort werden nur die benoetigten Hub-Snapshotdaten wie
-Domains, Versionen, Update-Metadaten und Planstatus serverseitig an OpenAI
+Domains, Versionen und Update-Metadaten serverseitig an OpenAI
 gesendet. Website-Verbindungssecrets, Bridge-Keys und der OpenAI-Key selbst
 werden nie als Modellkontext uebermittelt. Die Oberflaeche weist darauf hin,
 dass keine Kunden-Zugangsdaten in Fragen gehoeren.

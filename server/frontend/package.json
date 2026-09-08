@@ -1,0 +1,14 @@
+{
+  "name": "kosmos-hub-editor-assets",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "jodit": "^4.14.2"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}

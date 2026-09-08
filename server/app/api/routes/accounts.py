@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 from secrets import compare_digest
 from typing import Annotated
@@ -17,17 +18,30 @@ from app.services.ai_provider import AiProviderConfigError, AiProviderConfigServ
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HubAccountService
+from app.services.hub_mailbox_accounts import HubMailboxAccountError, HubMailboxAccountService
+from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.email_composer_settings import (
+    FONT_FAMILY_OPTIONS,
+    FONT_SIZE_OPTIONS,
+    LINE_HEIGHT_OPTIONS,
+    EmailComposerSettingsError,
+    EmailComposerSettingsService,
+)
+from app.services.email_attachment_storage import EmailAttachmentStorageError
 from app.services.maintenance_worker import (
+    schedule_pending_zoho_email_attachment_import,
     schedule_pending_zoho_email_content_import,
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_email_workflow_deliveries,
+    schedule_pending_hub_mailbox_imap_import,
 )
 from app.services.zoho_email_history_import import ZohoEmailHistoryImportService
 from app.services.zoho_email_content_import import ZohoEmailContentImportService
+from app.services.zoho_email_attachment_import import ZohoEmailAttachmentImportService
 from app.services.zoho_note_history_import import ZohoNoteHistoryImportService
 from app.services.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhookService
 
@@ -115,8 +129,8 @@ def setup_first_admin(
 
 @router.get("", response_class=HTMLResponse)
 def account_page(request: Request, db: Annotated[Session, Depends(get_db)]):
-    user = _require_current_user(request)
     service = _account_service(db)
+    user = _require_persisted_current_user(request, service)
     return templates.TemplateResponse(request, "account.html", _account_context(request, user, service))
 
 
@@ -155,6 +169,196 @@ def change_password(
     request.session.clear()
     request.session.update({"user_id": user.id, "session_version": user.session_version})
     return RedirectResponse(url="/account?password=changed", status_code=303)
+
+
+@router.post("/task-reminder-email")
+def configure_task_reminder_email(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    reminder_email: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    service = _account_service(db)
+    user = _require_persisted_current_user(request, service)
+    try:
+        service.configure_reminder_email(user=user, reminder_email=reminder_email)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc), error_section="account-task-reminders"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-task-reminder-email",
+        result="success",
+        detail="Updated the personal recipient address for task email reminders.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?task_reminder_email=saved#account-task-reminders", status_code=303)
+
+
+@router.post("/mailboxes/mittwald")
+def configure_mittwald_mailbox(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    email_address: Annotated[str, Form()] = "",
+    display_name: Annotated[str, Form()] = "",
+    username: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Test and securely save one Mittwald mailbox without starting email synchronization."""
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    mailbox_service = HubMailboxAccountService(db=db, cipher=get_secret_cipher())
+    try:
+        account = mailbox_service.test_and_save(
+            email_address=email_address,
+            display_name=display_name,
+            username=username,
+            password=password,
+            configured_by=user,
+        )
+    except HubMailboxAccountError as exc:
+        db.commit()
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-mailbox",
+        action="test-and-configure-mittwald-mailbox",
+        result="success",
+        detail=f"Verified Mittwald IMAP and SMTP access for mailbox {account.email_address}.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?mailbox=connected#account-mailbox", status_code=303)
+
+
+@router.post("/mailboxes/import")
+def import_mittwald_mailboxes(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    since_date: Annotated[str, Form()] = "2026-09-05",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Select only the requested date range, then import it outside the web request."""
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        selected_date = date.fromisoformat(since_date)
+        if selected_date > date.today():
+            raise HubMailboxImapImportError("Das Startdatum darf nicht in der Zukunft liegen.")
+        status, started = HubMailboxImapImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).start(requested_by=user.username, since_date=selected_date)
+    except (HubMailboxImapImportError, ValueError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-mailbox",
+        action="start-mittwald-imap-import",
+        result="success",
+        detail=f"Selected {status.total_messages} Mittwald message(s) since {selected_date.isoformat()}.",
+    )
+    db.commit()
+    schedule_pending_hub_mailbox_imap_import()
+    state = "import-started" if started else "import-running"
+    return RedirectResponse(url=f"/account?mailbox={state}#account-mailbox", status_code=303)
+
+
+@router.post("/mail-composer-settings")
+def configure_mail_composer_settings(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    font_family_key: Annotated[str, Form()] = "verdana",
+    font_size: Annotated[int, Form()] = 12,
+    line_height: Annotated[float, Form()] = 1.1,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        configured = EmailComposerSettingsService(db=db).configure(
+            font_family_key=font_family_key,
+            font_size=font_size,
+            line_height=line_height,
+        )
+    except EmailComposerSettingsError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-email-composer-defaults",
+        result="success",
+        detail=(
+            f"Set email composer defaults to {configured.font_family_key} at {configured.font_size}px, "
+            f"line height {configured.line_height:g}."
+        ),
+    )
+    db.commit()
+    return RedirectResponse(url="/account?email_composer=saved#account-mailbox", status_code=303)
+
+
+@router.post("/mail-signature")
+def configure_mail_signature(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    signature_html: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        normalized_signature = signature_html.strip()
+        if normalized_signature:
+            normalized_signature = CustomerCommunicationService._sanitized_email_content(normalized_signature)
+        EmailComposerSettingsService(db=db).configure_signature(signature_html=normalized_signature)
+    except (EmailComposerSettingsError, ValueError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="configure-email-signature",
+        result="success",
+        detail="Updated the shared email signature; signature content is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?email_signature=saved#account-mailbox", status_code=303)
 
 
 @router.post("/mcp-tokens")
@@ -235,6 +439,88 @@ def revoke_mcp_token(
     )
     db.commit()
     return RedirectResponse(url="/account?mcp_token=revoked", status_code=303)
+
+
+@router.post("/desktop-devices")
+def create_desktop_device(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+    try:
+        device, raw_token = service.create_desktop_device(user=user, name=name)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="pair-desktop-notifier",
+        result="success",
+        detail=f"Paired desktop notifier device {device.id} ({device.name}).",
+    )
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(
+            request,
+            user,
+            service,
+            new_desktop_device_token=raw_token,
+            new_desktop_device_name=device.name,
+        ),
+    )
+
+
+@router.post("/desktop-devices/{device_id}/revoke")
+def revoke_desktop_device(
+    device_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+    try:
+        device = service.revoke_desktop_device(user=user, device_id=device_id)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=404,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="revoke-desktop-notifier",
+        result="success",
+        detail=f"Revoked desktop notifier device {device.id} ({device.name}).",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?desktop_device=revoked", status_code=303)
 
 
 @router.post("/openai")
@@ -825,6 +1111,74 @@ def cancel_zoho_email_content_batch(
     return RedirectResponse(url="/account?zoho=email-content-import-cancel-requested", status_code=303)
 
 
+@router.post("/zoho/email-attachments/import")
+def import_zoho_email_attachments(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    limit: Annotated[int, Form()] = 100,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoEmailAttachmentImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).start(requested_by=user.username, limit=limit)
+    except (EmailAttachmentStorageError, ValueError, ZohoCrmError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc)),
+            status_code=400,
+        )
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-crm",
+        action="import-zoho-email-attachments",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho email attachment import {status.id} {'started' if started else 'was already active'} "
+            f"for {status.total_attachments} attachment(s)."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_email_attachment_import()
+    state = "email-attachment-import-started" if started else "email-attachment-import-running"
+    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+
+
+@router.post("/zoho/email-attachments/import/cancel")
+def cancel_zoho_email_attachment_import(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    status, requested = ZohoEmailAttachmentImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).cancel()
+    if requested and status is not None:
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho-crm",
+            action="cancel-zoho-email-attachment-import",
+            result="requested",
+            detail=f"Cancellation requested for Zoho email attachment import {status.id}.",
+        )
+        db.commit()
+    return RedirectResponse(url="/account?zoho=email-attachment-import-cancel-requested", status_code=303)
+
+
 @router.get("/zoho/email-content/import/status")
 def zoho_email_content_batch_status(
     request: Request,
@@ -846,6 +1200,36 @@ def zoho_email_content_batch_status(
             "total_emails": status.total_emails,
             "loaded_emails": status.loaded_emails,
             "failed_emails": status.failed_emails,
+            "consecutive_failures": status.consecutive_failures,
+            "cancel_requested": status.cancel_requested,
+            "continue_automatically": status.continue_automatically,
+            "last_error": status.last_error,
+        }
+    )
+
+
+@router.get("/zoho/email-attachments/import/status")
+def zoho_email_attachment_import_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_admin_user(request)
+    status = ZohoEmailAttachmentImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    ).status()
+    if status is None:
+        return JSONResponse({"active": False, "status": None})
+    return JSONResponse(
+        {
+            "active": status.status in {"pending", "running"},
+            "status": status.status,
+            "processed_attachments": status.processed_attachments,
+            "total_attachments": status.total_attachments,
+            "stored_attachments": status.stored_attachments,
+            "failed_attachments": status.failed_attachments,
+            "stored_bytes": status.stored_bytes,
             "consecutive_failures": status.consecutive_failures,
             "cancel_requested": status.cancel_requested,
             "continue_automatically": status.continue_automatically,
@@ -1023,8 +1407,11 @@ def _account_context(
     service: HubAccountService,
     *,
     error: str | None = None,
+    error_section: str | None = None,
     new_mcp_token: str | None = None,
     new_mcp_token_name: str | None = None,
+    new_desktop_device_token: str | None = None,
+    new_desktop_device_name: str | None = None,
     new_zoho_email_workflow_webhook_url: str | None = None,
 ) -> dict:
     zoho_service = _zoho_service(service.db)
@@ -1032,10 +1419,13 @@ def _account_context(
         "user": user,
         "csrf_token": get_csrf_token(request),
         "mcp_tokens": service.list_mcp_access_tokens(user=user),
+        "desktop_devices": service.list_desktop_devices(user=user),
         "error": error,
-        "error_section": _account_section_for_path(request.url.path),
+        "error_section": error_section or _account_section_for_path(request.url.path),
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
+        "new_desktop_device_token": new_desktop_device_token,
+        "new_desktop_device_name": new_desktop_device_name,
         "zoho_email_workflow_webhook": _zoho_email_workflow_webhook_service(service.db).status(),
         "zoho_email_history_import": ZohoEmailHistoryImportService(
             db=service.db,
@@ -1052,10 +1442,28 @@ def _account_context(
             cipher=get_secret_cipher(),
             public_base_url=get_settings().public_base_url,
         ).status(),
+        "zoho_email_attachment_import": ZohoEmailAttachmentImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).status(),
         "new_zoho_email_workflow_webhook_url": new_zoho_email_workflow_webhook_url,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
         "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
         "fleet_refresh_settings": FleetRefreshSettingsService(db=service.db).get_runtime_settings(),
+        "mittwald_mailbox_accounts": HubMailboxAccountService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+        ).list_statuses(),
+        "mittwald_mailbox_import": HubMailboxImapImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).status(),
+        "email_composer_settings": EmailComposerSettingsService(db=service.db).get_runtime_settings(),
+        "email_composer_font_options": FONT_FAMILY_OPTIONS,
+        "email_composer_font_size_options": FONT_SIZE_OPTIONS,
+        "email_composer_line_height_options": LINE_HEIGHT_OPTIONS,
         "zoho_status": zoho_service.get_status(),
         "zoho_mapping": zoho_service.mapping_rows(),
         "zoho_data_centers": ZOHO_DATA_CENTERS.values(),
@@ -1073,6 +1481,16 @@ def _require_current_user(request: Request):
     return user
 
 
+def _require_persisted_current_user(request: Request, service: HubAccountService):
+    """Use the request identity to load the writable user in this request's session."""
+    current_user = _require_current_user(request)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user
+
+
 def _require_admin_user(request: Request):
     user = _require_current_user(request)
     if user.role != "admin":
@@ -1085,6 +1503,14 @@ def _safe_next(value: str) -> str:
 
 
 def _account_section_for_path(path: str) -> str:
+    if path.startswith("/account/mail-composer-settings"):
+        return "account-mailbox"
+    if path.startswith("/account/mail-signature"):
+        return "account-mailbox"
+    if path.startswith("/account/mailboxes"):
+        return "account-mailbox"
+    if path.startswith("/account/desktop-devices"):
+        return "account-desktop-notifier"
     if path.startswith("/account/mcp-tokens"):
         return "account-mcp"
     if path.startswith("/account/openai"):

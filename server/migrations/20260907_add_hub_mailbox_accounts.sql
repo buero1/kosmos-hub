@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS hub_mailbox_accounts (
+    id INT NOT NULL AUTO_INCREMENT,
+    email_address VARCHAR(320) NOT NULL,
+    display_name VARCHAR(160) NOT NULL,
+    username VARCHAR(320) NOT NULL,
+    encrypted_password TEXT NOT NULL,
+    imap_host VARCHAR(255) NOT NULL DEFAULT 'mail.agenturserver.de',
+    imap_port INT NOT NULL DEFAULT 993,
+    imap_root_folder VARCHAR(64) NOT NULL DEFAULT 'INBOX',
+    smtp_host VARCHAR(255) NOT NULL DEFAULT 'mail.agenturserver.de',
+    smtp_port INT NOT NULL DEFAULT 465,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    configured_by_user_id INT NULL,
+    verified_at DATETIME NULL,
+    last_tested_at DATETIME NULL,
+    last_error VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_hub_mailbox_accounts_email_address (email_address),
+    CONSTRAINT fk_hub_mailbox_accounts_user FOREIGN KEY (configured_by_user_id) REFERENCES hub_users(id)
+);

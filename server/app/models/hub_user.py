@@ -14,5 +14,6 @@ class HubUser(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default="admin")
     is_active: Mapped[bool] = mapped_column(Boolean(), default=True)
+    reminder_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     session_version: Mapped[int] = mapped_column(Integer(), default=1)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

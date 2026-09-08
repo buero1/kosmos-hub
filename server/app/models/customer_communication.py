@@ -58,6 +58,29 @@ class CustomerZohoEmail(TimestampMixin, Base):
 
     customer = relationship("Customer", back_populates="zoho_emails")
     cached_images = relationship("CustomerZohoEmailImage", back_populates="email", cascade="all, delete-orphan")
+    stored_attachments = relationship("CustomerEmailAttachment", back_populates="email", cascade="all, delete-orphan")
+
+
+class CustomerEmailAttachment(TimestampMixin, Base):
+    """Metadata for an encrypted email attachment kept on the Hub server."""
+
+    __tablename__ = "customer_email_attachments"
+    __table_args__ = (
+        UniqueConstraint("email_id", "source_attachment_id", name="uq_customer_email_attachments_email_source"),
+        UniqueConstraint("storage_key", name="uq_customer_email_attachments_storage_key"),
+        Index("ix_customer_email_attachments_email_id", "email_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_id: Mapped[int] = mapped_column(ForeignKey("customer_zoho_emails.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="zoho")
+    source_attachment_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(96), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False, default="application/octet-stream")
+    byte_size: Mapped[int] = mapped_column(Integer(), nullable=False)
+    stored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    email = relationship("CustomerZohoEmail", back_populates="stored_attachments")
 
 
 class CustomerZohoEmailImage(TimestampMixin, Base):

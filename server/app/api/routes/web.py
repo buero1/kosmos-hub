@@ -1,6 +1,8 @@
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -30,14 +32,28 @@ from app.services.maintenance_worker import (
     schedule_pending_user_deletions,
 )
 from app.services.fleet_refresh import FleetRefreshService
-from app.services.update_plans import UpdatePlanService
 from app.services.customer_directory import CONTACT_FIELDS_LAYOUT_KEY, CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
 from app.services.customer_communications import (
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationImageError,
     CustomerCommunicationService,
 )
+from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
+from app.services.customer_activities import (
+    CALL_DIRECTION_OPTIONS,
+    CALL_DURATION_OPTIONS,
+    CALL_REMINDER_CHANNEL_OPTIONS,
+    CALL_REMINDER_OPTIONS,
+    CALL_STATUS_OPTIONS,
+    CALL_TIME_OPTIONS,
+    CustomerActivityError,
+    CustomerActivityService,
+    suggested_call_start,
+)
+from app.services.bavarian_holidays import bavarian_public_holidays
 from app.services.hub_mailbox import HubMailboxService, MAILBOX_FOLDERS
+from app.services.hub_mailbox_transport import DEFAULT_HUB_MAILBOX_SENDER_EMAIL
+from app.services.task_email_reminder_worker import TaskEmailReminderWorker
 from app.models.customer import Customer
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
 from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsError, StylingSettingsService
@@ -48,6 +64,12 @@ from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
+
+_GERMAN_WEEKDAY_NAMES = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
+_GERMAN_MONTH_NAMES = (
+    "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -274,11 +296,52 @@ def customers_page(
     )
 
 
+@router.get("/customers/suggestions", response_class=JSONResponse)
+def customer_suggestions(
+    db: Annotated[Session, Depends(get_db)],
+    q: str = "",
+    status: str = "all",
+    industry: str = "all",
+    email: str = "all",
+):
+    """Return compact customer matches for the directory's type-ahead search."""
+    valid_statuses = {*ZOHO_RELEVANT_ACCOUNT_STATUSES, "all"}
+    if status not in valid_statuses:
+        raise HTTPException(status_code=422, detail="Unknown customer status filter.")
+    if email not in {"all", "unread"}:
+        raise HTTPException(status_code=422, detail="Unknown customer email filter.")
+
+    query = q.strip()
+    if len(query) < 2:
+        return {"suggestions": []}
+
+    entries = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).list_entries(
+        query=query,
+        status=None if status == "all" else status,
+        industry=None if industry == "all" else industry,
+        unread_email_only=email == "unread",
+    )
+    return {
+        "suggestions": [
+            {
+                "id": entry.customer.id,
+                "name": entry.customer.name,
+                "website": entry.customer.website_domain or "",
+                "status": entry.account_status or "",
+            }
+            for entry in entries[:7]
+        ]
+    }
+
+
 @router.get("/contacts", response_class=HTMLResponse)
 def contacts_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     created: int | None = None,
+    deleted: bool = False,
+    sync: str = "",
+    sync_message: str = "",
 ):
     _require_hub_admin(request)
     service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
@@ -288,8 +351,308 @@ def contacts_page(
         {
             "entries": service.list_contact_entries(),
             "created": created,
+            "deleted": deleted,
+            "sync_state": sync if sync in {"success", "error"} else "",
+            "sync_message": sync_message[:500] if sync in {"success", "error"} else "",
+            "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/calendar", response_class=HTMLResponse)
+def calendar_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    week: str = "",
+    calendar: str = "",
+    calendar_message: str = "",
+):
+    berlin_now = datetime.now(ZoneInfo("Europe/Berlin"))
+    week_start = _calendar_week_start(week, today=berlin_now.date())
+    week_end = week_start + timedelta(days=6)
+    activities = CustomerActivityService(db=db).list_calendar_activities(week_start=week_start)
+    holidays_by_date = {
+        holiday_date: holiday_name
+        for year in {week_start.year, week_end.year}
+        for holiday_date, holiday_name in bavarian_public_holidays(year).items()
+    }
+    calendar_days = tuple(
+        {
+            "date": (day := week_start + timedelta(days=offset)).isoformat(),
+            "label": _GERMAN_WEEKDAY_NAMES[offset],
+            "short_label": _GERMAN_WEEKDAY_NAMES[offset][:2],
+            "day": day.day,
+            "holiday_name": holidays_by_date.get(day),
+            "is_today": day == berlin_now.date(),
+            "events": tuple(
+                activity for activity in activities
+                if activity.start_date == day.isoformat()
+            ),
+        }
+        for offset in range(7)
+    )
+    default_start = suggested_call_start(berlin_now).replace(tzinfo=None)
+    task_default_date = _next_task_due_date(berlin_now)
+    if not week_start <= default_start.date() <= week_end:
+        default_start = datetime.combine(week_start, time(hour=9))
+    can_manage_calendar = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
+    customers = tuple(
+        db.scalars(
+            select(Customer)
+            .where(Customer.is_visible.is_(True))
+            .order_by(Customer.name.asc(), Customer.id.asc())
+        ).all()
+    ) if can_manage_calendar else ()
+    return templates.TemplateResponse(
+        request,
+        "calendar.html",
+        {
+            "calendar_days": calendar_days,
+            "calendar_hours": tuple(f"{hour:02d}:00" for hour in range(24)),
+            "calendar_time_slots": CALL_TIME_OPTIONS,
+            "calendar_week_start": week_start.isoformat(),
+            "calendar_week_number": week_start.isocalendar().week,
+            "calendar_previous_week": (week_start - timedelta(days=7)).isoformat(),
+            "calendar_next_week": (week_start + timedelta(days=7)).isoformat(),
+            "calendar_today_week": (berlin_now.date() - timedelta(days=berlin_now.weekday())).isoformat(),
+            "calendar_week_label": _calendar_week_label(week_start, week_end),
+            "calendar_state": calendar if calendar in {"success", "error"} else "",
+            "calendar_message": calendar_message[:500] if calendar in {"success", "error"} else "",
+            "calendar_customers": customers,
+            "calendar_default_date": default_start.strftime("%Y-%m-%d"),
+            "calendar_default_time": default_start.strftime("%H:%M"),
+            "call_status_options": CALL_STATUS_OPTIONS,
+            "call_duration_options": CALL_DURATION_OPTIONS,
+            "call_time_options": CALL_TIME_OPTIONS,
+            "call_reminder_channel_options": CALL_REMINDER_CHANNEL_OPTIONS,
+            "call_reminder_options": CALL_REMINDER_OPTIONS,
+            "call_defaults": {
+                "start_date": default_start.strftime("%Y-%m-%d"),
+                "start_time": default_start.strftime("%H:%M"),
+                "duration_minutes": 30,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 5,
+            },
+            "task_defaults": {
+                "due_date": task_default_date.isoformat(),
+                "due_time": "09:00",
+                "reminder_channel": "email",
+                "reminder_minutes_before": 0,
+            },
+            "meeting_defaults": {
+                "start_date": default_start.strftime("%Y-%m-%d"),
+                "start_time": default_start.strftime("%H:%M"),
+                "end_date": (default_start + timedelta(minutes=60)).strftime("%Y-%m-%d"),
+                "end_time": (default_start + timedelta(minutes=60)).strftime("%H:%M"),
+                "duration_minutes": 60,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 15,
+            },
+            "can_manage_calendar": can_manage_calendar,
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/calendar/activities")
+def schedule_calendar_activity(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    customer_id: Annotated[str, Form()] = "",
+    activity_kind: Annotated[str, Form()] = "meeting",
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    direction: Annotated[str, Form()] = "outbound",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "60",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    week: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    week_start = _calendar_week_start(week, today=datetime.now(ZoneInfo("Europe/Berlin")).date())
+    service = CustomerActivityService(db=db)
+    try:
+        selected_customer_id = int(customer_id) if customer_id.strip() else None
+    except ValueError:
+        return _calendar_redirect(week_start, "error", "Bitte einen gültigen Kunden auswählen.")
+    try:
+        if activity_kind == "call":
+            activity = service.schedule_call(
+                customer_id=selected_customer_id,
+                actor=user.username,
+                name=name,
+                status=status,
+                direction=direction,
+                start_date=start_date,
+                start_time=start_time,
+                duration_minutes=duration_minutes,
+                reminder_channels=reminder_channels or [],
+                reminder_minutes_before=reminder_minutes_before or [],
+                description=description,
+            )
+            action = "schedule-calendar-call"
+            message = "Anruf wurde im Kalender geplant."
+        elif activity_kind == "meeting":
+            activity = service.schedule_meeting(
+                customer_id=selected_customer_id,
+                actor=user.username,
+                name=name,
+                status=status,
+                start_date=start_date,
+                start_time=start_time,
+                duration_minutes=duration_minutes,
+                reminder_channels=reminder_channels or [],
+                reminder_minutes_before=reminder_minutes_before or [],
+                description=description,
+            )
+            action = "schedule-calendar-meeting"
+            message = "Meeting wurde im Kalender geplant."
+        else:
+            raise CustomerActivityError("Bitte eine gültige Terminart wählen.")
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _calendar_redirect(week_start, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action=action,
+        result="ok",
+        detail=f"Scheduled calendar {activity_kind} {activity.id} for customer {selected_customer_id or 'none'}; description is not retained in the audit log.",
+    )
+    db.commit()
+    return _calendar_redirect(week_start, "success", message)
+
+
+@router.post("/calendar/activities/{activity_kind}/{activity_id}")
+def update_calendar_activity(
+    activity_kind: str,
+    activity_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    customer_id: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    direction: Annotated[str, Form()] = "outbound",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "60",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    week: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    week_start = _calendar_week_start(week, today=datetime.now(ZoneInfo("Europe/Berlin")).date())
+    try:
+        selected_customer_id = int(customer_id) if customer_id.strip() else None
+    except ValueError:
+        return _calendar_redirect(week_start, "error", "Bitte einen gültigen Kunden auswählen.")
+
+    service = CustomerActivityService(db=db)
+    try:
+        if activity_kind == "call":
+            activity = service.update_calendar_call(
+                call_id=activity_id,
+                customer_id=selected_customer_id,
+                name=name,
+                status=status,
+                direction=direction,
+                start_date=start_date,
+                start_time=start_time,
+                duration_minutes=duration_minutes,
+                reminder_channels=reminder_channels or [],
+                reminder_minutes_before=reminder_minutes_before or [],
+                description=description,
+            )
+            action = "update-calendar-call"
+            message = "Anruf wurde im Kalender gespeichert."
+        elif activity_kind == "meeting":
+            activity = service.update_calendar_meeting(
+                meeting_id=activity_id,
+                customer_id=selected_customer_id,
+                name=name,
+                status=status,
+                start_date=start_date,
+                start_time=start_time,
+                duration_minutes=duration_minutes,
+                reminder_channels=reminder_channels or [],
+                reminder_minutes_before=reminder_minutes_before or [],
+                description=description,
+            )
+            action = "update-calendar-meeting"
+            message = "Meeting wurde im Kalender gespeichert."
+        else:
+            raise CustomerActivityError("Bitte eine gültige Terminart wählen.")
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _calendar_redirect(week_start, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action=action,
+        result="ok",
+        detail=f"Updated calendar {activity_kind} {activity.id} for customer {selected_customer_id or 'none'}; description is not retained in the audit log.",
+    )
+    db.commit()
+    return _calendar_redirect(week_start, "success", message)
+
+
+@router.post("/contacts/sync")
+def synchronize_all_contacts(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = ZohoCrmService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).synchronize_all_contacts()
+    except ZohoCrmError as exc:
+        db.rollback()
+        query = urlencode({"sync": "error", "sync_message": str(exc)})
+        return RedirectResponse(url=f"/contacts?{query}", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="sync-all-zoho-contacts",
+        result="ok",
+        detail=(
+            f"Synchronized {result.synchronized_contacts} Zoho Contacts: "
+            f"created {result.created_contacts}, updated {result.updated_contacts}, "
+            f"removed {result.removed_contacts}."
+        ),
+    )
+    db.commit()
+    query = urlencode(
+        {
+            "sync": "success",
+            "sync_message": (
+                f"{result.synchronized_contacts} Kontakte aus Zoho aktualisiert: "
+                f"{result.created_contacts} neu, {result.updated_contacts} aktualisiert."
+            ),
+        }
+    )
+    return RedirectResponse(url=f"/contacts?{query}", status_code=303)
 
 
 @router.get("/contacts/new", response_class=HTMLResponse)
@@ -320,25 +683,18 @@ async def create_contact_page(
         for key, value in form.items()
         if isinstance(value, str) and key.startswith("contact_field__")
     }
+    raw_customer_id = str(form.get("customer_id") or "").strip()
     try:
-        customer_id = int(str(form.get("customer_id") or ""))
+        customer_id = int(raw_customer_id) if raw_customer_id else None
     except ValueError:
         customer_id = None
-    if customer_id is None:
-        return templates.TemplateResponse(
-            request,
-            "contact_create.html",
-            _contact_create_context(request, db, submitted_values=submitted_values, error="Wähle einen Kunden aus."),
-            status_code=400,
-        )
 
     try:
-        contact = ZohoCrmService(
-            db=db,
-            cipher=get_secret_cipher(),
-            public_base_url=get_settings().public_base_url,
-        ).create_contact(customer_id=customer_id, submitted_values=submitted_values)
-    except ZohoCrmError as exc:
+        contact = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).create_hub_contact(
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+    except ValueError as exc:
         db.rollback()
         return templates.TemplateResponse(
             request,
@@ -358,12 +714,182 @@ async def create_contact_page(
         site=None,
         actor=user.username,
         source="hub-web",
-        action="create-zoho-contact",
+        action="create-hub-contact",
         result="ok",
-        detail=f"Created Zoho Contact {contact.zoho_id} for customer {contact.customer_id}; contact data is not retained in the audit log.",
+        detail=f"Created Hub Contact {contact.id}; contact data is not retained in the audit log.",
     )
     db.commit()
-    return RedirectResponse(url=f"/contacts?{urlencode({'created': contact.id})}", status_code=303)
+    return RedirectResponse(url=f"/contacts/{contact.id}", status_code=303)
+
+
+@router.get("/contacts/{contact_id}", response_class=HTMLResponse)
+def contact_detail_page(
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
+):
+    service = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
+    detail = service.get_contact_detail_by_id(contact_id=contact_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    can_manage_contacts = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
+    return templates.TemplateResponse(
+        request,
+        "customer_contact_detail.html",
+        _contact_detail_context(
+            request,
+            db,
+            detail=detail,
+            can_manage_contacts=can_manage_contacts,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
+    )
+
+
+@router.post("/contacts/{contact_id}/fields")
+async def update_hub_contact_fields(
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("contact_field__")
+    }
+    try:
+        contact = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).update_hub_contact(
+            contact_id=contact_id,
+            submitted_values=submitted_values,
+        )
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-contact-fields",
+        result="ok",
+        detail=f"Updated Hub Contact {contact.id}; contact data is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Kontaktdaten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+
+
+@router.post("/contacts/{contact_id}/link")
+async def update_hub_contact_link(
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    raw_customer_id = str(form.get("customer_id") or "").strip()
+    try:
+        customer_id = int(raw_customer_id) if raw_customer_id else None
+    except ValueError:
+        customer_id = None
+    try:
+        contact = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).set_hub_contact_customer(
+            contact_id=contact_id,
+            customer_id=customer_id,
+        )
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/contacts/{contact_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-contact-link",
+        result="ok",
+        detail=f"Updated the Hub customer link for Contact {contact.id}.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Kundenverknüpfung wurde im Hub gespeichert."})
+    return RedirectResponse(url=f"/contacts/{contact_id}?{query}", status_code=303)
+
+
+@router.post("/contacts/{contact_id}/layout")
+async def update_hub_contact_field_layout(
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_contact_detail_by_id(contact_id=contact_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=CONTACT_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in detail.display_profile_fields),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-contact-fields-layout",
+        result="ok",
+        detail="Updated the global contact field layout.",
+    )
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Kontaktfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+
+
+@router.post("/contacts/{contact_id}/delete")
+async def delete_contact_from_hub(
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        contact = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).delete_contact_from_hub(contact_id=contact_id)
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/contacts/{contact_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-contact",
+        result="ok",
+        detail=f"Deleted Hub Contact {contact.id}; no Zoho record was changed.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/contacts?{urlencode({'deleted': 'true'})}", status_code=303)
 
 
 @router.get("/emails", response_class=HTMLResponse)
@@ -373,6 +899,8 @@ def mailbox_page(
     folder: str = "inbox",
     unread: bool = False,
     selected: str = "",
+    email_state: str = "",
+    email_message: str = "",
 ):
     _require_hub_admin(request)
     if folder not in MAILBOX_FOLDERS:
@@ -389,9 +917,161 @@ def mailbox_page(
             "mailbox": mailbox,
             "folder": folder,
             "unread": unread,
+            "email_state": email_state if email_state in {"success", "error"} else "",
+            "email_message": email_message[:500] if email_state in {"success", "error"} else "",
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/email-templates", response_class=HTMLResponse)
+def email_template_management_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    template: str = "",
+    state: str = "",
+    message: str = "",
+):
+    """Manage the Hub's locally stored email templates without querying Zoho."""
+    _require_hub_admin(request)
+    service = _customer_communication_service(db)
+    email_templates = service.list_email_templates()
+    template_library_templates = tuple(
+        {
+            "id": email_template.id,
+            "name": email_template.name,
+            "subject": email_template.subject,
+            "module": email_template.module,
+            "category": email_template.category or email_template.module or "Weitere Vorlagen",
+            "compiler_mode": email_template.compiler_mode,
+        }
+        for email_template in email_templates
+    )
+    selected_template = None
+    selected_template_id = template.strip()
+    if selected_template_id:
+        try:
+            selected_template = service.get_email_template_source(template_id=selected_template_id)
+        except ValueError:
+            selected_template_id = ""
+    return templates.TemplateResponse(
+        request,
+        "email_templates.html",
+        {
+            "template_library_templates": template_library_templates,
+            "selected_template": selected_template,
+            "selected_template_id": selected_template_id,
+            "template_state": state if state in {"success", "error"} else "",
+            "template_message": message[:500] if state in {"success", "error"} else "",
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/email-templates/{template_id}")
+def update_email_template(
+    template_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    subject: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        template = _customer_communication_service(db).update_email_template(
+            template_id=template_id,
+            name=name,
+            subject=subject,
+            content=content,
+        )
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"template": template_id, "state": "error", "message": str(exc)})
+        return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-email-template",
+        result="ok",
+        detail=f"Updated local email template {template.id}; the template content is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"template": template.id, "state": "success", "message": "Vorlage wurde im Hub gespeichert."})
+    return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+
+
+@router.post("/email-templates/{template_id}/clone")
+def clone_email_template(
+    template_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        template = _customer_communication_service(db).clone_email_template(
+            template_id=template_id,
+            name=name,
+        )
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"state": "error", "message": str(exc)})
+        return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="clone-hub-email-template",
+        result="ok",
+        detail=f"Cloned local email template {template_id} as {template.id}; template content is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"template": template.id, "state": "success", "message": "Vorlage wurde als Kopie angelegt."})
+    return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+
+
+@router.post("/email-templates/{template_id}/delete")
+def delete_email_template(
+    template_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    confirmation: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    if confirmation.strip().casefold() not in {"löschen", "loeschen"}:
+        query = urlencode({"state": "error", "message": "Zum Löschen muss LÖSCHEN bestätigt werden."})
+        return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+    try:
+        _customer_communication_service(db).delete_email_template(template_id=template_id)
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"state": "error", "message": str(exc)})
+        return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-email-template",
+        result="ok",
+        detail=f"Deleted local email template {template_id}; template content is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"state": "success", "message": "Vorlage wurde im Hub gelöscht."})
+    return RedirectResponse(url=f"/email-templates?{query}", status_code=303)
 
 
 @router.get("/emails/selected", response_class=HTMLResponse)
@@ -554,8 +1234,19 @@ def mailbox_compose_options(
     except ZohoCrmError as exc:
         senders = ()
         sender_error = str(exc)
+    templates = service.list_email_templates()
+    default_sender_email = next(
+        (sender.email for sender in senders if sender.email.casefold() == DEFAULT_HUB_MAILBOX_SENDER_EMAIL),
+        senders[0].email if senders else "",
+    )
+    default_template = next(
+        (template for template in templates if template.name.casefold() == "standard_neu"),
+        None,
+    )
     return {
         "senders": [{"name": sender.name, "email": sender.email} for sender in senders],
+        "default_sender_email": default_sender_email,
+        "default_template_id": default_template.id if default_template else "",
         "templates": [
             {
                 "id": template.id,
@@ -564,10 +1255,63 @@ def mailbox_compose_options(
                 "category": template.category,
                 "subject": template.subject,
             }
-            for template in service.list_email_templates()
+            for template in templates
         ],
         "sender_error": sender_error,
     }
+
+
+@router.post("/emails/compose/images", response_class=JSONResponse)
+async def upload_mailbox_compose_image(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    image: Annotated[UploadFile | None, File()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Store one composer image locally; it is embedded as a CID part only when sent."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    if image is None or not image.filename:
+        raise HTTPException(status_code=400, detail="Wähle ein Bild zum Einfügen aus.")
+    try:
+        stored = EmailComposeImageService(db=db, cipher=get_secret_cipher()).store_upload(
+            filename=image.filename,
+            content=await image.read(5 * 1024 * 1024 + 1),
+            submitted_content_type=image.content_type,
+            user_id=user.id,
+        )
+    except EmailComposeImageError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await image.close()
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="upload-email-compose-image",
+        result="ok",
+        detail="Stored one local email-compose image; image content is not retained in the audit log.",
+    )
+    db.commit()
+    return {"success": True, "url": f"/emails/compose/images/{stored.token}"}
+
+
+@router.get("/emails/compose/images/{token}")
+def load_mailbox_compose_image(
+    token: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Render a local image in the authenticated editor or the Hub's sent-mail preview."""
+    _require_hub_admin(request)
+    try:
+        image, content = EmailComposeImageService(db=db, cipher=get_secret_cipher()).load_image(token=token)
+    except EmailComposeImageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(content=content, media_type=image.content_type, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/emails/compose/recipients", response_class=JSONResponse)
@@ -592,6 +1336,53 @@ def mailbox_compose_recipients(
     }
 
 
+@router.get("/emails/compose/templates/{template_id}", response_class=JSONResponse)
+def mailbox_compose_template_preview(
+    template_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Return a local template even before the recipient context is known."""
+    _require_hub_admin(request)
+    try:
+        template = _customer_communication_service(db).get_email_template_preview(template_id=template_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "id": template.id,
+        "name": template.name,
+        "subject": template.subject,
+        "content": template.content,
+        "unresolved_placeholders": template.unresolved_placeholders,
+    }
+
+
+@router.get("/emails/compose/customers/{customer_id}/recipients", response_class=JSONResponse)
+def mailbox_compose_customer_contact_recipients(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Return each stored email address of contacts linked to this customer."""
+    _require_hub_admin(request)
+    customer = db.get(Customer, customer_id)
+    if customer is None or not customer.is_visible:
+        raise HTTPException(status_code=404, detail="Customer not found.")
+    recipients = _customer_communication_service(db).list_contact_recipients(customer_id=customer.id)
+    return {
+        "recipients": [
+            {
+                "customer_id": customer.id,
+                "customer_name": customer.name,
+                "key": recipient.key,
+                "name": recipient.name,
+                "email": recipient.email,
+            }
+            for recipient in recipients
+        ]
+    }
+
+
 @router.get("/emails/linked/{customer_id}/{email_id}/compose-context", response_class=JSONResponse)
 def mailbox_linked_email_compose_context(
     customer_id: int,
@@ -606,6 +1397,8 @@ def mailbox_linked_email_compose_context(
     try:
         if action in {"reply", "reply_all"}:
             reply = service.get_email_reply(customer_id=customer_id, email_id=email_id)
+            # The reply action may have fetched the original body for the quoted message.
+            db.commit()
             return {
                 "action": action,
                 "customer_id": customer_id,
@@ -615,7 +1408,7 @@ def mailbox_linked_email_compose_context(
                     "email": reply.recipient_email,
                 },
                 "subject": reply.subject,
-                "content": "",
+                "content": reply.content,
                 "cc_emails": list(reply.reply_all_cc_emails) if action == "reply_all" else [],
                 "reply_to_email_id": reply.email_id,
                 "forward_from_email_id": None,
@@ -724,6 +1517,75 @@ def save_mailbox_draft(
     }
 
 
+@router.post("/emails/send")
+async def send_direct_mailbox_email(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    sender_email: Annotated[str, Form()] = "",
+    recipient_email: Annotated[str, Form()] = "",
+    subject: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    cc_emails: Annotated[str, Form()] = "",
+    draft_id: Annotated[str, Form()] = "",
+    attachments: Annotated[list[UploadFile] | None, File()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Deliver an email without a customer selection through Mittwald SMTP."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    mailbox = HubMailboxService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+    try:
+        uploaded_attachments: list[CustomerCommunicationAttachmentUpload] = []
+        for attachment in attachments or []:
+            if not attachment.filename:
+                continue
+            uploaded_attachments.append(
+                CustomerCommunicationAttachmentUpload(
+                    filename=attachment.filename,
+                    content=await attachment.read(),
+                    content_type=attachment.content_type or "application/octet-stream",
+                )
+            )
+        sent = mailbox.send_direct_email(
+            sender_email=sender_email,
+            recipient_email=recipient_email,
+            subject=subject,
+            content=content,
+            cc_emails=cc_emails,
+            attachments=tuple(uploaded_attachments),
+        )
+        if draft_id.strip().isdigit():
+            mailbox.discard_draft(draft_id=int(draft_id))
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(
+            url=f"/emails?{urlencode({'folder': 'sent', 'email_state': 'error', 'email_message': str(exc)})}",
+            status_code=303,
+        )
+    finally:
+        for attachment in attachments or []:
+            await attachment.close()
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="send-direct-mittwald-email",
+        result="ok",
+        detail="Sent an unlinked mailbox email through Mittwald; recipients and content are not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(
+        url=f"/emails?{urlencode({'folder': 'sent', 'selected': f'unassigned-{sent.id}', 'email_state': 'success', 'email_message': 'E-Mail wurde über Mittwald versendet.'})}",
+        status_code=303,
+    )
+
+
 @router.post("/emails/unassigned/{email_id}/read")
 def mark_unassigned_mailbox_email_read(
     email_id: int,
@@ -743,6 +1605,43 @@ def mark_unassigned_mailbox_email_read(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     db.commit()
     return Response(status_code=204)
+
+
+@router.get("/emails/unassigned/{email_id}/attachments/{attachment_id}")
+def download_unassigned_mailbox_attachment(
+    email_id: int,
+    attachment_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    user = _require_hub_admin(request)
+    try:
+        download = HubMailboxService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).download_unassigned_attachment(email_id=email_id, attachment_id=attachment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="download-mittwald-unassigned-email-attachment",
+        result="ok",
+        detail=f"Downloaded a locally secured attachment for unassigned mailbox email {email_id}.",
+    )
+    db.commit()
+    return Response(
+        content=download.content,
+        media_type=download.content_type,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(download.filename, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/emails/linked/{customer_id}/{email_id}/load")
@@ -782,8 +1681,8 @@ def customer_detail_page(
     fields_message: str = "",
     layout: str = "",
     layout_message: str = "",
-    compose_email: bool = False,
-    reply_email: int | None = None,
+    activity: str = "",
+    activity_message: str = "",
 ):
     cipher = get_secret_cipher()
     can_manage_customer_fields = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
@@ -799,32 +1698,19 @@ def customer_detail_page(
         public_base_url=get_settings().public_base_url,
     )
     can_manage_communications = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
-    reply_context = None
-    reply_error = ""
-    if reply_email is not None and can_manage_communications:
-        try:
-            reply_context = communication_service.get_email_reply(customer_id=customer_id, email_id=reply_email)
-        except ValueError as exc:
-            reply_error = str(exc)
     communication_view = communication_service.get_view(customer_id=customer_id)
     communication_state = communication if communication in {"success", "warning", "error"} else ""
-    communication_senders = ()
-    communication_sender_error = ""
-    communication_templates = communication_service.list_email_templates()
-    if can_manage_communications:
-        try:
-            communication_senders = communication_service.list_senders()
-        except ZohoCrmError as exc:
-            communication_sender_error = str(exc)
+    activity_state = activity if activity in {"success", "error"} else ""
+    berlin_now = datetime.now(ZoneInfo("Europe/Berlin"))
+    call_start = suggested_call_start(berlin_now).replace(tzinfo=None)
+    task_default_date = _next_task_due_date(berlin_now)
+    activity_service = CustomerActivityService(db=db)
     return templates.TemplateResponse(
         request,
         "customer_detail.html",
         {
             "detail": detail,
             "communication": communication_view,
-            "communication_senders": communication_senders,
-            "communication_sender_error": communication_sender_error,
-            "communication_templates": communication_templates,
             "communication_state": communication_state,
             "communication_message": message[:500] if communication_state else "",
             "can_manage_communications": can_manage_communications,
@@ -833,9 +1719,39 @@ def customer_detail_page(
             "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
             "layout_state": layout if layout in {"success", "error"} else "",
             "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
-            "open_email_composer": compose_email or reply_context is not None,
-            "email_reply": reply_context,
-            "email_reply_error": reply_error,
+            "activity_calls": activity_service.list_calls(customer_id=customer_id),
+            "activity_tasks": activity_service.list_tasks(customer_id=customer_id),
+            "activity_meetings": activity_service.list_meetings(customer_id=customer_id),
+            "activity_state": activity_state,
+            "activity_message": activity_message[:500] if activity_state else "",
+            "call_status_options": CALL_STATUS_OPTIONS,
+            "call_direction_options": CALL_DIRECTION_OPTIONS,
+            "call_duration_options": CALL_DURATION_OPTIONS,
+            "call_time_options": CALL_TIME_OPTIONS,
+            "call_reminder_channel_options": CALL_REMINDER_CHANNEL_OPTIONS,
+            "call_reminder_options": CALL_REMINDER_OPTIONS,
+            "call_defaults": {
+                "start_date": call_start.strftime("%Y-%m-%d"),
+                "start_time": call_start.strftime("%H:%M"),
+                "duration_minutes": 30,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 5,
+            },
+            "task_defaults": {
+                "due_date": task_default_date.isoformat(),
+                "due_time": "09:00",
+                "reminder_channel": "email",
+                "reminder_minutes_before": 0,
+            },
+            "meeting_defaults": {
+                "start_date": call_start.strftime("%Y-%m-%d"),
+                "start_time": call_start.strftime("%H:%M"),
+                "end_date": (call_start + timedelta(minutes=60)).strftime("%Y-%m-%d"),
+                "end_time": (call_start + timedelta(minutes=60)).strftime("%H:%M"),
+                "duration_minutes": 60,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 15,
+            },
             "csrf_token": get_csrf_token(request),
         },
     )
@@ -857,7 +1773,11 @@ async def update_customer_fields(
         if isinstance(value, str)
     }
     try:
-        customer = ZohoCrmService(db=db, cipher=get_secret_cipher()).update_customer_fields(
+        customer = ZohoCrmService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).update_customer_fields(
             customer_id=customer_id,
             submitted_values=submitted_values,
         )
@@ -993,6 +1913,505 @@ def create_customer_communication_note(
     return _customer_communication_redirect(customer_id, "success" if result.success else "warning", result.message)
 
 
+@router.post("/customers/{customer_id}/communications/notes/{note_id}")
+def update_customer_communication_note(
+    customer_id: int,
+    note_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    title: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _customer_communication_service(db).update_note(
+            customer_id=customer_id,
+            note_id=note_id,
+            title=title,
+            content=content,
+        )
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-zoho-customer-note",
+        result="ok" if result.success else "failed",
+        detail=f"Updated customer note {note_id} for customer {customer_id}; note content is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_communication_redirect(customer_id, "success" if result.success else "warning", result.message)
+
+
+@router.post("/customers/{customer_id}/communications/notes/{note_id}/delete")
+def delete_customer_communication_note(
+    customer_id: int,
+    note_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _customer_communication_service(db).delete_note(customer_id=customer_id, note_id=note_id)
+    except (ValueError, ZohoCrmError) as exc:
+        db.rollback()
+        return _customer_communication_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-zoho-customer-note",
+        result="ok" if result.success else "failed",
+        detail=f"Deleted customer note {note_id} for customer {customer_id}.",
+    )
+    db.commit()
+    return _customer_communication_redirect(customer_id, "success" if result.success else "warning", result.message)
+
+
+@router.post("/customers/{customer_id}/activities/calls")
+def schedule_customer_call(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    direction: Annotated[str, Form()] = "outbound",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "30",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        call = CustomerActivityService(db=db).schedule_call(
+            customer_id=customer_id,
+            actor=user.username,
+            name=name,
+            status=status,
+            direction=direction,
+            start_date=start_date,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
+            reminder_channels=reminder_channels or [],
+            reminder_minutes_before=reminder_minutes_before or [],
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="schedule-customer-call",
+        result="ok",
+        detail=f"Scheduled customer call {call.id} for customer {customer_id}; call description is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Anruf wurde geplant.")
+
+
+@router.post("/customers/{customer_id}/activities/calls/{call_id}")
+def update_customer_call(
+    customer_id: int,
+    call_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    direction: Annotated[str, Form()] = "outbound",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "30",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        call = CustomerActivityService(db=db).update_call(
+            customer_id=customer_id,
+            call_id=call_id,
+            name=name,
+            status=status,
+            direction=direction,
+            start_date=start_date,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
+            reminder_channels=reminder_channels or [],
+            reminder_minutes_before=reminder_minutes_before or [],
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-customer-call",
+        result="ok",
+        detail=f"Updated customer call {call.id} for customer {customer_id}; call description is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Anruf wurde gespeichert.")
+
+
+@router.post("/customers/{customer_id}/activities/calls/{call_id}/delete")
+def delete_customer_call(
+    customer_id: int,
+    call_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        call = CustomerActivityService(db=db).delete_call(customer_id=customer_id, call_id=call_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-customer-call",
+        result="ok",
+        detail=f"Deleted customer call {call.id} for customer {customer_id}.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Anruf wurde gelöscht.")
+
+
+@router.post("/customers/{customer_id}/activities/calls/{call_id}/complete")
+def complete_customer_call(
+    customer_id: int,
+    call_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        call = CustomerActivityService(db=db).complete_call(customer_id=customer_id, call_id=call_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="complete-customer-call",
+        result="ok",
+        detail=f"Completed customer call {call.id} for customer {customer_id}.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Anruf wurde abgeschlossen.")
+
+
+@router.post("/customers/{customer_id}/activities/tasks")
+def schedule_customer_task(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    reminder_channel: Annotated[str, Form()] = "email",
+    reminder_minutes_before: Annotated[str, Form()] = "0",
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        task = CustomerActivityService(db=db).schedule_task(
+            customer_id=customer_id,
+            actor=user.username,
+            name=name,
+            status=status,
+            due_date=due_date,
+            due_time=due_time,
+            reminder_channel=reminder_channel,
+            reminder_minutes_before=reminder_minutes_before,
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="schedule-customer-task",
+        result="ok",
+        detail=f"Scheduled customer task {task.id} for customer {customer_id}; task description is not retained in the audit log.",
+    )
+    db.commit()
+    TaskEmailReminderWorker.notify_schedule_changed()
+    return _customer_activity_redirect(customer_id, "success", "Aufgabe wurde angelegt.")
+
+
+@router.post("/customers/{customer_id}/activities/tasks/{task_id}")
+def update_customer_task(
+    customer_id: int,
+    task_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
+    reminder_channel: Annotated[str, Form()] = "email",
+    reminder_minutes_before: Annotated[str, Form()] = "0",
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        task = CustomerActivityService(db=db).update_task(
+            customer_id=customer_id,
+            task_id=task_id,
+            name=name,
+            status=status,
+            due_date=due_date,
+            due_time=due_time,
+            reminder_channel=reminder_channel,
+            reminder_minutes_before=reminder_minutes_before,
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-customer-task",
+        result="ok",
+        detail=f"Updated customer task {task.id} for customer {customer_id}; task description is not retained in the audit log.",
+    )
+    db.commit()
+    TaskEmailReminderWorker.notify_schedule_changed()
+    return _customer_activity_redirect(customer_id, "success", "Aufgabe wurde gespeichert.")
+
+
+@router.post("/customers/{customer_id}/activities/tasks/{task_id}/delete")
+def delete_customer_task(
+    customer_id: int,
+    task_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        task = CustomerActivityService(db=db).delete_task(customer_id=customer_id, task_id=task_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-customer-task",
+        result="ok",
+        detail=f"Deleted customer task {task.id} for customer {customer_id}.",
+    )
+    db.commit()
+    TaskEmailReminderWorker.notify_schedule_changed()
+    return _customer_activity_redirect(customer_id, "success", "Aufgabe wurde gelöscht.")
+
+
+@router.post("/customers/{customer_id}/activities/tasks/{task_id}/complete")
+def complete_customer_task(
+    customer_id: int,
+    task_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        task = CustomerActivityService(db=db).complete_task(customer_id=customer_id, task_id=task_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="complete-customer-task",
+        result="ok",
+        detail=f"Completed customer task {task.id} for customer {customer_id}.",
+    )
+    db.commit()
+    TaskEmailReminderWorker.notify_schedule_changed()
+    return _customer_activity_redirect(customer_id, "success", "Aufgabe wurde abgeschlossen.")
+
+
+@router.post("/customers/{customer_id}/activities/meetings")
+def schedule_customer_meeting(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "60",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        meeting = CustomerActivityService(db=db).schedule_meeting(
+            customer_id=customer_id,
+            actor=user.username,
+            name=name,
+            status=status,
+            start_date=start_date,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
+            reminder_channels=reminder_channels or [],
+            reminder_minutes_before=reminder_minutes_before or [],
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="schedule-customer-meeting",
+        result="ok",
+        detail=f"Scheduled customer meeting {meeting.id} for customer {customer_id}; meeting description is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Meeting wurde angelegt.")
+
+
+@router.post("/customers/{customer_id}/activities/meetings/{meeting_id}")
+def update_customer_meeting(
+    customer_id: int,
+    meeting_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    status: Annotated[str, Form()] = "planned",
+    start_date: Annotated[str, Form()] = "",
+    start_time: Annotated[str, Form()] = "",
+    duration_minutes: Annotated[str, Form()] = "60",
+    reminder_channels: Annotated[list[str] | None, Form()] = None,
+    reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        meeting = CustomerActivityService(db=db).update_meeting(
+            customer_id=customer_id,
+            meeting_id=meeting_id,
+            name=name,
+            status=status,
+            start_date=start_date,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
+            reminder_channels=reminder_channels or [],
+            reminder_minutes_before=reminder_minutes_before or [],
+            description=description,
+        )
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-customer-meeting",
+        result="ok",
+        detail=f"Updated customer meeting {meeting.id} for customer {customer_id}; meeting description is not retained in the audit log.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Meeting wurde gespeichert.")
+
+
+@router.post("/customers/{customer_id}/activities/meetings/{meeting_id}/delete")
+def delete_customer_meeting(
+    customer_id: int,
+    meeting_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        meeting = CustomerActivityService(db=db).delete_meeting(customer_id=customer_id, meeting_id=meeting_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _customer_activity_redirect(customer_id, "error", str(exc))
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-customer-meeting",
+        result="ok",
+        detail=f"Deleted customer meeting {meeting.id} for customer {customer_id}.",
+    )
+    db.commit()
+    return _customer_activity_redirect(customer_id, "success", "Meeting wurde gelöscht.")
+
+
 @router.post("/customers/{customer_id}/communications/emails")
 async def send_customer_communication_email(
     customer_id: int,
@@ -1008,7 +2427,6 @@ async def send_customer_communication_email(
     forward_from_email_id: Annotated[str, Form()] = "",
     draft_id: Annotated[str, Form()] = "",
     attachments: Annotated[list[UploadFile] | None, File()] = None,
-    confirmed: Annotated[bool, Form()] = False,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -1016,15 +2434,17 @@ async def send_customer_communication_email(
     try:
         reply_to_id = int(reply_to_email_id) if reply_to_email_id.strip() else None
         forward_from_id = int(forward_from_email_id) if forward_from_email_id.strip() else None
-        uploaded_attachments = tuple(
-            CustomerCommunicationAttachmentUpload(
-                filename=attachment.filename or "",
-                content=await attachment.read(),
-                content_type=attachment.content_type or "application/octet-stream",
+        uploaded_attachments: list[CustomerCommunicationAttachmentUpload] = []
+        for attachment in attachments or []:
+            if not attachment.filename:
+                continue
+            uploaded_attachments.append(
+                CustomerCommunicationAttachmentUpload(
+                    filename=attachment.filename,
+                    content=await attachment.read(),
+                    content_type=attachment.content_type or "application/octet-stream",
+                )
             )
-            for attachment in (attachments or [])
-            if attachment.filename
-        )
         result = _customer_communication_service(db).send_email(
             customer_id=customer_id,
             actor=user.username,
@@ -1032,12 +2452,11 @@ async def send_customer_communication_email(
             recipient_key=recipient_key,
             subject=subject,
             content=content,
-            confirmed=confirmed,
             template_id=template_id,
             reply_to_email_id=reply_to_id,
             cc_emails=cc_emails,
             forward_from_email_id=forward_from_id,
-            attachments=uploaded_attachments,
+            attachments=tuple(uploaded_attachments),
         )
         if result.success and draft_id.strip().isdigit():
             HubMailboxService(
@@ -1057,7 +2476,7 @@ async def send_customer_communication_email(
         site=None,
         actor=user.username,
         source="hub-web",
-        action="send-zoho-customer-email",
+        action="send-customer-email",
         result="ok" if result.success else "failed",
         detail=f"Sent customer email for customer {customer_id}; recipients and message content are not retained in the audit log.",
     )
@@ -1223,6 +2642,10 @@ def customer_contact_detail_page(
     contact_id: int,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
 ):
     detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_contact_detail(
         customer_id=customer_id,
@@ -1234,12 +2657,120 @@ def customer_contact_detail_page(
     return templates.TemplateResponse(
         request,
         "customer_contact_detail.html",
-        {
-            "detail": detail,
-            "can_manage_contacts": can_manage_contacts,
-            "csrf_token": get_csrf_token(request),
-        },
+        _contact_detail_context(
+            request,
+            db,
+            detail=detail,
+            can_manage_contacts=can_manage_contacts,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
     )
+
+
+@router.post("/customers/{customer_id}/contacts/{contact_id}/fields")
+async def update_customer_contact_fields(
+    customer_id: int,
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("contact_field__")
+    }
+    try:
+        contact = ZohoCrmService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).update_contact(
+            customer_id=customer_id,
+            contact_id=contact_id,
+            submitted_values=submitted_values,
+        )
+    except ZohoCrmError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-web", action="update-zoho-contact-fields", result="ok",
+        detail=f"Updated Zoho Contact {contact.zoho_id} for customer {customer_id}.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Kontaktdaten wurden in Zoho CRM gespeichert."})
+    return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+
+
+@router.post("/customers/{customer_id}/contacts/{contact_id}/layout")
+async def update_customer_contact_field_layout(
+    customer_id: int,
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    detail = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).get_contact_detail(customer_id=customer_id, contact_id=contact_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Contact not found for this customer.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=CONTACT_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in detail.display_profile_fields),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-web", action="update-contact-fields-layout", result="ok",
+        detail="Updated the global contact field layout.",
+    )
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Kontaktfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+
+
+@router.post("/customers/{customer_id}/contacts/{contact_id}/sync")
+def sync_customer_contact(
+    customer_id: int,
+    contact_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        contact = ZohoCrmService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).synchronize_contact(
+            customer_id=customer_id,
+            contact_id=contact_id,
+        )
+    except ZohoCrmError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-web", action="sync-zoho-contact", result="ok",
+        detail=f"Synchronized Zoho Contact {contact.zoho_id} for customer {customer_id}.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Kontaktdaten wurden aus Zoho CRM aktualisiert."})
+    return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
 
 
 @router.post("/customers/{customer_id}/link-site")
@@ -2332,151 +3863,6 @@ def execute_selected_plugin_updates(
     )
 
 
-@router.get("/update-plans", response_class=HTMLResponse)
-def update_plans_page(request: Request, db: Annotated[Session, Depends(get_db)]):
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    return templates.TemplateResponse(
-        request,
-        "update_plans.html",
-        {
-            "plans": service.list_plans(),
-        },
-    )
-
-
-@router.post("/update-plans")
-def create_update_plan(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    name: Annotated[str, Form()] = "",
-    notes: Annotated[str, Form()] = "",
-    selected: Annotated[list[str] | None, Form()] = None,
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = getattr(request.state, "hub_user", None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    created_by = user.username
-    try:
-        plan = service.create_draft(
-            name=name,
-            notes=notes,
-            selected_keys=selected or [],
-            created_by=created_by,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url=f"/update-plans/{plan.id}", status_code=303)
-
-
-@router.get("/update-plans/{plan_id}", response_class=HTMLResponse)
-def update_plan_detail_page(
-    plan_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    action: str = "",
-    message: str = "",
-):
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    plan = service.get_plan(plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Update plan not found.")
-    preflight = service.build_preflight(plan)
-    postflight = service.get_latest_postflight(plan)
-    scope_error = service.plugin_update_scope_error(plan)
-    recovery_scope_error = service.plugin_recovery_scope_error(plan)
-    preflight_ready = len(preflight) == 1 and preflight[0].execution_ready
-    return templates.TemplateResponse(
-        request,
-        "update_plan_detail.html",
-        {
-            "plan": plan,
-            "preflight": preflight,
-            "postflight": postflight,
-            "csrf_token": get_csrf_token(request),
-            "scope_error": scope_error,
-            "recovery_scope_error": recovery_scope_error,
-            "can_approve": plan.status == "draft" and scope_error is None and preflight_ready,
-            "can_execute": plan.status == "approved" and scope_error is None and preflight_ready,
-            "can_recover": plan.status == "failed" and recovery_scope_error is None,
-            "action_result": action,
-            "action_message": message,
-        },
-    )
-
-
-@router.post("/update-plans/{plan_id}/approve-plugin-update")
-def approve_plugin_update_plan(
-    plan_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = getattr(request.state, "hub_user", None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    try:
-        outcome = service.approve_plugin_update(plan_id=plan_id, actor=user.username)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return RedirectResponse(
-        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
-        status_code=303,
-    )
-
-
-@router.post("/update-plans/{plan_id}/execute-plugin-update")
-def execute_plugin_update_plan(
-    plan_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = getattr(request.state, "hub_user", None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    try:
-        outcome = service.execute_plugin_update(plan_id=plan_id, actor=user.username)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return RedirectResponse(
-        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
-        status_code=303,
-    )
-
-
-@router.post("/update-plans/{plan_id}/recover-plugin-activation")
-def recover_plugin_activation(
-    plan_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = getattr(request.state, "hub_user", None)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Authentication required.")
-
-    service = UpdatePlanService(db=db, cipher=get_secret_cipher())
-    try:
-        outcome = service.recover_plugin_activation(plan_id=plan_id, actor=user.username)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return RedirectResponse(
-        url=f"/update-plans/{plan_id}?{urlencode({'action': outcome.result, 'message': outcome.message})}",
-        status_code=303,
-    )
-
-
 @router.get("/sites/{site_id}", response_class=HTMLResponse)
 def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     repository = SiteRepository(db)
@@ -3247,17 +4633,38 @@ def _contact_create_context(
 ) -> dict[str, object]:
     directory = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
     customers = tuple(entry.customer for entry in directory.list_entries())
-    fields_by_key = {field.key: field for field in ZOHO_CONTACT_FIELDS}
-    ordered_keys = ModuleLayoutService(db=db).ordered_keys(
-        layout_key=CONTACT_FIELDS_LAYOUT_KEY,
-        default_keys=tuple(fields_by_key),
-    )
+    selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
     return {
         "customers": customers,
-        "fields": tuple(fields_by_key[key] for key in ordered_keys),
+        "fields": ZOHO_CONTACT_FIELDS,
         "selected_customer_id": selected_customer_id,
+        "selected_customer": selected_customer,
         "submitted_values": submitted_values or {},
         "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _contact_detail_context(
+    request: Request,
+    db: Session,
+    *,
+    detail: object,
+    can_manage_contacts: bool,
+    fields: str,
+    fields_message: str,
+    layout: str,
+    layout_message: str,
+) -> dict[str, object]:
+    directory = CustomerDirectoryService(db=db, cipher=get_secret_cipher())
+    return {
+        "detail": detail,
+        "can_manage_contacts": can_manage_contacts,
+        "linkable_customers": tuple(entry.customer for entry in directory.list_entries()),
+        "fields_state": fields if fields in {"success", "error"} else "",
+        "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+        "layout_state": layout if layout in {"success", "error"} else "",
+        "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
     }
 
@@ -3265,6 +4672,38 @@ def _contact_create_context(
 def _customer_communication_redirect(customer_id: int, state: str, message: str) -> RedirectResponse:
     query = urlencode({"communication": state, "message": message[:500]})
     return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-communications", status_code=303)
+
+
+def _customer_activity_redirect(customer_id: int, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"activity": state, "activity_message": message[:500]})
+    return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-activities", status_code=303)
+
+
+def _calendar_week_start(value: str, *, today: date) -> date:
+    try:
+        selected = date.fromisoformat(value) if value else today
+    except ValueError:
+        selected = today
+    return selected - timedelta(days=selected.weekday())
+
+
+def _calendar_week_label(week_start: date, week_end: date) -> str:
+    start_month = _GERMAN_MONTH_NAMES[week_start.month - 1]
+    end_month = _GERMAN_MONTH_NAMES[week_end.month - 1]
+    if week_start.year == week_end.year and week_start.month == week_end.month:
+        return f"{week_start.day}. – {week_end.day}. {start_month} {week_start.year}"
+    if week_start.year == week_end.year:
+        return f"{week_start.day}. {start_month} – {week_end.day}. {end_month} {week_start.year}"
+    return f"{week_start.day}. {start_month} {week_start.year} – {week_end.day}. {end_month} {week_end.year}"
+
+
+def _next_task_due_date(berlin_now: datetime) -> date:
+    return berlin_now.date() + timedelta(days=1)
+
+
+def _calendar_redirect(week_start: date, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"week": week_start.isoformat(), "calendar": state, "calendar_message": message[:500]})
+    return RedirectResponse(url=f"/calendar?{query}", status_code=303)
 
 
 def _mailbox_url(*, folder: str, unread: bool, selected: str) -> str:

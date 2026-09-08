@@ -194,7 +194,88 @@ def test_customer_directory_exposes_status_and_decrypted_profile_fields():
             ("Postadresse", []),
             ("Weitere Daten", []),
         ]
+        editable_contact_keys = {field.key for field in contact_detail.editable_profile_fields}
+        assert [field.key for field in contact_detail.editable_profile_fields] == [
+            field.key for field in contact_detail.display_profile_fields if field.key in editable_contact_keys
+        ]
         assert _service(db).get_contact_detail(customer_id=customer.id + 1, contact_id=first_contact.id) is None
+
+
+def test_customer_directory_uses_the_picklist_label_for_reading_and_value_for_editing():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Test Customer",
+            zoho_id="zoho-account-test",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {"Kunde Typ": "Analyst"},
+                        "field_metadata": {
+                            "customer_type": {
+                                "label": "Kunde Typ",
+                                "display_type": "Auswahlliste",
+                                "editable": True,
+                                "pick_list_values": [{"value": "Analyst", "label": "Test-Kunde"}],
+                            }
+                        },
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.commit()
+
+        detail = _service(db).get_detail(customer_id=customer.id)
+
+        assert detail is not None
+        customer_type = next(field for field in detail.display_profile_fields if field.key == "customer_type")
+        editable_customer_type = next(field for field in detail.editable_profile_fields if field.key == "customer_type")
+        assert customer_type.value == "Test-Kunde"
+        assert editable_customer_type.form_value == "Analyst"
+        assert editable_customer_type.options == (("Analyst", "Test-Kunde"),)
+
+
+def test_contact_detail_collapses_fields_after_secretary_phone():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(name="Example Customer", zoho_id="zoho-account-1")
+        contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-1",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Name": "Anna Example",
+                            "Tel.": "+49 89 123456",
+                            "Mobil": "+49 170 1234567",
+                            "Telefon alternativ": "+49 89 987654",
+                            "Telefon privat": "+49 89 456789",
+                            "Telefon Sekr.": "+49 89 111222",
+                            "Vorname": "Anna",
+                            "Nachname": "Example",
+                            "Postadresse Straße": "Musterstraße 1",
+                        }
+                    }
+                )
+            ),
+        )
+        db.add_all([customer, contact])
+        db.commit()
+
+        detail = _service(db).get_contact_detail(customer_id=customer.id, contact_id=contact.id)
+
+        assert detail is not None
+        assert detail.summary_profile_fields[-1].label == "Telefon Sekr."
+        assert detail.following_profile_fields[0].label == "Vorname"
+        assert "Postadresse Straße" in [field.label for field in detail.following_profile_fields]
 
 
 def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for_the_hub():
@@ -222,17 +303,17 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
                             "Branche": "Beratung",
                         },
                         "field_metadata": {
-                            "customer_name": {"label": "Kunde-Name"},
+                            "customer_name": {"label": "Kunde-Name", "editable": True},
                             "account_status": {"label": "Status"},
                             "customer_type": {"label": "Kunde Typ"},
                             "billing_street": {"label": "Rechnungsadresse - Straße"},
                             "billing_postal_code": {"label": "Rechnungsadresse - PLZ"},
                             "billing_city": {"label": "Rechnungsadresse - Stadt"},
                             "phone": {"label": "Tel."},
-                            "website": {"label": "Webseite"},
+                            "website": {"label": "Webseite", "editable": True},
                             "work_domain_login": {"label": "Arbeitsdomain-Login"},
                             "send_options_to_wordpress": {"label": "Options an WP senden"},
-                            "industry": {"label": "Branche"},
+                            "industry": {"label": "Branche", "editable": True},
                         },
                     }
                 )
@@ -270,6 +351,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Options an WP senden",
         ]
         assert [field.label for field in detail.following_profile_fields] == ["Branche"]
+        assert [field.key for field in detail.editable_profile_fields] == ["customer_name", "website", "industry"]
 
         admin = HubUser(username="operator", password_hash="hashed", role="admin")
         db.add(admin)
@@ -287,6 +369,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
 
         assert reordered is not None
         assert reordered.display_profile_fields[0].label == "Branche"
+        assert [field.key for field in reordered.editable_profile_fields] == ["industry", "customer_name", "website"]
 
 
 def test_customer_directory_groups_existing_fields_into_synchronized_tabs():
@@ -528,3 +611,42 @@ def test_customer_directory_finds_customer_and_contact_phone_numbers_across_comm
         assert [entry.customer.id for entry in service.list_entries(query="89/555123")] == [customer.id]
         assert [entry.customer.id for entry in service.list_entries(query="0049 171 222333")] == [customer.id]
         assert [entry.customer.id for entry in service.list_entries(query="only this contact")] == [customer.id]
+
+
+def test_hub_contacts_can_be_created_without_zoho_or_customer_and_linked_later():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = _service(db)
+        contact = service.create_hub_contact(
+            customer_id=None,
+            submitted_values={
+                "contact_field__salutation": "Frau",
+                "contact_field__first_name": "Anna",
+                "contact_field__last_name": "Hub",
+            },
+        )
+        db.commit()
+
+        assert contact.customer_id is None
+        assert contact.zoho_id is None
+        profile = json.loads(SecretCipher("a" * 32).decrypt(contact.encrypted_profile_json))
+        assert profile["source"] == "hub"
+        assert profile["fields"]["Name"] == "Anna Hub"
+
+        entry = service.list_contact_entries()[0]
+        assert entry.customer is None
+        assert entry.contact.is_hub_contact is True
+
+        customer = Customer(name="Linked Later", zoho_id="zoho-linked-later")
+        db.add(customer)
+        db.flush()
+        service.set_hub_contact_customer(contact_id=contact.id, customer_id=customer.id)
+        service.set_hub_contact_customer(contact_id=contact.id, customer_id=None)
+        db.commit()
+
+        assert db.get(CustomerContact, contact.id) is not None
+        service.delete_contact_from_hub(contact_id=contact.id)
+        db.commit()
+        assert db.get(CustomerContact, contact.id) is None

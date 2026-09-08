@@ -13,8 +13,10 @@ from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.module_layout import ModuleLayout
 from app.models.site import Site
 from app.services.module_layouts import ModuleLayoutService
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.zoho_crm import ZohoCrmService
 
 
@@ -40,6 +42,7 @@ class CustomerProfileField:
     options: tuple[tuple[str, str], ...] = ()
     editable: bool = False
     sensitive: bool = False
+    required: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,20 +96,25 @@ class CustomerContactProfile:
     mobile: str | None
     searchable_values: tuple[str, ...]
     phone_values: tuple[str, ...]
+    is_hub_contact: bool = False
 
 
 @dataclass(frozen=True)
 class CustomerContactDetail:
-    customer: Customer
+    customer: Customer | None
     contact: CustomerContact
     name: str
     profile_fields: tuple[CustomerProfileField, ...]
+    editable_profile_fields: tuple[CustomerProfileField, ...] = ()
+    display_profile_fields: tuple[CustomerProfileField, ...] = ()
+    summary_profile_fields: tuple[CustomerProfileField, ...] = ()
+    following_profile_fields: tuple[CustomerProfileField, ...] = ()
     profile_field_tabs: tuple[CustomerProfileFieldTab, ...] = ()
 
 
 @dataclass(frozen=True)
 class CustomerContactDirectoryEntry:
-    customer: Customer
+    customer: Customer | None
     contact: CustomerContactProfile
 
 
@@ -272,11 +280,15 @@ class CustomerDirectoryService:
             display_profile_fields
         )
         profile_field_tabs = self._profile_field_tabs(display_profile_fields)
+        editable_profile_fields = self._ordered_editable_profile_fields(
+            display_profile_fields,
+            tuple(field for field in profile_fields if field.editable),
+        )
         return CustomerDirectoryDetail(
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
-            editable_profile_fields=tuple(field for field in profile_fields if field.editable),
+            editable_profile_fields=editable_profile_fields,
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
             display_profile_fields=display_profile_fields,
             summary_profile_fields=summary_profile_fields,
@@ -296,28 +308,137 @@ class CustomerDirectoryService:
         )
         if contact is None:
             return None
-        profile_fields = self._contact_profile_fields(contact)
-        return CustomerContactDetail(
+        return self._build_contact_detail(contact)
+
+    def get_contact_detail_by_id(self, *, contact_id: int) -> CustomerContactDetail | None:
+        contact = self.db.get(CustomerContact, contact_id)
+        if contact is None:
+            return None
+        return self._build_contact_detail(contact)
+
+    def create_hub_contact(
+        self,
+        *,
+        customer_id: int | None,
+        submitted_values: dict[str, str],
+    ) -> CustomerContact:
+        customer = None
+        if customer_id is not None:
+            customer = self.db.get(Customer, customer_id)
+            if customer is None or not customer.is_visible:
+                raise ValueError("Der ausgewählte Kunde ist nicht verfügbar.")
+        contact = CustomerContact(
             customer=customer,
+            zoho_id=None,
+            encrypted_profile_json=self.cipher.encrypt(
+                json.dumps(self._hub_contact_profile(self._hub_contact_values(submitted_values, require_salutation=True)), ensure_ascii=False)
+            ),
+        )
+        self.db.add(contact)
+        self.db.flush()
+        return contact
+
+    def update_hub_contact(self, *, contact_id: int, submitted_values: dict[str, str]) -> CustomerContact:
+        contact = self.db.get(CustomerContact, contact_id)
+        if contact is None:
+            raise ValueError("Der Kontakt wurde nicht gefunden.")
+        if contact.zoho_id:
+            raise ValueError("Dieser Zoho-Kontakt wird über die Zoho-Bearbeitung aktualisiert.")
+        contact.encrypted_profile_json = self.cipher.encrypt(
+            json.dumps(self._hub_contact_profile(self._hub_contact_values(submitted_values, require_salutation=False)), ensure_ascii=False)
+        )
+        self.db.flush()
+        return contact
+
+    def set_hub_contact_customer(self, *, contact_id: int, customer_id: int | None) -> CustomerContact:
+        contact = self.db.get(CustomerContact, contact_id)
+        if contact is None:
+            raise ValueError("Der Kontakt wurde nicht gefunden.")
+        if contact.zoho_id:
+            raise ValueError("Die Verknüpfung eines Zoho-Kontakts wird durch Zoho CRM verwaltet.")
+        if customer_id is None:
+            contact.customer = None
+        else:
+            customer = self.db.get(Customer, customer_id)
+            if customer is None or not customer.is_visible:
+                raise ValueError("Der ausgewählte Kunde ist nicht verfügbar.")
+            contact.customer = customer
+        self.db.flush()
+        return contact
+
+    def delete_contact_from_hub(self, *, contact_id: int) -> CustomerContact:
+        contact = self.db.get(CustomerContact, contact_id)
+        if contact is None:
+            raise ValueError("Der Kontakt wurde nicht gefunden.")
+        self.db.delete(contact)
+        self.db.flush()
+        return contact
+
+    def _build_contact_detail(self, contact: CustomerContact) -> CustomerContactDetail:
+        profile_fields = self._contact_profile_fields(contact)
+        display_profile_fields = self._contact_profile_field_display_layout(contact, profile_fields)
+        summary_profile_fields, following_profile_fields = self._split_contact_profile_field_summary(
+            display_profile_fields
+        )
+        editable_profile_fields = self._ordered_editable_profile_fields(
+            display_profile_fields,
+            self._contact_editable_profile_fields(contact, profile_fields),
+        )
+        return CustomerContactDetail(
+            customer=contact.customer,
             contact=contact,
-            name=next((field.value for field in profile_fields if field.label == "Name" and field.value), "Zoho contact"),
+            name=next((field.value for field in profile_fields if field.label == "Name" and field.value), "Hub Kontakt"),
             profile_fields=profile_fields,
+            editable_profile_fields=editable_profile_fields,
+            display_profile_fields=display_profile_fields,
+            summary_profile_fields=summary_profile_fields,
+            following_profile_fields=following_profile_fields,
             profile_field_tabs=self._contact_profile_field_tabs(profile_fields),
         )
 
     def list_contact_entries(self) -> tuple[CustomerContactDirectoryEntry, ...]:
-        """Return the current synchronized contact directory with its Hub customer link."""
+        """Return all Hub contacts, including contacts without a customer or Zoho link."""
         entries: list[CustomerContactDirectoryEntry] = []
         rows = self.db.execute(
             select(CustomerContact, Customer)
-            .join(Customer, Customer.id == CustomerContact.customer_id)
-            .where(Customer.is_visible.is_(True))
+            .outerjoin(Customer, Customer.id == CustomerContact.customer_id)
         ).all()
         for stored_contact, customer in rows:
             profiles = self._contact_profiles_from_records([stored_contact])
             if profiles:
                 entries.append(CustomerContactDirectoryEntry(customer=customer, contact=profiles[0]))
-        return tuple(sorted(entries, key=lambda entry: (entry.contact.name.casefold(), entry.customer.name.casefold())))
+        return tuple(
+            sorted(
+                entries,
+                key=lambda entry: (entry.contact.name.casefold(), entry.customer.name.casefold() if entry.customer else ""),
+            )
+        )
+
+    @staticmethod
+    def _hub_contact_values(submitted_values: dict[str, str], *, require_salutation: bool) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for definition in ZOHO_CONTACT_FIELDS:
+            value = str(submitted_values.get(f"contact_field__{definition.key}") or "").strip()
+            if len(value) > 1_000:
+                raise ValueError(f"{definition.label} ist zu lang.")
+            if (definition.required or (require_salutation and definition.key == "salutation")) and not value:
+                raise ValueError(f"{definition.label} ist erforderlich.")
+            values[definition.key] = value
+        return values
+
+    @staticmethod
+    def _hub_contact_profile(values: dict[str, str]) -> dict[str, object]:
+        name = " ".join(value for value in (values.get("first_name"), values.get("last_name")) if value)
+        fields = {"Name": name or "Hub Kontakt"}
+        fields.update({definition.label: values.get(definition.key, "") for definition in ZOHO_CONTACT_FIELDS})
+        return {
+            "source": "hub",
+            "record_id": None,
+            "account_id": None,
+            "modified_time": None,
+            "synced_at": None,
+            "fields": fields,
+        }
 
     def link_exact_match(self, *, customer_id: int, site_id: int) -> tuple[Customer, Site]:
         customer = self.db.get(Customer, customer_id)
@@ -458,12 +579,44 @@ class CustomerDirectoryService:
         return tuple(fields_by_key[key] for key in ordered_keys)
 
     @staticmethod
+    def _ordered_editable_profile_fields(
+        display_profile_fields: tuple[CustomerProfileField, ...],
+        editable_profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[CustomerProfileField, ...]:
+        """Keep edit controls aligned with the saved reading layout, then append hidden empty fields."""
+        editable_by_key = {
+            field.key: field
+            for field in editable_profile_fields
+            if field.key
+        }
+        ordered: list[CustomerProfileField] = []
+        for field in display_profile_fields:
+            editable = editable_by_key.pop(field.key, None)
+            if editable is not None:
+                ordered.append(editable)
+        ordered.extend(
+            field for field in editable_profile_fields
+            if field.key and field.key in editable_by_key
+        )
+        return tuple(ordered)
+
+    @staticmethod
     def _split_profile_field_summary(
         display_profile_fields: tuple[CustomerProfileField, ...],
     ) -> tuple[tuple[CustomerProfileField, ...], tuple[CustomerProfileField, ...]]:
         """Keep the global field order while ending the summary at the WordPress action."""
         for index, field in enumerate(display_profile_fields):
             if field.key == "send_options_to_wordpress":
+                return display_profile_fields[: index + 1], display_profile_fields[index + 1 :]
+        return display_profile_fields, ()
+
+    @staticmethod
+    def _split_contact_profile_field_summary(
+        display_profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[tuple[CustomerProfileField, ...], tuple[CustomerProfileField, ...]]:
+        """Keep contact details visible through the secretary phone number."""
+        for index, field in enumerate(display_profile_fields):
+            if field.key == "assistant_phone":
                 return display_profile_fields[: index + 1], display_profile_fields[index + 1 :]
         return display_profile_fields, ()
 
@@ -558,12 +711,14 @@ class CustomerDirectoryService:
             and isinstance(option.get("value"), str)
         )
         text_value = self._format_profile_value(raw_value)
+        displayed_value = next((label for value, label in option_values if value == text_value), text_value)
+        form_value = next((value for value, label in option_values if label == text_value), text_value)
         return CustomerProfileField(
             label=label,
-            value="Geschützt" if sensitive and raw_value is not None else text_value,
+            value="Geschützt" if sensitive and raw_value is not None else displayed_value,
             key=key,
             display_type=str(source.get("display_type") or "Einzelzeile"),
-            form_value="" if sensitive else (text_value or ""),
+            form_value="" if sensitive else (form_value or ""),
             options=option_values,
             editable=bool(source.get("editable")),
             sensitive=sensitive,
@@ -586,6 +741,8 @@ class CustomerDirectoryService:
     def _contact_profiles_by_customer(self) -> dict[int, tuple[CustomerContactProfile, ...]]:
         contacts_by_customer: dict[int, list[CustomerContact]] = {}
         for contact in self.db.scalars(select(CustomerContact)).all():
+            if contact.customer_id is None:
+                continue
             contacts_by_customer.setdefault(contact.customer_id, []).append(contact)
         return {
             customer_id: self._contact_profiles_from_records(contacts)
@@ -627,6 +784,7 @@ class CustomerDirectoryService:
                         for field in formatted_fields
                         if field.value and self._is_phone_field(field.label)
                     ),
+                    is_hub_contact=contact.zoho_id is None,
                 )
             )
         return tuple(sorted(contacts, key=lambda contact: contact.name.casefold()))
@@ -639,10 +797,90 @@ class CustomerDirectoryService:
         values = profile.get("fields") if isinstance(profile, dict) else None
         if not isinstance(values, dict):
             return ()
+        definitions_by_label = {field.label.casefold(): field for field in ZOHO_CONTACT_FIELDS}
+        definitions_by_label["telefon"] = next(field for field in ZOHO_CONTACT_FIELDS if field.key == "phone")
         return tuple(
-            CustomerProfileField(label=str(label), value=self._format_profile_value(value))
+            CustomerProfileField(
+                label=str(label),
+                value=self._format_profile_value(value),
+                key=(
+                    definition.key
+                    if (definition := definitions_by_label.get(str(label).casefold()))
+                    else self._contact_layout_key(str(label))
+                ),
+                display_type=definition.display_type if definition else "Einzelzeile",
+            )
             for label, value in values.items()
         )
+
+    @staticmethod
+    def _contact_layout_key(label: str) -> str:
+        """Give non-catalogued Zoho fields stable IDs for the global layout."""
+        normalized = re.sub(r"[^a-z0-9]+", "-", label.casefold()).strip("-")
+        return f"contact-{normalized or 'field'}"
+
+    def _contact_editable_profile_fields(
+        self,
+        contact: CustomerContact,
+        profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[CustomerProfileField, ...]:
+        values_by_key = {field.key: field.form_value or field.value or "" for field in profile_fields if field.key}
+        name = next((field.value for field in profile_fields if field.label == "Name"), "") or ""
+        name_parts = name.rsplit(" ", 1)
+        if not values_by_key.get("last_name") and name_parts:
+            values_by_key["last_name"] = name_parts[-1]
+        if not values_by_key.get("first_name") and len(name_parts) == 2:
+            values_by_key["first_name"] = name_parts[0]
+        return tuple(
+            CustomerProfileField(
+                label=definition.label,
+                value=values_by_key.get(definition.key) or None,
+                key=definition.key,
+                display_type=definition.display_type,
+                form_value=values_by_key.get(definition.key, ""),
+                editable=True,
+                required=definition.required,
+            )
+            for definition in ZOHO_CONTACT_FIELDS
+        )
+
+    def _contact_profile_field_display_layout(
+        self,
+        contact: CustomerContact,
+        profile_fields: tuple[CustomerProfileField, ...],
+    ) -> tuple[CustomerProfileField, ...]:
+        """Show the complete reviewed contact schema for older partial imports too."""
+        display_fields = list(profile_fields)
+        fields_by_key = {field.key: field for field in display_fields if field.key}
+        if contact.customer is not None and "customer_name" not in fields_by_key:
+            customer_field = CustomerProfileField(
+                label="Kunde-Name",
+                value=contact.customer.name if contact.customer is not None else None,
+                key="customer_name",
+                display_type="Link",
+            )
+            name_index = next((index for index, field in enumerate(display_fields) if field.label == "Name"), -1)
+            display_fields.insert(name_index + 1, customer_field)
+            fields_by_key[customer_field.key] = customer_field
+        for definition in ZOHO_CONTACT_FIELDS:
+            if definition.key in fields_by_key:
+                continue
+            field = CustomerProfileField(
+                label=definition.label,
+                value=None,
+                key=definition.key,
+                display_type=definition.display_type,
+            )
+            display_fields.append(field)
+            fields_by_key[field.key] = field
+        layout = self.db.scalar(select(ModuleLayout).where(ModuleLayout.layout_key == CONTACT_FIELDS_LAYOUT_KEY))
+        if layout is None:
+            return tuple(display_fields)
+        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+            layout_key=CONTACT_FIELDS_LAYOUT_KEY,
+            default_keys=tuple(fields_by_key),
+        )
+        return tuple(fields_by_key[key] for key in ordered_keys)
 
     @classmethod
     def _contact_profile_field_tabs(

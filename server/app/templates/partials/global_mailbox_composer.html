@@ -1,0 +1,79 @@
+<div class="email-compose-layer" data-email-compose-layer data-global-mailbox-composer hidden>
+  <button class="email-compose-backdrop" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen"></button>
+  <aside class="email-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="email-compose-title" aria-hidden="true" data-email-compose-drawer tabindex="-1">
+    <div class="email-compose-header">
+      <div>
+        <p class="eyebrow">KOSMOS HUB</p>
+        <h2 id="email-compose-title">E-Mail erstellen</h2>
+      </div>
+      <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
+    </div>
+    <form method="post" action="/emails/send" enctype="multipart/form-data" class="communication-form email-compose-form" data-global-mailbox-compose-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="template_id" value="" data-email-compose-template-id>
+      <input type="hidden" name="draft_id" value="" data-email-compose-draft-id>
+      <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
+      <input type="hidden" name="forward_from_email_id" value="" data-email-compose-forward-from>
+      <input type="hidden" name="recipient_key" value="" data-email-compose-recipient-key>
+      <input type="hidden" name="recipient_customer_id" value="" data-email-compose-recipient-customer-id>
+      <input type="hidden" name="recipient_name" value="" data-email-compose-recipient-name>
+      <div class="email-compose-recipient-fields">
+        <label>Absender
+          <select name="sender_email" required data-global-mailbox-compose-sender disabled>
+            <option value="">Absender wird geladen ...</option>
+          </select>
+        </label>
+        <label class="email-recipient-search">Empfänger
+          <input name="recipient_email" type="email" required autocomplete="off" placeholder="Name oder E-Mail-Adresse eingeben" data-email-compose-recipient aria-autocomplete="list" aria-controls="global-email-recipient-results">
+          <div id="global-email-recipient-results" class="email-recipient-search-results" data-global-mailbox-compose-recipient-results role="listbox" hidden></div>
+        </label>
+      </div>
+      <label class="email-recipient-search" data-global-mailbox-compose-cc-field hidden>CC
+        <input name="cc_emails" type="text" autocomplete="off" placeholder="Weitere Empfänger, durch Komma getrennt" data-email-compose-cc aria-autocomplete="list" aria-controls="global-email-cc-results">
+        <div id="global-email-cc-results" class="email-recipient-search-results" data-global-mailbox-compose-cc-results role="listbox" hidden></div>
+      </label>
+      <label class="email-template-search">E-Mail-Vorlage
+        <div class="email-template-search-control">
+          <input type="search" autocomplete="off" placeholder="Vorlage suchen" data-global-mailbox-template-search aria-autocomplete="list" aria-controls="global-email-template-results">
+          <button class="button button-secondary email-template-search-open" type="button" data-global-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen">↑</button>
+        </div>
+        <div id="global-email-template-results" class="email-template-search-results" data-global-mailbox-template-search-results role="listbox" hidden></div>
+        <select data-email-compose-template hidden><option value="">Keine Vorlage verwenden</option></select>
+      </label>
+      <p class="subtle email-compose-template-status" data-email-compose-template-status>Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
+      <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
+      <label>Nachricht
+        <div class="email-rich-editor" data-email-rich-editor>
+          <textarea class="email-rich-editor-content" aria-label="Nachricht" data-email-compose-content></textarea>
+        </div>
+        <textarea name="content" hidden data-email-compose-content-value></textarea>
+      </label>
+      <div class="email-compose-attachments">
+        <input id="global-email-compose-attachments" type="file" name="attachments" multiple hidden data-email-compose-attachments>
+        <div class="email-compose-attachment-controls">
+          <button class="button button-secondary button-variant-2 email-compose-attachment-trigger" type="button" data-email-compose-attachments-open aria-label="Anhänge hinzufügen" title="Anhänge hinzufügen">&#128206;</button>
+          <span class="email-compose-attachment-summary" data-email-compose-attachment-summary>Keine Anhänge ausgewählt</span>
+        </div>
+        <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
+      </div>
+      <div class="email-compose-actions">
+        <button class="button button-secondary" type="button" data-global-mailbox-compose-save-draft>Entwurf speichern</button>
+        <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
+        <button class="button" type="submit" data-global-mailbox-compose-submit disabled>E-Mail senden</button>
+      </div>
+    </form>
+    <section class="email-template-library" data-global-mailbox-template-library hidden aria-label="E-Mail-Vorlagen">
+      <div class="email-template-library-header">
+        <button class="button button-secondary" type="button" data-global-mailbox-template-library-back>← Zurück</button>
+        <div><p class="eyebrow">KOSMOS HUB</p><h3>Vorlage wählen</h3></div>
+      </div>
+      <div class="email-template-library-layout">
+        <nav class="email-template-library-categories" aria-label="Vorlagenkategorien" data-global-mailbox-template-library-categories></nav>
+        <div class="email-template-library-content">
+          <label>Vorlagen durchsuchen<input type="search" autocomplete="off" placeholder="Name, Betreff oder Kategorie" data-global-mailbox-template-library-search></label>
+          <div class="email-template-library-list" data-global-mailbox-template-library-list></div>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>

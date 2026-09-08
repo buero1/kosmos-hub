@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Kalender · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="calendar-page" aria-label="Kalender">
+    <header class="calendar-page-header">
+      <div class="calendar-navigation" aria-label="Kalenderwoche wechseln">
+        <a class="calendar-nav-button" href="/calendar?week={{ calendar_previous_week }}" aria-label="Vorherige Woche">‹</a>
+        <a class="calendar-nav-button" href="/calendar?week={{ calendar_next_week }}" aria-label="Nächste Woche">›</a>
+        <a class="button button-secondary button-variant-2 calendar-today-button" href="/calendar?week={{ calendar_today_week }}">Heute</a>
+      </div>
+    </header>
+
+    {% if calendar_state %}
+      <p class="notice-{{ calendar_state }}" role="status">{{ calendar_message }}</p>
+    {% endif %}
+
+    <section class="calendar-week-card" aria-label="Woche {{ calendar_week_label }}">
+      <header class="calendar-week-toolbar">
+        <p>{{ calendar_week_label }}</p>
+        <span>Woche</span>
+      </header>
+      <div class="calendar-week-scroll" data-calendar-scroll>
+        <div class="calendar-week-grid">
+          <div class="calendar-week-heading calendar-week-corner" aria-label="Kalenderwoche {{ calendar_week_number }}">KW {{ calendar_week_number }}</div>
+          {% for day in calendar_days %}
+            <div class="calendar-week-heading{% if day.is_today %} is-today{% endif %}{% if loop.index > 5 %} is-weekend{% endif %}{% if day.holiday_name %} is-holiday{% endif %}">
+              <span>{{ day.short_label }} {{ "%02d"|format(day.day) }}</span>
+              {% if day.holiday_name %}<small>{{ day.holiday_name }}</small>{% endif %}
+            </div>
+          {% endfor %}
+
+          <div class="calendar-time-labels" aria-hidden="true">
+            {% for hour in calendar_hours %}<span>{{ hour }}</span>{% endfor %}
+          </div>
+          {% for day in calendar_days %}
+            <div class="calendar-day-column{% if day.is_today %} is-today{% endif %}{% if loop.index > 5 %} is-weekend{% endif %}{% if day.holiday_name %} is-holiday{% endif %}">
+              {% for time in calendar_time_slots %}
+                {% if can_manage_calendar %}
+                  <button class="calendar-slot" type="button" data-calendar-slot data-date="{{ day.date }}" data-time="{{ time }}" aria-label="{{ day.label }} {{ day.day }}, {{ time }}: Termin anlegen"></button>
+                {% else %}
+                  <span class="calendar-slot" aria-hidden="true"></span>
+                {% endif %}
+              {% endfor %}
+              {% for event in day.events %}
+                {% set event_class = "calendar-event calendar-event-" ~ event.kind ~ (event.status != "planned" and " is-" ~ event.status or "") %}
+                {% set event_style = "top: " ~ ('%.3f' % (event.start_slot * 2.25)) ~ "rem; height: " ~ ('%.3f' % (event.slot_span * 2.25)) ~ "rem; left: calc(0.3rem + " ~ ('%.5f' % (event.column_index * 100 / event.column_count)) ~ "%); width: calc(" ~ ('%.5f' % (100 / event.column_count)) ~ "% - 0.48rem);" %}
+                {% if can_manage_calendar %}<button
+                  class="{{ event_class }}"
+                  type="button"
+                  style="{{ event_style }}"
+                  data-calendar-activity-edit
+                  data-calendar-activity-kind="{{ event.kind }}"
+                  data-calendar-activity-update-url="/calendar/activities/{{ event.kind }}/{{ event.id }}"
+                  data-calendar-activity-customer-id="{{ event.customer_id or '' }}"
+                  data-calendar-activity-name="{{ event.name }}"
+                  data-calendar-activity-status="{{ event.status }}"
+                  data-calendar-activity-direction="{{ event.direction or '' }}"
+                  data-calendar-activity-start-date="{{ event.start_date }}"
+                  data-calendar-activity-start-time="{{ event.start_time }}"
+                  data-calendar-activity-duration="{{ event.duration_minutes }}"
+                  data-calendar-activity-reminder-channels="{{ event.reminder_channels | join(',') }}"
+                  data-calendar-activity-reminder-minutes="{{ event.reminder_minutes_before | join(',') }}"
+                  data-calendar-activity-description="{{ event.description or '' }}"
+                  aria-label="{{ event.kind == 'call' and 'Anruf bearbeiten' or 'Meeting bearbeiten' }}: {{ event.name }}, {{ event.start_time }} bis {{ event.end_time }}{% if event.customer_name %}, {{ event.customer_name }}{% endif %}"
+                >{% elif event.customer_id %}<a
+                  class="{{ event_class }}"
+                  href="/customers/{{ event.customer_id }}#customer-activities"
+                  style="{{ event_style }}"
+                  aria-label="{{ event.kind == 'call' and 'Anruf' or 'Meeting' }}: {{ event.name }}, {{ event.start_time }} bis {{ event.end_time }}, {{ event.customer_name }}"
+                >{% else %}<div
+                  class="{{ event_class }}"
+                  style="{{ event_style }}"
+                  aria-label="{{ event.kind == 'call' and 'Anruf' or 'Meeting' }}: {{ event.name }}, {{ event.start_time }} bis {{ event.end_time }}"
+                >{% endif %}
+                  <span class="calendar-event-time">{{ event.start_time }} – {{ event.end_time }}</span>
+                  <strong>{{ event.name }}</strong>
+                  {% if event.customer_name %}<small>{{ event.customer_name }}</small>{% endif %}
+                {% if can_manage_calendar %}</button>{% elif event.customer_id %}</a>{% else %}</div>{% endif %}
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  </section>
+
+  {% if can_manage_calendar %}
+    <div class="calendar-slot-chooser" data-calendar-slot-chooser role="menu" aria-label="Terminart auswählen" hidden>
+      <button type="button" role="menuitem" data-calendar-slot-kind="meeting">Neues Meeting</button>
+      <button type="button" role="menuitem" data-calendar-slot-kind="call">Neuer Anruf</button>
+    </div>
+    {% set activity_composer_mode = "calendar" %}
+    {% include "partials/customer_activity_composer.html" %}
+    <script>
+      (function () {
+        var calendarScroll = document.querySelector("[data-calendar-scroll]");
+        if (calendarScroll) calendarScroll.scrollTop = 420;
+
+        var chooser = document.querySelector("[data-calendar-slot-chooser]");
+        if (!chooser) return;
+        var selectedSlot = null;
+
+        function closeChooser() {
+          chooser.hidden = true;
+          selectedSlot = null;
+        }
+
+        function openChooser(slot) {
+          selectedSlot = slot;
+          chooser.hidden = false;
+          var bounds = slot.getBoundingClientRect();
+          var chooserWidth = chooser.offsetWidth;
+          chooser.style.left = Math.max(12, Math.min(bounds.left, window.innerWidth - chooserWidth - 12)) + "px";
+          chooser.style.top = Math.min(bounds.bottom + 6, window.innerHeight - chooser.offsetHeight - 12) + "px";
+        }
+
+        document.querySelectorAll("[data-calendar-slot]").forEach(function (slot) {
+          slot.addEventListener("click", function () { openChooser(slot); });
+        });
+        document.querySelectorAll("[data-calendar-activity-edit]").forEach(function (activity) {
+          activity.addEventListener("click", function () {
+            document.dispatchEvent(new CustomEvent("calendar:activity-edit", {
+              detail: {
+                kind: activity.dataset.calendarActivityKind,
+                updateUrl: activity.dataset.calendarActivityUpdateUrl,
+                customerId: activity.dataset.calendarActivityCustomerId,
+                name: activity.dataset.calendarActivityName,
+                status: activity.dataset.calendarActivityStatus,
+                direction: activity.dataset.calendarActivityDirection,
+                startDate: activity.dataset.calendarActivityStartDate,
+                startTime: activity.dataset.calendarActivityStartTime,
+                duration: activity.dataset.calendarActivityDuration,
+                reminderChannels: activity.dataset.calendarActivityReminderChannels,
+                reminderMinutes: activity.dataset.calendarActivityReminderMinutes,
+                description: activity.dataset.calendarActivityDescription
+              }
+            }));
+          });
+        });
+        chooser.addEventListener("click", function (event) {
+          var option = event.target.closest("[data-calendar-slot-kind]");
+          if (!option || !selectedSlot) return;
+          var slot = selectedSlot;
+          closeChooser();
+          document.dispatchEvent(new CustomEvent("calendar:activity-open", {
+            detail: {
+              kind: option.dataset.calendarSlotKind,
+              date: slot.dataset.date,
+              time: slot.dataset.time
+            }
+          }));
+        });
+        document.addEventListener("click", function (event) {
+          if (!event.target.closest("[data-calendar-slot]") && !event.target.closest("[data-calendar-slot-chooser]")) closeChooser();
+        });
+        document.addEventListener("keydown", function (event) {
+          if (event.key === "Escape") closeChooser();
+        });
+      }());
+    </script>
+  {% endif %}
+{% endblock %}

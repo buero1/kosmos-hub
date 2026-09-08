@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kosmos Erinnerungen</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">KOSMOS HUB</p>
+          <h1 id="reminder-count">0 Erinnerungen</h1>
+          <p id="selected-reminder-appointment" class="selected-reminder-appointment" hidden></p>
+        </div>
+        <span class="status-dot" aria-label="Synchronisierung aktiv"></span>
+      </header>
+
+      <section class="setup" id="setup" hidden>
+        <p class="lede">Dieses Windows-Gerät mit dem Hub verbinden.</p>
+        <form id="setup-form">
+          <label>Hub-Adresse<input id="server-url" type="url" placeholder="https://kosmos-hub.example.de" required></label>
+          <label>Kopplungscode<input id="device-token" type="password" placeholder="khdsk_..." required></label>
+          <label class="check"><input id="launch-at-login" type="checkbox" checked> Beim Windows-Start ausführen</label>
+          <button type="submit">Gerät verbinden</button>
+        </form>
+        <p class="hint">Den Kopplungscode erstellst du im Hub unter Account → Windows Erinnerungen.</p>
+      </section>
+
+      <section class="reminder-area" id="reminder-area" hidden>
+        <div class="bulk-bar">
+          <label class="select-all-control"><input id="select-all" type="checkbox" aria-label="Alle Erinnerungen auswählen"></label>
+          <div class="bulk-actions">
+            <select id="bulk-snooze" aria-label="Erneut erinnern in">
+              <option value="before-start:5">5 Minuten vor dem Start</option>
+              <option value="before-start:0">0 Minuten vor dem Start</option>
+              <option value="1">In 1 Minute</option>
+              <option value="5">In 5 Minuten</option>
+              <option value="10">In 10 Minuten</option>
+              <option value="15">In 15 Minuten</option>
+              <option value="30">In 30 Minuten</option>
+              <option value="60">In 60 Minuten</option>
+              <option value="120">In 2 Stunden</option>
+              <option value="240">In 4 Stunden</option>
+              <option value="480">In 8 Stunden</option>
+              <option value="720">In einem halben Tag</option>
+              <option value="1440">In 1 Tag</option>
+              <option value="2880">In 2 Tagen</option>
+              <option value="4320">In 3 Tagen</option>
+              <option value="5760">In 4 Tagen</option>
+              <option value="10080">In 1 Woche</option>
+              <option value="20160">In 2 Wochen</option>
+            </select>
+            <button id="bulk-snooze-button" class="secondary" type="button">Erneut erinnern</button>
+            <button id="bulk-complete-button" type="button">Erledigt</button>
+          </div>
+        </div>
+        <div id="reminder-list" class="reminder-list"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <strong>Keine fälligen Erinnerungen.</strong>
+          <p>Der Notifier läuft im Hintergrund weiter.</p>
+        </div>
+      </section>
+      <p id="message" class="message" role="status"></p>
+    </main>
+    <script src="renderer.js"></script>
+  </body>
+</html>

@@ -57,6 +57,7 @@ _ZOHO_COMMUNICATION_SCOPE_VALUES = frozenset(
 _ZOHO_EMAIL_TEMPLATE_SCOPE = "ZohoCRM.templates.email.READ"
 _ZOHO_FILE_SCOPE = "ZohoCRM.Files.CREATE"
 _REQUEST_TIMEOUT_SECONDS = 20
+_BINARY_DOWNLOAD_TIMEOUT_SECONDS = 90
 _MAX_PAGE_REQUESTS = 10
 _MAX_FIELDS_PER_ZOHO_REQUEST = 50
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
@@ -128,6 +129,14 @@ class ZohoSyncResult:
     updated_contacts: int
     removed_contacts: int
     unmapped_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ZohoContactSyncResult:
+    synchronized_contacts: int
+    created_contacts: int
+    updated_contacts: int
+    removed_contacts: int
 
 
 @dataclass(frozen=True)
@@ -559,6 +568,22 @@ class ZohoCrmService:
         )
         return self._response_record(response, "note")
 
+    def update_note(self, *, note_id: str, title: str, content: str) -> dict[str, object]:
+        """Update one existing Zoho note by its immutable CRM ID."""
+        connection = self._require_communication_connection()
+        response = self._api_put_json(
+            connection,
+            f"/crm/v8/Notes/{note_id}",
+            {"data": [{"Note_Title": title, "Note_Content": content}]},
+        )
+        return self._response_record(response, "note update")
+
+    def delete_note(self, *, note_id: str) -> None:
+        """Delete one note in Zoho before removing its local mirror."""
+        connection = self._require_communication_connection()
+        response = self._api_delete(connection, f"/crm/v8/Notes/{note_id}")
+        self._response_record(response, "note deletion")
+
     def send_account_email(
         self,
         *,
@@ -900,6 +925,7 @@ class ZohoCrmService:
         *,
         records: list[dict[str, object]],
         synced_at: datetime,
+        remove_missing: bool = True,
     ) -> tuple[int, int, int, int]:
         """Import Contacts only when their Zoho Account is also a Hub customer."""
         customers_by_zoho_id = {
@@ -941,14 +967,33 @@ class ZohoCrmService:
             contact.zoho_synced_at = synced_at
 
         removed_contacts = 0
-        for contact in self.db.scalars(select(CustomerContact)).all():
-            if contact.zoho_id in linked_contact_ids:
-                continue
-            self.db.delete(contact)
-            removed_contacts += 1
+        if remove_missing:
+            for contact in self.db.scalars(select(CustomerContact)).all():
+                if contact.zoho_id in linked_contact_ids:
+                    continue
+                self.db.delete(contact)
+                removed_contacts += 1
 
         self.db.flush()
         return synchronized_contacts, created_contacts, updated_contacts, removed_contacts
+
+    def synchronize_all_contacts(self) -> ZohoContactSyncResult:
+        """Refresh every Zoho Contact linked to an existing Hub customer."""
+        connection = self._require_connected_connection()
+        synced_at = datetime.now(UTC)
+        synchronized, created, updated, removed = self._synchronize_contacts(
+            records=self._get_all_contact_records(connection),
+            synced_at=synced_at,
+            remove_missing=False,
+        )
+        connection.last_error = None
+        self.db.flush()
+        return ZohoContactSyncResult(
+            synchronized_contacts=synchronized,
+            created_contacts=created,
+            updated_contacts=updated,
+            removed_contacts=removed,
+        )
 
     def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
         requested_fields = ",".join(
@@ -1011,20 +1056,69 @@ class ZohoCrmService:
         self.db.flush()
         return contact
 
+    def update_contact(self, *, customer_id: int, contact_id: int, submitted_values: dict[str, str]) -> CustomerContact:
+        """Update a customer's Contact in Zoho and refresh the encrypted local copy."""
+        connection = self._require_connected_connection()
+        contact = self.db.get(CustomerContact, contact_id)
+        customer = self.db.get(Customer, customer_id)
+        if contact is None or customer is None or contact.customer_id != customer.id or not contact.zoho_id:
+            raise ZohoCrmError("Der Kontakt konnte nicht gefunden werden.")
+        values = self._contact_update_values(submitted_values)
+        response = self._api_put_json(
+            connection,
+            f"/crm/v8/{ZOHO_CONTACT_MODULE}/{contact.zoho_id}",
+            {"data": [{"id": contact.zoho_id, **values}]},
+        )
+        self._contact_result_id(response, action="aktualisieren")
+        synced_at = datetime.now(UTC)
+        record = {"id": contact.zoho_id, **values}
+        contact.encrypted_profile_json = self.cipher.encrypt(
+            json.dumps(self._build_contact_profile(record, customer.zoho_id, synced_at), ensure_ascii=False, default=str)
+        )
+        contact.zoho_synced_at = synced_at
+        self.db.flush()
+        return contact
+
+    def synchronize_contact(self, *, customer_id: int, contact_id: int) -> CustomerContact:
+        """Refresh one Contact without running the full CRM import."""
+        connection = self._require_connected_connection()
+        contact = self.db.get(CustomerContact, contact_id)
+        customer = self.db.get(Customer, customer_id)
+        if contact is None or customer is None or contact.customer_id != customer.id or not contact.zoho_id:
+            raise ZohoCrmError("Der Kontakt konnte nicht gefunden werden.")
+        fields = ",".join(("Account_Name", "Full_Name", "Modified_Time", *(field.api_name for field in ZOHO_CONTACT_FIELDS)))
+        response = self._api_get(connection, f"/crm/v8/{ZOHO_CONTACT_MODULE}/{contact.zoho_id}", {"fields": fields})
+        data = response.get("data")
+        record = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else None
+        if record is None:
+            raise ZohoCrmError("Zoho returned no usable Contact data.")
+        synced_at = datetime.now(UTC)
+        contact.encrypted_profile_json = self.cipher.encrypt(
+            json.dumps(self._build_contact_profile(record, customer.zoho_id, synced_at), ensure_ascii=False, default=str)
+        )
+        contact.zoho_modified_at = self._parse_datetime(record.get("Modified_Time"))
+        contact.zoho_synced_at = synced_at
+        self.db.flush()
+        return contact
+
     @staticmethod
     def _created_contact_id(response: dict[str, object]) -> str:
+        return ZohoCrmService._contact_result_id(response, action="erstellen")
+
+    @staticmethod
+    def _contact_result_id(response: dict[str, object], *, action: str) -> str:
         data = response.get("data")
         if not isinstance(data, list) or not data or not isinstance(data[0], dict):
-            raise ZohoCrmError("Zoho returned no Contact creation result.")
+            raise ZohoCrmError(f"Zoho returned no Contact result while trying to {action} it.")
         result = data[0]
         status = ZohoCrmService._as_text(result.get("status"))
         code = ZohoCrmService._as_text(result.get("code"))
         if (status and status.casefold() != "success") or (code and code.casefold() != "success"):
-            raise ZohoCrmError(ZohoCrmService._as_text(result.get("message")) or "Zoho could not create the Contact.")
+            raise ZohoCrmError(ZohoCrmService._as_text(result.get("message")) or f"Zoho could not {action} the Contact.")
         details = result.get("details")
         contact_id = ZohoCrmService._as_text(details.get("id")) if isinstance(details, dict) else None
         if not contact_id:
-            raise ZohoCrmError("Zoho created no usable Contact ID.")
+            raise ZohoCrmError("Zoho returned no usable Contact ID.")
         return contact_id
 
     @staticmethod
@@ -1035,10 +1129,22 @@ class ZohoCrmService:
             value = raw_value.strip()
             if len(value) > _MAX_CONTACT_FIELD_LENGTH:
                 raise ZohoCrmError(f"{field.label} ist zu lang.")
-            if field.required and not value:
+            if (field.required or field.key == "salutation") and not value:
                 raise ZohoCrmError(f"{field.label} ist erforderlich.")
             if value:
                 values[field.api_name] = value
+        return values
+
+    @staticmethod
+    def _contact_update_values(submitted_values: dict[str, str]) -> dict[str, str | None]:
+        values: dict[str, str | None] = {}
+        for field in ZOHO_CONTACT_FIELDS:
+            value = submitted_values.get(f"contact_field__{field.key}", "").strip()
+            if len(value) > _MAX_CONTACT_FIELD_LENGTH:
+                raise ZohoCrmError(f"{field.label} ist zu lang.")
+            if field.required and not value:
+                raise ZohoCrmError(f"{field.label} ist erforderlich.")
+            values[field.api_name] = value or None
         return values
 
     def _api_get(
@@ -1089,6 +1195,16 @@ class ZohoCrmService:
             f"{api_domain}{path}",
             method="PUT",
             json_body=payload,
+            headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
+        )
+
+    def _api_delete(self, connection: ZohoConnection, path: str) -> dict[str, object]:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        return self._request_json(
+            f"{api_domain}{path}",
+            method="DELETE",
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
         )
 
@@ -1677,7 +1793,7 @@ class ZohoCrmService:
                 payload = response.read().decode("utf-8")
         except HTTPError as exc:
             raise ZohoCrmError(f"Zoho rejected the request ({ZohoCrmService._zoho_error_code(exc)}).") from exc
-        except URLError as exc:
+        except (TimeoutError, URLError) as exc:
             raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.") from exc
 
         if not payload.strip() and allow_empty_response:
@@ -1694,11 +1810,13 @@ class ZohoCrmService:
     def _request_binary(url: str, *, headers: dict[str, str]) -> ZohoBinaryDownload:
         request = Request(url, headers={"Accept": "application/octet-stream, */*", **headers}, method="GET")
         try:
-            with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
+            with urlopen(request, timeout=_BINARY_DOWNLOAD_TIMEOUT_SECONDS) as response:  # noqa: S310 - Zoho URLs are fixed above.
                 content = response.read(_MAX_EMAIL_ATTACHMENT_BYTES + 1)
                 content_type = response.headers.get_content_type()
         except HTTPError as exc:
             raise ZohoCrmError(f"Zoho rejected the request ({ZohoCrmService._zoho_error_code(exc)}).") from exc
+        except TimeoutError as exc:
+            raise ZohoCrmError("Zoho hat beim Abruf des Anhangs nicht rechtzeitig geantwortet.") from exc
         except URLError as exc:
             raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.") from exc
 

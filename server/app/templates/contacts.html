@@ -3,32 +3,41 @@
 {% block content %}
   <section>
     {% if created %}
-      <p class="notice-success">Der Kontakt wurde in Zoho CRM angelegt und mit dem ausgewählten Kunden verknüpft.</p>
+      <p class="notice-success">Der Kontakt wurde im Hub angelegt.</p>
+    {% endif %}
+    {% if deleted %}<p class="notice-success">Der Kontakt wurde im Hub gelöscht. Zoho wurde nicht geändert.</p>{% endif %}
+    {% if sync_state and sync_message %}
+      <p class="notice-{{ sync_state }}">{{ sync_message }}</p>
     {% endif %}
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Zoho CRM</p>
+        <p class="eyebrow">Hub-Daten</p>
         <h2>Kontakte</h2>
-        <p class="subtle">Synchronisierte Kontakte und ihre Kundenverknüpfungen.</p>
       </div>
-      <a class="button button-variant-1" href="/contacts/new">Kontakt neu anlegen</a>
+      <div class="communication-heading-actions">
+        <form method="post" action="/contacts/sync">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-secondary button-variant-1" type="submit">Alle Kontakte synchronisieren</button>
+        </form>
+        <a class="button button-variant-1" href="/contacts/new">Kontakt neu anlegen</a>
+      </div>
     </div>
 
     <article class="card customer-detail-panel">
       <div class="table-scroll">
         <table class="customer-contacts-table contacts-directory-table">
           <thead>
-            <tr><th>Kunde</th><th>Name</th><th>E-Mail</th></tr>
+            <tr><th>Name</th><th>Kunde</th><th>E-Mail</th></tr>
           </thead>
           <tbody>
             {% for entry in entries %}
               <tr>
-                <td><a href="/customers/{{ entry.customer.id }}">{{ entry.customer.name }}</a></td>
-                <td><a href="/customers/{{ entry.customer.id }}/contacts/{{ entry.contact.id }}">{{ entry.contact.name }}</a></td>
-                <td>{% if entry.contact.email %}<a href="mailto:{{ entry.contact.email }}">{{ entry.contact.email }}</a>{% else %}-{% endif %}</td>
+                <td><a href="{% if entry.contact.is_hub_contact %}/contacts/{{ entry.contact.id }}{% else %}/customers/{{ entry.customer.id }}/contacts/{{ entry.contact.id }}{% endif %}">{{ entry.contact.name }}</a></td>
+                <td>{% if entry.customer %}<a href="/customers/{{ entry.customer.id }}">{{ entry.customer.name }}</a>{% else %}-{% endif %}</td>
+                <td>{{ entry.contact.email or "-" }}</td>
               </tr>
             {% else %}
-              <tr><td colspan="3">Noch keine synchronisierten Kontakte vorhanden.</td></tr>
+              <tr><td colspan="3">Noch keine Kontakte vorhanden.</td></tr>
             {% endfor %}
           </tbody>
         </table>

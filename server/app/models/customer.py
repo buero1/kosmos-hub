@@ -21,6 +21,9 @@ class Customer(TimestampMixin, Base):
     zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     sites = relationship("Site", back_populates="customer")
-    contacts = relationship("CustomerContact", back_populates="customer", cascade="all, delete-orphan")
+    contacts = relationship("CustomerContact", back_populates="customer", cascade="all", passive_deletes=True)
     zoho_notes = relationship("CustomerZohoNote", back_populates="customer", cascade="all, delete-orphan")
     zoho_emails = relationship("CustomerZohoEmail", back_populates="customer", cascade="all, delete-orphan")
+    call_activities = relationship("CustomerCallActivity", back_populates="customer", cascade="all, delete-orphan")
+    task_activities = relationship("CustomerTaskActivity", back_populates="customer", cascade="all, delete-orphan")
+    meeting_activities = relationship("CustomerMeetingActivity", back_populates="customer", cascade="all, delete-orphan")

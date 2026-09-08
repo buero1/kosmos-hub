@@ -10,5 +10,12 @@ dist/
 server/.env
 server/.venv/
 server/*.egg-info/
+server/data/email-attachments/
 wordpress-plugin/vendor/
 wordpress-plugin/composer.lock
+desktop-notifier/node_modules/
+desktop-notifier/release*/
+server/frontend/node_modules/
+server/outputs/
+backups/
+*.tgz

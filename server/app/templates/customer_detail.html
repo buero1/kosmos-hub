@@ -1,13 +1,112 @@
 {% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
 {% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
 {% macro communication_email_address(address, prefix="") %}
   {% if address %}
-    {% if can_manage_communications and communication.recipients and communication_senders %}
-      <button class="email-address-link" type="button" data-email-compose-open data-recipient-email="{{ address | lower }}" aria-label="E-Mail an {{ address }} verfassen">{{ prefix }}{{ address }}</button>
+    {% if can_manage_communications %}
+      <button class="email-address-link" type="button" data-email-compose-open data-email-compose-customer-id="{{ detail.entry.customer.id }}" data-recipient-email="{{ address | lower }}" aria-label="E-Mail an {{ address }} verfassen">{{ prefix }}{{ address }}</button>
     {% else %}
       {{ prefix }}{{ address }}
     {% endif %}
   {% endif %}
+{% endmacro %}
+{% macro communication_email_actions(email, inline=false) %}
+  <div class="communication-email-actions{% if inline %} communication-email-actions-inline{% endif %}" role="group" aria-label="E-Mail-Aktionen">
+    <button class="communication-email-action" type="button" data-global-mailbox-compose-action="reply" data-mailbox-compose-customer-id="{{ detail.entry.customer.id }}" data-mailbox-compose-email-id="{{ email.id }}" aria-label="Antworten" title="Antworten">
+      <svg class="communication-email-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 6.8 4.8 11.8l5.4 5v-3.1c4.3 0 7.1 1.6 8.8 5.1-.4-5.6-3.4-9.2-8.8-9.4V6.8Z"/></svg>
+    </button>
+    <button class="communication-email-action" type="button" data-global-mailbox-compose-action="reply_all" data-mailbox-compose-customer-id="{{ detail.entry.customer.id }}" data-mailbox-compose-email-id="{{ email.id }}" aria-label="Allen antworten" title="Allen antworten">
+      <svg class="communication-email-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M9.9 5.4 3.7 12 9.9 18.6"/><path d="M9.9 5.4v2.8"/><path d="M9.9 15.8v2.8"/><path d="M13.5 7.1 7.5 12l6 5.1v-3.2c4.2 0 7 1.7 8.6 5.3-.35-5.7-3.45-9.3-8.6-9.5V7.1Z"/></svg>
+    </button>
+    <button class="communication-email-action" type="button" data-global-mailbox-compose-action="forward" data-mailbox-compose-customer-id="{{ detail.entry.customer.id }}" data-mailbox-compose-email-id="{{ email.id }}" aria-label="Weiterleiten" title="Weiterleiten">
+      <svg class="communication-email-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M13.8 6.8 19.2 11.8l-5.4 5v-3.1c-4.3 0-7.1 1.6-8.8 5.1.4-5.6 3.4-9.2 8.8-9.4V6.8Z"/></svg>
+    </button>
+  </div>
+{% endmacro %}
+{% macro customer_activity_action(label, icon) %}
+  <button class="customer-activity-action" type="button" data-customer-activity-action="{{ icon }}" aria-label="{{ label }}" title="{{ label }}">
+    <svg class="customer-activity-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round">
+        {% if icon == "call" %}
+          <path d="M7.1 5.8c.25-.25.66-.27.95-.05l2.05 1.55c.31.24.39.67.19 1.01l-1.05 1.79a1 1 0 0 0 .08 1.1c.84 1.11 2.07 2.33 3.18 3.17a1 1 0 0 0 1.1.09l1.79-1.06c.34-.19.77-.11 1 .2l1.56 2.04c.22.29.2.7-.05.95l-1.11 1.11c-.62.62-1.55.9-2.42.68-2.17-.54-4.74-2.43-6.75-4.45-2.02-2.01-3.91-4.58-4.46-6.74-.22-.88.06-1.81.68-2.43L7.1 5.8Z"/>
+        {% elif icon == "task" %}
+          <path d="M7 5.2h10a1.2 1.2 0 0 1 1.2 1.2v11.2A1.2 1.2 0 0 1 17 18.8H7a1.2 1.2 0 0 1-1.2-1.2V6.4A1.2 1.2 0 0 1 7 5.2Z"/>
+          <path d="M9.1 8.8l.7.8 1.4-1.6M12.6 9.1h2.8M9.1 12l.7.8 1.4-1.6M12.6 12.3h2.8M9.1 15.2l.7.8 1.4-1.6M12.6 15.5h2.8"/>
+        {% else %}
+          <path d="M6.2 6.6h11.6a1.3 1.3 0 0 1 1.3 1.3v9.9a1.3 1.3 0 0 1-1.3 1.3H6.2a1.3 1.3 0 0 1-1.3-1.3V7.9a1.3 1.3 0 0 1 1.3-1.3Z"/>
+          <path d="M8 4.8v3.1M16 4.8v3.1M4.9 9.3h14.2"/>
+          <circle cx="12" cy="14" r="2.5"/>
+          <path d="M12 12.7v1.5l1 .6"/>
+        {% endif %}
+      </g>
+    </svg>
+  </button>
+{% endmacro %}
+{% macro customer_call_entry_action(call, action) %}
+  {% if action == "complete" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-call-complete-open data-customer-call-complete-url="/customers/{{ detail.entry.customer.id }}/activities/calls/{{ call.id }}/complete" data-customer-call-name="{{ call.name }}" aria-label="Anruf abschließen" title="Anruf abschließen">{{ customer_activity_complete_icon() }}</button>
+  {% elif action == "edit" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-call-edit data-customer-call-update-url="/customers/{{ detail.entry.customer.id }}/activities/calls/{{ call.id }}" data-customer-call-name="{{ call.name }}" data-customer-call-status="{{ call.status }}" data-customer-call-direction="{{ call.direction }}" data-customer-call-start-date="{{ call.start_date }}" data-customer-call-start-time="{{ call.start_time }}" data-customer-call-duration="{{ call.duration_minutes }}" data-customer-call-reminder-channels="{{ call.reminders | map(attribute='channel') | join(',') }}" data-customer-call-reminder-minutes="{{ call.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-call-description="{{ call.description or '' }}" aria-label="Anruf bearbeiten" title="Anruf bearbeiten">
+      <svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 18.8 6.1 14.6 15.4 5.3a1.85 1.85 0 0 1 2.62 0l.72.72a1.85 1.85 0 0 1 0 2.62l-9.33 9.33-4.55 1.1Z"/><path d="M14.2 6.5 17.6 9.9"/><path d="M6.1 14.6 9.45 17.95"/></g></svg>
+    </button>
+  {% else %}
+    <button class="customer-activity-entry-action" type="button" data-customer-call-delete-open data-customer-call-delete-url="/customers/{{ detail.entry.customer.id }}/activities/calls/{{ call.id }}/delete" data-customer-call-name="{{ call.name }}" aria-label="Anruf löschen" title="Anruf löschen">
+      <svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 5.1h5.6"/><path d="M7 7.25h10"/><path d="M6 7.25h12.2a.95.95 0 0 1 .95.95v.85a.95.95 0 0 1-.95.95H6a.95.95 0 0 1-.95-.95V8.2A.95.95 0 0 1 6 7.25Z"/><path d="M8 7.25v-1.1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1.1"/><path d="M6.9 10 7.9 18.15a1.3 1.3 0 0 0 1.29 1.15h5.84a1.3 1.3 0 0 0 1.29-1.15L17.1 10"/><path d="M10 11.3v5.6M12 11.3v5.6M14 11.3v5.6"/></g></svg>
+    </button>
+  {% endif %}
+{% endmacro %}
+{% macro customer_activity_entry_icon(action) %}
+  <svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round">{% if action == "edit" %}<path d="M4.9 18.8 6.1 14.6 15.4 5.3a1.85 1.85 0 0 1 2.62 0l.72.72a1.85 1.85 0 0 1 0 2.62l-9.33 9.33-4.55 1.1Z"/><path d="M14.2 6.5 17.6 9.9"/><path d="M6.1 14.6 9.45 17.95"/>{% else %}<path d="M9.2 5.1h5.6"/><path d="M7 7.25h10"/><path d="M6 7.25h12.2a.95.95 0 0 1 .95.95v.85a.95.95 0 0 1-.95.95H6a.95.95 0 0 1-.95-.95V8.2A.95.95 0 0 1 6 7.25Z"/><path d="M8 7.25v-1.1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1.1"/><path d="M6.9 10 7.9 18.15a1.3 1.3 0 0 0 1.29 1.15h5.84a1.3 1.3 0 0 0 1.29-1.15L17.1 10"/><path d="M10 11.3v5.6M12 11.3v5.6M14 11.3v5.6"/>{% endif %}</g></svg>
+{% endmacro %}
+{% macro customer_activity_complete_icon() %}
+  <svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.7 12.9 C6.8 13.4, 8.2 14.8, 9.7 16.3 C12.1 13.1, 14.8 10.3, 18.3 7.8"/></g></svg>
+{% endmacro %}
+{% macro customer_note_entry_action(note, action) %}
+  {% if action == "edit" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-note-edit data-customer-note-update-url="/customers/{{ detail.entry.customer.id }}/communications/notes/{{ note.id }}" data-customer-note-title="{{ note.title }}" data-customer-note-content="{{ note.content }}" aria-label="Notiz bearbeiten" title="Notiz bearbeiten">{{ customer_activity_entry_icon("edit") }}</button>
+  {% else %}
+    <button class="customer-activity-entry-action" type="button" data-customer-note-delete-open data-customer-note-delete-url="/customers/{{ detail.entry.customer.id }}/communications/notes/{{ note.id }}/delete" data-customer-note-name="{{ note.title }}" aria-label="Notiz löschen" title="Notiz löschen">{{ customer_activity_entry_icon("delete") }}</button>
+  {% endif %}
+{% endmacro %}
+{% macro customer_task_entry_action(task, action) %}
+  {% if action == "complete" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-task-complete-open data-customer-task-complete-url="/customers/{{ detail.entry.customer.id }}/activities/tasks/{{ task.id }}/complete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe abschließen" title="Aufgabe abschließen">{{ customer_activity_complete_icon() }}</button>
+  {% elif action == "edit" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-task-edit data-customer-task-update-url="/customers/{{ detail.entry.customer.id }}/activities/tasks/{{ task.id }}" data-customer-task-name="{{ task.name }}" data-customer-task-status="{{ task.status }}" data-customer-task-due-date="{{ task.due_date }}" data-customer-task-due-time="{{ task.due_time }}" data-customer-task-reminder-channel="{{ task.reminder_channel or 'none' }}" data-customer-task-reminder-minutes="{{ task.reminder_minutes_before if task.reminder_minutes_before is not none else 0 }}" data-customer-task-description="{{ task.description or '' }}" aria-label="Aufgabe bearbeiten" title="Aufgabe bearbeiten">{{ customer_activity_entry_icon("edit") }}</button>
+  {% else %}
+    <button class="customer-activity-entry-action" type="button" data-customer-task-delete-open data-customer-task-delete-url="/customers/{{ detail.entry.customer.id }}/activities/tasks/{{ task.id }}/delete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe löschen" title="Aufgabe löschen">{{ customer_activity_entry_icon("delete") }}</button>
+  {% endif %}
+{% endmacro %}
+{% macro customer_meeting_entry_action(meeting, action) %}
+  {% if action == "edit" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-meeting-edit data-customer-meeting-update-url="/customers/{{ detail.entry.customer.id }}/activities/meetings/{{ meeting.id }}" data-customer-meeting-name="{{ meeting.name }}" data-customer-meeting-status="{{ meeting.status }}" data-customer-meeting-start-date="{{ meeting.start_date }}" data-customer-meeting-start-time="{{ meeting.start_time }}" data-customer-meeting-duration="{{ meeting.duration_minutes }}" data-customer-meeting-reminder-channels="{{ meeting.reminders | map(attribute='channel') | join(',') }}" data-customer-meeting-reminder-minutes="{{ meeting.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-meeting-description="{{ meeting.description or '' }}" aria-label="Meeting bearbeiten" title="Meeting bearbeiten">{{ customer_activity_entry_icon("edit") }}</button>
+  {% else %}
+    <button class="customer-activity-entry-action" type="button" data-customer-meeting-delete-open data-customer-meeting-delete-url="/customers/{{ detail.entry.customer.id }}/activities/meetings/{{ meeting.id }}/delete" data-customer-meeting-name="{{ meeting.name }}" aria-label="Meeting löschen" title="Meeting löschen">{{ customer_activity_entry_icon("delete") }}</button>
+  {% endif %}
+{% endmacro %}
+{% macro customer_contacts_table(contacts, customer) %}
+  <div class="table-scroll">
+    <table class="customer-contacts-table">
+      <thead><tr><th>Name</th><th>E-Mail</th></tr></thead>
+      <tbody>
+        {% for contact in contacts %}
+          <tr>
+            <td><a href="{% if contact.is_hub_contact %}/contacts/{{ contact.id }}{% else %}/customers/{{ customer.id }}/contacts/{{ contact.id }}{% endif %}">{% if contact.salutation %}{{ contact.salutation }} {% endif %}<strong>{{ contact.name }}</strong></a></td>
+            <td>
+              {{ communication_email_address(contact.email) }}
+              {% if contact.email and contact.secondary_email %}<br>{% endif %}
+              {{ communication_email_address(contact.secondary_email, "2.: ") }}
+              {% if (contact.email or contact.secondary_email) and contact.third_email %}<br>{% endif %}
+              {{ communication_email_address(contact.third_email, "3.: ") }}
+              {% if not contact.email and not contact.secondary_email and not contact.third_email %}-{% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="2">Keine Kontakte sind derzeit mit diesem Kunden verknüpft.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 {% endmacro %}
 {% macro customer_field_control(field, name) %}
   <label class="customer-field-control">
@@ -30,16 +129,14 @@
 {% endmacro %}
 {% block content %}
   <section>
-    <a class="button button-secondary" href="/customers">Back to customers</a>
-    <div class="section-heading customer-detail-heading">
-      <div>
-        <p class="eyebrow">CRM customer</p>
-        <div class="customer-heading-title-row">
-          <h2>{{ detail.entry.customer.name }}</h2>
-          <span class="pill">{{ detail.entry.account_status or "Status not available" }}</span>
-        </div>
-      </div>
-      <div class="customer-detail-heading-actions">
+    {% call module_detail_header(
+      "/customers",
+      "Back to customers",
+      "CRM customer",
+      detail.entry.customer.name,
+      status=detail.entry.account_status or "Status not available",
+      has_actions=can_manage_customer_fields or can_manage_communications
+    ) %}
         {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
           <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
           <div class="customer-edit-heading-actions" data-customer-edit-actions hidden>
@@ -54,9 +151,9 @@
           </div>
         {% endif %}
         {% if can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields) %}
-          <details class="customer-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
-            <summary class="customer-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
-            <div class="customer-actions-menu-popover">
+          <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
+            <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
+            <div class="detail-actions-menu-popover">
               {% if can_manage_communications %}
                 <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -64,25 +161,24 @@
                 </form>
               {% endif %}
               {% if can_manage_customer_fields and detail.display_profile_fields %}
-                <button class="button button-secondary button-variant-1 customer-actions-menu-item" type="button" data-layout-edit-open="customer-fields">Layout bearbeiten</button>
+                <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="customer-fields">Layout bearbeiten</button>
               {% endif %}
             </div>
           </details>
         {% endif %}
-      </div>
-    </div>
+    {% endcall %}
 
     {% if communication_state and communication_message %}
       <p class="notice-{{ communication_state }}">{{ communication_message }}</p>
-    {% endif %}
-    {% if email_reply_error %}
-      <p class="notice-warning">{{ email_reply_error }}</p>
     {% endif %}
     {% if fields_state and fields_message %}
       <p class="notice-{{ fields_state }}">{{ fields_message }}</p>
     {% endif %}
     {% if layout_state and layout_message %}
       <p class="notice-{{ layout_state }}">{{ layout_message }}</p>
+    {% endif %}
+    {% if activity_state and activity_message %}
+      <p class="notice-{{ activity_state }}">{{ activity_message }}</p>
     {% endif %}
 
     <div id="customer-communications" class="customer-detail-layout">
@@ -235,58 +331,87 @@
           </div>
         </article>
 
-        <article class="card customer-detail-panel">
+        <article class="card customer-detail-panel customer-communication-panel">
           <div class="customer-detail-panel-heading">
             <div>
               <p class="eyebrow">Zoho CRM</p>
-              <h3>E-Mails</h3>
+              <h3>Kommunikation</h3>
             </div>
-            {% if can_manage_communications and communication.recipients and communication_senders %}
-              <button class="button button-variant-2 customer-email-compose-open" type="button" data-email-compose-open>E-Mail schreiben</button>
-            {% endif %}
           </div>
-          <div class="customer-section-expandable" data-expandable-section>
-            <div data-expandable-content>
-              {% for email in communication.emails %}
-                <article class="communication-entry">
-                  <div class="communication-entry-heading">
-                    <strong>{{ email.subject }}</strong>
-                    <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
-                    {% if email.is_unread %}<span class="pill">Neu</span>{% endif %}
-                  </div>
-                  <p class="subtle">
-                    {% if email.sender %}Von {{ email.sender }}{% endif %}
-                    {% if email.sender and email.recipients %} · {% endif %}
-                    {% if email.recipients %}An {{ email.recipients }}{% endif %}
-                    {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
-                  </p>
-                  {% if email.direction == "inbound" and can_manage_communications %}
-                    <a class="button button-secondary button-variant-2" href="/customers/{{ detail.entry.customer.id }}?reply_email={{ email.id }}#customer-communications">Antworten</a>
-                  {% endif %}
-                  {% if email.preview_html %}
-                    <details class="communication-content" data-email-preview data-email-unread="{{ 'true' if email.is_unread else 'false' }}" data-email-read-url="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/read" data-email-read-csrf="{{ csrf_token }}"><summary>E-Mail-Vorschau anzeigen</summary><iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe></details>
-                  {% elif email.can_load_content and can_manage_communications %}
-                    <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/load">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                      <button class="button button-secondary" type="submit">Nachricht laden</button>
-                    </form>
-                  {% else %}
-                    <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
-                  {% endif %}
-                  {% if email.attachments and can_manage_communications %}
-                    <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
-                      {% for attachment in email.attachments %}
-                        <li><a href="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>
-                      {% endfor %}
-                    </ul>
-                  {% endif %}
-                  {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
-                </article>
-              {% else %}
-                <p class="subtle">Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.</p>
-              {% endfor %}
+          <div class="field-tabs customer-communication-tabs" data-field-tabs>
+            <div class="field-tabs-list" role="tablist" aria-label="Kundenkommunikation filtern">
+              <button id="customer-communications-tab-emails" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-emails" aria-selected="true" tabindex="0" data-field-tab="emails">E-Mails</button>
+              <button id="customer-communications-tab-contacts" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-contacts" aria-selected="false" tabindex="-1" data-field-tab="contacts">Kontakte</button>
+              <button id="customer-communications-tab-cases" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-cases" aria-selected="false" tabindex="-1" data-field-tab="cases">Fälle</button>
+              <button id="customer-communications-tab-reminders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-reminders" aria-selected="false" tabindex="-1" data-field-tab="reminders">Mahnungen</button>
             </div>
-            <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+          </div>
+          <div id="customer-communications-panel-emails" role="tabpanel" aria-labelledby="customer-communications-tab-emails" data-field-tab-panel="emails">
+            {% if can_manage_communications %}
+              <div class="customer-communication-tab-actions">
+                <button class="button button-variant-2" type="button" data-email-compose-open data-email-compose-customer-id="{{ detail.entry.customer.id }}">E-Mail schreiben</button>
+              </div>
+            {% endif %}
+            <div class="customer-section-expandable" data-expandable-section>
+              <div data-expandable-content>
+                {% for email in communication.emails %}
+                  <article class="communication-entry">
+                    <div class="communication-entry-heading">
+                      <strong>{{ email.subject }}</strong>
+                      <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
+                      {% if email.is_unread %}<span class="pill">Neu</span>{% endif %}
+                    </div>
+                    <p class="subtle">
+                      {% if email.sender %}Von {{ email.sender }}{% endif %}
+                      {% if email.sender and email.recipients %} · {% endif %}
+                      {% if email.recipients %}An {{ email.recipients }}{% endif %}
+                      {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
+                    </p>
+                    {% if email.preview_html %}
+                      <details class="communication-content communication-content-with-actions" data-email-preview data-email-unread="{{ 'true' if email.is_unread else 'false' }}" data-email-read-url="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/read" data-email-read-csrf="{{ csrf_token }}">
+                        <summary>E-Mail-Vorschau anzeigen</summary>
+                        {% if email.direction == "inbound" and can_manage_communications %}{{ communication_email_actions(email) }}{% endif %}
+                        <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe>
+                      </details>
+                    {% elif email.can_load_content and can_manage_communications %}
+                      {% if email.direction == "inbound" %}{{ communication_email_actions(email, true) }}{% endif %}
+                      <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/load">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="button button-secondary" type="submit">Nachricht laden</button>
+                      </form>
+                    {% else %}
+                      <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
+                    {% endif %}
+                    {% if email.attachments and can_manage_communications %}
+                      <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
+                        {% for attachment in email.attachments %}
+                          <li><a href="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                    {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
+                  </article>
+                {% else %}
+                  <p class="subtle">Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.</p>
+                {% endfor %}
+              </div>
+              <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+            </div>
+          </div>
+          <div id="customer-communications-panel-contacts" role="tabpanel" aria-labelledby="customer-communications-tab-contacts" data-field-tab-panel="contacts" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Kontakte.</p>
+              {% if can_manage_customer_fields %}
+                <a class="button button-secondary button-variant-2" href="/contacts/new?customer_id={{ detail.entry.customer.id }}">Kontakt anlegen</a>
+              {% endif %}
+            </div>
+            {{ customer_contacts_table(detail.contacts, detail.entry.customer) }}
+          </div>
+          <div id="customer-communications-panel-cases" class="customer-communication-tab-empty" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases" hidden>
+            <p class="subtle">Fälle werden hier künftig angezeigt.</p>
+          </div>
+          <div id="customer-communications-panel-reminders" class="customer-communication-tab-empty" role="tabpanel" aria-labelledby="customer-communications-tab-reminders" data-field-tab-panel="reminders" hidden>
+            <p class="subtle">Mahnungen werden hier künftig angezeigt.</p>
           </div>
         </article>
 
@@ -320,7 +445,12 @@
                 <article class="communication-entry">
                   <div class="communication-entry-heading">
                     <strong>{{ note.title }}</strong>
-                    <span class="pill">{% if note.source == "hub" %}Hub{% else %}Zoho{% endif %}</span>
+                    {% if can_manage_communications %}
+                      <div class="customer-activity-entry-actions" role="group" aria-label="Notizaktionen">
+                        {{ customer_note_entry_action(note, "edit") }}
+                        {{ customer_note_entry_action(note, "delete") }}
+                      </div>
+                    {% endif %}
                   </div>
                   {% if note.author or note.occurred_at %}
                     <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
@@ -334,7 +464,168 @@
             </div>
             <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
           </div>
+
+          {% if can_manage_communications %}
+            <dialog class="update-confirmation-dialog customer-note-edit-dialog" data-customer-note-edit-dialog aria-labelledby="customer-note-edit-heading">
+              <form method="post" data-customer-note-edit-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h3 id="customer-note-edit-heading">Notiz bearbeiten</h3>
+                <label>Titel<input name="title" maxlength="255" required data-customer-note-edit-title></label>
+                <label>Notiz<textarea name="content" rows="7" maxlength="30000" required data-customer-note-edit-content></textarea></label>
+                <div class="dialog-actions">
+                  <button class="button button-secondary" type="button" data-customer-note-edit-cancel>Abbrechen</button>
+                  <button class="button" type="submit">Änderungen speichern</button>
+                </div>
+              </form>
+            </dialog>
+
+            <dialog class="update-confirmation-dialog" data-customer-note-delete-dialog aria-labelledby="customer-note-delete-heading">
+              <form method="post" data-customer-note-delete-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h3 id="customer-note-delete-heading">Notiz löschen?</h3>
+                <p>Die Notiz <strong data-customer-note-delete-name></strong> wird aus dem Kosmos Hub und Zoho CRM entfernt.</p>
+                <div class="dialog-actions">
+                  <button class="button button-secondary" type="button" data-customer-note-delete-cancel>Abbrechen</button>
+                  <button class="button button-danger" type="submit">Notiz löschen</button>
+                </div>
+              </form>
+            </dialog>
+          {% endif %}
         </article>
+
+        <article id="customer-activities" class="card customer-detail-panel customer-activities-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Zoho CRM</p>
+              <h3>Aktivitäten</h3>
+            </div>
+            <div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
+              {{ customer_activity_action("Neuen Anruf anlegen", "call") }}
+              {{ customer_activity_action("Neue Aufgabe anlegen", "task") }}
+              {{ customer_activity_action("Neues Meeting anlegen", "meeting") }}
+            </div>
+          </div>
+          <div class="customer-activity-list">
+            {% if activity_calls or activity_tasks or activity_meetings %}
+              {% for call in activity_calls %}
+                <article class="customer-activity-entry">
+                  <div class="customer-activity-entry-heading">
+                    <strong>{{ call.name }}</strong>
+                    <div class="customer-activity-entry-controls">
+                      <span class="pill">{% if call.status == "planned" %}Geplant{% elif call.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
+                      <div class="customer-activity-entry-actions" role="group" aria-label="Anrufaktionen">
+                        {% if call.status == "planned" %}{{ customer_call_entry_action(call, "complete") }}{% endif %}
+                        {{ customer_call_entry_action(call, "edit") }}
+                        {{ customer_call_entry_action(call, "delete") }}
+                      </div>
+                    </div>
+                  </div>
+                  <p class="subtle">{% if call.direction == "outbound" %}Ausgehend{% else %}Eingehend{% endif %} · {{ call.starts_at | berlin_time }} · {{ call.duration_minutes }} Min.</p>
+                  {% for reminder in call.reminders %}<p class="subtle">{% if reminder.channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ reminder.minutes_before }} Min. vorher</p>{% endfor %}
+                  {% if call.description %}<p class="customer-activity-entry-description">{{ call.description }}</p>{% endif %}
+                </article>
+              {% endfor %}
+              {% for task in activity_tasks %}
+                <article id="task-{{ task.id }}" class="customer-activity-entry">
+                  <div class="customer-activity-entry-heading">
+                    <strong>{{ task.name }}</strong>
+                    <div class="customer-activity-entry-controls">
+                      <span class="pill">{% if task.status == "planned" %}Geplant{% elif task.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
+                      <div class="customer-activity-entry-actions" role="group" aria-label="Aufgabenaktionen">
+                        {% if task.status == "planned" %}{{ customer_task_entry_action(task, "complete") }}{% endif %}
+                        {{ customer_task_entry_action(task, "edit") }}
+                        {{ customer_task_entry_action(task, "delete") }}
+                      </div>
+                    </div>
+                  </div>
+                  <p class="subtle">Aufgabe · {{ task.due_at | berlin_time }}</p>
+                  {% if task.reminder_channel in ["popup", "email"] and task.reminder_minutes_before is not none %}<p class="subtle">{% if task.reminder_channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ task.reminder_minutes_before }} Min. vorher</p>{% endif %}
+                  {% if task.email_reminder_status == "failed" %}<p class="notice-warning">E-Mail-Erinnerung konnte nicht versendet werden: {{ task.email_reminder_last_error or "Unbekannter Fehler" }}</p>{% endif %}
+                  {% if task.description %}<p class="customer-activity-entry-description">{{ task.description }}</p>{% endif %}
+                </article>
+              {% endfor %}
+              {% for meeting in activity_meetings %}
+                <article class="customer-activity-entry">
+                  <div class="customer-activity-entry-heading">
+                    <strong>{{ meeting.name }}</strong>
+                    <div class="customer-activity-entry-controls">
+                      <span class="pill">{% if meeting.status == "planned" %}Geplant{% elif meeting.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
+                      <div class="customer-activity-entry-actions" role="group" aria-label="Meetingaktionen">
+                        {{ customer_meeting_entry_action(meeting, "edit") }}
+                        {{ customer_meeting_entry_action(meeting, "delete") }}
+                      </div>
+                    </div>
+                  </div>
+                  <p class="subtle">Meeting · {{ meeting.starts_at | berlin_time }} · {{ meeting.duration_minutes }} Min.</p>
+                  {% for reminder in meeting.reminders %}<p class="subtle">{% if reminder.channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ reminder.minutes_before }} Min. vorher</p>{% endfor %}
+                  {% if meeting.description %}<p class="customer-activity-entry-description">{{ meeting.description }}</p>{% endif %}
+                </article>
+              {% endfor %}
+            {% else %}
+              <p class="subtle customer-activity-empty">Noch keine Aktivitäten geplant.</p>
+            {% endif %}
+          </div>
+        </article>
+
+        <dialog class="update-confirmation-dialog" data-customer-call-complete-dialog aria-labelledby="customer-call-complete-heading">
+          <form method="post" data-customer-call-complete-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h3 id="customer-call-complete-heading">Anruf abschließen?</h3>
+            <p>Der Anruf <strong data-customer-call-complete-name></strong> wird als abgeschlossen gebucht.</p>
+            <div class="dialog-actions">
+              <button class="button button-secondary" type="button" data-customer-call-complete-cancel>Abbrechen</button>
+              <button class="button" type="submit">Abschließen</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="update-confirmation-dialog" data-customer-task-complete-dialog aria-labelledby="customer-task-complete-heading">
+          <form method="post" data-customer-task-complete-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h3 id="customer-task-complete-heading">Aufgabe abschließen?</h3>
+            <p>Die Aufgabe <strong data-customer-task-complete-name></strong> wird als abgeschlossen gebucht.</p>
+            <div class="dialog-actions">
+              <button class="button button-secondary" type="button" data-customer-task-complete-cancel>Abbrechen</button>
+              <button class="button" type="submit">Abschließen</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="update-confirmation-dialog" data-customer-call-delete-dialog aria-labelledby="customer-call-delete-heading">
+          <form method="post" data-customer-call-delete-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h3 id="customer-call-delete-heading">Anruf löschen?</h3>
+            <p>Der Anruf <strong data-customer-call-delete-name></strong> wird aus dem Kosmos Hub entfernt.</p>
+            <div class="dialog-actions">
+              <button class="button button-secondary" type="button" data-customer-call-delete-cancel>Abbrechen</button>
+              <button class="button button-danger" type="submit">Anruf löschen</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="update-confirmation-dialog" data-customer-task-delete-dialog aria-labelledby="customer-task-delete-heading">
+          <form method="post" data-customer-task-delete-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h3 id="customer-task-delete-heading">Aufgabe löschen?</h3>
+            <p>Die Aufgabe <strong data-customer-task-delete-name></strong> wird aus dem Kosmos Hub entfernt.</p>
+            <div class="dialog-actions">
+              <button class="button button-secondary" type="button" data-customer-task-delete-cancel>Abbrechen</button>
+              <button class="button button-danger" type="submit">Aufgabe löschen</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="update-confirmation-dialog" data-customer-meeting-delete-dialog aria-labelledby="customer-meeting-delete-heading">
+          <form method="post" data-customer-meeting-delete-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h3 id="customer-meeting-delete-heading">Meeting löschen?</h3>
+            <p>Das Meeting <strong data-customer-meeting-delete-name></strong> wird aus dem Kosmos Hub entfernt.</p>
+            <div class="dialog-actions">
+              <button class="button button-secondary" type="button" data-customer-meeting-delete-cancel>Abbrechen</button>
+              <button class="button button-danger" type="submit">Meeting löschen</button>
+            </div>
+          </form>
+        </dialog>
 
         <article class="card customer-detail-panel">
           <div class="customer-detail-panel-heading">
@@ -349,28 +640,7 @@
           </div>
           <div class="customer-section-expandable" data-expandable-section>
             <div data-expandable-content>
-              <div class="table-scroll">
-                <table class="customer-contacts-table">
-                <thead><tr><th>Name</th><th>E-Mail</th></tr></thead>
-                <tbody>
-                  {% for contact in detail.contacts %}
-                    <tr>
-                      <td><a href="/customers/{{ detail.entry.customer.id }}/contacts/{{ contact.id }}">{% if contact.salutation %}{{ contact.salutation }} {% endif %}<strong>{{ contact.name }}</strong></a></td>
-                      <td>
-                        {{ communication_email_address(contact.email) }}
-                        {% if contact.email and contact.secondary_email %}<br>{% endif %}
-                        {{ communication_email_address(contact.secondary_email, "2.: ") }}
-                        {% if (contact.email or contact.secondary_email) and contact.third_email %}<br>{% endif %}
-                        {{ communication_email_address(contact.third_email, "3.: ") }}
-                        {% if not contact.email and not contact.secondary_email and not contact.third_email %}-{% endif %}
-                      </td>
-                    </tr>
-                  {% else %}
-                    <tr><td colspan="2">Keine Zoho-Kontakte sind derzeit mit diesem Kunden verknüpft.</td></tr>
-                  {% endfor %}
-                </tbody>
-                </table>
-              </div>
+              {{ customer_contacts_table(detail.contacts, detail.entry.customer) }}
             </div>
             <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
           </div>
@@ -378,91 +648,6 @@
       </aside>
     </div>
   </section>
+  {% include "partials/customer_activity_composer.html" %}
 
-  {% if can_manage_communications %}
-    <div class="email-compose-layer" data-email-compose-layer data-email-template-url="/customers/{{ detail.entry.customer.id }}/communications/email-templates"{% if email_reply %} data-email-compose-reply-to-email-id="{{ email_reply.email_id }}" data-email-compose-reply-subject="{{ email_reply.subject }}"{% endif %}{% if open_email_composer %} data-email-compose-autostart{% endif %} hidden>
-      <button class="email-compose-backdrop" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen"></button>
-      <aside class="email-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="email-compose-title" aria-hidden="true" data-email-compose-drawer tabindex="-1">
-        <div class="email-compose-header">
-          <div>
-            <p class="eyebrow">Zoho CRM</p>
-            <h2 id="email-compose-title">E-Mail erstellen</h2>
-            <p class="subtle">Die Nachricht wird über Zoho CRM versendet und dem Kunden zugeordnet.</p>
-          </div>
-          <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
-        </div>
-
-        {% if communication.recipients and communication_senders %}
-          <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails" class="communication-form email-compose-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="template_id" value="" data-email-compose-template-id>
-            <input type="hidden" name="reply_to_email_id" value="{{ email_reply.email_id if email_reply else '' }}" data-email-compose-reply-to>
-            <label>Zoho-Vorlage
-              <select data-email-compose-template>
-                <option value="">Keine Vorlage verwenden</option>
-                {% for template in communication_templates %}
-                  <option value="{{ template.id }}">{{ template.module }} · {{ template.name }}{% if template.subject %} · {{ template.subject }}{% endif %}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <p class="subtle email-compose-template-status" data-email-compose-template-status>{% if not communication_templates %}Noch keine E-Mail-Vorlagen im Hub. Bitte zuerst im Accountbereich aus Zoho synchronisieren.{% endif %}</p>
-            <div class="email-compose-recipient-fields">
-              <label>Absender
-                <select name="sender_email" required>
-                  {% for sender in communication_senders %}
-                    <option value="{{ sender.email }}">{{ sender.name }} · {{ sender.email }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>Empfänger
-                <select name="recipient_key" required data-email-compose-recipient>
-                  {% for recipient in communication.recipients %}
-                    <option value="{{ recipient.key }}" data-recipient-email="{{ recipient.email }}"{% if email_reply and recipient.key == email_reply.recipient_key %} selected{% endif %}>{{ recipient.name }} · {{ recipient.email }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-            </div>
-            <label>Betreff<input name="subject" maxlength="500" required value="{{ email_reply.subject if email_reply else '' }}" data-email-compose-subject></label>
-            <label>Nachricht
-              <div class="email-rich-editor" data-email-rich-editor>
-                <div class="email-rich-editor-toolbar" role="toolbar" aria-label="Text formatieren">
-                  <button type="button" data-rich-command="bold" title="Fett" aria-label="Fett"><strong>B</strong></button>
-                  <button type="button" data-rich-command="italic" title="Kursiv" aria-label="Kursiv"><em>I</em></button>
-                  <button type="button" data-rich-command="underline" title="Unterstrichen" aria-label="Unterstrichen"><u>U</u></button>
-                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
-                  <label class="email-rich-editor-select">Schriftgröße
-                    <select data-rich-command="fontSize" aria-label="Schriftgröße">
-                      <option value="2">Klein</option>
-                      <option value="3" selected>Standard</option>
-                      <option value="4">Groß</option>
-                      <option value="5">Sehr groß</option>
-                    </select>
-                  </label>
-                  <label class="email-rich-editor-color">Schriftfarbe<input type="color" value="#1d2a2f" data-rich-color></label>
-                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
-                  <button type="button" data-rich-command="justifyLeft" title="Linksbündig" aria-label="Linksbündig">L</button>
-                  <button type="button" data-rich-command="justifyCenter" title="Zentriert" aria-label="Zentriert">C</button>
-                  <button type="button" data-rich-command="justifyRight" title="Rechtsbündig" aria-label="Rechtsbündig">R</button>
-                  <span class="email-rich-editor-divider" aria-hidden="true"></span>
-                  <button type="button" data-rich-command="insertUnorderedList" title="Aufzählung" aria-label="Aufzählung">UL</button>
-                  <button type="button" data-rich-command="insertOrderedList" title="Nummerierung" aria-label="Nummerierung">OL</button>
-                </div>
-                <div class="email-rich-editor-content" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Nachricht" data-email-compose-content data-placeholder="Nachricht schreiben ..."></div>
-              </div>
-              <textarea name="content" hidden data-email-compose-content-value></textarea>
-            </label>
-            <label class="bulk-action-confirmation"><input type="checkbox" name="confirmed" value="true" required> Ich bestätige den Versand dieser E-Mail über Zoho CRM.</label>
-            <div class="email-compose-actions">
-              <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
-              <button class="button" type="submit">E-Mail senden</button>
-            </div>
-          </form>
-        {% elif communication_sender_error %}
-          <p class="notice-warning">{{ communication_sender_error }}</p>
-        {% else %}
-          <p class="notice-warning">Für diesen Kunden ist keine gültige, aus Zoho synchronisierte E-Mail-Adresse vorhanden.</p>
-        {% endif %}
-      </aside>
-    </div>
-  {% endif %}
 {% endblock %}

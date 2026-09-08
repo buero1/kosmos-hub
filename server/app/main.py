@@ -1,15 +1,17 @@
 import asyncio
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, select, text
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import accounts, assistant, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, assistant, desktop_notifications, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
@@ -17,8 +19,18 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.fleet_refresh_run import FleetRefreshSiteResult
 from app.models.customer_contact import CustomerContact
-from app.models.customer_communication import CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
+from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
+from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder, CustomerTaskActivity
+from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
+from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
+from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_mailbox_email import HubMailboxEmail
+from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.email_compose_image import EmailComposeImage
+from app.models.email_composer_settings import EmailComposerSettings
+from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
+from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.models.hub_mailbox_email import HubMailboxAttachment
 from app.models.site_user_snapshot import SiteUserSnapshot
 from app.models.styling_settings import StylingSettings
 from app.models.module_layout import ModuleLayout
@@ -28,6 +40,7 @@ from app.mcp_server import hub_mcp, mcp_asgi_app
 from app.models.zoho_email_workflow_delivery import ZohoEmailWorkflowDelivery
 from app.models.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhook
 from app.models.zoho_email_content_import import ZohoEmailContentImport, ZohoEmailContentImportItem
+from app.models.zoho_email_attachment_import import ZohoEmailAttachmentImport, ZohoEmailAttachmentImportItem
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.services.hub_accounts import HubAccountService
@@ -40,10 +53,16 @@ from app.services.maintenance_worker import (
     process_pending_user_deletions,
     schedule_pending_user_deletions,
     schedule_pending_zoho_email_content_import,
+    schedule_pending_zoho_email_attachment_import,
+    schedule_pending_hub_mailbox_imap_import,
+    schedule_elapsed_customer_meetings,
+    schedule_hub_mailbox_imap_inbox_idle,
+    schedule_hub_mailbox_imap_sync_polling,
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_email_workflow_deliveries,
 )
+from app.services.task_email_reminder_worker import TaskEmailReminderWorker
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +87,69 @@ def _ensure_phase_one_schema() -> None:
     if "customer_contacts" not in table_names:
         CustomerContact.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created customer_contacts table.")
+    else:
+        contact_columns = {column["name"]: column for column in inspector.get_columns("customer_contacts")}
+        customer_id_column = contact_columns.get("customer_id")
+        zoho_id_column = contact_columns.get("zoho_id")
+        if customer_id_column is not None and not customer_id_column.get("nullable", False):
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE customer_contacts MODIFY COLUMN customer_id INT NULL"))
+            logger.info("Made customer_contacts.customer_id optional for Hub contacts.")
+        if zoho_id_column is not None and not zoho_id_column.get("nullable", False):
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE customer_contacts MODIFY COLUMN zoho_id VARCHAR(255) NULL"))
+            logger.info("Made customer_contacts.zoho_id optional for Hub contacts.")
 
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created customer_zoho_notes table.")
+
+    for activity_model in (
+        CustomerCallActivity,
+        CustomerCallReminder,
+        CustomerTaskActivity,
+        CustomerMeetingActivity,
+        CustomerMeetingReminder,
+        CustomerActivityReminderNotification,
+        HubDesktopDevice,
+    ):
+        if activity_model.__tablename__ not in table_names:
+            activity_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", activity_model.__tablename__)
+
+    optional_activity_customer_tables = (
+        "customer_call_activities",
+        "customer_meeting_activities",
+        "customer_activity_reminder_notifications",
+    )
+    for table_name in optional_activity_customer_tables:
+        if table_name not in table_names:
+            continue
+        customer_id_column = next(
+            (column for column in inspector.get_columns(table_name) if column["name"] == "customer_id"),
+            None,
+        )
+        if customer_id_column is not None and not customer_id_column.get("nullable", False):
+            with engine.begin() as connection:
+                connection.execute(text(f"ALTER TABLE {table_name} MODIFY COLUMN customer_id INT NULL"))
+            logger.info("Made %s.customer_id optional for calendar activities.", table_name)
+
+    if "customer_task_activities" in table_names:
+        task_columns = {column["name"] for column in inspector.get_columns("customer_task_activities")}
+        with engine.begin() as connection:
+            if "reminder_channel" not in task_columns:
+                connection.execute(
+                    text("ALTER TABLE customer_task_activities ADD COLUMN reminder_channel VARCHAR(16) NULL AFTER due_at")
+                )
+                logger.info("Added customer_task_activities.reminder_channel column.")
+            if "reminder_minutes_before" not in task_columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE customer_task_activities "
+                        "ADD COLUMN reminder_minutes_before INT NULL AFTER reminder_channel"
+                    )
+                )
+                logger.info("Added customer_task_activities.reminder_minutes_before column.")
 
     if "customer_zoho_emails" not in table_names:
         CustomerZohoEmail.__table__.create(bind=engine, checkfirst=True)
@@ -131,6 +209,10 @@ def _ensure_phase_one_schema() -> None:
         CustomerZohoEmailImage.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created customer_zoho_email_images table.")
 
+    if "customer_email_attachments" not in table_names:
+        CustomerEmailAttachment.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_email_attachments table.")
+
     if "customer_zoho_emails" in table_names:
         columns = {column["name"]: column for column in inspector.get_columns("customer_zoho_emails")}
         payload_column = columns.get("encrypted_payload_json")
@@ -174,6 +256,17 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added customer_zoho_emails mailbox-state folder index.")
+
+    if "hub_mailbox_accounts" not in table_names:
+        HubMailboxAccount.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_accounts table.")
+
+    if "hub_users" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("hub_users")}
+        if "reminder_email" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_users ADD COLUMN reminder_email VARCHAR(320) NULL"))
+            logger.info("Added hub_users.reminder_email column.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
@@ -252,6 +345,80 @@ def _ensure_phase_one_schema() -> None:
     if "zoho_email_content_import_items" not in table_names:
         ZohoEmailContentImportItem.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created zoho_email_content_import_items table.")
+
+    if "zoho_email_attachment_imports" not in table_names:
+        ZohoEmailAttachmentImport.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_attachment_imports table.")
+
+    if "zoho_email_attachment_import_items" not in table_names:
+        ZohoEmailAttachmentImportItem.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_email_attachment_import_items table.")
+
+    if "hub_mailbox_imap_imports" not in table_names:
+        HubMailboxImapImport.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_imap_imports table.")
+
+    if "hub_mailbox_imap_import_items" not in table_names:
+        HubMailboxImapImportItem.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_imap_import_items table.")
+
+    if "hub_mailbox_attachments" not in table_names:
+        HubMailboxAttachment.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_attachments table.")
+
+    if "hub_mailbox_imap_sync_states" not in table_names:
+        HubMailboxImapSyncState.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_imap_sync_states table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("hub_mailbox_imap_sync_states")}
+        additions = (
+            ("last_success_at", "DATETIME NULL"),
+            ("consecutive_failures", "INT NOT NULL DEFAULT 0"),
+            ("alerted_at", "DATETIME NULL"),
+        )
+        missing = tuple((name, definition) for name, definition in additions if name not in columns)
+        if missing:
+            with engine.begin() as connection:
+                for name, definition in missing:
+                    connection.execute(
+                        text(f"ALTER TABLE hub_mailbox_imap_sync_states ADD COLUMN {name} {definition}")
+                    )
+            logger.info(
+                "Added hub_mailbox_imap_sync_states columns: %s",
+                ", ".join(name for name, _ in missing),
+            )
+
+    if "customer_task_email_reminders" not in table_names:
+        CustomerTaskEmailReminder.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created customer_task_email_reminders table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("customer_task_email_reminders")}
+        if "minutes_before" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE customer_task_email_reminders "
+                        "ADD COLUMN minutes_before INT NOT NULL DEFAULT 0 AFTER sender_email"
+                    )
+                )
+            logger.info("Added customer_task_email_reminders.minutes_before column.")
+
+    if "email_composer_settings" not in table_names:
+        EmailComposerSettings.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created email_composer_settings table.")
+    else:
+        columns = {column["name"] for column in inspector.get_columns("email_composer_settings")}
+        with engine.begin() as connection:
+            if "signature_html" not in columns:
+                connection.execute(text("ALTER TABLE email_composer_settings ADD COLUMN signature_html MEDIUMTEXT NULL"))
+                logger.info("Added email_composer_settings.signature_html column.")
+            if "line_height" not in columns:
+                connection.execute(text("ALTER TABLE email_composer_settings ADD COLUMN line_height DOUBLE NOT NULL DEFAULT 1.1"))
+                logger.info("Added email_composer_settings.line_height column.")
+
+    if "email_compose_images" not in table_names:
+        EmailComposeImage.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created email_compose_images table.")
 
     if "user_deletion_batches" not in table_names:
         UserDeletionBatch.__table__.create(bind=engine, checkfirst=True)
@@ -411,8 +578,13 @@ async def lifespan(_: FastAPI):
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
         _backfill_customer_zoho_email_headers()
+        schedule_elapsed_customer_meetings()
         schedule_pending_user_deletions()
         schedule_pending_zoho_email_content_import()
+        schedule_pending_zoho_email_attachment_import()
+        schedule_pending_hub_mailbox_imap_import()
+        schedule_hub_mailbox_imap_inbox_idle()
+        schedule_hub_mailbox_imap_sync_polling()
         schedule_pending_zoho_email_history_import()
         schedule_pending_zoho_note_history_import()
         schedule_pending_zoho_email_workflow_deliveries()
@@ -441,6 +613,9 @@ async def lifespan(_: FastAPI):
                     settings.maintenance_runs_poll_interval_seconds,
                 )
             )
+        task_email_reminder_worker_task = asyncio.create_task(
+            TaskEmailReminderWorker(settings=settings, cipher=get_secret_cipher()).run_forever()
+        )
         try:
             yield
         finally:
@@ -455,6 +630,9 @@ async def lifespan(_: FastAPI):
                 maintenance_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await maintenance_task
+            task_email_reminder_worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task_email_reminder_worker_task
 
 
 def create_app() -> FastAPI:
@@ -478,6 +656,15 @@ def create_app() -> FastAPI:
                 request.state.hub_user = user
             request.state.mcp_actor = mcp_actor
             mcp_context_token = set_mcp_actor(mcp_actor)
+        elif _is_desktop_api_path(request.url.path):
+            user = _authenticated_desktop_user(request)
+            if user is None:
+                return PlainTextResponse(
+                    "Desktop bearer token required.",
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+                )
+            request.state.hub_user = user
         elif not _is_public_hub_path(request.url.path):
             user = _authenticated_hub_user(request)
             if user is None:
@@ -501,8 +688,8 @@ def create_app() -> FastAPI:
             or request.url.path.startswith("/users")
             or request.url.path == "/updates"
             or request.url.path.startswith("/plugin-installations")
-            or request.url.path.startswith("/update-plans")
             or request.url.path.startswith("/assistant")
+            or request.url.path.startswith("/api/v1/desktop")
         ):
             # Dynamic inventory, user, and update data must not be served from a browser cache.
             response.headers["Cache-Control"] = "no-store"
@@ -511,6 +698,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(registrations.router)
     app.include_router(accounts.router)
+    app.include_router(desktop_notifications.router)
     app.include_router(accounts.bootstrap_router)
     app.include_router(assistant.router)
     app.include_router(sites.router)
@@ -519,6 +707,7 @@ def create_app() -> FastAPI:
     app.include_router(site_inventory.router)
     app.include_router(site_updates.router)
     app.include_router(web.router)
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
     app.mount("/mcp", mcp_asgi_app)
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(
@@ -541,6 +730,10 @@ def _is_public_hub_path(path: str) -> bool:
 
 def _is_mcp_path(path: str) -> bool:
     return path == "/mcp" or path.startswith("/mcp/")
+
+
+def _is_desktop_api_path(path: str) -> bool:
+    return path == "/api/v1/desktop" or path.startswith("/api/v1/desktop/")
 
 
 def _authenticated_mcp_actor(request: Request) -> str | None:
@@ -568,6 +761,21 @@ def _authenticated_hub_user(request: Request):
         user = service.get_user(user_id)
         if user is None or not user.is_active or user.session_version != session_version:
             return None
+        db.expunge(user)
+        return user
+
+
+def _authenticated_desktop_user(request: Request):
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    with SessionLocal() as db:
+        service = HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+        authenticated = service.authenticate_desktop_device(token)
+        if authenticated is None:
+            return None
+        user, _device = authenticated
         db.expunge(user)
         return user
 

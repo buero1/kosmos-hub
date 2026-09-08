@@ -36,6 +36,17 @@
         background: linear-gradient(180deg, var(--bg) 0%, var(--bg-end) 100%);
         color: var(--ink);
       }
+      a:not(.button),
+      a:not(.button):visited {
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+      }
+      a:not(.button):hover {
+        color: var(--accent);
+        opacity: 0.74;
+        text-decoration: none;
+      }
       .app-shell {
         display: grid;
         grid-template-columns: 14.25rem minmax(0, 1fr);
@@ -354,11 +365,42 @@
       .customer-filter-panel {
         grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.55fr) minmax(220px, 0.75fr) auto;
       }
+      .customer-search-field {
+        position: relative;
+        min-width: 0;
+      }
       .customer-search-input {
         display: block;
         position: relative;
       }
-      .customer-search-input input { padding-right: 3rem; }
+      .customer-search-input input { padding-right: 5.35rem; }
+      .customer-search-input input[type="search"]::-webkit-search-cancel-button {
+        margin-right: 2.1rem;
+        cursor: pointer;
+      }
+      .customer-search-suggestions {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 0.35rem);
+        left: 0;
+        width: 100%;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: var(--panel);
+        box-shadow: 0 12px 25px rgba(40, 45, 44, 0.14);
+      }
+      .customer-search-suggestion {
+        display: grid;
+        gap: 0.12rem;
+        padding: 0.58rem 0.7rem;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .customer-search-suggestion + .customer-search-suggestion { border-top: 1px solid var(--border); }
+      .customer-search-suggestion:hover,
+      .customer-search-suggestion:focus-visible { background: var(--accent-soft); }
+      .customer-search-suggestion small { color: var(--muted); }
       .customer-filter-search-submit {
         position: absolute;
         top: 50%;
@@ -548,6 +590,10 @@
       .update-confirmation-safeguard input { width: 100%; }
       .update-confirmation-safeguard .subtle { margin: 0.35rem 0 0; }
       .dialog-actions { display: flex; justify-content: flex-end; gap: 0.65rem; }
+      .update-confirmation-dialog button.button.button-secondary {
+        border-color: var(--ink);
+        color: var(--ink);
+      }
       .fleet-refresh-status-card {
         margin: 1rem 0;
         padding: 1rem;
@@ -1833,37 +1879,46 @@
       .detail-list .card p {
         margin: 0.25rem 0;
       }
-      .customer-detail-heading {
+      .customer-detail-heading,
+      .detail-page-heading {
         align-items: flex-start;
         margin-bottom: 1.25rem;
       }
-      .customer-heading-title-row {
+      .customer-heading-title-row,
+      .detail-page-heading-title-row {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
         gap: 0.65rem;
       }
-      .customer-heading-title-row h2 { margin: 0; }
-      .customer-detail-heading-actions {
+      .customer-heading-title-row h2,
+      .detail-page-heading-title-row h2 { margin: 0; }
+      .customer-detail-heading-actions,
+      .detail-page-heading-actions {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 0.6rem;
       }
-      .customer-detail-heading-actions form { margin: 0; }
-      .customer-detail-heading-actions .button { margin: 0; }
-      .customer-detail-heading-actions [hidden] { display: none !important; }
+      .customer-detail-heading-actions form,
+      .detail-page-heading-actions form { margin: 0; }
+      .customer-detail-heading-actions .button,
+      .detail-page-heading-actions .button { margin: 0; }
+      .customer-detail-heading-actions [hidden],
+      .detail-page-heading-actions [hidden] { display: none !important; }
       .customer-edit-heading-actions {
         display: flex;
         align-items: center;
         gap: 0.6rem;
       }
       .customer-edit-heading-actions[hidden] { display: none; }
-      .customer-actions-menu {
+      .customer-actions-menu,
+      .detail-actions-menu {
         position: relative;
       }
-      .customer-actions-menu-trigger {
+      .customer-actions-menu-trigger,
+      .detail-actions-menu-trigger {
         display: grid;
         width: var(--control-v1-height);
         height: var(--control-v1-height);
@@ -1878,8 +1933,10 @@
         line-height: 1;
         list-style: none;
       }
-      .customer-actions-menu-trigger::-webkit-details-marker { display: none; }
-      .customer-actions-menu-popover {
+      .customer-actions-menu-trigger::-webkit-details-marker,
+      .detail-actions-menu-trigger::-webkit-details-marker { display: none; }
+      .customer-actions-menu-popover,
+      .detail-actions-menu-popover {
         position: absolute;
         z-index: 4;
         top: calc(100% + 0.45rem);
@@ -1891,12 +1948,55 @@
         background: var(--panel);
         box-shadow: 0 0.65rem 1.5rem rgba(29, 42, 47, 0.14);
       }
-      .customer-actions-menu-popover {
+      .customer-actions-menu-popover,
+      .detail-actions-menu-popover {
         display: grid;
         gap: 0.45rem;
       }
-      .customer-actions-menu-popover form { margin: 0; }
-      .customer-actions-menu-item { width: 100%; }
+      .customer-actions-menu-popover form,
+      .detail-actions-menu-popover form { margin: 0; }
+      .customer-actions-menu-item,
+      .detail-actions-menu-item { width: 100%; }
+      .customer-actions-menu-popover .button,
+      .detail-actions-menu-popover .button {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        width: 100%;
+        min-height: 2.35rem;
+        height: auto;
+        margin: 0;
+        padding: 0.55rem 0.65rem;
+        border: 0;
+        border-radius: var(--control-v1-radius);
+        background: transparent;
+        color: var(--ink);
+        font-weight: 700;
+        text-align: left;
+      }
+      .customer-actions-menu-popover .button:hover,
+      .detail-actions-menu-popover .button:hover {
+        background: var(--accent-soft);
+        color: var(--ink);
+      }
+      .customer-actions-menu-popover .button-danger,
+      .detail-actions-menu-popover .button-danger { color: var(--ink); }
+      .customer-actions-menu-popover button.button.button-secondary,
+      .detail-actions-menu-popover button.button.button-secondary,
+      .customer-actions-menu-popover button.button.button-danger,
+      .detail-actions-menu-popover button.button.button-danger {
+        background: transparent;
+        color: var(--ink);
+      }
+      .customer-actions-menu-popover button.button.button-secondary:hover,
+      .detail-actions-menu-popover button.button.button-secondary:hover {
+        background: var(--accent-soft);
+        color: var(--ink);
+      }
+      .customer-actions-menu-popover .button-danger:hover,
+      .detail-actions-menu-popover .button-danger:hover,
+      .customer-actions-menu-popover button.button.button-danger:hover,
+      .detail-actions-menu-popover button.button.button-danger:hover { background: #f6e2d9; color: #843a26; }
       .customer-detail-layout {
         display: grid;
         grid-template-columns: minmax(0, 1.55fr) minmax(17.5rem, 0.85fr);
@@ -1924,10 +2024,27 @@
       .customer-detail-panel-heading h3,
       .customer-detail-panel-heading p { margin: 0; }
       .customer-detail-panel-heading .subtle { margin-top: 0.35rem; }
-      .customer-email-compose-open {
-        width: 150px;
-        justify-content: center;
+      .customer-communication-tab-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.9rem;
       }
+      .customer-communication-tab-heading .subtle { margin: 0; }
+      .customer-communication-tab-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 0.9rem;
+      }
+      .customer-communication-tab-empty {
+        display: grid;
+        min-height: 10rem;
+        place-items: center;
+        border: 1px dashed var(--border);
+        border-radius: var(--control-v1-radius);
+      }
+      .customer-communication-tab-empty .subtle { margin: 0; }
       .field-tabs-list {
         display: flex;
         gap: 0.2rem;
@@ -2028,7 +2145,6 @@
         min-height: 1rem;
         margin: 0.35rem 0;
       }
-      .contact-create-card { max-width: 72rem; }
       .contact-create-form {
         margin-top: 0;
         padding-top: 0;
@@ -2037,13 +2153,27 @@
       .contact-create-form input,
       .contact-create-form select { width: 100%; }
       .contact-create-customer { max-width: 34rem; }
+      .customer-detail-side-column .contact-create-customer {
+        width: 100%;
+        max-width: 100%;
+      }
+      .customer-detail-side-column .contact-create-customer select {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .contact-create-selected-customer {
+        margin: -0.1rem 0 0;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
       .contact-create-hint { margin: -0.2rem 0 0; }
-      .contact-create-actions {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 0.6rem;
-        margin-top: 0.25rem;
+      .contact-link-form {
+        display: grid;
+        gap: 0.8rem;
+        margin: 0;
+        padding: 0;
+        border: 0;
       }
       .contacts-directory-table { min-width: 42rem; }
       .contacts-directory-table th:first-child,
@@ -2184,10 +2314,6 @@
         padding: 0.85rem 0;
         border-top: 1px solid var(--border);
       }
-      .communication-entry:first-of-type {
-        padding-top: 0;
-        border-top: 0;
-      }
       .communication-entry-heading {
         display: flex;
         align-items: center;
@@ -2202,6 +2328,95 @@
         cursor: pointer;
         font-weight: 700;
       }
+      .communication-content-with-actions { position: relative; }
+      .communication-content-with-actions > summary {
+        display: flex;
+        align-items: center;
+        min-height: var(--control-v1-height);
+        padding-right: 8rem;
+      }
+      .communication-email-actions {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.2rem;
+      }
+      a.communication-email-action,
+      button.communication-email-action {
+        display: grid;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        min-height: var(--control-v1-height);
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: var(--control-v1-radius);
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+        font: inherit;
+        text-decoration: none;
+      }
+      a.communication-email-action:hover,
+      button.communication-email-action:hover { background: var(--accent-soft); color: var(--accent); text-decoration: none; }
+      a.communication-email-action:focus-visible,
+      button.communication-email-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .communication-email-action-icon { display: block; width: 1.65rem; height: 1.65rem; }
+      .communication-email-actions-inline { position: static; justify-content: flex-end; margin: 0.3rem 0; }
+      .customer-activity-actions { display: flex; align-items: center; gap: 0.3rem; }
+      button.customer-activity-action {
+        display: grid;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        min-height: var(--control-v1-height);
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--control-v1-radius);
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+      }
+      button.customer-activity-action:hover { background: var(--accent-soft); color: var(--accent); }
+      button.customer-activity-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .customer-activity-action-icon { display: block; width: 1.6rem; height: 1.6rem; }
+      .customer-activity-list { display: grid; gap: 0.8rem; margin-top: 1rem; }
+      .customer-activity-entry { padding-top: 0.8rem; border-top: 1px solid var(--border); }
+      .customer-activity-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; }
+      .customer-activity-entry-controls,
+      .customer-activity-entry-actions { display: flex; align-items: center; gap: 0.3rem; }
+      .customer-activity-entry-action-form { margin: 0; }
+      .customer-activity-entry-heading .pill { flex: 0 0 auto; }
+      button.customer-activity-entry-action {
+        display: grid;
+        width: 1.9rem;
+        min-width: 1.9rem;
+        height: 1.9rem;
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: var(--control-v1-radius);
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      button.customer-activity-entry-action:hover { background: var(--accent-soft); color: var(--accent); }
+      button.customer-activity-entry-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .customer-activity-entry-action-icon { display: block; width: 1.3rem; height: 1.3rem; }
+      .customer-note-edit-dialog form { display: grid; gap: 0.85rem; }
+      .customer-note-edit-dialog label { display: grid; gap: 0.4rem; font-weight: 700; }
+      .customer-note-edit-dialog textarea { min-height: 9rem; resize: vertical; }
+      .customer-note-edit-dialog .dialog-actions { margin-top: 0.3rem; }
+      .customer-activity-entry .subtle { margin: 0.3rem 0 0; }
+      .customer-activity-entry-description { margin: 0.45rem 0 0; white-space: pre-wrap; }
+      .customer-activity-empty { margin: 0.8rem 0 0; }
       .communication-note-content {
         margin: 0.6rem 0 0;
         white-space: pre-wrap;
@@ -2265,14 +2480,19 @@
         display: inline;
         padding: 0;
         border: 0;
-        border-bottom: 1px solid currentColor;
         background: transparent;
         color: var(--accent);
         cursor: pointer;
         font: inherit;
+        font-weight: 700;
         text-align: left;
+        text-decoration: none;
       }
-      .email-address-link:hover { color: #075f4e; }
+      .email-address-link:hover {
+        color: var(--accent);
+        opacity: 0.74;
+        text-decoration: none;
+      }
       .email-compose-layer {
         position: fixed;
         z-index: 100;
@@ -2308,6 +2528,141 @@
       }
       .email-compose-layer.is-open .email-compose-backdrop { opacity: 1; }
       .email-compose-layer.is-open .email-compose-drawer { transform: translateX(0); }
+      .activity-compose-layer {
+        position: fixed;
+        z-index: 100;
+        inset: 0;
+      }
+      .activity-compose-layer[hidden] { display: none; }
+      .activity-compose-backdrop {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        border: 0;
+        background: rgba(29, 42, 47, 0.22);
+        cursor: default;
+        opacity: 0;
+        backdrop-filter: blur(5px);
+        transition: opacity 180ms ease;
+      }
+      .activity-compose-drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        width: max(28rem, 45vw);
+        height: 100dvh;
+        overflow-y: auto;
+        padding: 1.45rem;
+        border-left: 1px solid var(--border);
+        background: #fffdfa;
+        box-shadow: -24px 0 56px rgba(29, 42, 47, 0.18);
+        transform: translateX(103%);
+        transition: transform 220ms ease;
+      }
+      .activity-compose-layer.is-open .activity-compose-backdrop { opacity: 1; }
+      .activity-compose-layer.is-open .activity-compose-drawer { transform: translateX(0); }
+      .activity-compose-form { flex: 1; align-content: start; }
+      .activity-compose-form[hidden] { display: none; }
+      .activity-compose-two-columns,
+      .activity-compose-datetime {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.7rem;
+      }
+      .activity-compose-datetime {
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .activity-compose-datetime legend {
+        grid-column: 1 / -1;
+        margin-bottom: -0.35rem;
+        padding: 0;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .activity-time-picker { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) var(--control-v1-height); }
+      .activity-time-picker input {
+        min-width: 0;
+        border-radius: var(--control-v1-radius) 0 0 var(--control-v1-radius);
+      }
+      .activity-time-picker-toggle {
+        display: grid;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-left: 0;
+        border-radius: 0 var(--control-v1-radius) var(--control-v1-radius) 0;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: 1.1rem/1 sans-serif;
+      }
+      .activity-time-picker:focus-within .activity-time-picker-toggle { border-color: var(--accent); }
+      .activity-time-picker-toggle:hover { background: var(--accent-soft); color: var(--accent); }
+      .activity-time-picker-toggle svg { display: block; width: 1.15rem; height: 1.15rem; }
+      .activity-time-picker-options {
+        position: absolute;
+        z-index: 5;
+        top: calc(100% + 0.3rem);
+        right: 0;
+        left: 0;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-height: 14rem;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--control-v1-radius);
+        background: var(--panel);
+        box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.16);
+      }
+      .activity-time-picker-options[hidden] { display: none; }
+      .activity-time-picker-options button {
+        padding: 0.55rem 0.65rem;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+      .activity-time-picker-options button:hover,
+      .activity-time-picker-options button:focus-visible { background: var(--accent-soft); outline: none; }
+      .activity-time-picker-options button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+      .activity-time-picker-options button[hidden] { display: none; }
+      .activity-compose-reminder { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.84rem; }
+      .activity-compose-reminder-list { display: grid; gap: 0.5rem; }
+      .activity-compose-reminder-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--control-v1-height);
+        gap: 0.5rem;
+      }
+      .activity-compose-reminder-row-single { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .activity-compose-reminder-row.is-none [data-customer-call-reminder-minutes] {
+        pointer-events: none;
+        opacity: 0.45;
+      }
+      .activity-compose-reminder-action {
+        display: grid;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        font-size: 1.25rem;
+        line-height: 1;
+      }
+      .activity-compose-placeholder { display: grid; gap: 1rem; }
+      .activity-compose-placeholder[hidden] { display: none; }
       .email-compose-header {
         display: flex;
         align-items: flex-start;
@@ -2336,6 +2691,73 @@
       .email-compose-close:hover { border-color: var(--accent); color: var(--accent); }
       .email-compose-form { flex: 1; align-content: start; }
       .email-compose-template-status { min-height: 1.25rem; margin: -0.25rem 0 0; }
+      .email-recipient-search { position: relative; }
+      .email-recipient-search-results,
+      .email-template-search-results {
+        position: absolute;
+        z-index: 3;
+        inset: calc(100% + 0.3rem) 0 auto;
+        display: grid;
+        max-height: 15rem;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--control-v1-radius);
+        background: var(--panel);
+        box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.16);
+      }
+      .email-recipient-search-results[hidden],
+      .email-template-search-results[hidden] { display: none; }
+      .email-recipient-search-result,
+      .email-template-search-result {
+        width: 100%;
+        padding: 0.62rem 0.72rem;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+      .email-recipient-search-result:last-child,
+      .email-template-search-result:last-child { border-bottom: 0; }
+      .email-recipient-search-result:hover,
+      .email-recipient-search-result:focus-visible,
+      .email-template-search-result:hover,
+      .email-template-search-result:focus-visible { background: var(--accent-soft); outline: none; }
+      .email-recipient-search-result strong,
+      .email-recipient-search-result span,
+      .email-template-search-result strong,
+      .email-template-search-result span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .email-recipient-search-result span,
+      .email-template-search-result span { margin-top: 0.14rem; color: var(--muted); font-size: 0.78rem; }
+      .email-template-search { position: relative; }
+      .email-template-search-control { display: grid; grid-template-columns: minmax(0, 1fr) var(--control-v1-height); gap: 0; }
+      .email-template-search-control input { min-width: 0; margin: 0; border-radius: var(--control-v1-radius) 0 0 var(--control-v1-radius); }
+      .email-template-search-open { min-height: var(--control-v1-height); margin: 0; border-radius: 0 var(--control-v1-radius) var(--control-v1-radius) 0; font-size: 1.15rem; line-height: 1; }
+      .email-template-library { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 1.25rem; overflow: hidden; padding: 1.45rem; background: #fffdfa; }
+      .email-template-library[hidden] { display: none; }
+      .email-template-library-header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.85rem; align-items: center; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+      .email-template-library-header h3 { margin: 0; }
+      .email-template-library-layout { display: grid; grid-template-columns: 11.5rem minmax(0, 1fr); min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); }
+      .email-template-library-categories { min-height: 0; overflow-y: auto; padding: 0.55rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
+      .email-template-library-category { display: flex; justify-content: space-between; gap: 0.4rem; width: 100%; padding: 0.58rem 0.62rem; border: 0; border-radius: var(--control-v1-radius); background: transparent; color: var(--ink); cursor: pointer; font: 700 0.8rem "Trebuchet MS", sans-serif; text-align: left; }
+      .email-template-library-category:hover, .email-template-library-category:focus-visible, .email-template-library-category.is-active { background: var(--accent-soft); color: #075f4e; outline: none; }
+      .email-template-library-category small { color: var(--muted); font-size: 0.72rem; }
+      .email-template-library-content { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; gap: 0.75rem; padding: 0.85rem; }
+      .email-template-library-content > label { margin: 0; }
+      .email-template-library-list { min-height: 0; overflow-y: auto; border-top: 1px solid var(--border); }
+      .email-template-library-group { display: grid; gap: 0.35rem; padding-top: 0.75rem; }
+      .email-template-library-group h4 { margin: 0; color: var(--muted); font-size: 0.82rem; }
+      .email-compose-attachments { display: grid; gap: 0.45rem; padding-top: 0.15rem; }
+      .email-compose-attachment-controls { display: flex; align-items: center; gap: 0.55rem; }
+      button.email-compose-attachment-trigger { display: grid; width: var(--control-v2-height); min-width: var(--control-v2-height); height: var(--control-v2-height); min-height: var(--control-v2-height); place-items: center; margin: 0; padding: 0; font-size: 24px; line-height: 1; }
+      .email-compose-attachment-summary { color: var(--muted); font-size: 0.82rem; }
+      .email-compose-attachment-list { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+      .email-compose-attachment-list[hidden] { display: none; }
+      .email-compose-attachment-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); color: var(--muted); font-size: 0.8rem; }
+      .email-compose-attachment-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .email-compose-attachment-remove { flex: 0 0 auto; min-width: 1.55rem; height: 1.55rem; margin: 0; padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 1rem; line-height: 1; }
       .email-compose-recipient-fields {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2346,78 +2768,24 @@
         line-height: 1.5;
       }
       .email-rich-editor {
-        overflow: hidden;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: #fff;
-      }
-      .email-rich-editor:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(14, 124, 102, 0.14); }
-      .email-rich-editor-toolbar {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0.35rem;
-        padding: 0.45rem;
-        border-bottom: 1px solid var(--border);
-        background: #f7f3eb;
-      }
-      .email-rich-editor-toolbar button,
-      .email-rich-editor-toolbar select,
-      .email-rich-editor-toolbar input {
-        height: 2rem;
-        margin: 0;
-        border: 1px solid var(--border);
-        border-radius: 5px;
-        background: #fffdfa;
-        color: var(--ink);
-        font: inherit;
-      }
-      .email-rich-editor-toolbar button {
-        min-width: 2rem;
-        padding: 0 0.45rem;
-        cursor: pointer;
-        font-family: Georgia, "Times New Roman", serif;
-      }
-      .email-rich-editor-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
-      .email-rich-editor-toolbar select { padding: 0 1.45rem 0 0.45rem; }
-      .email-rich-editor-select,
-      .email-rich-editor-color {
-        display: flex !important;
-        align-items: center;
-        gap: 0.3rem;
-        color: var(--muted) !important;
-        font-size: 0.74rem !important;
-      }
-      .email-rich-editor-color input {
-        width: 2.2rem !important;
-        padding: 0.2rem !important;
-        cursor: pointer;
-      }
-      .email-rich-editor-divider {
-        width: 1px;
-        height: 1.45rem;
-        background: var(--border);
-      }
-      .email-rich-editor-content {
         min-height: 18rem;
-        padding: 0.8rem;
-        outline: 0;
-        color: var(--ink);
-        font-size: 1rem;
-        line-height: 1.5;
       }
-      .email-rich-editor-content:empty::before {
-        content: attr(data-placeholder);
-        color: #8c918b;
-        pointer-events: none;
+      .email-rich-editor .jodit-container {
+        min-height: 18rem;
+        border-color: var(--border);
+        border-radius: 9px;
+        box-shadow: none;
       }
-      .email-rich-editor-content a { color: var(--accent); }
-      .email-rich-editor-content p:first-child,
-      .email-rich-editor-content div:first-child { margin-top: 0; }
-      .email-rich-editor-content p:last-child,
-      .email-rich-editor-content div:last-child { margin-bottom: 0; }
+      .email-rich-editor .jodit-container:focus-within {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(14, 124, 102, 0.14);
+      }
+      .email-rich-editor .jodit-workplace,
+      .email-rich-editor .jodit-wysiwyg {
+        min-height: 18rem;
+      }
       /* Zoho layouts use tables for visual containers; keep their email-native styling intact. */
-      [data-email-compose-content] table {
+      .email-rich-editor .jodit-wysiwyg table {
         width: auto;
         border-collapse: separate;
         border-spacing: 0;
@@ -2426,13 +2794,30 @@
         border-radius: 0;
         background: transparent;
       }
-      [data-email-compose-content] th,
-      [data-email-compose-content] td {
+      .email-rich-editor .jodit-wysiwyg th,
+      .email-rich-editor .jodit-wysiwyg td {
         padding: 0;
         border-bottom: 0;
         text-align: initial;
         vertical-align: initial;
       }
+      .email-editor-button-dialog {
+        width: min(29rem, calc(100vw - 2rem));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 0;
+        background: var(--panel);
+        color: var(--ink);
+        box-shadow: 0 24px 70px rgba(29, 42, 47, 0.24);
+      }
+      .email-editor-button-dialog::backdrop { background: rgba(29, 42, 47, 0.34); }
+      .email-editor-button-dialog form { display: grid; gap: 0.85rem; padding: 1.15rem; }
+      .email-editor-button-dialog h3,
+      .email-editor-button-dialog p { margin: 0; }
+      .email-editor-button-dialog label { display: grid; gap: 0.38rem; font-weight: 700; }
+      .email-editor-button-dialog input { width: 100%; }
+      .email-editor-button-dialog-error { color: var(--danger, #b42318); font-size: 0.88rem; }
+      .email-editor-button-dialog .dialog-actions { margin-top: 0.15rem; }
       .email-compose-actions {
         display: flex;
         align-items: center;
@@ -2440,19 +2825,239 @@
         gap: 0.65rem;
         margin-top: 0.35rem;
       }
-      body.email-compose-open { overflow: hidden; }
+      body.email-compose-open,
+      body.activity-compose-open { overflow: hidden; }
       @media (max-width: 760px) {
         .customer-detail-layout { grid-template-columns: 1fr; }
-        .customer-detail-heading-actions { justify-content: flex-start; }
+        .customer-detail-heading-actions,
+        .detail-page-heading-actions { justify-content: flex-start; }
         .communication-grid,
         .communication-composer-grid { grid-template-columns: 1fr; }
         .communication-entry-heading { align-items: flex-start; }
         .communication-heading-actions { justify-content: flex-start; }
-        .email-compose-drawer { width: 100vw; }
+        .email-compose-drawer,
+        .activity-compose-drawer { width: 100vw; }
         .email-compose-recipient-fields { grid-template-columns: 1fr; }
-        .email-rich-editor-toolbar { gap: 0.25rem; }
-        .email-rich-editor-divider { display: none; }
+        .activity-compose-two-columns,
+        .activity-compose-datetime { grid-template-columns: 1fr; }
+        .email-template-library-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+        .email-template-library-categories { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); }
+        .email-template-library-category { flex: 0 0 auto; width: auto; }
       }
+      .calendar-page { display: grid; gap: 1rem; min-width: 0; }
+      .calendar-page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .calendar-navigation { display: flex; align-items: center; gap: 0.5rem; }
+      a.button.button-secondary.calendar-today-button {
+        margin: 0 0 0 1.25rem;
+        border-color: var(--border);
+        color: var(--ink);
+      }
+      .calendar-nav-button {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        color: var(--ink);
+        font: 24px/1 Georgia, serif;
+        text-decoration: none;
+      }
+      .calendar-nav-button:hover,
+      .calendar-nav-button:focus-visible { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+      .calendar-week-card {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: var(--panel);
+        box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.07);
+      }
+      .calendar-week-toolbar {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 3.8rem;
+        padding: 0.9rem 1.15rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .calendar-week-toolbar p { margin: 0; font-size: 1.2rem; font-weight: 700; }
+      .calendar-week-toolbar span { color: var(--muted); font: 700 0.76rem "Trebuchet MS", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+      .calendar-week-scroll { max-height: calc(100vh - 14rem); min-height: 33rem; overflow: auto; }
+      .calendar-week-grid {
+        display: grid;
+        grid-template-columns: 4.4rem repeat(7, minmax(9rem, 1fr));
+        min-width: 67.4rem;
+        background: var(--border);
+        gap: 1px;
+      }
+      .calendar-week-heading {
+        position: sticky;
+        z-index: 3;
+        top: 0;
+        display: grid;
+        grid-template-columns: auto;
+        align-content: center;
+        align-items: center;
+        justify-content: center;
+        min-height: 30px;
+        height: 30px;
+        padding: 0 0.45rem;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .calendar-week-heading span { font: 700 0.76rem "Trebuchet MS", sans-serif; white-space: nowrap; }
+      .calendar-week-heading strong { font-size: 1.25rem; }
+      .calendar-week-heading small {
+        grid-column: 1 / -1;
+        color: #805c35;
+        font: 0.68rem/1.2 "Trebuchet MS", sans-serif;
+        text-align: center;
+      }
+      .calendar-week-heading.is-today { background: var(--accent-soft); color: #075f4e; }
+      .calendar-week-heading.is-weekend { background: #f3f3f1; }
+      .calendar-week-heading.is-today.is-weekend { background: var(--accent-soft); }
+      .calendar-week-heading.is-holiday { background: #f8efe1; color: #704c28; }
+      .calendar-week-heading.is-today.is-holiday { background: #e6f2e9; }
+      .calendar-week-heading.is-holiday { height: auto; min-height: 3.25rem; padding-block: 0.35rem; }
+      .calendar-week-corner { display: flex; justify-content: flex-start; padding-left: 0.85rem; color: var(--muted); font: 700 0.72rem "Trebuchet MS", sans-serif; letter-spacing: 0.06em; text-transform: uppercase; }
+      .calendar-time-labels {
+        display: grid;
+        grid-template-rows: repeat(24, 4.5rem);
+        height: 108rem;
+        background: var(--panel);
+      }
+      .calendar-time-labels span {
+        position: relative;
+        top: -0.6rem;
+        padding-left: 0.85rem;
+        color: var(--muted);
+        font: 0.78rem/1 "Trebuchet MS", sans-serif;
+      }
+      .calendar-day-column {
+        position: relative;
+        display: grid;
+        grid-template-rows: repeat(48, 2.25rem);
+        height: 108rem;
+        background: #fffefa;
+      }
+      .calendar-day-column.is-weekend { background: #f7f7f5; }
+      .calendar-day-column.is-today { background: #fbfffd; }
+      .calendar-day-column.is-holiday { background: #fff8ee; }
+      .calendar-day-column.is-today.is-holiday { background: #f4fbf5; }
+      .calendar-slot {
+        display: block;
+        width: 100%;
+        height: 2.25rem;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-bottom: 1px solid #e8e3db;
+        border-radius: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+      .calendar-slot:nth-child(2n) { border-bottom-color: var(--border); }
+      button.calendar-slot:hover,
+      button.calendar-slot:focus-visible { background: color-mix(in srgb, var(--accent-soft) 72%, transparent); outline: none; }
+      .calendar-slot-chooser {
+        position: fixed;
+        z-index: 20;
+        display: grid;
+        min-width: 11.5rem;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--panel);
+        box-shadow: 0 0.7rem 1.5rem rgba(29, 42, 47, 0.18);
+      }
+      .calendar-slot-chooser[hidden] { display: none; }
+      .calendar-slot-chooser button {
+        min-height: 2.35rem;
+        padding: 0.45rem 0.7rem;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: 0.84rem "Trebuchet MS", sans-serif;
+        text-align: left;
+      }
+      .calendar-slot-chooser button:last-child { border-bottom: 0; }
+      .calendar-slot-chooser button:hover,
+      .calendar-slot-chooser button:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
+      .calendar-event {
+        position: absolute;
+        z-index: 1;
+        right: auto;
+        left: 0.3rem;
+        width: calc(100% - 0.6rem);
+        border: 0;
+        display: grid;
+        align-content: start;
+        gap: 0.1rem;
+        min-height: 2rem;
+        overflow: hidden;
+        padding: 0.28rem 0.4rem;
+        border-radius: 6px;
+        color: #fffdf8;
+        font: inherit;
+        text-align: left;
+        text-decoration: none;
+        box-shadow: 0 0.25rem 0.6rem rgba(29, 42, 47, 0.13);
+      }
+      button.calendar-event { cursor: pointer; }
+      .calendar-event:hover,
+      .calendar-event:focus-visible { z-index: 2; filter: brightness(0.93); outline: 2px solid var(--ink); outline-offset: 1px; }
+      .calendar-event-call { background: #949494; }
+      .calendar-event-meeting { background: #297db8; }
+      .calendar-event.is-completed { background: #6c8c7d; opacity: 0.78; }
+      .calendar-event.is-cancelled { background: #8a837b; opacity: 0.72; text-decoration: line-through; }
+      .calendar-event-time { font: 700 0.68rem/1.15 "Trebuchet MS", sans-serif; }
+      .calendar-event strong { font: 700 0.78rem/1.18 "Trebuchet MS", sans-serif; overflow-wrap: anywhere; }
+      .calendar-event small { font: 0.68rem/1.15 "Trebuchet MS", sans-serif; overflow-wrap: anywhere; }
+      .calendar-compose-dialog {
+        width: min(34rem, calc(100vw - 2rem));
+        max-height: calc(100dvh - 2rem);
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: #fffdfa;
+        color: var(--ink);
+        box-shadow: 0 1.5rem 4rem rgba(29, 42, 47, 0.28);
+      }
+      .calendar-compose-dialog::backdrop { background: rgba(29, 42, 47, 0.3); backdrop-filter: blur(4px); }
+      .calendar-compose-form { display: grid; gap: 0.85rem; padding: 1.25rem; }
+      .calendar-compose-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
+      .calendar-compose-header .eyebrow { margin: 0 0 0.35rem; }
+      .calendar-compose-header h2 { margin: 0; }
+      .calendar-compose-close {
+        display: grid;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        place-items: center;
+        margin: 0;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ink);
+        font: 1.55rem/1 sans-serif;
+      }
+      .calendar-compose-close:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+      .calendar-compose-form label { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.84rem; }
+      .calendar-compose-form input,
+      .calendar-compose-form select,
+      .calendar-compose-form textarea { width: 100%; }
+      .calendar-compose-two-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
+      .calendar-compose-actions { display: flex; justify-content: flex-end; gap: 0.6rem; padding-top: 0.2rem; }
       @media (max-width: 900px) {
         .app-shell { grid-template-columns: 1fr; }
         .app-sidebar {
@@ -2489,6 +3094,8 @@
           padding: 0.52rem 0.62rem;
           white-space: nowrap;
         }
+        .calendar-page-header { align-items: center; flex-direction: row; }
+        .calendar-week-scroll { max-height: 38rem; }
         .app-main { padding: 1.15rem 1rem 2rem; }
       }
       .capability-summary {
@@ -2682,6 +3289,22 @@
         font-size: var(--hub-control-font-size, var(--control-v1-font-size));
         line-height: 1.2;
       }
+      input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]):not([type="color"]):not([type="range"]),
+      select:not([multiple]),
+      textarea {
+        border: 1px solid var(--border);
+        background: color-mix(in srgb, var(--panel) 92%, white);
+        box-shadow: none;
+        color: var(--ink);
+        font-family: inherit;
+      }
+      input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]):not([type="color"]):not([type="range"]):focus,
+      select:not([multiple]):focus,
+      textarea:focus {
+        border-color: var(--accent);
+        outline: none;
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+      }
       button.button,
       a.button {
         display: inline-flex;
@@ -2694,19 +3317,6 @@
         padding: var(--hub-control-padding, var(--control-v1-padding));
         border-radius: var(--hub-control-radius, var(--control-v1-radius));
         font-size: var(--hub-control-font-size, var(--control-v1-font-size));
-      }
-      .email-rich-editor-toolbar {
-        --hub-control-height: var(--control-v2-height);
-        --hub-control-font-size: var(--control-v2-font-size);
-        --hub-control-padding: var(--control-v2-padding);
-        --hub-control-radius: var(--control-v2-radius);
-      }
-      .email-rich-editor-toolbar button,
-      .email-rich-editor-toolbar select,
-      .email-rich-editor-toolbar input {
-        height: var(--hub-control-height);
-        border-radius: var(--hub-control-radius);
-        font-size: var(--hub-control-font-size);
       }
       .styling-page-layout {
         display: grid;
@@ -2915,7 +3525,7 @@
       }
     </style>
   </head>
-  <body>
+  <body data-email-composer-font-family="{{ email_composer_settings.font_family }}" data-email-composer-font-size="{{ email_composer_settings.font_size }}" data-email-composer-line-height="{{ email_composer_settings.line_height }}">
     <div class="app-shell">
       <aside class="app-sidebar" aria-label="Hauptnavigation">
         <div class="app-brand">
@@ -2929,14 +3539,14 @@
         <nav class="app-navigation" aria-label="Bereiche">
           <a href="/"{% if request.url.path == "/" %} class="is-active"{% endif %}>Dashboard</a>
           <a href="/sites"{% if request.url.path.startswith("/sites") %} class="is-active"{% endif %}>Sites</a>
-          <a href="/customers"{% if request.url.path.startswith("/customers") %} class="is-active"{% endif %}>Customers</a>
-          <a href="/contacts"{% if request.url.path.startswith("/contacts") %} class="is-active"{% endif %}>Kontakte</a>
+          <a href="/customers"{% if request.url.path.startswith("/customers") and "/contacts/" not in request.url.path %} class="is-active"{% endif %}>Customers</a>
+          <a href="/calendar"{% if request.url.path.startswith("/calendar") %} class="is-active"{% endif %}>Kalender</a>
+          <a href="/contacts"{% if request.url.path.startswith("/contacts") or "/contacts/" in request.url.path %} class="is-active"{% endif %}>Kontakte</a>
           <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>
           <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
           <a href="/backups"{% if request.url.path.startswith("/backups") %} class="is-active"{% endif %}>Backups</a>
           <a href="/updates"{% if request.url.path.startswith("/updates") %} class="is-active"{% endif %}>Update workbench</a>
           <a href="/plugin-installations"{% if request.url.path.startswith("/plugin-installations") %} class="is-active"{% endif %}>Plugin installation</a>
-          <a href="/update-plans"{% if request.url.path.startswith("/update-plans") %} class="is-active"{% endif %}>Plans</a>
           <a href="/assistant"{% if request.url.path.startswith("/assistant") %} class="is-active"{% endif %}>Assistant</a>
           <a href="/account"{% if request.url.path.startswith("/account") %} class="is-active"{% endif %}>Account</a>
           <a href="/styling"{% if request.url.path.startswith("/styling") %} class="is-active"{% endif %}>Styling</a>
@@ -2947,7 +3557,12 @@
         {% block content %}{% endblock %}
       </main>
     </div>
+    {% if can_use_global_email_composer and not request.url.path.startswith('/emails') %}
+      {% include "partials/global_mailbox_composer.html" %}
+    {% endif %}
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link rel="stylesheet" href="/static/jodit-editor.css?v=1">
+    <script src="/static/jodit-editor.js?v=11"></script>
     <script>
       (function () {
         var adminIconPaths = [
@@ -3073,7 +3688,7 @@
           form.remove();
         });
 
-        var emailComposerLayer = document.querySelector("[data-email-compose-layer]");
+        var emailComposerLayer = document.querySelector("[data-email-compose-layer]:not([data-global-mailbox-composer]):not([data-legacy-email-composer])");
         if (emailComposerLayer) {
           var emailComposerDrawer = emailComposerLayer.querySelector("[data-email-compose-drawer]");
           var emailComposerRecipient = emailComposerLayer.querySelector("[data-email-compose-recipient]");
@@ -3091,33 +3706,25 @@
 
           function syncEmailComposerContent() {
             if (emailComposerContent && emailComposerContentValue) {
-              emailComposerContentValue.value = emailComposerContent.innerHTML;
+              emailComposerContentValue.value = window.KosmosEmailEditors
+                ? window.KosmosEmailEditors.getHTML(emailComposerContent)
+                : emailComposerContent.innerHTML;
             }
           }
 
-          function runEmailComposerCommand(command, value) {
-            if (!emailComposerContent) { return; }
-            emailComposerContent.focus();
-            document.execCommand("styleWithCSS", false, false);
-            document.execCommand(command, false, value || null);
-            syncEmailComposerContent();
+          function setEmailComposerContent(content) {
+            if (!emailComposerContent) return;
+            if (window.KosmosEmailEditors) {
+              window.KosmosEmailEditors.setHTML(emailComposerContent, content || "");
+            } else {
+              emailComposerContent.innerHTML = content || "";
+              syncEmailComposerContent();
+            }
           }
 
           if (emailComposerContent && emailComposerContentValue) {
             emailComposerContent.addEventListener("input", syncEmailComposerContent);
             emailComposerContent.addEventListener("blur", syncEmailComposerContent);
-            emailComposerLayer.addEventListener("mousedown", function (event) {
-              if (event.target.closest("button[data-rich-command]")) { event.preventDefault(); }
-            });
-            emailComposerLayer.querySelectorAll("button[data-rich-command]").forEach(function (control) {
-              control.addEventListener("click", function () { runEmailComposerCommand(control.dataset.richCommand || ""); });
-            });
-            emailComposerLayer.querySelectorAll("select[data-rich-command]").forEach(function (control) {
-              control.addEventListener("change", function () { runEmailComposerCommand(control.dataset.richCommand || "", control.value); });
-            });
-            emailComposerLayer.querySelectorAll("[data-rich-color]").forEach(function (control) {
-              control.addEventListener("input", function () { runEmailComposerCommand("foreColor", control.value); });
-            });
             if (emailComposerForm) { emailComposerForm.addEventListener("submit", syncEmailComposerContent); }
           }
 
@@ -3135,16 +3742,15 @@
                 return;
               }
               var templateBaseUrl = emailComposerLayer.dataset.emailTemplateUrl;
-              if (!templateBaseUrl) {
-                setEmailComposerTemplateStatus("Vorlage ausgewählt. Bitte einen Kontakt aus der Ergebnisliste wählen, damit Platzhalter gesetzt werden.");
-                return;
-              }
-              setEmailComposerTemplateStatus("Vorlage wird geladen ...");
-              var templateUrl = templateBaseUrl + "/" + encodeURIComponent(templateId);
+              var isPreview = !templateBaseUrl;
+              setEmailComposerTemplateStatus(isPreview ? "Vorlage wird als Entwurf geladen ..." : "Vorlage wird geladen ...");
+              var templateUrl = isPreview
+                ? "/emails/compose/templates/" + encodeURIComponent(templateId)
+                : templateBaseUrl + "/" + encodeURIComponent(templateId);
               var recipientKey = emailComposerRecipientKey && emailComposerRecipientKey.value
                 ? emailComposerRecipientKey.value
                 : (emailComposerRecipient && emailComposerRecipient.tagName === "SELECT" ? emailComposerRecipient.value : "");
-              if (recipientKey) {
+              if (!isPreview && recipientKey) {
                 templateUrl += "?recipient_key=" + encodeURIComponent(recipientKey);
               }
               window.fetch(templateUrl, {
@@ -3158,19 +3764,23 @@
               }).then(function (template) {
                 if (requestId !== emailComposerTemplateRequest) { return; }
                 if (emailComposerSubject) { emailComposerSubject.value = template.subject || ""; }
-                if (emailComposerContent) { emailComposerContent.innerHTML = template.content || ""; }
+                if (emailComposerContent) {
+                  setEmailComposerContent(template.content || "");
+                }
                 syncEmailComposerContent();
                 var unresolved = Array.isArray(template.unresolved_placeholders) ? template.unresolved_placeholders : [];
                 setEmailComposerTemplateStatus(
-                  unresolved.length
+                  isPreview && unresolved.length
+                    ? "Vorlage als Entwurf geladen. Nach Auswahl eines Kontakts werden Platzhalter automatisch ersetzt."
+                    : unresolved.length
                     ? "Vorlage geladen. Nicht aufgelöste Platzhalter: " + unresolved.join(", ")
-                    : "Vorlage „" + (template.name || "Zoho") + "“ als bearbeitbarer Entwurf geladen."
+                    : "Vorlage „" + (template.name || "E-Mail") + "“ als bearbeitbarer Entwurf geladen."
                 );
               }).catch(function (error) {
                 if (requestId !== emailComposerTemplateRequest) { return; }
                 emailComposerTemplateId.value = "";
                 emailComposerTemplate.value = "";
-                setEmailComposerTemplateStatus(error.message || "Die Zoho-Vorlage konnte nicht geladen werden.");
+                setEmailComposerTemplateStatus(error.message || "Die E-Mail-Vorlage konnte nicht geladen werden.");
               });
             });
           }
@@ -3238,6 +3848,1462 @@
           }
         }
 
+        var globalMailboxComposer = document.querySelector("[data-global-mailbox-composer]");
+        if (globalMailboxComposer) {
+          var globalMailboxDrawer = globalMailboxComposer.querySelector("[data-email-compose-drawer]");
+          var globalMailboxForm = globalMailboxComposer.querySelector("[data-global-mailbox-compose-form]");
+          var globalMailboxSender = globalMailboxComposer.querySelector("[data-global-mailbox-compose-sender]");
+          var globalMailboxRecipient = globalMailboxComposer.querySelector("[data-email-compose-recipient]");
+          var globalMailboxRecipientKey = globalMailboxComposer.querySelector("[data-email-compose-recipient-key]");
+          var globalMailboxRecipientCustomerId = globalMailboxComposer.querySelector("[data-email-compose-recipient-customer-id]");
+          var globalMailboxRecipientName = globalMailboxComposer.querySelector("[data-email-compose-recipient-name]");
+          var globalMailboxDraftId = globalMailboxComposer.querySelector("[data-email-compose-draft-id]");
+          var globalMailboxReplyTo = globalMailboxComposer.querySelector("[data-email-compose-reply-to]");
+          var globalMailboxForwardFrom = globalMailboxComposer.querySelector("[data-email-compose-forward-from]");
+          var globalMailboxCcField = globalMailboxComposer.querySelector("[data-global-mailbox-compose-cc-field]");
+          var globalMailboxCc = globalMailboxComposer.querySelector("[data-email-compose-cc]");
+          var globalMailboxSubject = globalMailboxComposer.querySelector("[data-email-compose-subject]");
+          var globalMailboxContent = globalMailboxComposer.querySelector("[data-email-compose-content]");
+          var globalMailboxContentValue = globalMailboxComposer.querySelector("[data-email-compose-content-value]");
+          var globalMailboxStatus = globalMailboxComposer.querySelector("[data-email-compose-template-status]");
+          var globalMailboxSubmit = globalMailboxComposer.querySelector("[data-global-mailbox-compose-submit]");
+          var globalMailboxSaveDraft = globalMailboxComposer.querySelector("[data-global-mailbox-compose-save-draft]");
+          var globalMailboxRecipientResults = globalMailboxComposer.querySelector("[data-global-mailbox-compose-recipient-results]");
+          var globalMailboxCcResults = globalMailboxComposer.querySelector("[data-global-mailbox-compose-cc-results]");
+          var globalMailboxTemplate = globalMailboxComposer.querySelector("[data-email-compose-template]");
+          var globalMailboxTemplateId = globalMailboxComposer.querySelector("[data-email-compose-template-id]");
+          var globalMailboxTemplateSearch = globalMailboxComposer.querySelector("[data-global-mailbox-template-search]");
+          var globalMailboxTemplateResults = globalMailboxComposer.querySelector("[data-global-mailbox-template-search-results]");
+          var globalMailboxTemplateLibrary = globalMailboxComposer.querySelector("[data-global-mailbox-template-library]");
+          var globalMailboxTemplateLibraryOpen = globalMailboxComposer.querySelector("[data-global-mailbox-template-library-open]");
+          var globalMailboxTemplateLibraryBack = globalMailboxComposer.querySelector("[data-global-mailbox-template-library-back]");
+          var globalMailboxTemplateLibrarySearch = globalMailboxComposer.querySelector("[data-global-mailbox-template-library-search]");
+          var globalMailboxTemplateCategories = globalMailboxComposer.querySelector("[data-global-mailbox-template-library-categories]");
+          var globalMailboxTemplateLibraryList = globalMailboxComposer.querySelector("[data-global-mailbox-template-library-list]");
+          var globalMailboxAttachmentInput = globalMailboxComposer.querySelector("[data-email-compose-attachments]");
+          var globalMailboxAttachmentOpen = globalMailboxComposer.querySelector("[data-email-compose-attachments-open]");
+          var globalMailboxAttachmentSummary = globalMailboxComposer.querySelector("[data-email-compose-attachment-summary]");
+          var globalMailboxAttachmentList = globalMailboxComposer.querySelector("[data-email-compose-attachment-list]");
+          var globalMailboxLoaded = false;
+          var globalMailboxLoading = null;
+          var globalMailboxTemplates = [];
+          var globalMailboxCategory = "";
+          var globalMailboxDefaultSenderEmail = "";
+          var globalMailboxDefaultTemplateId = "";
+          var globalMailboxNeedsNewEmailDefaults = false;
+          var globalMailboxTemplateRequest = 0;
+          var globalMailboxAttachments = [];
+          var globalMailboxRecipientTimer = 0;
+          var globalMailboxCcTimer = 0;
+          var globalMailboxSuggestedRecipients = [];
+          var globalMailboxSuggestedCustomerId = "";
+          var globalMailboxSuggestedRequest = 0;
+          var globalMailboxDraftTimer = 0;
+          var globalMailboxDraftSavePromise = null;
+          var globalMailboxDraftDirty = false;
+          var globalMailboxDraftSession = 0;
+          var globalMailboxDraftStartedAt = 0;
+          var globalMailboxSubmitting = false;
+
+          function globalMailboxStatusMessage(message) {
+            if (globalMailboxStatus) globalMailboxStatus.textContent = message;
+          }
+
+          function globalMailboxOption(select, value, label) {
+            var option = document.createElement("option");
+            option.value = String(value || "");
+            option.textContent = label;
+            select.append(option);
+          }
+
+          function globalMailboxSyncContent() {
+            if (globalMailboxContent && globalMailboxContentValue) {
+              globalMailboxContentValue.value = window.KosmosEmailEditors
+                ? window.KosmosEmailEditors.getHTML(globalMailboxContent)
+                : globalMailboxContent.innerHTML;
+            }
+          }
+
+          function globalMailboxSetContent(content) {
+            if (!globalMailboxContent) return;
+            if (window.KosmosEmailEditors) {
+              window.KosmosEmailEditors.setHTML(globalMailboxContent, content || "");
+            } else {
+              globalMailboxContent.innerHTML = content || "";
+              globalMailboxSyncContent();
+            }
+          }
+
+          function globalMailboxUpdateSubmit() {
+            if (!globalMailboxSubmit) return;
+            globalMailboxSubmit.disabled = !(
+              globalMailboxSender && globalMailboxSender.value &&
+              globalMailboxRecipient && globalMailboxRecipient.validity.valid
+            );
+          }
+
+          function globalMailboxClearRecipientResults() {
+            if (!globalMailboxRecipientResults) return;
+            globalMailboxRecipientResults.replaceChildren();
+            globalMailboxRecipientResults.hidden = true;
+          }
+
+          function globalMailboxClearCcResults() {
+            if (!globalMailboxCcResults) return;
+            globalMailboxCcResults.replaceChildren();
+            globalMailboxCcResults.hidden = true;
+          }
+
+          function globalMailboxShowSuggestedRecipients() {
+            if (!globalMailboxRecipient || globalMailboxRecipient.value.trim()) return;
+            globalMailboxRenderRecipients(globalMailboxSuggestedRecipients);
+          }
+
+          function globalMailboxCcSearchTerm() {
+            if (!globalMailboxCc) return "";
+            var addresses = globalMailboxCc.value.split(",");
+            return (addresses[addresses.length - 1] || "").trim();
+          }
+
+          function globalMailboxShowSuggestedCcRecipients() {
+            if (globalMailboxCcSearchTerm()) return;
+            globalMailboxRenderCcRecipients(globalMailboxSuggestedRecipients);
+          }
+
+          function globalMailboxLoadSuggestedRecipients(customerId) {
+            var normalizedCustomerId = String(customerId || "");
+            var requestId = ++globalMailboxSuggestedRequest;
+            globalMailboxSuggestedCustomerId = normalizedCustomerId;
+            globalMailboxSuggestedRecipients = [];
+            if (!normalizedCustomerId) return Promise.resolve([]);
+            return window.fetch("/emails/compose/customers/" + encodeURIComponent(normalizedCustomerId) + "/recipients", { credentials: "same-origin" })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Die verknüpften Kontakte konnten nicht geladen werden.");
+                  return payload.recipients || [];
+                });
+              })
+              .then(function (recipients) {
+                if (requestId !== globalMailboxSuggestedRequest || globalMailboxSuggestedCustomerId !== normalizedCustomerId) return [];
+                globalMailboxSuggestedRecipients = recipients;
+                globalMailboxShowSuggestedRecipients();
+                globalMailboxStatusMessage(recipients.length
+                  ? "Verknüpfte Kontakte auswählen oder Adresse eingeben."
+                  : "Keine verknüpften Kontakt-E-Mail-Adressen gefunden.");
+                return recipients;
+              })
+              .catch(function (error) {
+                if (requestId === globalMailboxSuggestedRequest) globalMailboxStatusMessage(error.message || "Die verknüpften Kontakte konnten nicht geladen werden.");
+                return [];
+              });
+          }
+
+          function globalMailboxClearRecipient() {
+            if (globalMailboxRecipientKey) globalMailboxRecipientKey.value = "";
+            if (globalMailboxRecipientCustomerId) globalMailboxRecipientCustomerId.value = "";
+            if (globalMailboxRecipientName) globalMailboxRecipientName.value = "";
+            if (globalMailboxForm) globalMailboxForm.action = "/emails/send";
+            globalMailboxComposer.dataset.emailTemplateUrl = "";
+          }
+
+          function globalMailboxSetAttachments(attachments) {
+            globalMailboxAttachments = attachments.slice();
+            if (globalMailboxAttachmentInput) {
+              var transfer = new DataTransfer();
+              globalMailboxAttachments.forEach(function (attachment) { transfer.items.add(attachment); });
+              globalMailboxAttachmentInput.files = transfer.files;
+            }
+            if (globalMailboxAttachmentSummary) {
+              globalMailboxAttachmentSummary.textContent = globalMailboxAttachments.length
+                ? globalMailboxAttachments.length + (globalMailboxAttachments.length === 1 ? " Anhang ausgewählt" : " Anhänge ausgewählt")
+                : "Keine Anhänge ausgewählt";
+            }
+            if (!globalMailboxAttachmentList) return;
+            globalMailboxAttachmentList.replaceChildren();
+            globalMailboxAttachments.forEach(function (attachment, index) {
+              var item = document.createElement("li");
+              var name = document.createElement("span");
+              var remove = document.createElement("button");
+              name.textContent = attachment.name;
+              remove.type = "button";
+              remove.className = "email-compose-attachment-remove";
+              remove.setAttribute("aria-label", attachment.name + " entfernen");
+              remove.title = "Anhang entfernen";
+              remove.textContent = "x";
+              remove.addEventListener("click", function () {
+                globalMailboxSetAttachments(globalMailboxAttachments.filter(function (_attachment, itemIndex) { return itemIndex !== index; }));
+              });
+              item.append(name, remove);
+              globalMailboxAttachmentList.append(item);
+            });
+            globalMailboxAttachmentList.hidden = !globalMailboxAttachments.length;
+          }
+
+          function globalMailboxHasDraftContent() {
+            globalMailboxSyncContent();
+            var messageText = (globalMailboxContentValue && globalMailboxContentValue.value || "")
+              .replace(/<[^>]*>/g, " ")
+              .replace(/&nbsp;/gi, " ")
+              .trim();
+            return Boolean(
+              (globalMailboxRecipient && globalMailboxRecipient.value.trim()) ||
+              (globalMailboxCc && globalMailboxCc.value.trim()) ||
+              (globalMailboxSubject && globalMailboxSubject.value.trim()) ||
+              messageText ||
+              (globalMailboxTemplateId && globalMailboxTemplateId.value)
+            );
+          }
+
+          function globalMailboxClearDraftTimer() {
+            if (!globalMailboxDraftTimer) return;
+            window.clearTimeout(globalMailboxDraftTimer);
+            globalMailboxDraftTimer = 0;
+          }
+
+          function globalMailboxScheduleDraftSave() {
+            if (!globalMailboxHasDraftContent()) return;
+            if (!globalMailboxDraftStartedAt) globalMailboxDraftStartedAt = Date.now();
+            globalMailboxDraftDirty = true;
+            if (globalMailboxDraftTimer || globalMailboxDraftSavePromise) return;
+            globalMailboxDraftTimer = window.setTimeout(function () {
+              globalMailboxDraftTimer = 0;
+              saveGlobalMailboxDraft({ automatic: true });
+            }, 30000);
+          }
+
+          function saveGlobalMailboxDraft(options) {
+            options = options || {};
+            if (!globalMailboxForm || !globalMailboxHasDraftContent()) {
+              globalMailboxDraftDirty = false;
+              return Promise.resolve(false);
+            }
+            var session = globalMailboxDraftSession;
+            if (globalMailboxDraftSavePromise) {
+              globalMailboxDraftDirty = true;
+              return globalMailboxDraftSavePromise.then(function () {
+                return options.force && session === globalMailboxDraftSession
+                  ? saveGlobalMailboxDraft(options)
+                  : true;
+              });
+            }
+            globalMailboxClearDraftTimer();
+            globalMailboxDraftDirty = false;
+            var data = new FormData(globalMailboxForm);
+            // Drafts retain text only; attachments are stored once the email is actually sent.
+            data.delete("attachments");
+            if (!options.automatic) globalMailboxSaveDraft.disabled = true;
+            if (!options.quiet) globalMailboxStatusMessage("Entwurf wird gespeichert ...");
+            var saving = window.fetch("/emails/drafts", { method: "POST", body: data, credentials: "same-origin" })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Der Entwurf konnte nicht gespeichert werden.");
+                  return payload;
+                });
+              })
+              .then(function (payload) {
+                if (session !== globalMailboxDraftSession) return true;
+                globalMailboxDraftId.value = String(payload.draft_id || "");
+                if (!options.quiet) globalMailboxStatusMessage("Entwurf gespeichert.");
+                return true;
+              })
+              .catch(function (error) {
+                globalMailboxDraftDirty = true;
+                if (session === globalMailboxDraftSession && !options.quiet) {
+                  globalMailboxStatusMessage(error.message || "Der Entwurf konnte nicht gespeichert werden.");
+                }
+                return false;
+              });
+            var completed = saving.finally(function () {
+              if (globalMailboxDraftSavePromise === completed) globalMailboxDraftSavePromise = null;
+              if (!options.automatic) globalMailboxSaveDraft.disabled = false;
+              if (globalMailboxDraftDirty) globalMailboxScheduleDraftSave();
+            });
+            globalMailboxDraftSavePromise = completed;
+            return completed;
+          }
+
+          function globalMailboxResetAction(applyNewEmailDefaults) {
+            globalMailboxDraftSession += 1;
+            globalMailboxDraftDirty = false;
+            globalMailboxDraftStartedAt = 0;
+            globalMailboxNeedsNewEmailDefaults = applyNewEmailDefaults !== false;
+            globalMailboxTemplateRequest += 1;
+            globalMailboxClearDraftTimer();
+            globalMailboxSuggestedRequest += 1;
+            globalMailboxSuggestedRecipients = [];
+            globalMailboxSuggestedCustomerId = "";
+            if (globalMailboxDraftId) globalMailboxDraftId.value = "";
+            if (globalMailboxReplyTo) globalMailboxReplyTo.value = "";
+            if (globalMailboxForwardFrom) globalMailboxForwardFrom.value = "";
+            if (globalMailboxSender) globalMailboxSender.value = "";
+            if (globalMailboxRecipient) globalMailboxRecipient.value = "";
+            globalMailboxClearRecipient();
+            globalMailboxClearRecipientResults();
+            if (globalMailboxCc) globalMailboxCc.value = "";
+            globalMailboxClearCcResults();
+            if (globalMailboxCcField) globalMailboxCcField.hidden = true;
+            if (globalMailboxSubject) globalMailboxSubject.value = "";
+            if (globalMailboxContent) {
+              globalMailboxSetContent("");
+            }
+            if (globalMailboxContentValue) globalMailboxContentValue.value = "";
+            if (globalMailboxTemplate) globalMailboxTemplate.value = "";
+            if (globalMailboxTemplateId) globalMailboxTemplateId.value = "";
+            if (globalMailboxTemplateSearch) globalMailboxTemplateSearch.value = "";
+            if (globalMailboxTemplateResults) {
+              globalMailboxTemplateResults.replaceChildren();
+              globalMailboxTemplateResults.hidden = true;
+            }
+            globalMailboxCloseLibrary();
+            globalMailboxSetAttachments([]);
+            globalMailboxApplyNewEmailDefaults();
+          }
+
+          function globalMailboxApplyNewEmailDefaults() {
+            if (!globalMailboxNeedsNewEmailDefaults || !globalMailboxLoaded) return;
+            globalMailboxNeedsNewEmailDefaults = false;
+            globalMailboxApplyDefaultSender();
+            var template = globalMailboxTemplates.find(function (item) {
+              return String(item.id) === String(globalMailboxDefaultTemplateId);
+            });
+            if (template) {
+              globalMailboxTemplate.value = template.id;
+              globalMailboxTemplateSearch.value = template.name;
+              globalMailboxTemplate.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            globalMailboxUpdateSubmit();
+          }
+
+          function globalMailboxApplyDefaultSender() {
+            globalMailboxSender.value = globalMailboxDefaultSenderEmail || (
+              Array.from(globalMailboxSender.options).find(function (option) { return option.value; }) || {}
+            ).value || "";
+          }
+
+          function globalMailboxLoadOptions() {
+            if (globalMailboxLoaded) return Promise.resolve();
+            if (globalMailboxLoading) return globalMailboxLoading;
+            globalMailboxStatusMessage("Absender werden geladen ...");
+            globalMailboxLoading = window.fetch("/emails/compose/options", { credentials: "same-origin" })
+              .then(function (response) {
+                if (!response.ok) throw new Error("Die E-Mail-Maske konnte nicht vorbereitet werden.");
+                return response.json();
+              })
+              .then(function (payload) {
+                globalMailboxSender.replaceChildren();
+                globalMailboxOption(globalMailboxSender, "", "Absender auswählen");
+                (payload.senders || []).forEach(function (sender) {
+                  globalMailboxOption(globalMailboxSender, sender.email, sender.name + " · " + sender.email);
+                });
+                globalMailboxSender.disabled = !(payload.senders || []).length;
+                globalMailboxTemplates = (payload.templates || []).map(function (template) {
+                  return { id: template.id, name: template.name, module: template.module, category: template.category || template.module, subject: template.subject || "" };
+                });
+                globalMailboxTemplate.replaceChildren();
+                globalMailboxOption(globalMailboxTemplate, "", "Keine Vorlage verwenden");
+                globalMailboxTemplates.forEach(function (template) { globalMailboxOption(globalMailboxTemplate, template.id, template.name); });
+                globalMailboxDefaultSenderEmail = payload.default_sender_email || "";
+                globalMailboxDefaultTemplateId = payload.default_template_id || "";
+                globalMailboxLoaded = true;
+                globalMailboxApplyNewEmailDefaults();
+                globalMailboxStatusMessage(payload.sender_error || "Kontakt oder E-Mail-Adresse eingeben.");
+                globalMailboxUpdateSubmit();
+              })
+              .catch(function (error) {
+                globalMailboxStatusMessage(error.message || "Die E-Mail-Maske konnte nicht vorbereitet werden.");
+                throw error;
+              })
+              .finally(function () { globalMailboxLoading = null; });
+            return globalMailboxLoading;
+          }
+
+          function globalMailboxSelectRecipient(recipient) {
+            if (!recipient || !recipient.key || !recipient.customer_id) return;
+            globalMailboxRecipient.value = recipient.email;
+            globalMailboxRecipientKey.value = recipient.key;
+            globalMailboxRecipientCustomerId.value = String(recipient.customer_id);
+            globalMailboxRecipientName.value = recipient.name || "";
+            globalMailboxForm.action = "/customers/" + encodeURIComponent(recipient.customer_id) + "/communications/emails";
+            globalMailboxComposer.dataset.emailTemplateUrl = "/customers/" + encodeURIComponent(recipient.customer_id) + "/communications/email-templates";
+            globalMailboxClearRecipientResults();
+            globalMailboxStatusMessage(recipient.name + " · " + recipient.customer_name + " ausgewählt.");
+            if (globalMailboxTemplate && globalMailboxTemplate.value) {
+              globalMailboxTemplate.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            globalMailboxUpdateSubmit();
+            globalMailboxScheduleDraftSave();
+          }
+
+          function globalMailboxRenderRecipients(recipients) {
+            globalMailboxClearRecipientResults();
+            recipients.forEach(function (recipient) {
+              var result = document.createElement("button");
+              var name = document.createElement("strong");
+              var detail = document.createElement("span");
+              result.type = "button";
+              result.className = "email-recipient-search-result";
+              result.setAttribute("role", "option");
+              name.textContent = recipient.name + " · " + recipient.email;
+              detail.textContent = recipient.customer_name;
+              result.append(name, detail);
+              result.addEventListener("click", function () { globalMailboxSelectRecipient(recipient); });
+              globalMailboxRecipientResults.append(result);
+            });
+            globalMailboxRecipientResults.hidden = !recipients.length;
+          }
+
+          function globalMailboxAppendCcRecipient(recipient) {
+            if (!globalMailboxCc || !recipient || !recipient.email) return;
+            var entries = globalMailboxCc.value.split(",");
+            var currentEntry = (entries.pop() || "").trim();
+            var addresses = entries.map(function (address) { return address.trim(); }).filter(Boolean);
+            var normalizedEmail = recipient.email.trim().toLowerCase();
+            if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(currentEntry) && currentEntry.toLowerCase() !== normalizedEmail) {
+              addresses.push(currentEntry);
+            }
+            if (!addresses.some(function (address) { return address.toLowerCase() === normalizedEmail; })) {
+              addresses.push(recipient.email);
+            }
+            globalMailboxCc.value = addresses.join(", ");
+            globalMailboxClearCcResults();
+            globalMailboxCc.focus();
+            globalMailboxScheduleDraftSave();
+          }
+
+          function globalMailboxRenderCcRecipients(recipients) {
+            globalMailboxClearCcResults();
+            recipients.forEach(function (recipient) {
+              var result = document.createElement("button");
+              var name = document.createElement("strong");
+              var detail = document.createElement("span");
+              result.type = "button";
+              result.className = "email-recipient-search-result";
+              result.setAttribute("role", "option");
+              name.textContent = recipient.name + " · " + recipient.email;
+              detail.textContent = recipient.customer_name;
+              result.append(name, detail);
+              result.addEventListener("click", function () { globalMailboxAppendCcRecipient(recipient); });
+              globalMailboxCcResults.append(result);
+            });
+            globalMailboxCcResults.hidden = !recipients.length;
+          }
+
+          function globalMailboxSearchRecipients(query, selectExact) {
+            if (!query) {
+              globalMailboxShowSuggestedRecipients();
+              return Promise.resolve(globalMailboxSuggestedRecipients);
+            }
+            if (query.length < 2) {
+              globalMailboxClearRecipientResults();
+              return Promise.resolve([]);
+            }
+            return window.fetch("/emails/compose/recipients?q=" + encodeURIComponent(query), { credentials: "same-origin" })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Die Empfänger konnten nicht geladen werden.");
+                  return payload.recipients || [];
+                });
+              })
+              .then(function (recipients) {
+                var exact = selectExact && recipients.find(function (recipient) { return (recipient.email || "").toLowerCase() === query.toLowerCase(); });
+                if (exact) globalMailboxSelectRecipient(exact);
+                else globalMailboxRenderRecipients(recipients);
+                return recipients;
+              })
+              .catch(function (error) {
+                globalMailboxStatusMessage(error.message || "Die Kontakte konnten nicht gesucht werden.");
+                return [];
+              });
+          }
+
+          function globalMailboxSearchCcRecipients(query) {
+            if (!query) {
+              globalMailboxShowSuggestedCcRecipients();
+              return Promise.resolve(globalMailboxSuggestedRecipients);
+            }
+            if (query.length < 2) {
+              globalMailboxClearCcResults();
+              return Promise.resolve([]);
+            }
+            return window.fetch("/emails/compose/recipients?q=" + encodeURIComponent(query), { credentials: "same-origin" })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Die Empfänger konnten nicht geladen werden.");
+                  return payload.recipients || [];
+                });
+              })
+              .then(function (recipients) {
+                globalMailboxRenderCcRecipients(recipients);
+                return recipients;
+              })
+              .catch(function () {
+                globalMailboxClearCcResults();
+                return [];
+              });
+          }
+
+          function globalMailboxCloseLibrary() {
+            globalMailboxTemplateLibrary.hidden = true;
+            globalMailboxForm.hidden = false;
+          }
+
+          function globalMailboxFilteredTemplates(query) {
+            var terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+            return globalMailboxTemplates.filter(function (template) {
+              var source = [template.name, template.subject, template.category, template.module].join(" ").toLowerCase();
+              return terms.every(function (term) { return source.indexOf(term) !== -1; });
+            });
+          }
+
+          function globalMailboxTemplateResult(template) {
+            var result = document.createElement("button");
+            var name = document.createElement("strong");
+            var detail = document.createElement("span");
+            result.type = "button";
+            result.className = "email-template-search-result";
+            result.setAttribute("role", "option");
+            name.textContent = template.name;
+            detail.textContent = template.category + " · " + (template.subject || template.module);
+            result.append(name, detail);
+            result.addEventListener("click", function () {
+              globalMailboxTemplate.value = template.id;
+              globalMailboxTemplateSearch.value = template.name;
+              globalMailboxTemplateResults.hidden = true;
+              globalMailboxCloseLibrary();
+              globalMailboxTemplate.dispatchEvent(new Event("change", { bubbles: true }));
+            });
+            return result;
+          }
+
+          function globalMailboxRenderLibrary() {
+            var query = globalMailboxTemplateLibrarySearch.value || "";
+            var available = query.trim()
+              ? globalMailboxFilteredTemplates(query)
+              : globalMailboxTemplates.filter(function (template) { return template.category === globalMailboxCategory; });
+            globalMailboxTemplateLibraryList.replaceChildren();
+            if (!available.length) {
+              var empty = document.createElement("p");
+              empty.className = "subtle";
+              empty.textContent = "Keine passende Vorlage gefunden.";
+              globalMailboxTemplateLibraryList.append(empty);
+              return;
+            }
+            var group = document.createElement("section");
+            var heading = document.createElement("h4");
+            group.className = "email-template-library-group";
+            heading.textContent = query.trim() ? "Suchergebnisse" : globalMailboxCategory;
+            group.append(heading);
+            available.forEach(function (template) { group.append(globalMailboxTemplateResult(template)); });
+            globalMailboxTemplateLibraryList.append(group);
+          }
+
+          function globalMailboxRenderCategories() {
+            var categories = Array.from(new Set(globalMailboxTemplates.map(function (template) { return template.category || template.module || "Weitere Vorlagen"; })));
+            if (!categories.includes(globalMailboxCategory)) globalMailboxCategory = categories[0] || "";
+            globalMailboxTemplateCategories.replaceChildren();
+            categories.forEach(function (category) {
+              var button = document.createElement("button");
+              var name = document.createElement("span");
+              var count = document.createElement("small");
+              button.type = "button";
+              button.className = "email-template-library-category" + (category === globalMailboxCategory ? " is-active" : "");
+              name.textContent = category;
+              count.textContent = String(globalMailboxTemplates.filter(function (template) { return template.category === category; }).length);
+              button.append(name, count);
+              button.addEventListener("click", function () {
+                globalMailboxCategory = category;
+                globalMailboxTemplateLibrarySearch.value = "";
+                globalMailboxRenderCategories();
+                globalMailboxRenderLibrary();
+              });
+              globalMailboxTemplateCategories.append(button);
+            });
+          }
+
+          function globalMailboxLoadTemplate() {
+            var templateId = globalMailboxTemplate.value;
+            globalMailboxTemplateId.value = templateId;
+            if (!templateId) return;
+            var requestId = ++globalMailboxTemplateRequest;
+            var baseUrl = globalMailboxComposer.dataset.emailTemplateUrl;
+            var isPreview = !baseUrl || !globalMailboxRecipientKey.value;
+            var templateUrl = isPreview
+              ? "/emails/compose/templates/" + encodeURIComponent(templateId)
+              : baseUrl + "/" + encodeURIComponent(templateId) + "?recipient_key=" + encodeURIComponent(globalMailboxRecipientKey.value);
+            globalMailboxStatusMessage(isPreview ? "Vorlage wird als Entwurf geladen ..." : "Vorlage wird geladen ...");
+            window.fetch(templateUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Die Zoho-Vorlage konnte nicht geladen werden.");
+                  return payload;
+                });
+              })
+              .then(function (template) {
+                if (requestId !== globalMailboxTemplateRequest) return;
+                globalMailboxSubject.value = template.subject || "";
+                globalMailboxSetContent(template.content || "");
+                globalMailboxSyncContent();
+                globalMailboxScheduleDraftSave();
+                var unresolved = Array.isArray(template.unresolved_placeholders) ? template.unresolved_placeholders : [];
+                globalMailboxStatusMessage(
+                  isPreview && unresolved.length
+                    ? "Vorlage als Entwurf geladen. Nach Auswahl eines Kontakts werden Platzhalter automatisch ersetzt."
+                    : unresolved.length
+                      ? "Vorlage geladen. Nicht aufgelöste Platzhalter: " + unresolved.join(", ")
+                      : "Vorlage wurde als bearbeitbarer Entwurf geladen."
+                );
+              })
+              .catch(function (error) {
+                if (requestId === globalMailboxTemplateRequest) {
+                  globalMailboxStatusMessage(error.message || "Die E-Mail-Vorlage konnte nicht geladen werden.");
+                }
+              });
+          }
+
+          function globalMailboxOpen(trigger) {
+            globalMailboxComposer.hidden = false;
+            globalMailboxComposer.classList.add("is-open");
+            globalMailboxDrawer.setAttribute("aria-hidden", "false");
+            document.body.classList.add("email-compose-open");
+            var customerId = trigger.dataset.emailComposeCustomerId || "";
+            globalMailboxLoadOptions().then(function () {
+              var recipientEmail = trigger.dataset.recipientEmail || "";
+              if (recipientEmail) {
+                globalMailboxRecipient.value = recipientEmail;
+                globalMailboxClearRecipient();
+                globalMailboxSearchRecipients(recipientEmail, true);
+              } else if (customerId) {
+                globalMailboxLoadSuggestedRecipients(customerId);
+              }
+              window.setTimeout(function () { (globalMailboxRecipient || globalMailboxSubject).focus(); }, 230);
+            });
+          }
+
+          function globalMailboxClose() {
+            var hasSavedDraft = Boolean(globalMailboxDraftId && globalMailboxDraftId.value);
+            var autosaveIsDue = globalMailboxDraftStartedAt && Date.now() - globalMailboxDraftStartedAt >= 30000;
+            if (hasSavedDraft || autosaveIsDue) saveGlobalMailboxDraft({ force: true, quiet: true });
+            globalMailboxComposer.classList.remove("is-open");
+            globalMailboxDrawer.setAttribute("aria-hidden", "true");
+            document.body.classList.remove("email-compose-open");
+            window.setTimeout(function () {
+              if (!globalMailboxComposer.classList.contains("is-open")) globalMailboxComposer.hidden = true;
+            }, 230);
+          }
+
+          function globalMailboxApplyAction(action) {
+            globalMailboxResetAction(false);
+            globalMailboxApplyDefaultSender();
+            if (action.recipient) {
+              globalMailboxSelectRecipient({
+                key: action.recipient.key,
+                name: action.recipient.name,
+                email: action.recipient.email,
+                customer_id: action.customer_id,
+                customer_name: action.customer_name || "Kundenkontakt"
+              });
+            }
+            globalMailboxReplyTo.value = action.reply_to_email_id || "";
+            globalMailboxForwardFrom.value = action.forward_from_email_id || "";
+            globalMailboxSubject.value = action.subject || "";
+            globalMailboxSetContent(action.content || "");
+            if (Array.isArray(action.cc_emails) && action.cc_emails.length) {
+              globalMailboxCc.value = action.cc_emails.join(", ");
+              globalMailboxCcField.hidden = false;
+            }
+            globalMailboxSyncContent();
+            globalMailboxStatusMessage(action.action === "reply_all" ? "Antwort an alle vorbereitet." : action.action === "forward" ? "Weiterleitung vorbereitet." : "Antwort vorbereitet.");
+            globalMailboxUpdateSubmit();
+            globalMailboxScheduleDraftSave();
+          }
+
+          function globalMailboxPrepareAction(button) {
+            var action = button.dataset.globalMailboxComposeAction || "";
+            var customerId = button.dataset.mailboxComposeCustomerId || "";
+            var emailId = button.dataset.mailboxComposeEmailId || "";
+            if (!action || !customerId || !emailId) return;
+            button.disabled = true;
+            globalMailboxResetAction(false);
+            globalMailboxOpen(button);
+            globalMailboxLoadOptions()
+              .then(function () {
+                return window.fetch("/emails/linked/" + encodeURIComponent(customerId) + "/" + encodeURIComponent(emailId) + "/compose-context?action=" + encodeURIComponent(action), { credentials: "same-origin" });
+              })
+              .then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (payload) {
+                  if (!response.ok) throw new Error(payload.detail || "Die E-Mail-Aktion konnte nicht vorbereitet werden.");
+                  return payload;
+                });
+              })
+              .then(globalMailboxApplyAction)
+              .catch(function (error) { globalMailboxStatusMessage(error.message || "Die E-Mail-Aktion konnte nicht vorbereitet werden."); })
+              .finally(function () { button.disabled = false; });
+          }
+
+          globalMailboxContent.addEventListener("input", globalMailboxSyncContent);
+          globalMailboxContent.addEventListener("blur", globalMailboxSyncContent);
+          globalMailboxSender.addEventListener("change", globalMailboxUpdateSubmit);
+          globalMailboxRecipient.addEventListener("input", function () {
+            globalMailboxClearRecipient();
+            globalMailboxUpdateSubmit();
+            if (globalMailboxRecipient.validity.valid) {
+              globalMailboxStatusMessage("Freie E-Mail-Adresse eingegeben. Die E-Mail wird direkt über Mittwald versendet.");
+            }
+            window.clearTimeout(globalMailboxRecipientTimer);
+            globalMailboxRecipientTimer = window.setTimeout(function () { globalMailboxSearchRecipients(globalMailboxRecipient.value.trim(), false); }, 180);
+          });
+          globalMailboxRecipient.addEventListener("focus", globalMailboxShowSuggestedRecipients);
+          globalMailboxRecipient.addEventListener("blur", function () { window.setTimeout(globalMailboxClearRecipientResults, 160); });
+          globalMailboxCc.addEventListener("input", function () {
+            window.clearTimeout(globalMailboxCcTimer);
+            globalMailboxCcTimer = window.setTimeout(function () { globalMailboxSearchCcRecipients(globalMailboxCcSearchTerm()); }, 180);
+          });
+          globalMailboxCc.addEventListener("focus", globalMailboxShowSuggestedCcRecipients);
+          globalMailboxCc.addEventListener("blur", function () { window.setTimeout(globalMailboxClearCcResults, 160); });
+          globalMailboxTemplate.addEventListener("change", globalMailboxLoadTemplate);
+          globalMailboxTemplateSearch.addEventListener("input", function () {
+            var matches = globalMailboxFilteredTemplates(globalMailboxTemplateSearch.value).slice(0, 8);
+            globalMailboxTemplateResults.replaceChildren();
+            matches.forEach(function (template) { globalMailboxTemplateResults.append(globalMailboxTemplateResult(template)); });
+            globalMailboxTemplateResults.hidden = !matches.length;
+          });
+          globalMailboxTemplateSearch.addEventListener("blur", function () { window.setTimeout(function () { globalMailboxTemplateResults.hidden = true; }, 160); });
+          globalMailboxTemplateLibraryOpen.addEventListener("click", function () {
+            globalMailboxForm.hidden = true;
+            globalMailboxTemplateLibrary.hidden = false;
+            globalMailboxTemplateLibrarySearch.value = "";
+            globalMailboxRenderCategories();
+            globalMailboxRenderLibrary();
+            globalMailboxTemplateLibrarySearch.focus();
+          });
+          globalMailboxTemplateLibraryBack.addEventListener("click", globalMailboxCloseLibrary);
+          globalMailboxTemplateLibrarySearch.addEventListener("input", globalMailboxRenderLibrary);
+          globalMailboxAttachmentOpen.addEventListener("click", function () { globalMailboxAttachmentInput.click(); });
+          globalMailboxAttachmentInput.addEventListener("change", function () {
+            globalMailboxSetAttachments(globalMailboxAttachments.concat(Array.from(globalMailboxAttachmentInput.files || [])));
+            globalMailboxScheduleDraftSave();
+          });
+          globalMailboxSaveDraft.addEventListener("click", function () {
+            saveGlobalMailboxDraft({ force: true });
+          });
+          globalMailboxForm.addEventListener("submit", function (event) {
+            globalMailboxSyncContent();
+            if (globalMailboxSubmitting || !globalMailboxHasDraftContent()) return;
+            event.preventDefault();
+            globalMailboxSubmitting = true;
+            globalMailboxClearDraftTimer();
+            globalMailboxSubmit.disabled = true;
+            saveGlobalMailboxDraft({ force: true, quiet: true }).finally(function () {
+              HTMLFormElement.prototype.submit.call(globalMailboxForm);
+            });
+          });
+          globalMailboxForm.querySelectorAll("input, select, textarea").forEach(function (control) {
+            if (control.type === "hidden" || control === globalMailboxContentValue) return;
+            control.addEventListener("input", globalMailboxScheduleDraftSave);
+            control.addEventListener("change", globalMailboxScheduleDraftSave);
+          });
+          globalMailboxContent.addEventListener("input", globalMailboxScheduleDraftSave);
+          document.addEventListener("click", function (event) {
+            var action = event.target.closest("[data-global-mailbox-compose-action]");
+            if (action) {
+              event.preventDefault();
+              globalMailboxPrepareAction(action);
+              return;
+            }
+            var opener = event.target.closest("[data-email-compose-open]");
+            if (opener) {
+              event.preventDefault();
+              globalMailboxResetAction();
+              globalMailboxOpen(opener);
+              return;
+            }
+            if (event.target.closest("[data-email-compose-close]")) globalMailboxClose();
+          });
+          document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !globalMailboxComposer.hidden) globalMailboxClose();
+          });
+        }
+
+        var customerActivityComposer = document.querySelector("[data-customer-activity-compose]");
+        if (customerActivityComposer) {
+          var customerActivityDrawer = customerActivityComposer.querySelector("[data-customer-activity-compose-drawer]");
+          var customerActivityTitle = customerActivityComposer.querySelector("[data-customer-activity-compose-title]");
+          var customerCallForm = customerActivityComposer.querySelector("[data-customer-call-form]");
+          var customerTaskForm = customerActivityComposer.querySelector("[data-customer-task-form]");
+          var customerActivityPlaceholder = customerActivityComposer.querySelector("[data-customer-activity-placeholder]");
+          var customerActivityPlaceholderCopy = customerActivityComposer.querySelector("[data-customer-activity-placeholder-copy]");
+          var customerCallName = customerActivityComposer.querySelector("[data-customer-call-name]");
+          var customerCallReminderList = customerActivityComposer.querySelector("[data-customer-call-reminders]");
+          var customerCallReminderTemplate = customerActivityComposer.querySelector("[data-customer-call-reminder-template]");
+          var customerCallTimePicker = customerActivityComposer.querySelector("[data-customer-call-time-picker]");
+          var customerCallStartTime = customerActivityComposer.querySelector("[data-customer-call-start-time]");
+          var customerCallTimeToggle = customerActivityComposer.querySelector("[data-customer-call-time-toggle]");
+          var customerCallTimeOptions = customerActivityComposer.querySelector("[data-customer-call-time-options]");
+          var customerCallStartDate = customerActivityComposer.querySelector("[data-customer-call-start-date]");
+          var customerCallStatus = customerCallForm.querySelector("[name=status]");
+          var customerCallDirection = customerCallForm.querySelector("[name=direction]");
+          var customerCallDuration = customerCallForm.querySelector("[name=duration_minutes]");
+          var customerCallDescription = customerCallForm.querySelector("[name=description]");
+          var customerCallSubmit = customerCallForm.querySelector("[data-customer-call-submit]");
+          var customerCallCreateAction = customerCallForm.dataset.customerCallCreateAction;
+          var customerCallCompleteDialog = document.querySelector("[data-customer-call-complete-dialog]");
+          var customerCallCompleteForm = customerCallCompleteDialog && customerCallCompleteDialog.querySelector("[data-customer-call-complete-form]");
+          var customerCallCompleteName = customerCallCompleteDialog && customerCallCompleteDialog.querySelector("[data-customer-call-complete-name]");
+          var customerCallDeleteDialog = document.querySelector("[data-customer-call-delete-dialog]");
+          var customerCallDeleteForm = customerCallDeleteDialog && customerCallDeleteDialog.querySelector("[data-customer-call-delete-form]");
+          var customerCallDeleteName = customerCallDeleteDialog && customerCallDeleteDialog.querySelector("[data-customer-call-delete-name]");
+          var customerTaskName = customerActivityComposer.querySelector("[data-customer-task-name]");
+          var customerTaskTimePicker = customerActivityComposer.querySelector("[data-customer-task-time-picker]");
+          var customerTaskDueTime = customerActivityComposer.querySelector("[data-customer-task-due-time]");
+          var customerTaskTimeToggle = customerActivityComposer.querySelector("[data-customer-task-time-toggle]");
+          var customerTaskTimeOptions = customerActivityComposer.querySelector("[data-customer-task-time-options]");
+          var customerTaskDueDate = customerActivityComposer.querySelector("[data-customer-task-due-date]");
+          var customerTaskStatus = customerTaskForm.querySelector("[name=status]");
+          var customerTaskReminderChannel = customerTaskForm.querySelector("[name=reminder_channel]");
+          var customerTaskReminderMinutes = customerTaskForm.querySelector("[name=reminder_minutes_before]");
+          var customerTaskDescription = customerTaskForm.querySelector("[name=description]");
+          var customerTaskSubmit = customerTaskForm.querySelector("[data-customer-task-submit]");
+          var customerTaskCreateAction = customerTaskForm.dataset.customerTaskCreateAction;
+          var customerTaskCompleteDialog = document.querySelector("[data-customer-task-complete-dialog]");
+          var customerTaskCompleteForm = customerTaskCompleteDialog && customerTaskCompleteDialog.querySelector("[data-customer-task-complete-form]");
+          var customerTaskCompleteName = customerTaskCompleteDialog && customerTaskCompleteDialog.querySelector("[data-customer-task-complete-name]");
+          var customerTaskDeleteDialog = document.querySelector("[data-customer-task-delete-dialog]");
+          var customerTaskDeleteForm = customerTaskDeleteDialog && customerTaskDeleteDialog.querySelector("[data-customer-task-delete-form]");
+          var customerTaskDeleteName = customerTaskDeleteDialog && customerTaskDeleteDialog.querySelector("[data-customer-task-delete-name]");
+          var customerMeetingForm = customerActivityComposer.querySelector("[data-customer-meeting-form]");
+          var customerMeetingName = customerActivityComposer.querySelector("[data-customer-meeting-name]");
+          var customerMeetingStatus = customerMeetingForm.querySelector("[name=status]");
+          var customerMeetingTimePicker = customerActivityComposer.querySelector("[data-customer-meeting-time-picker]");
+          var customerMeetingStartDate = customerActivityComposer.querySelector("[data-customer-meeting-start-date]");
+          var customerMeetingStartTime = customerActivityComposer.querySelector("[data-customer-meeting-start-time]");
+          var customerMeetingTimeToggle = customerActivityComposer.querySelector("[data-customer-meeting-time-toggle]");
+          var customerMeetingTimeOptions = customerActivityComposer.querySelector("[data-customer-meeting-time-options]");
+          var customerMeetingEndDate = customerActivityComposer.querySelector("[data-customer-meeting-end-date]");
+          var customerMeetingEndTime = customerActivityComposer.querySelector("[data-customer-meeting-end-time]");
+          var customerMeetingDuration = customerActivityComposer.querySelector("[data-customer-meeting-duration]");
+          var customerMeetingReminderList = customerActivityComposer.querySelector("[data-customer-meeting-reminders]");
+          var customerMeetingReminderTemplate = customerActivityComposer.querySelector("[data-customer-meeting-reminder-template]");
+          var customerMeetingDescription = customerActivityComposer.querySelector("[data-customer-meeting-description]");
+          var customerMeetingSubmit = customerMeetingForm.querySelector("[data-customer-meeting-submit]");
+          var customerMeetingCreateAction = customerMeetingForm.dataset.customerMeetingCreateAction;
+          var customerMeetingDeleteDialog = document.querySelector("[data-customer-meeting-delete-dialog]");
+          var customerMeetingDeleteForm = customerMeetingDeleteDialog && customerMeetingDeleteDialog.querySelector("[data-customer-meeting-delete-form]");
+          var customerMeetingDeleteName = customerMeetingDeleteDialog && customerMeetingDeleteDialog.querySelector("[data-customer-meeting-delete-name]");
+          var customerActivityCalendarMode = customerActivityComposer.dataset.activityComposerMode === "calendar";
+
+          function customerActivityClose() {
+            customerActivityComposer.classList.remove("is-open");
+            customerActivityDrawer.setAttribute("aria-hidden", "true");
+            document.body.classList.remove("activity-compose-open");
+            window.setTimeout(function () {
+              if (!customerActivityComposer.classList.contains("is-open")) customerActivityComposer.hidden = true;
+            }, 230);
+          }
+
+          function customerCallUpdateReminderRow(row) {
+            var channel = row.querySelector("[data-customer-call-reminder-channel]");
+            row.classList.toggle("is-none", channel && channel.value === "none");
+          }
+
+          function customerCallResetReminders() {
+            customerCallReminderList.querySelectorAll("[data-customer-call-reminder-row]:not([data-customer-call-reminder-primary])").forEach(function (row) {
+              row.remove();
+            });
+            customerCallReminderList.querySelectorAll("[data-customer-call-reminder-row]").forEach(customerCallUpdateReminderRow);
+          }
+
+          function customerCallAddReminder() {
+            var fragment = customerCallReminderTemplate.content.cloneNode(true);
+            customerCallReminderList.append(fragment);
+            var rows = customerCallReminderList.querySelectorAll("[data-customer-call-reminder-row]");
+            customerCallUpdateReminderRow(rows[rows.length - 1]);
+          }
+
+          function customerCallSetReminders(channels, minutes) {
+            customerCallResetReminders();
+            if (!channels.length) {
+              var primary = customerCallReminderList.querySelector("[data-customer-call-reminder-primary]");
+              primary.querySelector("[data-customer-call-reminder-channel]").value = "none";
+              customerCallUpdateReminderRow(primary);
+              return;
+            }
+            channels.forEach(function (channel, index) {
+              if (index) customerCallAddReminder();
+              var row = customerCallReminderList.querySelectorAll("[data-customer-call-reminder-row]")[index];
+              row.querySelector("[data-customer-call-reminder-channel]").value = channel;
+              row.querySelector("[data-customer-call-reminder-minutes]").value = minutes[index] || "5";
+              customerCallUpdateReminderRow(row);
+            });
+          }
+
+          function customerCallHideTimeOptions() {
+            customerCallTimeOptions.hidden = true;
+            customerCallStartTime.setAttribute("aria-expanded", "false");
+          }
+
+          function customerMeetingUpdateReminderRow(row) {
+            var channel = row.querySelector("[data-customer-meeting-reminder-channel]");
+            row.classList.toggle("is-none", channel && channel.value === "none");
+          }
+
+          function customerMeetingResetReminders() {
+            customerMeetingReminderList.querySelectorAll("[data-customer-meeting-reminder-row]:not([data-customer-meeting-reminder-primary])").forEach(function (row) {
+              row.remove();
+            });
+            customerMeetingReminderList.querySelectorAll("[data-customer-meeting-reminder-row]").forEach(customerMeetingUpdateReminderRow);
+          }
+
+          function customerMeetingAddReminder() {
+            var fragment = customerMeetingReminderTemplate.content.cloneNode(true);
+            customerMeetingReminderList.append(fragment);
+            var rows = customerMeetingReminderList.querySelectorAll("[data-customer-meeting-reminder-row]");
+            customerMeetingUpdateReminderRow(rows[rows.length - 1]);
+          }
+
+          function customerMeetingSetReminders(channels, minutes) {
+            customerMeetingResetReminders();
+            if (!channels.length) {
+              var primary = customerMeetingReminderList.querySelector("[data-customer-meeting-reminder-primary]");
+              primary.querySelector("[data-customer-meeting-reminder-channel]").value = "none";
+              customerMeetingUpdateReminderRow(primary);
+              return;
+            }
+            channels.forEach(function (channel, index) {
+              if (index) customerMeetingAddReminder();
+              var row = customerMeetingReminderList.querySelectorAll("[data-customer-meeting-reminder-row]")[index];
+              row.querySelector("[data-customer-meeting-reminder-channel]").value = channel;
+              row.querySelector("[data-customer-meeting-reminder-minutes]").value = minutes[index] || "5";
+              customerMeetingUpdateReminderRow(row);
+            });
+          }
+
+          function customerMeetingHideTimeOptions() {
+            customerMeetingTimeOptions.hidden = true;
+            customerMeetingStartTime.setAttribute("aria-expanded", "false");
+          }
+
+          function customerMeetingShowTimeOptions(filter) {
+            var normalizedFilter = (filter || "").trim();
+            var visibleOptions = 0;
+            var selectedOption = null;
+            customerMeetingTimeOptions.querySelectorAll("[data-customer-meeting-time-option]").forEach(function (option) {
+              var matches = !normalizedFilter || option.dataset.customerMeetingTimeOption.indexOf(normalizedFilter) === 0;
+              option.hidden = !matches;
+              var selected = option.dataset.customerMeetingTimeOption === customerMeetingStartTime.value;
+              option.setAttribute("aria-selected", selected ? "true" : "false");
+              if (matches) {
+                visibleOptions += 1;
+                if (selected) selectedOption = option;
+              }
+            });
+            customerMeetingTimeOptions.hidden = !visibleOptions;
+            customerMeetingStartTime.setAttribute("aria-expanded", visibleOptions ? "true" : "false");
+            if (selectedOption) {
+              window.requestAnimationFrame(function () {
+                customerMeetingTimeOptions.scrollTop = Math.max(
+                  0,
+                  selectedOption.offsetTop - ((customerMeetingTimeOptions.clientHeight - selectedOption.offsetHeight) / 2)
+                );
+              });
+            }
+          }
+
+          function customerMeetingUpdateEnd() {
+            if (!customerMeetingStartDate.value || !customerMeetingStartTime.value) return;
+            var start = new Date(customerMeetingStartDate.value + "T" + customerMeetingStartTime.value);
+            var duration = Number(customerMeetingDuration.value);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(duration)) return;
+            var end = new Date(start.getTime() + duration * 60 * 1000);
+            var pad = function (value) { return String(value).padStart(2, "0"); };
+            customerMeetingEndDate.value = end.getFullYear() + "-" + pad(end.getMonth() + 1) + "-" + pad(end.getDate());
+            customerMeetingEndTime.value = pad(end.getHours()) + ":" + pad(end.getMinutes());
+          }
+
+          function customerCallShowTimeOptions(filter) {
+            var normalizedFilter = (filter || "").trim();
+            var visibleOptions = 0;
+            var selectedOption = null;
+            customerCallTimeOptions.querySelectorAll("[data-customer-call-time-option]").forEach(function (option) {
+              var matches = !normalizedFilter || option.dataset.customerCallTimeOption.indexOf(normalizedFilter) === 0;
+              option.hidden = !matches;
+              var selected = option.dataset.customerCallTimeOption === customerCallStartTime.value;
+              option.setAttribute("aria-selected", selected ? "true" : "false");
+              if (matches) {
+                visibleOptions += 1;
+                if (selected) selectedOption = option;
+              }
+            });
+            customerCallTimeOptions.hidden = !visibleOptions;
+            customerCallStartTime.setAttribute("aria-expanded", visibleOptions ? "true" : "false");
+            if (selectedOption) {
+              window.requestAnimationFrame(function () {
+                customerCallTimeOptions.scrollTop = Math.max(
+                  0,
+                  selectedOption.offsetTop - ((customerCallTimeOptions.clientHeight - selectedOption.offsetHeight) / 2)
+                );
+              });
+            }
+          }
+
+          function customerTaskHideTimeOptions() {
+            customerTaskTimeOptions.hidden = true;
+            customerTaskDueTime.setAttribute("aria-expanded", "false");
+          }
+
+          function customerTaskShowTimeOptions(filter) {
+            var normalizedFilter = (filter || "").trim();
+            var visibleOptions = 0;
+            var selectedOption = null;
+            customerTaskTimeOptions.querySelectorAll("[data-customer-task-time-option]").forEach(function (option) {
+              var matches = !normalizedFilter || option.dataset.customerTaskTimeOption.indexOf(normalizedFilter) === 0;
+              option.hidden = !matches;
+              var selected = option.dataset.customerTaskTimeOption === customerTaskDueTime.value;
+              option.setAttribute("aria-selected", selected ? "true" : "false");
+              if (matches) {
+                visibleOptions += 1;
+                if (selected) selectedOption = option;
+              }
+            });
+            customerTaskTimeOptions.hidden = !visibleOptions;
+            customerTaskDueTime.setAttribute("aria-expanded", visibleOptions ? "true" : "false");
+            if (selectedOption) {
+              window.requestAnimationFrame(function () {
+                customerTaskTimeOptions.scrollTop = Math.max(
+                  0,
+                  selectedOption.offsetTop - ((customerTaskTimeOptions.clientHeight - selectedOption.offsetHeight) / 2)
+                );
+              });
+            }
+          }
+
+          function customerActivityCurrentStart() {
+            var berlinParts = new Intl.DateTimeFormat("en-GB", {
+              timeZone: "Europe/Berlin",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hourCycle: "h23"
+            }).formatToParts(new Date()).reduce(function (parts, part) {
+              if (part.type !== "literal") parts[part.type] = Number(part.value);
+              return parts;
+            }, {});
+            var start = new Date(Date.UTC(
+              berlinParts.year,
+              berlinParts.month - 1,
+              berlinParts.day,
+              berlinParts.hour,
+              berlinParts.minute,
+              berlinParts.second
+            ));
+            var minutesToNextHalfHour = start.getUTCMinutes() < 30
+              ? 30 - start.getUTCMinutes()
+              : 60 - start.getUTCMinutes();
+            var secondsToNextHalfHour = (minutesToNextHalfHour * 60) - start.getUTCSeconds();
+
+            start.setUTCSeconds(0, 0);
+            start.setUTCMinutes(start.getUTCMinutes() + minutesToNextHalfHour);
+            if (secondsToNextHalfHour < 10 * 60) start.setUTCMinutes(start.getUTCMinutes() + 30);
+
+            var pad = function (value) { return String(value).padStart(2, "0"); };
+            return {
+              date: start.getUTCFullYear() + "-" + pad(start.getUTCMonth() + 1) + "-" + pad(start.getUTCDate()),
+              time: pad(start.getUTCHours()) + ":" + pad(start.getUTCMinutes())
+            };
+          }
+
+          function customerActivitySetStart(dateInput, timeInput, selectedStart) {
+            if (selectedStart && /^\d{4}-\d{2}-\d{2}$/.test(selectedStart.date || "") && /^\d{2}:\d{2}$/.test(selectedStart.time || "")) {
+              dateInput.value = selectedStart.date;
+              timeInput.value = selectedStart.time;
+              return;
+            }
+            var start = customerActivityCurrentStart();
+            dateInput.value = start.date;
+            timeInput.value = start.time;
+          }
+
+          function customerActivitySetCalendarName(form, nameInput, prefix) {
+            if (!customerActivityCalendarMode || nameInput.dataset.automatic === "false") return;
+            var customer = form.querySelector("[data-customer-activity-calendar-customer]");
+            var option = customer && customer.options[customer.selectedIndex];
+            var customerName = customer && customer.value && option ? option.textContent.trim() : "";
+            nameInput.value = customerName ? prefix + " " + customerName : prefix;
+            nameInput.dataset.automatic = "true";
+          }
+
+          function customerActivitySetCalendarCustomer(form, customerId) {
+            if (!customerActivityCalendarMode) return;
+            var customer = form.querySelector("[data-customer-activity-calendar-customer]");
+            if (customer) customer.value = customerId || "";
+          }
+
+          function customerActivityOpen(kind, selectedStart) {
+            var isCall = kind === "call";
+            var isTask = kind === "task";
+            var isMeeting = kind === "meeting";
+            customerActivityComposer.hidden = false;
+            customerActivityComposer.classList.add("is-open");
+            customerActivityDrawer.setAttribute("aria-hidden", "false");
+            document.body.classList.add("activity-compose-open");
+            customerCallForm.hidden = !isCall;
+            customerTaskForm.hidden = !isTask;
+            customerMeetingForm.hidden = !isMeeting;
+            customerActivityPlaceholder.hidden = isCall || isTask || isMeeting;
+            if (isCall) {
+              customerCallForm.reset();
+              customerCallName.dataset.automatic = "true";
+              customerActivitySetCalendarName(customerCallForm, customerCallName, "Anruf mit");
+              customerActivitySetStart(customerCallStartDate, customerCallStartTime, selectedStart);
+              customerCallResetReminders();
+              customerCallForm.action = customerCallCreateAction;
+              customerActivityTitle.textContent = "Anruf planen";
+              customerCallSubmit.textContent = "Speichern";
+              window.setTimeout(function () { customerCallName.focus(); }, 230);
+              return;
+            }
+            if (isTask) {
+              customerTaskForm.reset();
+              customerTaskForm.action = customerTaskCreateAction;
+              customerActivityTitle.textContent = "Neue Aufgabe";
+              customerTaskSubmit.textContent = "Speichern";
+              window.setTimeout(function () { customerTaskName.focus(); }, 230);
+              return;
+            }
+            if (isMeeting) {
+              customerMeetingForm.reset();
+              customerMeetingName.dataset.automatic = "true";
+              customerActivitySetCalendarName(customerMeetingForm, customerMeetingName, "Neues Meeting mit");
+              customerActivitySetStart(customerMeetingStartDate, customerMeetingStartTime, selectedStart);
+              customerMeetingResetReminders();
+              customerMeetingUpdateEnd();
+              customerMeetingForm.action = customerMeetingCreateAction;
+              customerActivityTitle.textContent = "Neues Meeting";
+              customerMeetingSubmit.textContent = "Speichern";
+              window.setTimeout(function () { customerMeetingName.focus(); }, 230);
+              return;
+            }
+            customerActivityTitle.textContent = "Aktivität";
+            window.setTimeout(function () { customerActivityDrawer.focus(); }, 230);
+          }
+
+          function customerCallOpenForEdit(opener) {
+            customerActivityOpen("call");
+            customerCallForm.action = opener.dataset.customerCallUpdateUrl;
+            customerCallName.value = opener.dataset.customerCallName || "";
+            customerCallStatus.value = opener.dataset.customerCallStatus || "planned";
+            customerCallDirection.value = opener.dataset.customerCallDirection || "outbound";
+            customerCallStartDate.value = opener.dataset.customerCallStartDate || "";
+            customerCallStartTime.value = opener.dataset.customerCallStartTime || "";
+            customerCallDuration.value = opener.dataset.customerCallDuration || "30";
+            customerCallDescription.value = opener.dataset.customerCallDescription || "";
+            customerCallSetReminders(
+              (opener.dataset.customerCallReminderChannels || "").split(",").filter(Boolean),
+              (opener.dataset.customerCallReminderMinutes || "").split(",").filter(Boolean)
+            );
+            customerActivitySetCalendarCustomer(customerCallForm, opener.dataset.customerCalendarCustomerId);
+            customerCallName.dataset.automatic = "false";
+            customerActivityTitle.textContent = "Anruf bearbeiten";
+            customerCallSubmit.textContent = "Änderungen speichern";
+          }
+
+          function customerCallOpenDeleteDialog(opener) {
+            if (!customerCallDeleteDialog || !customerCallDeleteForm || typeof customerCallDeleteDialog.showModal !== "function") return;
+            customerCallDeleteForm.action = opener.dataset.customerCallDeleteUrl;
+            customerCallDeleteName.textContent = opener.dataset.customerCallName || "";
+            customerCallDeleteDialog.showModal();
+          }
+
+          function customerCallOpenCompleteDialog(opener) {
+            if (!customerCallCompleteDialog || !customerCallCompleteForm || typeof customerCallCompleteDialog.showModal !== "function") return;
+            customerCallCompleteForm.action = opener.dataset.customerCallCompleteUrl;
+            customerCallCompleteName.textContent = opener.dataset.customerCallName || "";
+            customerCallCompleteDialog.showModal();
+          }
+
+          function customerTaskOpenForEdit(opener) {
+            customerActivityOpen("task");
+            customerTaskForm.action = opener.dataset.customerTaskUpdateUrl;
+            customerTaskName.value = opener.dataset.customerTaskName || "";
+            customerTaskStatus.value = opener.dataset.customerTaskStatus || "planned";
+            customerTaskDueDate.value = opener.dataset.customerTaskDueDate || "";
+            customerTaskDueTime.value = opener.dataset.customerTaskDueTime || "";
+            customerTaskReminderChannel.value = opener.dataset.customerTaskReminderChannel || "none";
+            customerTaskReminderMinutes.value = opener.dataset.customerTaskReminderMinutes || "0";
+            customerTaskDescription.value = opener.dataset.customerTaskDescription || "";
+            customerActivityTitle.textContent = "Aufgabe bearbeiten";
+            customerTaskSubmit.textContent = "Änderungen speichern";
+          }
+
+          function customerTaskOpenDeleteDialog(opener) {
+            if (!customerTaskDeleteDialog || !customerTaskDeleteForm || typeof customerTaskDeleteDialog.showModal !== "function") return;
+            customerTaskDeleteForm.action = opener.dataset.customerTaskDeleteUrl;
+            customerTaskDeleteName.textContent = opener.dataset.customerTaskName || "";
+            customerTaskDeleteDialog.showModal();
+          }
+
+          function customerTaskOpenCompleteDialog(opener) {
+            if (!customerTaskCompleteDialog || !customerTaskCompleteForm || typeof customerTaskCompleteDialog.showModal !== "function") return;
+            customerTaskCompleteForm.action = opener.dataset.customerTaskCompleteUrl;
+            customerTaskCompleteName.textContent = opener.dataset.customerTaskName || "";
+            customerTaskCompleteDialog.showModal();
+          }
+
+          function customerMeetingOpenForEdit(opener) {
+            customerActivityOpen("meeting");
+            customerMeetingForm.action = opener.dataset.customerMeetingUpdateUrl;
+            customerMeetingName.value = opener.dataset.customerMeetingName || "";
+            customerMeetingStatus.value = opener.dataset.customerMeetingStatus || "planned";
+            customerMeetingStartDate.value = opener.dataset.customerMeetingStartDate || "";
+            customerMeetingStartTime.value = opener.dataset.customerMeetingStartTime || "";
+            customerMeetingDuration.value = opener.dataset.customerMeetingDuration || "30";
+            customerMeetingDescription.value = opener.dataset.customerMeetingDescription || "";
+            customerMeetingSetReminders(
+              (opener.dataset.customerMeetingReminderChannels || "").split(",").filter(Boolean),
+              (opener.dataset.customerMeetingReminderMinutes || "").split(",").filter(Boolean)
+            );
+            customerActivitySetCalendarCustomer(customerMeetingForm, opener.dataset.customerCalendarCustomerId);
+            customerMeetingName.dataset.automatic = "false";
+            customerMeetingUpdateEnd();
+            customerActivityTitle.textContent = "Meeting bearbeiten";
+            customerMeetingSubmit.textContent = "Änderungen speichern";
+          }
+
+          function customerMeetingOpenDeleteDialog(opener) {
+            if (!customerMeetingDeleteDialog || !customerMeetingDeleteForm || typeof customerMeetingDeleteDialog.showModal !== "function") return;
+            customerMeetingDeleteForm.action = opener.dataset.customerMeetingDeleteUrl;
+            customerMeetingDeleteName.textContent = opener.dataset.customerMeetingName || "";
+            customerMeetingDeleteDialog.showModal();
+          }
+
+          customerMeetingForm.addEventListener("change", function (event) {
+            if (event.target.matches("[data-customer-meeting-reminder-channel]")) {
+              customerMeetingUpdateReminderRow(event.target.closest("[data-customer-meeting-reminder-row]"));
+            }
+            if (event.target.matches("[data-customer-activity-calendar-customer]")) {
+              customerActivitySetCalendarName(customerMeetingForm, customerMeetingName, "Neues Meeting mit");
+            }
+            if (event.target === customerMeetingStartDate || event.target === customerMeetingDuration) {
+              customerMeetingUpdateEnd();
+            }
+          });
+          customerMeetingStartTime.addEventListener("focus", function () { customerMeetingShowTimeOptions(""); });
+          customerMeetingStartTime.addEventListener("input", function () {
+            customerMeetingShowTimeOptions(customerMeetingStartTime.value);
+            customerMeetingUpdateEnd();
+          });
+          customerMeetingStartTime.addEventListener("blur", function () { window.setTimeout(customerMeetingHideTimeOptions, 160); });
+          customerMeetingTimeToggle.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerMeetingTimeToggle.addEventListener("click", function () {
+            if (customerMeetingTimeOptions.hidden) customerMeetingShowTimeOptions("");
+            else customerMeetingHideTimeOptions();
+          });
+          customerMeetingTimeOptions.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerMeetingTimeOptions.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-customer-meeting-time-option]");
+            if (!option) return;
+            customerMeetingStartTime.value = option.dataset.customerMeetingTimeOption || "";
+            customerMeetingUpdateEnd();
+            customerMeetingHideTimeOptions();
+            customerMeetingStartTime.focus();
+          });
+          customerCallForm.addEventListener("change", function (event) {
+            if (event.target.matches("[data-customer-call-reminder-channel]")) {
+              customerCallUpdateReminderRow(event.target.closest("[data-customer-call-reminder-row]"));
+            }
+            if (event.target.matches("[data-customer-activity-calendar-customer]")) {
+              customerActivitySetCalendarName(customerCallForm, customerCallName, "Anruf mit");
+            }
+          });
+          customerCallName.addEventListener("input", function () { customerCallName.dataset.automatic = "false"; });
+          customerMeetingName.addEventListener("input", function () { customerMeetingName.dataset.automatic = "false"; });
+          customerCallStartTime.addEventListener("focus", function () { customerCallShowTimeOptions(""); });
+          customerCallStartTime.addEventListener("input", function () { customerCallShowTimeOptions(customerCallStartTime.value); });
+          customerCallStartTime.addEventListener("blur", function () { window.setTimeout(customerCallHideTimeOptions, 160); });
+          customerCallTimeToggle.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerCallTimeToggle.addEventListener("click", function () {
+            if (customerCallTimeOptions.hidden) customerCallShowTimeOptions("");
+            else customerCallHideTimeOptions();
+          });
+          customerCallTimeOptions.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerCallTimeOptions.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-customer-call-time-option]");
+            if (!option) return;
+            customerCallStartTime.value = option.dataset.customerCallTimeOption || "";
+            customerCallHideTimeOptions();
+            customerCallStartTime.focus();
+          });
+          customerTaskDueTime.addEventListener("focus", function () { customerTaskShowTimeOptions(""); });
+          customerTaskDueTime.addEventListener("input", function () { customerTaskShowTimeOptions(customerTaskDueTime.value); });
+          customerTaskDueTime.addEventListener("blur", function () { window.setTimeout(customerTaskHideTimeOptions, 160); });
+          customerTaskTimeToggle.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerTaskTimeToggle.addEventListener("click", function () {
+            if (customerTaskTimeOptions.hidden) customerTaskShowTimeOptions("");
+            else customerTaskHideTimeOptions();
+          });
+          customerTaskTimeOptions.addEventListener("mousedown", function (event) { event.preventDefault(); });
+          customerTaskTimeOptions.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-customer-task-time-option]");
+            if (!option) return;
+            customerTaskDueTime.value = option.dataset.customerTaskTimeOption || "";
+            customerTaskHideTimeOptions();
+            customerTaskDueTime.focus();
+          });
+          document.addEventListener("click", function (event) {
+            if (!event.target.closest("[data-customer-call-time-picker]")) customerCallHideTimeOptions();
+            if (!event.target.closest("[data-customer-task-time-picker]")) customerTaskHideTimeOptions();
+            if (!event.target.closest("[data-customer-meeting-time-picker]")) customerMeetingHideTimeOptions();
+            if (event.target.closest("[data-customer-call-reminder-add]")) {
+              event.preventDefault();
+              customerCallAddReminder();
+              return;
+            }
+            var removeReminder = event.target.closest("[data-customer-call-reminder-remove]");
+            if (removeReminder) {
+              event.preventDefault();
+              removeReminder.closest("[data-customer-call-reminder-row]").remove();
+              return;
+            }
+            if (event.target.closest("[data-customer-meeting-reminder-add]")) {
+              event.preventDefault();
+              customerMeetingAddReminder();
+              return;
+            }
+            var removeMeetingReminder = event.target.closest("[data-customer-meeting-reminder-remove]");
+            if (removeMeetingReminder) {
+              event.preventDefault();
+              removeMeetingReminder.closest("[data-customer-meeting-reminder-row]").remove();
+              return;
+            }
+            var editCall = event.target.closest("[data-customer-call-edit]");
+            if (editCall) {
+              event.preventDefault();
+              customerCallOpenForEdit(editCall);
+              return;
+            }
+            var editTask = event.target.closest("[data-customer-task-edit]");
+            if (editTask) {
+              event.preventDefault();
+              customerTaskOpenForEdit(editTask);
+              return;
+            }
+            var editMeeting = event.target.closest("[data-customer-meeting-edit]");
+            if (editMeeting) {
+              event.preventDefault();
+              customerMeetingOpenForEdit(editMeeting);
+              return;
+            }
+            var completeCall = event.target.closest("[data-customer-call-complete-open]");
+            if (completeCall) {
+              event.preventDefault();
+              customerCallOpenCompleteDialog(completeCall);
+              return;
+            }
+            var completeTask = event.target.closest("[data-customer-task-complete-open]");
+            if (completeTask) {
+              event.preventDefault();
+              customerTaskOpenCompleteDialog(completeTask);
+              return;
+            }
+            var deleteCall = event.target.closest("[data-customer-call-delete-open]");
+            if (deleteCall) {
+              event.preventDefault();
+              customerCallOpenDeleteDialog(deleteCall);
+              return;
+            }
+            var deleteTask = event.target.closest("[data-customer-task-delete-open]");
+            if (deleteTask) {
+              event.preventDefault();
+              customerTaskOpenDeleteDialog(deleteTask);
+              return;
+            }
+            var deleteMeeting = event.target.closest("[data-customer-meeting-delete-open]");
+            if (deleteMeeting) {
+              event.preventDefault();
+              customerMeetingOpenDeleteDialog(deleteMeeting);
+              return;
+            }
+            if (event.target.closest("[data-customer-call-delete-cancel]")) {
+              event.preventDefault();
+              if (customerCallDeleteDialog) customerCallDeleteDialog.close();
+              return;
+            }
+            if (event.target.closest("[data-customer-task-delete-cancel]")) {
+              event.preventDefault();
+              if (customerTaskDeleteDialog) customerTaskDeleteDialog.close();
+              return;
+            }
+            if (event.target.closest("[data-customer-meeting-delete-cancel]")) {
+              event.preventDefault();
+              if (customerMeetingDeleteDialog) customerMeetingDeleteDialog.close();
+              return;
+            }
+            if (event.target.closest("[data-customer-call-complete-cancel]")) {
+              event.preventDefault();
+              if (customerCallCompleteDialog) customerCallCompleteDialog.close();
+              return;
+            }
+            if (event.target.closest("[data-customer-task-complete-cancel]")) {
+              event.preventDefault();
+              if (customerTaskCompleteDialog) customerTaskCompleteDialog.close();
+              return;
+            }
+            var activityAction = event.target.closest("[data-customer-activity-action]");
+            if (activityAction) {
+              event.preventDefault();
+              customerActivityOpen(activityAction.dataset.customerActivityAction || "call");
+              return;
+            }
+            if (event.target.closest("[data-customer-activity-compose-close]")) customerActivityClose();
+          });
+          document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !customerActivityComposer.hidden) customerActivityClose();
+          });
+          document.addEventListener("calendar:activity-open", function (event) {
+            var activity = event.detail || {};
+            if (activity.kind !== "call" && activity.kind !== "meeting") return;
+            customerActivityOpen(activity.kind, activity);
+          });
+          document.addEventListener("calendar:activity-edit", function (event) {
+            var activity = event.detail || {};
+            if (activity.kind !== "call" && activity.kind !== "meeting") return;
+            var opener = { dataset: {
+              customerCalendarCustomerId: activity.customerId || "",
+              customerCallUpdateUrl: activity.updateUrl || "",
+              customerCallName: activity.name || "",
+              customerCallStatus: activity.status || "planned",
+              customerCallDirection: activity.direction || "outbound",
+              customerCallStartDate: activity.startDate || "",
+              customerCallStartTime: activity.startTime || "",
+              customerCallDuration: activity.duration || "30",
+              customerCallReminderChannels: activity.reminderChannels || "",
+              customerCallReminderMinutes: activity.reminderMinutes || "",
+              customerCallDescription: activity.description || "",
+              customerMeetingUpdateUrl: activity.updateUrl || "",
+              customerMeetingName: activity.name || "",
+              customerMeetingStatus: activity.status || "planned",
+              customerMeetingStartDate: activity.startDate || "",
+              customerMeetingStartTime: activity.startTime || "",
+              customerMeetingDuration: activity.duration || "60",
+              customerMeetingReminderChannels: activity.reminderChannels || "",
+              customerMeetingReminderMinutes: activity.reminderMinutes || "",
+              customerMeetingDescription: activity.description || ""
+            }};
+            if (activity.kind === "call") customerCallOpenForEdit(opener);
+            else customerMeetingOpenForEdit(opener);
+          });
+        }
+
+        document.querySelectorAll("[data-contact-delete-dialog]").forEach(function (dialog) {
+          var opener = document.querySelector("[data-contact-delete-open]");
+          var cancel = dialog.querySelector("[data-contact-delete-cancel]");
+          if (!opener || !cancel || typeof dialog.showModal !== "function") return;
+          opener.addEventListener("click", function () { dialog.showModal(); });
+          cancel.addEventListener("click", function () { dialog.close(); });
+        });
+
         document.querySelectorAll("[data-note-composer]").forEach(function (composer) {
           var opener = composer.querySelector("[data-note-composer-open]");
           var form = composer.querySelector("[data-note-composer-form]");
@@ -3261,10 +5327,53 @@
           cancel.addEventListener("click", closeNoteComposer);
         });
 
+        var customerNoteEditDialog = document.querySelector("[data-customer-note-edit-dialog]");
+        var customerNoteDeleteDialog = document.querySelector("[data-customer-note-delete-dialog]");
+        if (customerNoteEditDialog || customerNoteDeleteDialog) {
+          var customerNoteEditForm = customerNoteEditDialog && customerNoteEditDialog.querySelector("[data-customer-note-edit-form]");
+          var customerNoteEditTitle = customerNoteEditDialog && customerNoteEditDialog.querySelector("[data-customer-note-edit-title]");
+          var customerNoteEditContent = customerNoteEditDialog && customerNoteEditDialog.querySelector("[data-customer-note-edit-content]");
+          var customerNoteDeleteForm = customerNoteDeleteDialog && customerNoteDeleteDialog.querySelector("[data-customer-note-delete-form]");
+          var customerNoteDeleteName = customerNoteDeleteDialog && customerNoteDeleteDialog.querySelector("[data-customer-note-delete-name]");
+
+          document.addEventListener("click", function (event) {
+            var editNote = event.target.closest("[data-customer-note-edit]");
+            if (editNote && customerNoteEditDialog && customerNoteEditForm && customerNoteEditTitle && customerNoteEditContent && typeof customerNoteEditDialog.showModal === "function") {
+              event.preventDefault();
+              customerNoteEditForm.action = editNote.dataset.customerNoteUpdateUrl || "";
+              customerNoteEditTitle.value = editNote.dataset.customerNoteTitle || "";
+              customerNoteEditContent.value = editNote.dataset.customerNoteContent || "";
+              customerNoteEditDialog.showModal();
+              customerNoteEditTitle.focus();
+              return;
+            }
+
+            var deleteNote = event.target.closest("[data-customer-note-delete-open]");
+            if (deleteNote && customerNoteDeleteDialog && customerNoteDeleteForm && customerNoteDeleteName && typeof customerNoteDeleteDialog.showModal === "function") {
+              event.preventDefault();
+              customerNoteDeleteForm.action = deleteNote.dataset.customerNoteDeleteUrl || "";
+              customerNoteDeleteName.textContent = deleteNote.dataset.customerNoteName || "";
+              customerNoteDeleteDialog.showModal();
+              return;
+            }
+
+            if (event.target.closest("[data-customer-note-edit-cancel]") && customerNoteEditDialog) {
+              event.preventDefault();
+              customerNoteEditDialog.close();
+              return;
+            }
+            if (event.target.closest("[data-customer-note-delete-cancel]") && customerNoteDeleteDialog) {
+              event.preventDefault();
+              customerNoteDeleteDialog.close();
+            }
+          });
+        }
+
         document.querySelectorAll("[data-field-tabs]").forEach(function (tabsContainer) {
           var root = tabsContainer.parentElement;
           var tabs = Array.prototype.slice.call(tabsContainer.querySelectorAll("[data-field-tab]"));
           var panels = root ? Array.prototype.slice.call(root.querySelectorAll("[data-field-tab-panel]")) : [];
+          var tabActions = root ? Array.prototype.slice.call(root.querySelectorAll("[data-field-tab-action]")) : [];
           if (!root || !tabs.length || !panels.length) { return; }
 
           function selectTab(key) {
@@ -3275,6 +5384,9 @@
             });
             panels.forEach(function (panel) {
               panel.hidden = panel.getAttribute("data-field-tab-panel") !== key;
+            });
+            tabActions.forEach(function (action) {
+              action.hidden = action.getAttribute("data-field-tab-action") !== key;
             });
             window.dispatchEvent(new Event("resize"));
           }
@@ -3356,6 +5468,21 @@
             toggle.textContent = content.getAttribute("data-expandable-less-label") || "Weniger anzeigen";
           }
         }, true);
+
+        function closeDetailActionMenus(except) {
+          document.querySelectorAll("details.customer-actions-menu[open], details.detail-actions-menu[open]").forEach(function (menu) {
+            if (menu !== except) { menu.open = false; }
+          });
+        }
+
+        document.addEventListener("pointerdown", function (event) {
+          var activeMenu = event.target.closest("details.customer-actions-menu, details.detail-actions-menu");
+          closeDetailActionMenus(activeMenu || null);
+        });
+
+        document.addEventListener("keydown", function (event) {
+          if (event.key === "Escape") { closeDetailActionMenus(null); }
+        });
 
         document.querySelectorAll("[data-customer-field-editor]").forEach(function (editor) {
           var section = editor.closest("[data-expandable-section]");

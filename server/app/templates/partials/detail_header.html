@@ -1,0 +1,15 @@
+{% macro module_detail_header(back_href, back_label, eyebrow, title, status=None, has_actions=False) %}
+  <a class="button button-secondary" href="{{ back_href }}">{{ back_label }}</a>
+  <div class="section-heading detail-page-heading">
+    <div>
+      <p class="eyebrow">{{ eyebrow }}</p>
+      <div class="detail-page-heading-title-row">
+        <h2>{{ title }}</h2>
+        {% if status %}<span class="pill">{{ status }}</span>{% endif %}
+      </div>
+    </div>
+    {% if has_actions %}
+      <div class="detail-page-heading-actions">{{ caller() }}</div>
+    {% endif %}
+  </div>
+{% endmacro %}

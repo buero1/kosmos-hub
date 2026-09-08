@@ -25,3 +25,25 @@ def format_berlin_time(value: object) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(BERLIN_TIMEZONE).strftime("%d.%m.%Y %H:%M:%S %Z")
+
+
+def format_berlin_time_short(value: object) -> str:
+    """Render concise Berlin times for dense mailbox lists."""
+    if value is None:
+        return "-"
+
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return "-"
+        try:
+            value = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError:
+            return normalized
+
+    if not isinstance(value, datetime):
+        return str(value)
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(BERLIN_TIMEZONE).strftime("%d.%m.%Y %H:%M")

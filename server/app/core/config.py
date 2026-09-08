@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     maintenance_runs_auto_poll: bool = True
     maintenance_runs_poll_interval_seconds: int = Field(default=15, ge=15, le=900)
     maintenance_runs_initial_delay_seconds: int = Field(default=15, ge=0, le=300)
+    email_attachment_storage_dir: str = "data/email-attachments"
+    email_attachment_import_min_free_bytes: int = Field(default=5 * 1024 * 1024 * 1024, ge=0)
 
     @property
     def auto_verify_domain_list(self) -> list[str]:

@@ -177,8 +177,152 @@ def test_zoho_creates_a_contact_for_the_selected_customer_and_encrypts_the_profi
         assert profile["fields"]["E-Mail"] == "anna@example.test"
         assert profile["fields"]["Postadresse Stadt"] == "Starnberg"
 
-        with pytest.raises(ZohoCrmError, match="Nachname"):
+        with pytest.raises(ZohoCrmError, match="Anrede"):
             service.create_contact(customer_id=customer.id, submitted_values={})
+
+
+def test_zoho_updates_a_contact_and_clears_empty_optional_values():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("e" * 32)
+        customer = Customer(name="Example Customer", zoho_id="zoho-account-1", is_visible=True)
+        contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-1",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Old Contact"}})),
+        )
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = ZohoCrmService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        service._require_connected_connection = lambda: SimpleNamespace()
+        captured: dict[str, object] = {}
+
+        def fake_put(_connection, path, payload):
+            captured["path"] = path
+            captured["payload"] = payload
+            return {"data": [{"status": "success", "code": "SUCCESS", "details": {"id": "zoho-contact-1"}}]}
+
+        service._api_put_json = fake_put
+        updated = service.update_contact(
+            customer_id=customer.id,
+            contact_id=contact.id,
+            submitted_values={
+                "contact_field__first_name": "Anna",
+                "contact_field__last_name": "Example",
+                "contact_field__email": "anna@example.test",
+            },
+        )
+
+        assert captured["path"] == "/crm/v8/Contacts/zoho-contact-1"
+        payload = captured["payload"]
+        assert isinstance(payload, dict)
+        assert payload["data"][0]["Last_Name"] == "Example"
+        assert payload["data"][0]["Secondary_Email"] is None
+        profile = json.loads(cipher.decrypt(updated.encrypted_profile_json))
+        assert profile["fields"]["Name"] == "Anna Example"
+        assert profile["fields"]["E-Mail"] == "anna@example.test"
+
+
+def test_zoho_contact_sync_keeps_individual_name_fields():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("f" * 32)
+        customer = Customer(name="Example Customer", zoho_id="zoho-account-1", is_visible=True)
+        contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-1",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Old Contact"}})),
+        )
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = ZohoCrmService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        service._require_connected_connection = lambda: SimpleNamespace()
+        captured: dict[str, object] = {}
+
+        def fake_get(_connection, path, params):
+            captured["path"] = path
+            captured["fields"] = params["fields"]
+            return {
+                "data": [{
+                    "id": "zoho-contact-1",
+                    "Full_Name": "Anna Example",
+                    "First_Name": "Anna",
+                    "Last_Name": "Example",
+                    "Salutation": "Frau",
+                    "Modified_Time": "2026-09-06T12:00:00+02:00",
+                }],
+            }
+
+        service._api_get = fake_get
+        updated = service.synchronize_contact(customer_id=customer.id, contact_id=contact.id)
+
+        assert captured["path"] == "/crm/v8/Contacts/zoho-contact-1"
+        assert "First_Name" in captured["fields"]
+        assert "Last_Name" in captured["fields"]
+        profile = json.loads(cipher.decrypt(updated.encrypted_profile_json))
+        assert profile["fields"]["Name"] == "Anna Example"
+        assert profile["fields"]["Vorname"] == "Anna"
+        assert profile["fields"]["Nachname"] == "Example"
+        assert profile["fields"]["Anrede"] == "Frau"
+
+
+def test_zoho_syncs_all_contacts_without_changing_customers():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("g" * 32)
+        customer = Customer(name="Example Customer", zoho_id="zoho-account-1", is_visible=True)
+        existing_contact = CustomerContact(
+            customer=customer,
+            zoho_id="zoho-contact-existing",
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Existing Contact"}})),
+        )
+        db.add_all([customer, existing_contact])
+        db.commit()
+
+        service = ZohoCrmService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        service._require_connected_connection = lambda: SimpleNamespace(last_error="previous error")
+        captured: dict[str, object] = {}
+
+        def fake_get(_connection, path, params, **_kwargs):
+            captured["path"] = path
+            captured["fields"] = params["fields"]
+            return {
+                "data": [{
+                    "id": "zoho-contact-1",
+                    "Account_Name": {"id": "zoho-account-1"},
+                    "Full_Name": "Anna Example",
+                    "First_Name": "Anna",
+                    "Last_Name": "Example",
+                    "Salutation": "Frau",
+                }],
+                "info": {"more_records": False},
+            }
+
+        service._api_get = fake_get
+        result = service.synchronize_all_contacts()
+
+        assert captured["path"] == "/crm/v8/Contacts"
+        assert "First_Name" in captured["fields"]
+        assert "Last_Name" in captured["fields"]
+        assert result.synchronized_contacts == 1
+        assert result.created_contacts == 1
+        assert result.updated_contacts == 0
+        assert result.removed_contacts == 0
+        assert db.get(Customer, customer.id).name == "Example Customer"
+        assert db.get(CustomerContact, existing_contact.id) is not None
+        contact = db.scalar(select(CustomerContact).where(CustomerContact.zoho_id == "zoho-contact-1"))
+        assert contact is not None
+        profile = json.loads(cipher.decrypt(contact.encrypted_profile_json))
+        assert profile["fields"]["Vorname"] == "Anna"
+        assert profile["fields"]["Nachname"] == "Example"
 
 
 def test_zoho_field_metadata_keeps_picklist_options_and_respects_zoho_write_permissions():
