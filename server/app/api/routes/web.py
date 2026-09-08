@@ -63,6 +63,7 @@ from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, 
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_cases import HubCaseError, HubCaseService
+from app.services.zoho_case_import import ZohoCaseImportService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -366,6 +367,8 @@ def cases_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     created: bool = False,
+    sync: str = "",
+    sync_message: str = "",
 ):
     _require_hub_admin(request)
     return templates.TemplateResponse(
@@ -374,8 +377,59 @@ def cases_page(
         {
             "entries": HubCaseService(db=db, cipher=get_secret_cipher()).list_cases(),
             "created": created,
+            "sync_state": sync if sync in {"success", "error"} else "",
+            "sync_message": sync_message[:500] if sync in {"success", "error"} else "",
+            "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.post("/cases/sync")
+def synchronize_all_cases(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = ZohoCaseImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+            zoho_service=ZohoCrmService(
+                db=db,
+                cipher=get_secret_cipher(),
+                public_base_url=get_settings().public_base_url,
+            ),
+        ).synchronize_all_cases()
+    except ZohoCrmError as exc:
+        db.rollback()
+        query = urlencode({"sync": "error", "sync_message": str(exc)})
+        return RedirectResponse(url=f"/cases?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="sync-all-zoho-cases",
+        result="ok",
+        detail=(
+            f"Synchronized {result.synchronized_cases} Zoho Cases: "
+            f"created {result.created_cases}, updated {result.updated_cases}, "
+            f"unlinked {result.unlinked_cases}."
+        ),
+    )
+    db.commit()
+    message = (
+        f"{result.synchronized_cases} Fälle aus Zoho aktualisiert: "
+        f"{result.created_cases} neu, {result.updated_cases} aktualisiert"
+    )
+    if result.unlinked_cases:
+        message += f", {result.unlinked_cases} ohne Kundenverknüpfung"
+    if result.number_collisions:
+        message += f", {result.number_collisions} mit Hub-Fallnummer"
+    query = urlencode({"sync": "success", "sync_message": f"{message}."})
+    return RedirectResponse(url=f"/cases?{query}", status_code=303)
 
 
 @router.get("/cases/new", response_class=HTMLResponse)

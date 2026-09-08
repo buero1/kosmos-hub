@@ -1,4 +1,6 @@
-from sqlalchemy import ForeignKey, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -12,6 +14,9 @@ class HubCase(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     case_number: Mapped[str | None] = mapped_column(String(32), nullable=True, unique=True, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
+    zoho_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     encrypted_fields_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    zoho_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     customer = relationship("Customer")

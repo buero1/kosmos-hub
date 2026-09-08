@@ -13,6 +13,9 @@
     {% elif field.display_type == "Auswahlliste" %}
       <select name="case_field__{{ field.key }}"{% if field.required %} required{% endif %}>
         <option value="">Auswählen</option>
+        {% if value and value not in field.options %}
+          <option value="{{ value }}" selected>{{ value }} (bestehender Zoho-Wert)</option>
+        {% endif %}
         {% for option in field.options %}
           <option value="{{ option }}"{% if value == option %} selected{% endif %}>{% if option == "-None-" %}Keine Auswahl{% else %}{{ option }}{% endif %}</option>
         {% endfor %}

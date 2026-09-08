@@ -104,6 +104,25 @@ def _ensure_phase_one_schema() -> None:
     if "hub_cases" not in table_names:
         HubCase.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_cases table.")
+    else:
+        case_columns = {column["name"] for column in inspector.get_columns("hub_cases")}
+        case_additions = {
+            "zoho_id": "VARCHAR(255) NULL",
+            "zoho_modified_at": "DATETIME NULL",
+            "zoho_synced_at": "DATETIME NULL",
+        }
+        missing_case_columns = [(name, definition) for name, definition in case_additions.items() if name not in case_columns]
+        if missing_case_columns:
+            with engine.begin() as connection:
+                for name, definition in missing_case_columns:
+                    connection.execute(text(f"ALTER TABLE hub_cases ADD COLUMN {name} {definition}"))
+            logger.info("Added hub_cases columns: %s", ", ".join(name for name, _ in missing_case_columns))
+        inspector = inspect(engine)
+        case_indexes = {index["name"] for index in inspector.get_indexes("hub_cases")}
+        if "ix_hub_cases_zoho_id" not in case_indexes:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE UNIQUE INDEX ix_hub_cases_zoho_id ON hub_cases (zoho_id)"))
+            logger.info("Added hub_cases.zoho_id index.")
 
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)

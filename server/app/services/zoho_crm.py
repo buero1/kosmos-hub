@@ -28,6 +28,7 @@ from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
+ZOHO_CASE_MODULE = "Cases"
 # Request the complete CRM API scope once. Individual Hub workflows still decide
 # whether a connected capability may create, change, or delete CRM data.
 _ZOHO_CRM_SCOPE_VALUES = (
@@ -60,6 +61,7 @@ _REQUEST_TIMEOUT_SECONDS = 20
 _BINARY_DOWNLOAD_TIMEOUT_SECONDS = 90
 _MAX_PAGE_REQUESTS = 10
 _MAX_FIELDS_PER_ZOHO_REQUEST = 50
+_MAX_CASE_PAGE_REQUESTS = 100
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 _MAX_CONTACT_FIELD_LENGTH = 1_000
 _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
@@ -994,6 +996,47 @@ class ZohoCrmService:
             updated_contacts=updated,
             removed_contacts=removed,
         )
+
+    def list_case_records(self) -> list[dict[str, object]]:
+        """Return every Zoho Case needed by the reviewed Hub Fälle schema."""
+        connection = self._require_connected_connection()
+        requested_fields = ",".join(
+            (
+                "Case_Number",
+                "Status",
+                "Case_Reason",
+                "Case_Origin",
+                "Created_Time",
+                "Modified_Time",
+                "Description",
+                "Account_Name",
+                "Dauer_des_Falls_in_Minuten",
+                "Betrag_in_Rechnung_gestellt_netto",
+            )
+        )
+        records_by_id: dict[str, dict[str, object]] = {}
+        for page in range(1, _MAX_CASE_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{ZOHO_CASE_MODULE}",
+                {"fields": requested_fields, "per_page": "200", "page": str(page)},
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError("Zoho returned an invalid Cases response. No cases were changed.")
+            for record in data:
+                if not isinstance(record, dict):
+                    continue
+                case_id = self._as_text(record.get("id"))
+                if case_id:
+                    records_by_id[case_id] = record
+            info = response.get("info")
+            if not (isinstance(info, dict) and info.get("more_records") is True):
+                break
+        else:
+            raise ZohoCrmError("Zoho returned more than 20,000 Cases. The import was not changed.")
+        return list(records_by_id.values())
 
     def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
         requested_fields = ",".join(

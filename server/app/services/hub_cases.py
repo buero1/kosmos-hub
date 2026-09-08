@@ -113,6 +113,8 @@ class HubCaseService:
     def create_case(self, *, customer_id: int | None, submitted_values: dict[str, str]) -> HubCase:
         customer = self._customer(customer_id)
         values = self._submitted_values(submitted_values, creating=True)
+        if customer is not None:
+            values["customer_name"] = customer.name
         case = HubCase(
             customer=customer,
             encrypted_fields_json=self._encrypt_values(values),
@@ -128,7 +130,17 @@ class HubCaseService:
         if case is None:
             raise HubCaseError("Der Fall wurde nicht gefunden.")
         case.customer = self._customer(customer_id)
-        case.encrypted_fields_json = self._encrypt_values(self._submitted_values(submitted_values, creating=False))
+        existing_values = self._values(case)
+        values = self._submitted_values(
+            submitted_values,
+            creating=False,
+            allowed_legacy_values=existing_values,
+        )
+        if case.customer is not None:
+            values["customer_name"] = case.customer.name
+        elif existing_values.get("customer_name"):
+            values["customer_name"] = existing_values["customer_name"]
+        case.encrypted_fields_json = self._encrypt_values(values)
         self.db.flush()
         return case
 
@@ -144,7 +156,13 @@ class HubCaseService:
             raise HubCaseError("Der ausgewählte Kunde ist nicht verfügbar.")
         return customer
 
-    def _submitted_values(self, submitted_values: dict[str, str], *, creating: bool) -> dict[str, str]:
+    def _submitted_values(
+        self,
+        submitted_values: dict[str, str],
+        *,
+        creating: bool,
+        allowed_legacy_values: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         values: dict[str, str] = {}
         for field in HUB_CASE_FIELDS:
             if field.key in {"case_number", "customer_name"}:
@@ -157,7 +175,12 @@ class HubCaseService:
                 raise HubCaseError(f"{field.label} ist zu lang.")
             if field.required and (not value or value == "-None-"):
                 raise HubCaseError(f"{field.label} ist erforderlich.")
-            if field.options and value and value not in field.options:
+            if (
+                field.options
+                and value
+                and value not in field.options
+                and value != (allowed_legacy_values or {}).get(field.key)
+            ):
                 raise HubCaseError(f"{field.label} enthält eine ungültige Auswahl.")
             if field.display_type == "Ganzzahl" and value:
                 value = self._validated_integer(field, value)
@@ -195,7 +218,7 @@ class HubCaseService:
             display_value = raw_value
         elif field.key == "customer_name":
             raw_value = str(case.customer_id or "")
-            display_value = case.customer.name if case.customer is not None else ""
+            display_value = case.customer.name if case.customer is not None else values.get("customer_name", "")
         else:
             raw_value = values.get(field.key, "")
             display_value = raw_value
