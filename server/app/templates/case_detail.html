@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/case_field_control.html" import case_field_control %}
+{% block title %}{{ detail.case_number if detail.case_number else "Fall" }} · Fälle · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% call module_detail_header("/cases", "Zurück zu Fälle", "Hub-Fall", detail.case_number, status=detail.status, has_actions=true) %}
+      <button class="button button-variant-1" type="button" data-customer-edit-open>Bearbeiten</button>
+      <div class="customer-edit-heading-actions" data-customer-edit-actions hidden>
+        <button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button>
+        <button class="button button-variant-1" type="submit" form="case-fields-form">Speichern</button>
+      </div>
+    {% endcall %}
+
+    {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
+    <article class="card customer-detail-panel">
+      <div class="customer-detail-panel-heading">
+        <div>
+          <p class="eyebrow">Fälle</p>
+          <h3>Alle Felder</h3>
+          <p class="subtle">Fallnummer und Kundenverknüpfung werden im Hub geführt.</p>
+        </div>
+      </div>
+      <section data-expandable-section>
+        <div data-expandable-content class="is-expanded">
+          <div data-customer-fields-readonly>
+            <dl class="customer-fields-grid">
+              {% for field in detail.fields %}
+                <div>
+                  <dt>{{ field.label }}</dt>
+                  <dd>
+                    {% if field.key == "customer_name" and detail.case.customer %}
+                      <a href="/customers/{{ detail.case.customer.id }}">{{ field.value }}</a>
+                    {% else %}
+                      {{ field.value or "-" }}
+                    {% endif %}
+                  </dd>
+                </div>
+              {% endfor %}
+            </dl>
+          </div>
+        </div>
+        <form id="case-fields-form" method="post" action="/cases/{{ detail.case.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="customer-field-editor-grid">
+            {% for field in detail.fields %}
+              {{ case_field_control(field, field.form_value, customers, detail.case.customer_id) }}
+            {% endfor %}
+          </div>
+        </form>
+      </section>
+    </article>
+  </section>
+{% endblock %}

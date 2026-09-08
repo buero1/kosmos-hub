@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/case_field_control.html" import case_field_control %}
+{% block title %}Fall neu anlegen · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% call module_detail_header("/cases", "Zurück zu Fälle", "Hub-Fall", "Fall neu anlegen", has_actions=true) %}
+      <a class="button button-secondary button-variant-1" href="/cases">Abbrechen</a>
+      <button class="button button-variant-1" type="submit" form="case-create-form">Fall anlegen</button>
+    {% endcall %}
+
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <article class="card customer-detail-panel">
+      <div class="customer-detail-panel-heading">
+        <div>
+          <p class="eyebrow">Fälle</p>
+          <h3>Alle Felder</h3>
+          <p class="subtle">Die Angaben werden ausschließlich im Hub gespeichert.</p>
+        </div>
+      </div>
+      <form id="case-create-form" method="post" action="/cases" class="communication-form customer-field-editor contact-create-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="customer-field-editor-grid">
+          {% for field in fields %}
+            {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
+          {% endfor %}
+        </div>
+      </form>
+    </article>
+  </section>
+{% endblock %}

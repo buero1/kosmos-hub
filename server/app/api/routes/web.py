@@ -61,6 +61,8 @@ from app.services.module_layouts import ModuleLayoutError, ModuleLayoutService
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
+from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
+from app.services.hub_cases import HubCaseError, HubCaseService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -357,6 +359,139 @@ def contacts_page(
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/cases", response_class=HTMLResponse)
+def cases_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: bool = False,
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "cases.html",
+        {
+            "entries": HubCaseService(db=db, cipher=get_secret_cipher()).list_cases(),
+            "created": created,
+        },
+    )
+
+
+@router.get("/cases/new", response_class=HTMLResponse)
+def new_case_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "case_create.html", _case_create_context(request, db))
+
+
+@router.post("/cases")
+async def create_case_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("case_field__")
+    }
+    raw_customer_id = str(form.get("customer_id") or "").strip()
+    try:
+        customer_id = int(raw_customer_id) if raw_customer_id else None
+        case = HubCaseService(db=db, cipher=get_secret_cipher()).create_case(
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+    except (ValueError, HubCaseError) as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "case_create.html",
+            _case_create_context(
+                request,
+                db,
+                selected_customer_id=int(raw_customer_id) if raw_customer_id.isdigit() else None,
+                submitted_values=submitted_values,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-hub-case",
+        result="ok",
+        detail=f"Created Hub Case {case.id}; case data is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/cases/{case.id}", status_code=303)
+
+
+@router.get("/cases/{case_id}", response_class=HTMLResponse)
+def case_detail_page(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+):
+    _require_hub_admin(request)
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    detail = service.get_detail(case_id=case_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    return templates.TemplateResponse(
+        request,
+        "case_detail.html",
+        _case_detail_context(request, service=service, detail=detail, fields=fields, fields_message=fields_message),
+    )
+
+
+@router.post("/cases/{case_id}/fields")
+async def update_case_fields(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("case_field__")
+    }
+    raw_customer_id = str(form.get("customer_id") or "").strip()
+    try:
+        customer_id = int(raw_customer_id) if raw_customer_id else None
+        case = HubCaseService(db=db, cipher=get_secret_cipher()).update_case(
+            case_id=case_id,
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+    except (ValueError, HubCaseError) as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-case-fields",
+        result="ok",
+        detail=f"Updated Hub Case {case.id}; case data is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Falldaten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
 
 
 @router.get("/calendar", response_class=HTMLResponse)
@@ -4641,6 +4776,44 @@ def _contact_create_context(
         "selected_customer": selected_customer,
         "submitted_values": submitted_values or {},
         "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _case_create_context(
+    request: Request,
+    db: Session,
+    *,
+    selected_customer_id: int | None = None,
+    submitted_values: dict[str, str] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    values = service.new_form_values()
+    values.update(submitted_values or {})
+    return {
+        "fields": HUB_CASE_FIELDS,
+        "customers": service.list_linkable_customers(),
+        "selected_customer_id": selected_customer_id,
+        "submitted_values": values,
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _case_detail_context(
+    request: Request,
+    *,
+    service: HubCaseService,
+    detail: object,
+    fields: str,
+    fields_message: str,
+) -> dict[str, object]:
+    return {
+        "detail": detail,
+        "customers": service.list_linkable_customers(),
+        "fields_state": fields if fields in {"success", "error"} else "",
+        "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
     }
 

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Fälle · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}<p class="notice-success">Der Fall wurde im Hub angelegt.</p>{% endif %}
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Hub-Daten</p>
+        <h2>Fälle</h2>
+      </div>
+      <a class="button button-variant-1" href="/cases/new">Fall neu anlegen</a>
+    </div>
+
+    <article class="card customer-detail-panel">
+      <div class="table-scroll">
+        <table class="customer-contacts-table contacts-directory-table">
+          <thead>
+            <tr><th>Fall-Nummer</th><th>Status</th><th>Kunde</th><th>Fall Ursprung</th><th>Erstellt</th></tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr>
+                <td><a href="/cases/{{ entry.case.id }}">{{ entry.case_number }}</a></td>
+                <td>{{ entry.status }}</td>
+                <td>{% if entry.case.customer %}<a href="/customers/{{ entry.case.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td>
+                <td>{{ entry.case_origin or "-" }}</td>
+                <td>{{ entry.created_time or "-" }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">Noch keine Fälle vorhanden.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+{% endblock %}

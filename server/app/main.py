@@ -24,6 +24,7 @@ from app.models.customer_activity import CustomerCallActivity, CustomerCallRemin
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
+from app.models.hub_case import HubCase
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.email_compose_image import EmailComposeImage
@@ -99,6 +100,10 @@ def _ensure_phase_one_schema() -> None:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE customer_contacts MODIFY COLUMN zoho_id VARCHAR(255) NULL"))
             logger.info("Made customer_contacts.zoho_id optional for Hub contacts.")
+
+    if "hub_cases" not in table_names:
+        HubCase.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_cases table.")
 
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
