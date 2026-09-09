@@ -43,8 +43,15 @@
       <p class="subtle email-compose-template-status" data-email-compose-template-status>Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
       <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
       <label>Nachricht
-        <div class="email-rich-editor" data-email-rich-editor>
-          <textarea class="email-rich-editor-content" aria-label="Nachricht" rows="20" data-email-compose-content></textarea>
+        <div class="email-editor-ai-shell">
+          <div class="email-rich-editor" data-email-rich-editor>
+            <textarea class="email-rich-editor-content" aria-label="Nachricht" rows="20" data-email-compose-content></textarea>
+          </div>
+          <div class="email-editor-ai-prompt" data-email-ai-prompt aria-label="KI-E-Mail-Überarbeitung">
+            <svg class="email-editor-ai-prompt-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l1.7 5.3L19 9l-5.3 1.7L12 16l-1.7-5.3L5 9l5.3-1.7L12 2zm7 12l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14zM5 15l.8 1.2L7 17l-1.2.8L5 19l-.8-1.2L3 17l1.2-.8L5 15z"/></svg>
+            <input type="text" disabled aria-label="KI-Anweisung" placeholder="E-Mail überarbeiten oder Änderung anfordern ..." data-email-ai-prompt-input>
+            <button class="email-editor-ai-prompt-submit" type="button" disabled aria-label="KI-Anweisung senden" title="KI-Überarbeitung folgt im nächsten Schritt" data-email-ai-prompt-submit><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17V7m0 0L8 11m4-4l4 4"/></svg></button>
+          </div>
         </div>
         <textarea name="content" hidden data-email-compose-content-value></textarea>
       </label>
