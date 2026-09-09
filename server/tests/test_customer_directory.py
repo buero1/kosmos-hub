@@ -8,6 +8,7 @@ from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.hub_case import HubCase
 from app.models.hub_user import HubUser
 from app.models.site import Site
 from app.services.customer_directory import CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
@@ -27,6 +28,50 @@ def _site(*, site_id: int, domain: str, customer_id: int | None = None) -> Site:
 
 def _service(db: Session) -> CustomerDirectoryService:
     return CustomerDirectoryService(db=db, cipher=SecretCipher("a" * 32))
+
+
+def test_customer_detail_lists_only_cases_linked_to_the_customer():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        linked_customer = Customer(name="Verknuepfter Kunde", is_visible=True)
+        other_customer = Customer(name="Anderer Kunde", is_visible=True)
+        db.add_all([linked_customer, other_customer])
+        db.flush()
+        db.add_all(
+            [
+                HubCase(
+                    customer=linked_customer,
+                    case_number="FALL-000001",
+                    encrypted_fields_json=cipher.encrypt(
+                        json.dumps(
+                            {
+                                "status": "Neu",
+                                "case_origin": "E-Mail",
+                                "created_time": "2026-09-09T10:15",
+                            }
+                        )
+                    ),
+                ),
+                HubCase(
+                    customer=other_customer,
+                    case_number="FALL-000002",
+                    encrypted_fields_json=cipher.encrypt(
+                        json.dumps({"status": "Abgeschlossen", "case_origin": "Telefon"})
+                    ),
+                ),
+            ]
+        )
+        db.commit()
+
+        detail = _service(db).get_detail(customer_id=linked_customer.id)
+
+        assert detail is not None
+        assert [(entry.case_number, entry.status, entry.case_origin, entry.created_time) for entry in detail.cases] == [
+            ("FALL-000001", "Neu", "E-Mail", "09.09.2026 10:15")
+        ]
 
 
 def test_customer_directory_requires_explicit_review_before_linking_exact_domain():

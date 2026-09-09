@@ -68,8 +68,20 @@ class HubCaseService:
         self.cipher = cipher
 
     def list_cases(self) -> tuple[HubCaseListEntry, ...]:
-        entries: list[HubCaseListEntry] = []
         cases = self.db.scalars(select(HubCase).order_by(HubCase.created_at.desc(), HubCase.id.desc())).all()
+        return self._list_entries(cases)
+
+    def list_cases_for_customer(self, *, customer_id: int) -> tuple[HubCaseListEntry, ...]:
+        """Return only the cases linked to one Hub customer for its detail view."""
+        cases = self.db.scalars(
+            select(HubCase)
+            .where(HubCase.customer_id == customer_id)
+            .order_by(HubCase.created_at.desc(), HubCase.id.desc())
+        ).all()
+        return self._list_entries(cases)
+
+    def _list_entries(self, cases: list[HubCase]) -> tuple[HubCaseListEntry, ...]:
+        entries: list[HubCaseListEntry] = []
         for case in cases:
             values = self._values(case)
             entries.append(

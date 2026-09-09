@@ -407,8 +407,28 @@
             </div>
             {{ customer_contacts_table(detail.contacts, detail.entry.customer) }}
           </div>
-          <div id="customer-communications-panel-cases" class="customer-communication-tab-empty" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases" hidden>
-            <p class="subtle">Fälle werden hier künftig angezeigt.</p>
+          <div id="customer-communications-panel-cases" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases" hidden>
+            {% if detail.cases %}
+              <div class="table-scroll">
+                <table class="customer-contacts-table contacts-directory-table">
+                  <thead>
+                    <tr><th>Fall-Nummer</th><th>Status</th><th>Fall Ursprung</th><th>Erstellt</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for entry in detail.cases %}
+                      <tr>
+                        <td><a href="/cases/{{ entry.case.id }}">{{ entry.case_number }}</a></td>
+                        <td>{{ entry.status }}</td>
+                        <td>{{ entry.case_origin or "-" }}</td>
+                        <td>{{ entry.created_time or "-" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="subtle">Für diesen Kunden sind keine Fälle vorhanden.</p>
+            {% endif %}
           </div>
           <div id="customer-communications-panel-reminders" class="customer-communication-tab-empty" role="tabpanel" aria-labelledby="customer-communications-tab-reminders" data-field-tab-panel="reminders" hidden>
             <p class="subtle">Mahnungen werden hier künftig angezeigt.</p>

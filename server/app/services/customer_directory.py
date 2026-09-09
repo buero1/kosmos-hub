@@ -15,6 +15,7 @@ from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.module_layout import ModuleLayout
 from app.models.site import Site
+from app.services.hub_cases import HubCaseListEntry, HubCaseService
 from app.services.module_layouts import ModuleLayoutService
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.zoho_crm import ZohoCrmService
@@ -73,6 +74,7 @@ class CustomerDirectoryDetail:
     entry: CustomerDirectoryEntry
     profile_fields: tuple[CustomerProfileField, ...]
     contacts: tuple["CustomerContactProfile", ...]
+    cases: tuple[HubCaseListEntry, ...] = ()
     editable_profile_fields: tuple[CustomerProfileField, ...] = ()
     subforms: tuple[CustomerProfileSubform, ...] = ()
     display_profile_fields: tuple[CustomerProfileField, ...] = ()
@@ -288,6 +290,7 @@ class CustomerDirectoryService:
             entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
+            cases=HubCaseService(db=self.db, cipher=self.cipher).list_cases_for_customer(customer_id=customer.id),
             editable_profile_fields=editable_profile_fields,
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
             display_profile_fields=display_profile_fields,
