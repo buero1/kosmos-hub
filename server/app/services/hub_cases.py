@@ -14,6 +14,10 @@ from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.hub_case import HubCase
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS, HubCaseField
+from app.services.module_layouts import ModuleLayoutService
+
+
+CASE_FIELDS_LAYOUT_KEY = "case-fields"
 
 
 class HubCaseError(ValueError):
@@ -122,7 +126,7 @@ class HubCaseService:
         return HubCaseDetail(
             case=case,
             case_number=self.case_number(case),
-            fields=fields,
+            fields=self._field_display_layout(fields),
             status=values.get("status") or "-",
         )
 
@@ -267,6 +271,17 @@ class HubCaseService:
             read_only=field.read_only,
             options=field.options,
         )
+
+    def _field_display_layout(
+        self,
+        fields: tuple[HubCaseFieldValue, ...],
+    ) -> tuple[HubCaseFieldValue, ...]:
+        fields_by_key = {field.key: field for field in fields}
+        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+            layout_key=CASE_FIELDS_LAYOUT_KEY,
+            default_keys=tuple(fields_by_key),
+        )
+        return tuple(fields_by_key[key] for key in ordered_keys)
 
     def _values(self, case: HubCase) -> dict[str, str]:
         try:

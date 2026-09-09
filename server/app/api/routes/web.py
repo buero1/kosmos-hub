@@ -62,7 +62,7 @@ from app.services.plugin_installation_packages import PluginInstallationPackageS
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
-from app.services.hub_cases import HubCaseError, HubCaseService
+from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
 from app.services.zoho_case_import import ZohoCaseImportService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -497,6 +497,8 @@ def case_detail_page(
     db: Annotated[Session, Depends(get_db)],
     fields: str = "",
     fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
 ):
     _require_hub_admin(request)
     service = HubCaseService(db=db, cipher=get_secret_cipher())
@@ -506,7 +508,15 @@ def case_detail_page(
     return templates.TemplateResponse(
         request,
         "case_detail.html",
-        _case_detail_context(request, service=service, detail=detail, fields=fields, fields_message=fields_message),
+        _case_detail_context(
+            request,
+            service=service,
+            detail=detail,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
     )
 
 
@@ -548,6 +558,44 @@ async def update_case_fields(
     db.commit()
     query = urlencode({"fields": "success", "fields_message": "Falldaten wurden im Hub gespeichert."})
     return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
+
+
+@router.post("/cases/{case_id}/layout")
+async def update_case_field_layout(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    detail = service.get_detail(case_id=case_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Case not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=CASE_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in detail.fields),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/cases/{case_id}?{query}#case-fields", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-case-fields-layout",
+        result="ok",
+        detail="Updated the global case field layout.",
+    )
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Fallfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/cases/{case_id}?{query}#case-fields", status_code=303)
 
 
 @router.post("/cases/{case_id}/delete")
@@ -4892,12 +4940,16 @@ def _case_detail_context(
     detail: object,
     fields: str,
     fields_message: str,
+    layout: str,
+    layout_message: str,
 ) -> dict[str, object]:
     return {
         "detail": detail,
         "customers": service.list_linkable_customers(),
         "fields_state": fields if fields in {"success", "error"} else "",
         "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+        "layout_state": layout if layout in {"success", "error"} else "",
+        "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
     }
 

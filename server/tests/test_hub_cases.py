@@ -8,7 +8,9 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.hub_case import HubCase
-from app.services.hub_cases import HubCaseError, HubCaseService
+from app.models.hub_user import HubUser
+from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
+from app.services.module_layouts import ModuleLayoutService
 
 
 def _service(db: Session) -> HubCaseService:
@@ -94,6 +96,35 @@ def test_hub_case_update_replaces_fields_and_customer_link():
         assert updated.customer_id == second_customer.id
         assert _service(db).list_cases()[0].status == "Abgeschlossen"
         assert db.get(HubCase, case.id) is not None
+
+
+def test_hub_case_detail_uses_the_saved_global_field_layout():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        admin = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add(admin)
+        db.flush()
+        case = _service(db).create_case(customer_id=None, submitted_values=_submitted_values())
+        db.commit()
+
+        original_detail = _service(db).get_detail(case_id=case.id)
+        assert original_detail is not None
+        original_keys = tuple(field.key for field in original_detail.fields)
+        reordered_keys = ("description",) + tuple(key for key in original_keys if key != "description")
+        ModuleLayoutService(db=db).configure(
+            actor=admin,
+            layout_key=CASE_FIELDS_LAYOUT_KEY,
+            item_order_json=json.dumps(reordered_keys),
+            allowed_keys=original_keys,
+        )
+        db.commit()
+
+        detail = _service(db).get_detail(case_id=case.id)
+
+        assert detail is not None
+        assert tuple(field.key for field in detail.fields) == reordered_keys
 
 
 def test_hub_case_delete_removes_only_the_hub_case():

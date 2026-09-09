@@ -10,18 +10,24 @@
         <button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button>
         <button class="button button-variant-1" type="submit" form="case-fields-form">Speichern</button>
       </div>
+      <div class="customer-edit-heading-actions" data-layout-edit-actions="case-fields" hidden>
+        <button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="case-fields">Abbrechen</button>
+        <button class="button button-variant-1" type="submit" form="case-fields-layout-form">Speichern</button>
+      </div>
       <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
         <summary class="detail-actions-menu-trigger" aria-label="Weitere Fallaktionen">&#8942;</summary>
         <div class="detail-actions-menu-popover">
           <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-case-delete-open>Fall löschen</button>
+          <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="case-fields">Layout bearbeiten</button>
         </div>
       </details>
     {% endcall %}
 
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
+    {% if layout_state and layout_message %}<p class="notice-{{ layout_state }}">{{ layout_message }}</p>{% endif %}
     <div class="customer-detail-layout">
       <div class="customer-detail-main-column">
-        <article class="card customer-detail-panel">
+        <article id="case-fields" class="card customer-detail-panel" data-layout-editor="case-fields">
           <div class="customer-detail-panel-heading">
             <div>
               <p class="eyebrow">Fälle</p>
@@ -48,6 +54,17 @@
                 </dl>
               </div>
             </div>
+            <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
+              <dl class="customer-fields-grid" data-layout-sortable>
+                {% for field in detail.fields %}
+                  <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
+                {% endfor %}
+              </dl>
+            </div>
+            <form id="case-fields-layout-form" method="post" action="/cases/{{ detail.case.id }}/layout" data-layout-form hidden>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="order_json" value="" data-layout-order-input>
+            </form>
             <form id="case-fields-form" method="post" action="/cases/{{ detail.case.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <div class="customer-field-editor-grid">
