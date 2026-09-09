@@ -757,14 +757,21 @@
 
       function submitMailboxComposerForm(event) {
         syncMailboxComposerContent();
-        if (mailboxComposerSubmitting || !mailboxComposerHasDraftContent()) return;
         event.preventDefault();
+        if (mailboxComposerSubmitting) return;
+        if (!mailboxComposerForm.reportValidity()) {
+          setMailboxComposerStatus('Bitte Absender, Empfänger und Betreff prüfen.');
+          return;
+        }
+        if (!mailboxComposerHasDraftContent()) {
+          setMailboxComposerStatus('Die E-Mail enthält noch keinen Inhalt.');
+          return;
+        }
         mailboxComposerSubmitting = true;
         clearMailboxComposerDraftTimer();
         if (mailboxComposerSubmit) mailboxComposerSubmit.disabled = true;
-        saveMailboxDraft({ force: true, quiet: true }).finally(function () {
-          HTMLFormElement.prototype.submit.call(mailboxComposerForm);
-        });
+        // Delivery must not wait for an autosave request; an interrupted save must never block sending.
+        HTMLFormElement.prototype.submit.call(mailboxComposerForm);
       }
 
       function selectMailboxComposerRecipient(recipient) {
