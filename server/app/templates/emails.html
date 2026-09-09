@@ -604,6 +604,9 @@
         } else {
           setMailboxComposerStatus('Antwort vorbereitet.');
         }
+        // The reply context sets the sender after selecting a recipient. Re-check now so
+        // a valid reply cannot retain the disabled state from the earlier check.
+        updateMailboxComposerSubmit();
       }
 
       function prepareMailboxComposerAction(button) {
