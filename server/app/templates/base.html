@@ -4027,7 +4027,7 @@
       <span class="agent-launcher-label">Hub-Agent</span>
       <span class="agent-launcher-badge" data-agent-float-badge hidden></span>
     </button>
-    <section class="agent-float" data-agent-float hidden aria-label="Hub-Agent Unterhaltung">
+    <section class="agent-float" data-agent-float{% if agent_page_context %} data-agent-page-context-type="{{ agent_page_context.type }}" data-agent-page-context-key="{{ agent_page_context.key }}"{% endif %} hidden aria-label="Hub-Agent Unterhaltung">
       <header class="agent-float-header">
         <div class="agent-float-heading">
           <p class="eyebrow">KI-Mitarbeiter</p>
@@ -6169,6 +6169,10 @@
           var input = panel.querySelector("[data-agent-float-input]");
           var badge = document.querySelector("[data-agent-float-badge]");
           var state = { csrfToken: {{ csrf_token | tojson }}, chat: null, busy: false };
+          var pageContext = {
+            type: panel.dataset.agentPageContextType || "",
+            key: panel.dataset.agentPageContextKey || ""
+          };
 
           function createElement(name, className, text) {
             var element = document.createElement(name);
@@ -6346,11 +6350,25 @@
             }
           }
 
-          launcher.addEventListener("click", function () {
+          async function addPageContext() {
+            if (!pageContext.type || !pageContext.key || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
+            var alreadyIncluded = (state.chat.contexts || []).some(function (context) {
+              return context.type === pageContext.type && context.key === pageContext.key;
+            });
+            if (alreadyIncluded) { return; }
+            await postChat("/agent/chat/context", {
+              conversation_id: state.chat.conversation.id,
+              resource_type: pageContext.type,
+              resource_key: pageContext.key
+            });
+          }
+
+          launcher.addEventListener("click", async function () {
             if (panel.hidden) {
               showPanel();
-              if (!state.chat) { loadChat(); }
+              if (!state.chat) { await loadChat(); }
               else { render(state.chat); }
+              await addPageContext();
             } else {
               hidePanel();
             }

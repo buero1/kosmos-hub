@@ -1,3 +1,5 @@
+import re
+
 from starlette.requests import Request
 from starlette.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -21,7 +23,59 @@ def _shared_template_context(request: Request) -> dict[str, object]:
         "unread_email_count": _unread_email_count(user),
         "email_composer_settings": _email_composer_settings(),
         "styling": _styling_settings(),
+        "agent_page_context": _agent_page_context(request),
     }
+
+
+def _agent_page_context(request: Request) -> dict[str, str] | None:
+    """Describe the current Hub page so opening the agent can add it as context."""
+    path = request.url.path.rstrip("/") or "/"
+    if path.startswith("/agent"):
+        return None
+
+    direct_resource_patterns = (
+        (r"^/customers/\d+/contacts/(\d+)$", "contact"),
+        (r"^/contacts/(\d+)$", "contact"),
+        (r"^/customers/\d+/cases/(\d+)(?:/.*)?$", "case"),
+        (r"^/emails/cases/(\d+)(?:/.*)?$", "case"),
+        (r"^/cases/(\d+)$", "case"),
+        (r"^/sites/(\d+)$", "site"),
+        (r"^/customers/(\d+)$", "customer"),
+    )
+    for pattern, resource_type in direct_resource_patterns:
+        match = re.fullmatch(pattern, path)
+        if match is not None:
+            return {"type": resource_type, "key": match.group(1)}
+
+    if path == "/calendar":
+        week = request.query_params.get("week", "").strip()
+        return {"type": "calendar", "key": week or "current"}
+    if path == "/emails":
+        selected = request.query_params.get("selected", "").strip()
+        if re.fullmatch(r"(?:linked-\d+-\d+|unassigned-\d+)", selected):
+            return {"type": "email", "key": selected}
+        folder = request.query_params.get("folder", "inbox").strip()[:64]
+        return {"type": "mailbox", "key": folder or "inbox"}
+
+    page_contexts = (
+        ("/", "Dashboard"),
+        ("/sites", "Sites"),
+        ("/customers", "Customers"),
+        ("/contacts", "Kontakte"),
+        ("/cases", "Fälle"),
+        ("/email-templates", "E-Mail-Vorlagen"),
+        ("/users", "Users"),
+        ("/backups", "Backups"),
+        ("/updates", "Update workbench"),
+        ("/plugin-installations", "Plugin installation"),
+        ("/assistant", "Assistant"),
+        ("/account", "Account"),
+        ("/styling", "Styling"),
+    )
+    for prefix, label in page_contexts:
+        if path == prefix or (prefix != "/" and path.startswith(prefix + "/")):
+            return {"type": "page", "key": label}
+    return None
 
 
 def _styling_settings() -> StylingRuntimeSettings:

@@ -216,6 +216,8 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert 'data-agent-float-open' in base_template
     assert 'data-agent-context-add' in base_template
     assert 'data-agent-float-delete' in base_template
+    assert 'data-agent-page-context-type' in base_template
+    assert 'async function addPageContext()' in base_template
     assert '>Hub-Agent</a>' in base_template
     assert 'href="#agent-completed-chats"' in template
     assert 'href="#agent-deleted-chats"' in template
@@ -396,6 +398,48 @@ def test_hub_agent_builds_a_current_customer_dossier_for_the_chat_context():
         assert "Der Kunde erwartet den Rückruf am Freitag." in dossier
         assert "Bitte um Änderung" in dossier
         assert "Bitte passen Sie die Startseite bis Freitag an." in dossier
+
+
+def test_hub_agent_uses_the_open_calendar_week_as_dynamic_context():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Kalender-Kunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        db.add(
+            CustomerCallActivity(
+                customer_id=customer.id,
+                name="Projekt abstimmen",
+                status="planned",
+                direction="outbound",
+                starts_at=datetime(2026, 9, 8, 10, 0),
+                ends_at=datetime(2026, 9, 8, 10, 30),
+                duration_minutes=30,
+            )
+        )
+        db.flush()
+
+        service = HubAgentService(db=db, cipher=cipher)
+        conversation = service.start_conversation(actor="hub-admin")
+        service.add_context(
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+            resource_type="calendar",
+            resource_key="2026-09-07",
+        )
+        active_conversation = service._conversation_for_actor(
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+            create_if_missing=False,
+        )
+        calendar_context = "\n".join(service._conversation_prompt_contexts(active_conversation, exclude_email_key=""))
+
+        assert "Kalender-Kunde" in calendar_context
+        assert "Projekt abstimmen" in calendar_context
+        assert "2026-09-08" in calendar_context
 
 
 def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
