@@ -94,3 +94,19 @@ def test_hub_case_update_replaces_fields_and_customer_link():
         assert updated.customer_id == second_customer.id
         assert _service(db).list_cases()[0].status == "Abgeschlossen"
         assert db.get(HubCase, case.id) is not None
+
+
+def test_hub_case_delete_removes_only_the_hub_case():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        case = _service(db).create_case(customer_id=None, submitted_values=_submitted_values())
+        case_id = case.id
+        db.commit()
+
+        deleted = _service(db).delete_case(case_id=case_id)
+        db.commit()
+
+        assert deleted.id == case_id
+        assert db.get(HubCase, case_id) is None

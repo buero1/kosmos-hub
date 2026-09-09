@@ -166,6 +166,15 @@ class HubCaseService:
         self.db.flush()
         return case
 
+    def delete_case(self, *, case_id: int) -> HubCase:
+        """Remove a case from the Hub without changing its Zoho source record."""
+        case = self.db.get(HubCase, case_id)
+        if case is None:
+            raise HubCaseError("Der Fall wurde nicht gefunden.")
+        self.db.delete(case)
+        self.db.flush()
+        return case
+
     @staticmethod
     def case_number(case: HubCase) -> str:
         return case.case_number or f"FALL-{case.id:06d}"

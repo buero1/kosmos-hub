@@ -367,6 +367,7 @@ def cases_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     created: bool = False,
+    deleted: bool = False,
     sync: str = "",
     sync_message: str = "",
 ):
@@ -377,6 +378,7 @@ def cases_page(
         {
             "entries": HubCaseService(db=db, cipher=get_secret_cipher()).list_cases(),
             "created": created,
+            "deleted": deleted,
             "sync_state": sync if sync in {"success", "error"} else "",
             "sync_message": sync_message[:500] if sync in {"success", "error"} else "",
             "csrf_token": get_csrf_token(request),
@@ -546,6 +548,34 @@ async def update_case_fields(
     db.commit()
     query = urlencode({"fields": "success", "fields_message": "Falldaten wurden im Hub gespeichert."})
     return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
+
+
+@router.post("/cases/{case_id}/delete")
+async def delete_case_from_hub(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        case = HubCaseService(db=db, cipher=get_secret_cipher()).delete_case(case_id=case_id)
+    except HubCaseError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-case",
+        result="ok",
+        detail=f"Deleted Hub Case {case.id}; no Zoho record was changed.",
+    )
+    db.commit()
+    return RedirectResponse(url="/cases?deleted=true", status_code=303)
 
 
 @router.get("/calendar", response_class=HTMLResponse)

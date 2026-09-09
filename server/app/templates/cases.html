@@ -3,6 +3,7 @@
 {% block content %}
   <section>
     {% if created %}<p class="notice-success">Der Fall wurde im Hub angelegt.</p>{% endif %}
+    {% if deleted %}<p class="notice-success">Der Fall wurde im Hub gelöscht.</p>{% endif %}
     {% if sync_state and sync_message %}<p class="notice-{{ sync_state }}">{{ sync_message }}</p>{% endif %}
     <div class="section-heading">
       <div>

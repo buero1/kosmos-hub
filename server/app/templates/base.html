@@ -5305,6 +5305,14 @@
           cancel.addEventListener("click", function () { dialog.close(); });
         });
 
+        document.querySelectorAll("[data-case-delete-dialog]").forEach(function (dialog) {
+          var opener = document.querySelector("[data-case-delete-open]");
+          var cancel = dialog.querySelector("[data-case-delete-cancel]");
+          if (!opener || !cancel || typeof dialog.showModal !== "function") return;
+          opener.addEventListener("click", function () { dialog.showModal(); });
+          cancel.addEventListener("click", function () { dialog.close(); });
+        });
+
         document.querySelectorAll("[data-note-composer]").forEach(function (composer) {
           var opener = composer.querySelector("[data-note-composer-open]");
           var form = composer.querySelector("[data-note-composer-form]");
