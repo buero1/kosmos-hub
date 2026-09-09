@@ -31,6 +31,7 @@
       <p class="notice-error">Die Agent-Aktion ist nicht verfügbar.</p>
     {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if email_context_error %}<p class="notice-error">{{ email_context_error }}</p>{% endif %}
 
     <section id="agent-work" class="account-section" data-agent-section>
     {% if not provider_configured %}
@@ -43,10 +44,19 @@
     {% else %}
       <form class="agent-instruction-form" method="post" action="/agent">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% if email_context %}
+          <input type="hidden" name="email_key" value="{{ email_context.key }}">
+          <section class="agent-email-context" aria-label="Ausgewählter E-Mail-Kontext">
+            <p class="eyebrow">E-Mail-Kontext</p>
+            <strong>{{ email_context.subject }}</strong>
+            <p class="subtle">{% if email_context.sender %}Von {{ email_context.sender }}{% endif %}{% if email_context.sender and email_context.recipients %} · {% endif %}{% if email_context.recipients %}An {{ email_context.recipients }}{% endif %}{% if email_context.customer_name %}<br>Kunde: {{ email_context.customer_name }}{% endif %}</p>
+            <a href="/agent#agent-work">E-Mail-Kontext entfernen</a>
+          </section>
+        {% endif %}
         <label for="agent-instruction">Was soll der Hub-Agent vorbereiten?</label>
         <textarea id="agent-instruction" name="instruction" rows="5" maxlength="4000" required placeholder="Zum Beispiel: Lege einen neuen Kontakt an und bereite eine E-Mail für Ende der Woche vor.">{{ instruction }}</textarea>
         <div class="agent-instruction-actions">
-          <p class="subtle">Aktuell: Kontakte anlegen, Aufgaben planen und E-Mail-Entwürfe erstellen. E-Mails werden nie automatisch versendet.</p>
+          <p class="subtle">Der Agent kann Entwürfe, Kontakte, Notizen, Fälle sowie Aufgaben und Anrufe vorbereiten. E-Mails werden nie automatisch versendet.</p>
           <button class="button" type="submit">Arbeitsplan erstellen</button>
         </div>
       </form>
@@ -81,7 +91,7 @@
                   <li class="agent-action agent-action-{{ action.status }}">
                     <div class="agent-action-main">
                       <span class="agent-action-type">
-                        {% if action.action_type == 'create_contact' %}Kontakt{% elif action.action_type == 'create_task' %}Aufgabe{% else %}E-Mail-Entwurf{% endif %}
+                        {% if action.action_type == 'create_contact' %}Kontakt{% elif action.action_type in ('create_task', 'update_task', 'complete_task', 'delete_task') %}Aufgabe{% elif action.action_type in ('schedule_call', 'update_call', 'complete_call', 'delete_call') %}Anruf{% elif action.action_type in ('create_case_from_email', 'link_email_to_case') %}Fall{% elif action.action_type == 'create_customer_note' %}Notiz{% else %}E-Mail-Entwurf{% endif %}
                       </span>
                       <h4>{{ action.title }}</h4>
                       <p>{{ action.details }}</p>

@@ -337,7 +337,8 @@ class HubCaseService:
         if customer_id is None:
             return None
         customer = self.db.get(Customer, customer_id)
-        if customer is None or not customer.is_visible:
+        # Explicitly linked Fälle may also belong to hidden Test-Kunden.
+        if customer is None:
             raise HubCaseError("Der ausgewählte Kunde ist nicht verfügbar.")
         return customer
 

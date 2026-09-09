@@ -7,11 +7,14 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
-from app.models.customer_activity import CustomerTaskActivity
+from app.models.customer_activity import CustomerCallActivity, CustomerTaskActivity
+from app.models.customer_communication import CustomerZohoEmail
 from app.models.customer_contact import CustomerContact
 from app.models.hub_agent import HubAgentAction, HubAgentJob
+from app.models.hub_case import HubCase
+from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
-from app.services.hub_agent import HubAgentError, HubAgentService
+from app.services.hub_agent import HubAgentEmailContext, HubAgentError, HubAgentService
 
 
 def _add_action(db: Session, cipher: SecretCipher, *, action_type: str, input_values: dict[str, str]) -> HubAgentAction:
@@ -171,11 +174,23 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
     assert captured["api_key"] == "test-key"
     assert captured["payload"]["store"] is False
     assert captured["payload"]["tool_choice"] == {"type": "function", "name": "propose_hub_actions"}
-    assert captured["payload"]["tools"][0]["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"] == [
-        "create_contact",
-        "create_email_draft",
-        "create_task",
-    ]
+    assert captured["payload"]["tools"][0]["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"] == sorted(
+        {
+            "complete_call",
+            "complete_task",
+            "create_case_from_email",
+            "create_contact",
+            "create_customer_note",
+            "create_email_draft",
+            "create_task",
+            "delete_call",
+            "delete_task",
+            "link_email_to_case",
+            "schedule_call",
+            "update_call",
+            "update_task",
+        }
+    )
 
 
 def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui():
@@ -205,5 +220,255 @@ def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
     assert capabilities["create_contact"].status == "available"
     assert capabilities["create_task"].status == "available"
     assert capabilities["create_email_draft"].status == "available"
-    assert capabilities["email_context"].status == "planned"
+    assert capabilities["email_context"].status == "available"
+    assert capabilities["case_management"].status == "available"
+    assert capabilities["customer_notes"].status == "available"
+    assert capabilities["calendar_management"].status == "available"
     assert capabilities["automatic_email_delivery"].status == "disabled"
+
+
+def test_hub_agent_binds_case_actions_to_the_selected_email_context_only():
+    raw_plan = {
+        "summary": "Fall erstellen",
+        "response": "Ich bereite einen Fall vor.",
+        "actions": [
+            {
+                "action_type": "create_case_from_email",
+                "title": "Fall aus E-Mail anlegen",
+                "details": "Die E-Mail wird mit dem Fall verknüpft.",
+                "input": {"case_reason": "Änderungswunsch"},
+            }
+        ],
+    }
+    context = HubAgentEmailContext(
+        key="linked-7-11",
+        subject="Änderungswunsch",
+        sender="",
+        recipients="",
+        customer_id=7,
+        customer_name="Kontext-Kunde",
+        body_text="",
+        attachment_names=(),
+    )
+
+    plan = HubAgentService._normalize_plan(raw_plan, email_context=context)
+
+    assert plan["actions"][0]["input"]["email_key"] == "linked-7-11"
+    try:
+        HubAgentService._normalize_plan(raw_plan)
+    except HubAgentError as exc:
+        assert "E-Mail als Kontext" in str(exc)
+    else:
+        raise AssertionError("Case actions must not be proposed without a selected email.")
+
+
+def test_hub_agent_uses_selected_email_for_case_creation_and_linking():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Fall-Kunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        first_email = CustomerZohoEmail(
+            customer_id=customer.id,
+            source="hub",
+            direction="inbound",
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Änderungswunsch",
+                        "from": {"name": "Max Mustermann", "email": "max@example.test"},
+                        "to": [{"email": "info@example.test"}],
+                        "content": "<p>Bitte die Startseite ändern.</p>",
+                        "attachments": [{"id": "attachment-1", "name": "wunsch.pdf"}],
+                    }
+                )
+            ),
+            encrypted_header_json="",
+        )
+        second_email = CustomerZohoEmail(
+            customer_id=customer.id,
+            source="hub",
+            direction="inbound",
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Nachtrag", "content": "Weitere Infos"})),
+            encrypted_header_json="",
+        )
+        db.add_all([first_email, second_email])
+        db.flush()
+
+        service = HubAgentService(db=db, cipher=cipher)
+        context = service.get_email_context(email_key=f"linked-{customer.id}-{first_email.id}")
+        assert context.customer_name == "Fall-Kunde"
+        assert context.sender == "Max Mustermann <max@example.test>"
+        assert context.attachment_names == ("wunsch.pdf",)
+        assert context.body_text == "Bitte die Startseite ändern."
+
+        create_action = _add_action(
+            db,
+            cipher,
+            action_type="create_case_from_email",
+            input_values={
+                "email_key": context.key,
+                "case_reason": "Änderungswunsch",
+                "case_description": "Änderungswunsch aus der E-Mail.",
+            },
+        )
+        created = service.execute_action(action_id=create_action.id, actor="hub-admin")
+        case = db.scalars(select(HubCase)).one()
+        assert created.status == "completed"
+        assert created.result_href == f"/cases/{case.id}"
+        assert case.customer_id == customer.id
+        assert db.scalars(select(HubCaseEmailLink)).one().customer_email_id == first_email.id
+
+        link_action = _add_action(
+            db,
+            cipher,
+            action_type="link_email_to_case",
+            input_values={"email_key": f"linked-{customer.id}-{second_email.id}", "case_number": case.case_number},
+        )
+        linked = service.execute_action(action_id=link_action.id, actor="hub-admin")
+        assert linked.status == "completed"
+        assert len(db.scalars(select(HubCaseEmailLink)).all()) == 2
+
+
+def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    noted_customers = []
+
+    def fake_create_note(self, **kwargs):
+        noted_customers.append(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.services.hub_agent.CustomerCommunicationService.create_note", fake_create_note)
+
+    with Session(engine) as db:
+        customer = Customer(name="Aktivitäts-Kunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        service = HubAgentService(db=db, cipher=cipher)
+
+        create_task = _add_action(
+            db,
+            cipher,
+            action_type="create_task",
+            input_values={
+                "customer_name": customer.name,
+                "task_name": "Angebot prüfen",
+                "due_date": "2026-09-11",
+                "due_time": "09:00",
+                "reminder_channel": "popup",
+                "reminder_minutes_before": "0",
+            },
+        )
+        assert service.execute_action(action_id=create_task.id, actor="hub-admin").status == "completed"
+
+        complete_task = _add_action(
+            db,
+            cipher,
+            action_type="complete_task",
+            input_values={"customer_name": customer.name, "target_task_name": "Angebot prüfen"},
+        )
+        assert service.execute_action(action_id=complete_task.id, actor="hub-admin").status == "completed"
+        assert db.scalars(select(CustomerTaskActivity)).one().status == "completed"
+
+        adjustable_task = _add_action(
+            db,
+            cipher,
+            action_type="create_task",
+            input_values={
+                "customer_name": customer.name,
+                "task_name": "Termin ändern",
+                "due_date": "2026-09-12",
+                "due_time": "09:00",
+                "reminder_channel": "popup",
+                "reminder_minutes_before": "0",
+            },
+        )
+        assert service.execute_action(action_id=adjustable_task.id, actor="hub-admin").status == "completed"
+        update_task = _add_action(
+            db,
+            cipher,
+            action_type="update_task",
+            input_values={
+                "customer_name": customer.name,
+                "target_task_name": "Termin ändern",
+                "task_name": "Neuer Termin",
+                "due_time": "11:00",
+            },
+        )
+        assert service.execute_action(action_id=update_task.id, actor="hub-admin").status == "completed"
+        assert db.scalars(select(CustomerTaskActivity).where(CustomerTaskActivity.name == "Neuer Termin")).one().due_at.hour == 9
+        delete_task = _add_action(
+            db,
+            cipher,
+            action_type="delete_task",
+            input_values={"customer_name": customer.name, "target_task_name": "Neuer Termin"},
+        )
+        assert service.execute_action(action_id=delete_task.id, actor="hub-admin").status == "completed"
+
+        create_call = _add_action(
+            db,
+            cipher,
+            action_type="schedule_call",
+            input_values={
+                "customer_name": customer.name,
+                "call_name": "Rückruf",
+                "start_date": "2026-09-12",
+                "start_time": "10:00",
+                "duration_minutes": "30",
+                "reminder_channels": "popup",
+                "reminder_minutes_before": "15",
+            },
+        )
+        assert service.execute_action(action_id=create_call.id, actor="hub-admin").status == "completed"
+
+        update_call = _add_action(
+            db,
+            cipher,
+            action_type="update_call",
+            input_values={
+                "customer_name": customer.name,
+                "target_call_name": "Rückruf",
+                "start_time": "11:00",
+            },
+        )
+        assert service.execute_action(action_id=update_call.id, actor="hub-admin").status == "completed"
+        assert db.scalars(select(CustomerCallActivity)).one().starts_at.hour == 9
+
+        complete_call = _add_action(
+            db,
+            cipher,
+            action_type="complete_call",
+            input_values={"customer_name": customer.name, "target_call_name": "Rückruf"},
+        )
+        assert service.execute_action(action_id=complete_call.id, actor="hub-admin").status == "completed"
+        assert db.scalars(select(CustomerCallActivity)).one().status == "completed"
+
+        delete_call = _add_action(
+            db,
+            cipher,
+            action_type="delete_call",
+            input_values={"customer_name": customer.name, "target_call_name": "Rückruf"},
+        )
+        assert service.execute_action(action_id=delete_call.id, actor="hub-admin").status == "completed"
+        assert db.scalars(select(CustomerCallActivity)).all() == []
+
+        note_action = _add_action(
+            db,
+            cipher,
+            action_type="create_customer_note",
+            input_values={"customer_name": customer.name, "note_title": "Rückruf", "note_content": "Rückruf wurde erledigt."},
+        )
+        assert service.execute_action(action_id=note_action.id, actor="hub-admin").status == "completed"
+        assert noted_customers == [
+            {
+                "customer_id": customer.id,
+                "actor": "hub-admin",
+                "title": "Rückruf",
+                "content": "Rückruf wurde erledigt.",
+            }
+        ]

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -20,9 +20,17 @@ router = APIRouter(prefix="/agent", include_in_schema=False)
 
 
 @router.get("", response_class=HTMLResponse)
-def agent_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+def agent_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    email_key: Annotated[str, Query()] = "",
+):
     user = _current_user(request)
-    return templates.TemplateResponse(request, "agent.html", _page_context(request, db=db, user=user))
+    return templates.TemplateResponse(
+        request,
+        "agent.html",
+        _page_context(request, db=db, user=user, email_key=email_key),
+    )
 
 
 @router.post("", response_class=HTMLResponse)
@@ -30,13 +38,14 @@ def plan_agent_work(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     instruction: Annotated[str, Form()] = "",
+    email_key: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     user = _current_user(request)
     service = HubAgentService(db=db, cipher=get_secret_cipher())
     try:
-        job = service.plan(instruction=instruction, actor=user.username)
+        job = service.plan(instruction=instruction, actor=user.username, email_key=email_key)
         write_audit_log(
             db,
             site=None,
@@ -49,10 +58,11 @@ def plan_agent_work(
         db.commit()
     except HubAgentError as exc:
         db.rollback()
-        context = _page_context(request, db=db, user=user, instruction=instruction)
+        context = _page_context(request, db=db, user=user, instruction=instruction, email_key=email_key)
         context["error"] = str(exc)
         return templates.TemplateResponse(request, "agent.html", context, status_code=400)
-    return RedirectResponse(url=f"/agent?agent_job={job.id}", status_code=303)
+    suffix = f"&email_key={email_key}" if email_key.strip() else ""
+    return RedirectResponse(url=f"/agent?agent_job={job.id}{suffix}", status_code=303)
 
 
 @router.post("/actions/{action_id}/execute")
@@ -85,15 +95,25 @@ def execute_agent_action(
     return RedirectResponse(url=f"/agent?agent_action={outcome}", status_code=303)
 
 
-def _page_context(request: Request, *, db: Session, user, instruction: str = "") -> dict:
+def _page_context(request: Request, *, db: Session, user, instruction: str = "", email_key: str = "") -> dict:
     provider = AiProviderConfigService(db=db, cipher=get_secret_cipher()).get_openai_config()
+    agent = HubAgentService(db=db, cipher=get_secret_cipher())
+    email_context = None
+    context_error = None
+    if email_key.strip():
+        try:
+            email_context = agent.get_email_context(email_key=email_key)
+        except HubAgentError as exc:
+            context_error = str(exc)
     return {
         "csrf_token": get_csrf_token(request),
         "user": user,
         "instruction": instruction,
+        "email_context": email_context,
+        "email_context_error": context_error,
         "provider_configured": provider is not None and provider.enabled,
         "capabilities": HubAgentService.capabilities(),
-        "jobs": HubAgentService(db=db, cipher=get_secret_cipher()).list_jobs(actor=user.username),
+        "jobs": agent.list_jobs(actor=user.username),
     }
 
 
