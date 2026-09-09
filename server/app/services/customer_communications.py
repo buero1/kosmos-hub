@@ -1319,7 +1319,11 @@ class CustomerCommunicationService:
             email.sync_status = "failed"
             email.last_error = str(exc)[:1000]
             self.db.flush()
-            return CustomerCommunicationActionResult(False, "E-Mail wurde nicht über Mittwald versendet. Der Entwurf bleibt verschlüsselt im Hub gespeichert.")
+            return CustomerCommunicationActionResult(
+                False,
+                f"E-Mail wurde nicht über Mittwald versendet: {email.last_error}. "
+                "Der Entwurf bleibt verschlüsselt im Hub gespeichert.",
+            )
 
         email.zoho_message_id = delivery.message_id
         email.sync_status = "sent"
