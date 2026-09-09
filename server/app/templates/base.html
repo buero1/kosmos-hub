@@ -6364,7 +6364,6 @@
           });
           panel.querySelector("[data-agent-float-delete]").addEventListener("click", function () {
             if (!state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
-            if (!window.confirm("Diese Unterhaltung wird in Gelöschte Chats verschoben.")) { return; }
             postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/delete");
           });
 
