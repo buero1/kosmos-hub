@@ -92,6 +92,7 @@ def _page_context(request: Request, *, db: Session, user, instruction: str = "")
         "user": user,
         "instruction": instruction,
         "provider_configured": provider is not None and provider.enabled,
+        "capabilities": HubAgentService.capabilities(),
         "jobs": HubAgentService(db=db, cipher=get_secret_cipher()).list_jobs(actor=user.username),
     }
 

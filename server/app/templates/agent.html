@@ -1,7 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Hub-Agent · kosmos-hub{% endblock %}
 {% block content %}
-  <section class="agent-page">
+  <div class="account-page-layout" data-agent-navigation>
+    <aside class="account-page-sidebar">
+      <p class="eyebrow">Hub-Agent</p>
+      <nav class="account-section-nav" aria-label="Hub-Agent Bereiche">
+        <a href="#agent-work" aria-current="page">Arbeitsaufträge</a>
+        <a href="#agent-capabilities">Fähigkeiten</a>
+      </nav>
+    </aside>
+    <section class="account-page-content">
+    <section class="agent-page">
     <div class="section-heading">
       <div>
         <p class="eyebrow">KI-Mitarbeiter</p>
@@ -23,6 +32,7 @@
     {% endif %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
 
+    <section id="agent-work" class="account-section" data-agent-section>
     {% if not provider_configured %}
       <section class="agent-empty-state">
         <p class="eyebrow">OpenAI-Verbindung benötigt</p>
@@ -41,8 +51,9 @@
         </div>
       </form>
     {% endif %}
+    </section>
 
-    <section class="agent-jobs" aria-label="Agent-Arbeitspläne">
+    <section id="agent-jobs" class="agent-jobs account-section" data-agent-section aria-label="Agent-Arbeitspläne">
       <div class="section-heading section-heading-compact">
         <div>
           <p class="eyebrow">Verlauf</p>
@@ -109,5 +120,57 @@
         </div>
       {% endif %}
     </section>
+    <section id="agent-capabilities" class="agent-capabilities account-section" data-agent-section>
+      <div class="section-heading section-heading-compact">
+        <div>
+          <p class="eyebrow">Werkzeugkasten</p>
+          <h3>Fähigkeiten</h3>
+          <p class="subtle">Verfügbar bedeutet: Der Agent kann die Fähigkeit im Arbeitsplan vorschlagen und nach deiner Bestätigung ausführen.</p>
+        </div>
+      </div>
+      <div class="agent-capability-table-wrap">
+        <table class="agent-capability-table">
+          <thead><tr><th>Fähigkeit</th><th>Status</th><th>Beschreibung</th></tr></thead>
+          <tbody>
+            {% for capability in capabilities %}
+              <tr>
+                <td>{{ capability.name }}</td>
+                <td><span class="agent-capability-status agent-capability-status-{{ capability.status }}">
+                  {% if capability.status == 'available' %}Verfügbar{% elif capability.status == 'planned' %}Geplant{% else %}Deaktiviert{% endif %}
+                </span></td>
+                <td>{{ capability.description }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
   </section>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const page = document.querySelector("[data-agent-navigation]");
+      if (!page) return;
+      const links = Array.from(page.querySelectorAll(".account-section-nav a"));
+      const sections = Array.from(page.querySelectorAll("[data-agent-section]"));
+
+      const activate = () => {
+        const current = sections.find((section) => {
+          const bounds = section.getBoundingClientRect();
+          return bounds.top <= 120 && bounds.bottom > 120;
+        }) || sections[0];
+        links.forEach((link) => {
+          if (link.getAttribute("href") === `#${current.id}`) {
+            link.setAttribute("aria-current", "page");
+          } else {
+            link.removeAttribute("aria-current");
+          }
+        });
+      };
+      links.forEach((link) => link.addEventListener("click", () => window.setTimeout(activate, 0)));
+      window.addEventListener("scroll", activate, {passive: true});
+      activate();
+    })();
+  </script>
 {% endblock %}

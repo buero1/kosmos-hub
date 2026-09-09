@@ -193,5 +193,17 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert "Jeder Schritt wird erst nach deinem Klick ausgeführt." in template
     assert 'action="/agent/actions/{{ action.id }}/execute"' in template
     assert "E-Mails werden nie automatisch versendet." in template
+    assert 'href="#agent-capabilities"' in template
+    assert "agent-capability-status-{{ capability.status }}" in template
     assert '@router.post("/actions/{action_id}/execute")' in route
     assert '>Hub-Agent</a>' in base_template
+
+
+def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
+    capabilities = {capability.key: capability for capability in HubAgentService.capabilities()}
+
+    assert capabilities["create_contact"].status == "available"
+    assert capabilities["create_task"].status == "available"
+    assert capabilities["create_email_draft"].status == "available"
+    assert capabilities["email_context"].status == "planned"
+    assert capabilities["automatic_email_delivery"].status == "disabled"

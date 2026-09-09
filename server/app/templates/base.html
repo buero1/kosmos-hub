@@ -1526,6 +1526,27 @@
       .agent-action-status { color: var(--muted); font-size: 0.78rem; }
       .agent-action-completed::before { background: #d8efe1; color: #216841; }
       .agent-action-failed::before { background: #f5ded8; color: #9c3c2e; }
+      .agent-capabilities {
+        display: grid;
+        gap: 0.8rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 252, 246, 0.78);
+      }
+      .agent-capabilities .section-heading { margin: 0; }
+      .agent-capabilities .section-heading h3 { margin-bottom: 0.3rem; }
+      .agent-capabilities .section-heading .subtle { margin: 0; }
+      .agent-capability-table-wrap { overflow-x: auto; }
+      .agent-capability-table { width: 100%; min-width: 42rem; border-collapse: collapse; }
+      .agent-capability-table th,
+      .agent-capability-table td { padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+      .agent-capability-table th { color: var(--muted); font: 700 0.72rem "Trebuchet MS", sans-serif; letter-spacing: 0.07em; text-transform: uppercase; }
+      .agent-capability-table td:first-child { font-weight: 700; }
+      .agent-capability-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.78rem; white-space: nowrap; }
+      .agent-capability-status-available { background: #d8efe1; color: #216841; }
+      .agent-capability-status-planned { background: #e5e9f8; color: #385f9e; }
+      .agent-capability-status-disabled { background: #f1e4e0; color: #8a493c; }
       @media (max-width: 700px) {
         .agent-instruction-actions,
         .agent-job-heading { align-items: stretch; flex-direction: column; }

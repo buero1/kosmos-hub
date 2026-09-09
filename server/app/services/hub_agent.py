@@ -33,6 +33,66 @@ class HubAgentError(ValueError):
 
 
 @dataclass(frozen=True)
+class HubAgentCapability:
+    key: str
+    name: str
+    status: str
+    description: str
+
+
+HUB_AGENT_CAPABILITIES = (
+    HubAgentCapability(
+        key="create_contact",
+        name="Kontakte anlegen",
+        status="available",
+        description="Legt Hub-Kontakte an und kann sie einem eindeutig erkannten Kunden zuordnen.",
+    ),
+    HubAgentCapability(
+        key="create_task",
+        name="Aufgaben planen",
+        status="available",
+        description="Erstellt eine Aufgabe mit Termin, Kundenverknüpfung und Popup- oder E-Mail-Erinnerung.",
+    ),
+    HubAgentCapability(
+        key="create_email_draft",
+        name="E-Mail-Entwürfe erstellen",
+        status="available",
+        description="Erstellt einen bereinigten Entwurf im Hub-Ordner „Entwürfe“, ohne ihn zu versenden.",
+    ),
+    HubAgentCapability(
+        key="email_context",
+        name="E-Mails als Kontext verstehen",
+        status="planned",
+        description="Übernimmt Absender, Inhalt und Anhänge einer ausgewählten E-Mail als Arbeitsgrundlage.",
+    ),
+    HubAgentCapability(
+        key="case_management",
+        name="Fälle aus E-Mails bearbeiten",
+        status="planned",
+        description="Legt Fälle aus einer E-Mail an, verknüpft sie und bereitet Änderungen oder Abschlüsse vor.",
+    ),
+    HubAgentCapability(
+        key="customer_updates",
+        name="Kunden- und Kontaktdaten aktualisieren",
+        status="planned",
+        description="Bereitet Änderungen an vorhandenen Stammdaten aus klaren Nutzeranweisungen vor.",
+    ),
+    HubAgentCapability(
+        key="calendar_management",
+        name="Anrufe und Meetings planen",
+        status="planned",
+        description="Erstellt geplante Anrufe und Meetings mit Termin und Erinnerungen.",
+    ),
+    HubAgentCapability(
+        key="automatic_email_delivery",
+        name="E-Mails automatisch versenden",
+        status="disabled",
+        description="Bleibt deaktiviert. Der Agent kann Entwürfe vorbereiten, der Versand erfolgt weiterhin bewusst durch den Nutzer.",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class HubAgentActionView:
     id: int
     action_type: str
@@ -63,6 +123,10 @@ class HubAgentService:
         self.db = db
         self.cipher = cipher
         self.provider_service = AiProviderConfigService(db=db, cipher=cipher)
+
+    @staticmethod
+    def capabilities() -> tuple[HubAgentCapability, ...]:
+        return HUB_AGENT_CAPABILITIES
 
     def plan(self, *, instruction: str, actor: str) -> HubAgentJobView:
         normalized_instruction = self._normalize_instruction(instruction)
