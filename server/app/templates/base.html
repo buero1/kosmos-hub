@@ -1158,34 +1158,42 @@
         line-height: 1.45;
         padding: 0.7rem;
       }
-      .account-workflow-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-        gap: 0.65rem;
-      }
-      .account-workflow-tab {
-        display: grid;
-        gap: 0.25rem;
+      .account-workflow-table-scroll { margin: 0; }
+      .account-workflow-table {
         width: 100%;
-        min-height: 6.5rem;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: #fffdf8;
-        color: var(--ink);
-        cursor: pointer;
-        font: inherit;
-        padding: 0.8rem;
+        border-collapse: collapse;
+      }
+      .account-workflow-table th,
+      .account-workflow-table td {
+        padding: 0.72rem 0.8rem;
+        border-bottom: 1px solid var(--border);
         text-align: left;
       }
-      .account-workflow-tab strong { font-size: 0.96rem; }
-      .account-workflow-tab span,
-      .account-workflow-tab time { color: var(--muted); font-size: 0.8rem; }
-      .account-workflow-tab:hover,
-      .account-workflow-tab:focus-visible,
-      .account-workflow-tab.is-active {
-        border-color: var(--accent);
-        background: var(--accent-soft);
-        outline: none;
+      .account-workflow-table th {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      .account-workflow-table tbody tr:last-child td { border-bottom: 0; }
+      .account-workflow-table td:last-child { white-space: nowrap; }
+      .account-workflow-name {
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        width: 100%;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        padding: 0;
+        text-align: left;
+      }
+      .account-workflow-name:hover,
+      .account-workflow-name:focus-visible,
+      .account-workflow-name.is-active {
+        color: #075f4e;
+        text-decoration: underline;
       }
       .account-workflow-description { margin-top: 0.15rem; }
       .account-panel label.checkbox-label {

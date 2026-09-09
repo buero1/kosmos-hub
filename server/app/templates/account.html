@@ -270,24 +270,33 @@
         <h3>Workflows</h3>
         <p class="subtle">Festgelegte Hub-Abläufe werden zentral dokumentiert und bei den jeweiligen Modulen ausgeführt.</p>
       </div>
-      <div class="account-workflow-list" role="tablist" aria-label="Workflows">
-        {% for workflow in workflows %}
-          <button
-            type="button"
-            class="account-workflow-tab{% if loop.first %} is-active{% endif %}"
-            role="tab"
-            aria-selected="{{ 'true' if loop.first else 'false' }}"
-            data-workflow-tab
-            data-workflow-target="workflow-description-{{ workflow.id }}"
-          >
-            <strong>{{ workflow.title }}</strong>
-            <span>{{ workflow.module_label }}</span>
-            <time datetime="{{ workflow.created_at.isoformat() }}">Erstellt am {{ workflow.created_at | berlin_time }}</time>
-          </button>
-        {% endfor %}
+      <div class="table-scroll account-workflow-table-scroll">
+        <table class="account-workflow-table">
+          <thead>
+            <tr><th>Name</th><th>Modul</th><th>Erstellt am</th></tr>
+          </thead>
+          <tbody>
+            {% for workflow in workflows %}
+              <tr>
+                <td>
+                  <button
+                    type="button"
+                    class="account-workflow-name"
+                    data-workflow-link
+                    data-workflow-target="workflow-description-{{ workflow.id }}"
+                    aria-controls="workflow-description-{{ workflow.id }}"
+                    aria-expanded="false"
+                  >{{ workflow.title }}</button>
+                </td>
+                <td>{{ workflow.module_label }}</td>
+                <td><time datetime="{{ workflow.created_at.isoformat() }}">{{ workflow.created_at | berlin_time }}</time></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
       {% for workflow in workflows %}
-        <label class="account-workflow-description" id="workflow-description-{{ workflow.id }}" data-workflow-description{% if not loop.first %} hidden{% endif %}>
+        <label class="account-workflow-description" id="workflow-description-{{ workflow.id }}" data-workflow-description hidden>
           <span>Beschreibung</span>
           <textarea readonly>{{ workflow.description }}</textarea>
         </label>
@@ -909,19 +918,22 @@
           selectSection(link.getAttribute("href").slice(1), { updateHash: true });
         });
       });
-      const workflowTabs = Array.from(page.querySelectorAll("[data-workflow-tab]"));
+      const workflowLinks = Array.from(page.querySelectorAll("[data-workflow-link]"));
       const workflowDescriptions = Array.from(page.querySelectorAll("[data-workflow-description]"));
-      workflowTabs.forEach((tab) => {
-        tab.addEventListener("click", () => {
-          const targetId = tab.dataset.workflowTarget;
-          workflowTabs.forEach((candidate) => {
-            const isActive = candidate === tab;
-            candidate.classList.toggle("is-active", isActive);
-            candidate.setAttribute("aria-selected", String(isActive));
-          });
+      workflowLinks.forEach((link) => {
+        link.addEventListener("click", () => {
+          const targetId = link.dataset.workflowTarget;
+          const target = workflowDescriptions.find((description) => description.id === targetId);
+          const shouldShow = target ? target.hidden : false;
           workflowDescriptions.forEach((description) => {
-            description.hidden = description.id !== targetId;
+            description.hidden = true;
           });
+          workflowLinks.forEach((candidate) => {
+            const isActive = shouldShow && candidate === link;
+            candidate.classList.toggle("is-active", isActive);
+            candidate.setAttribute("aria-expanded", String(isActive));
+          });
+          if (target) target.hidden = !shouldShow;
         });
       });
       window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));
