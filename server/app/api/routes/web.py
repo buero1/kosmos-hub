@@ -1561,15 +1561,123 @@ async def create_mailbox_case(
         detail=f"Created Hub Case {case.id} and linked one selected mailbox email.",
     )
     db.commit()
-    is_closed = linked_case.status.casefold() == "abgeschlossen"
-    return {
-        "case_id": linked_case.case.id,
-        "case_number": linked_case.case_number,
-        "case_url": f"/cases/{linked_case.case.id}",
-        "status": linked_case.status,
-        "label": "Fall abgeschlossen" if is_closed else "Offener Fall",
-        "is_closed": is_closed,
+    return _mailbox_case_payload(linked_case)
+
+
+@router.get("/emails/cases/{case_id}/compose", response_class=HTMLResponse)
+def mailbox_case_edit_compose(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    source_email_key: str = "",
+):
+    """Render the linked Hub case as an editor inside the mailbox drawer."""
+    _require_hub_admin(request)
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        source_email = service.source_email(source_email_key=source_email_key)
+        linked_case = service.linked_case_for_source_email(source_email_key=source_email.key)
+        if linked_case is None or linked_case.case.id != case_id:
+            raise HubCaseError("Der Fall ist nicht mehr mit dieser E-Mail verknüpft.")
+        detail = service.get_detail(case_id=case_id)
+        if detail is None:
+            raise HubCaseError("Der Fall wurde nicht gefunden.")
+    except HubCaseError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    context = _case_create_context(
+        request,
+        db,
+        selected_customer_id=detail.case.customer_id,
+        source_email=source_email,
+    )
+    context.update({"fields": detail.fields, "case_detail": detail})
+    return templates.TemplateResponse(request, "emails_case_compose.html", context)
+
+
+@router.post("/emails/cases/{case_id}", response_class=JSONResponse)
+async def update_mailbox_case(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Save a case from its linked mailbox message without leaving the mailbox."""
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("case_field__")
     }
+    raw_customer_id = str(form.get("customer_id") or "").strip()
+    source_email_key = str(form.get("source_email_key") or "").strip()
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        customer_id = int(raw_customer_id) if raw_customer_id else None
+        source_email = service.source_email(source_email_key=source_email_key)
+        linked_case = service.linked_case_for_source_email(source_email_key=source_email.key)
+        if linked_case is None or linked_case.case.id != case_id:
+            raise HubCaseError("Der Fall ist nicht mehr mit dieser E-Mail verknüpft.")
+        if source_email.customer_id is not None and customer_id != source_email.customer_id:
+            raise HubCaseError("Der Kundenbezug der ausgewählten E-Mail darf nicht geändert werden.")
+        case = service.update_case(
+            case_id=case_id,
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+        linked_case = service.linked_case_for_source_email(source_email_key=source_email.key)
+        if linked_case is None:
+            raise HubCaseError("Die E-Mail-Verknüpfung wurde nicht gefunden.")
+    except (ValueError, HubCaseError) as exc:
+        db.rollback()
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-case-from-mailbox-email",
+        result="ok",
+        detail=f"Updated Hub Case {case.id} from one linked mailbox email.",
+    )
+    db.commit()
+    return _mailbox_case_payload(linked_case)
+
+
+@router.post("/emails/cases/{case_id}/delete", response_class=JSONResponse)
+async def delete_mailbox_case(
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Delete the case currently linked to one mailbox message."""
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    source_email_key = str(form.get("source_email_key") or "").strip()
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        source_email = service.source_email(source_email_key=source_email_key)
+        linked_case = service.linked_case_for_source_email(source_email_key=source_email.key)
+        if linked_case is None or linked_case.case.id != case_id:
+            raise HubCaseError("Der Fall ist nicht mehr mit dieser E-Mail verknüpft.")
+        case = service.delete_case(case_id=case_id)
+    except HubCaseError as exc:
+        db.rollback()
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-case-from-mailbox-email",
+        result="ok",
+        detail=f"Deleted Hub Case {case.id} from one linked mailbox email.",
+    )
+    db.commit()
+    return {"case_id": case_id, "source_email_key": source_email.key}
 
 
 @router.get("/emails/folder", response_class=HTMLResponse)
@@ -5172,6 +5280,21 @@ def _mailbox_linked_case(db: Session, message: object):
         )
     except HubCaseError:
         return None
+
+
+def _mailbox_case_payload(linked_case: object) -> dict[str, object]:
+    """Build the small status payload used to refresh a mailbox case control."""
+    case = getattr(linked_case, "case")
+    status = str(getattr(linked_case, "status") or "")
+    is_closed = status.casefold() == "abgeschlossen"
+    return {
+        "case_id": case.id,
+        "case_number": getattr(linked_case, "case_number"),
+        "case_url": f"/cases/{case.id}",
+        "status": status,
+        "label": "Fall abgeschlossen" if is_closed else "Offener Fall",
+        "is_closed": is_closed,
+    }
 
 
 def _case_detail_context(

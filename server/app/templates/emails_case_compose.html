@@ -1,18 +1,25 @@
 {% from "partials/case_field_control.html" import case_field_control %}
-{% if source_email %}
+{% if case_detail %}
+  <p class="notice-info">Der Fall „{{ case_detail.case_number }}“ ist mit der ausgewählten E-Mail verknüpft.</p>
+{% elif source_email %}
   <p class="notice-info">Der neue Fall wird mit der E-Mail „{{ source_email.subject }}“ verknüpft.</p>
 {% endif %}
 <p class="notice-error" data-mailbox-case-error hidden></p>
-<form method="post" action="/emails/cases" class="communication-form activity-compose-form customer-field-editor contact-create-form" data-mailbox-case-form>
+<form method="post" action="{% if case_detail %}/emails/cases/{{ case_detail.case.id }}{% else %}/emails/cases{% endif %}" class="communication-form activity-compose-form customer-field-editor contact-create-form" data-mailbox-case-form data-mailbox-case-mode="{% if case_detail %}edit{% else %}create{% endif %}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="source_email_key" value="{{ source_email.key if source_email else '' }}">
   <div class="customer-field-editor-grid">
     {% for field in fields %}
-      {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
+      {{ case_field_control(field, field.form_value if case_detail else submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
     {% endfor %}
   </div>
   <div class="email-compose-actions">
+    {% if case_detail %}
+      <button class="button button-secondary mailbox-case-delete" type="button" data-mailbox-case-delete-open data-mailbox-case-id="{{ case_detail.case.id }}" data-mailbox-case-source-key="{{ source_email.key }}" aria-label="Fall löschen" title="Fall löschen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 5.1h5.6"/><path d="M7 7.25h10"/><path d="M8 7.25v-1.1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1.1"/><path d="M6.9 10 7.9 18.15a1.3 1.3 0 0 0 1.29 1.15h5.84a1.3 1.3 0 0 0 1.29-1.15L17.1 10"/><path d="M10 11.3v5.6M12 11.3v5.6M14 11.3v5.6"/></g></svg>
+      </button>
+    {% endif %}
     <button class="button button-secondary" type="button" data-mailbox-case-close>Abbrechen</button>
-    <button class="button button-variant-1" type="submit" data-mailbox-case-submit>Fall anlegen</button>
+    <button class="button button-variant-1" type="submit" data-mailbox-case-submit>{% if case_detail %}Speichern{% else %}Fall anlegen{% endif %}</button>
   </div>
 </form>

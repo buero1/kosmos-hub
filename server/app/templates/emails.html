@@ -47,6 +47,9 @@
     a.mailbox-reading-case-link.is-open:hover, button.mailbox-reading-case-link.is-open:hover { border-color: #bf5f5f; background: #fbd8d8; color: #7e1c1c; }
     a.mailbox-reading-case-link.is-closed, button.mailbox-reading-case-link.is-closed { border-color: #8dbb9b; background: #e2f3e7; color: #1f7040; }
     a.mailbox-reading-case-link.is-closed:hover, button.mailbox-reading-case-link.is-closed:hover { border-color: #5e9d72; background: #d2ebda; color: #155a30; }
+    button.mailbox-case-delete { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; color: #9d2424; }
+    button.mailbox-case-delete:hover { border-color: #bf5f5f; background: #fde7e7; color: #7e1c1c; }
+    button.mailbox-case-delete svg { display: block; width: 1.3rem; height: 1.3rem; }
     .mailbox-reading-meta { grid-area: meta; }
     .mailbox-reading-actions { grid-area: actions; display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
     button.mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; background: transparent; color: var(--accent); line-height: 1; }
@@ -290,6 +293,16 @@
       </div>
     </div>
   </dialog>
+  <dialog class="update-confirmation-dialog" data-mailbox-case-delete-dialog aria-labelledby="mailbox-case-delete-heading">
+    <div>
+      <h3 id="mailbox-case-delete-heading">Fall im Hub löschen?</h3>
+      <p>Der Fall wird nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" data-mailbox-case-delete-cancel>Abbrechen</button>
+        <button class="button button-danger" type="button" data-mailbox-case-delete-confirm>Fall löschen</button>
+      </div>
+    </div>
+  </dialog>
   <script>
     (function () {
       var shell = document.querySelector('[data-mailbox-shell]');
@@ -308,6 +321,10 @@
       var mailboxCaseComposer = document.querySelector('[data-mailbox-case-compose]');
       var mailboxCaseComposerDrawer = mailboxCaseComposer && mailboxCaseComposer.querySelector('[data-mailbox-case-compose-drawer]');
       var mailboxCaseComposerContent = mailboxCaseComposer && mailboxCaseComposer.querySelector('[data-mailbox-case-compose-content]');
+      var mailboxCaseComposerTitle = mailboxCaseComposer && mailboxCaseComposer.querySelector('#mailbox-case-compose-title');
+      var mailboxCaseDeleteDialog = document.querySelector('[data-mailbox-case-delete-dialog]');
+      var mailboxCaseDeleteConfirm = mailboxCaseDeleteDialog && mailboxCaseDeleteDialog.querySelector('[data-mailbox-case-delete-confirm]');
+      var mailboxCaseDeletePending = null;
       var mailboxComposerForm = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-form]');
       var mailboxComposerSender = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-sender]');
       var mailboxComposerRecipient = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient]');
@@ -385,22 +402,33 @@
         error.hidden = false;
       }
 
-      function replaceMailboxCaseButton(button, payload) {
-        if (!button || !payload || !payload.case_url) return;
-        var link = document.createElement('a');
-        link.className = 'button button-secondary button-variant-2 mailbox-reading-case-link' + (payload.is_closed ? ' is-closed' : ' is-open');
-        link.href = payload.case_url;
-        link.textContent = payload.label || 'Offener Fall';
-        link.title = payload.case_number || '';
-        button.replaceWith(link);
+      function mailboxCaseControl(sourceEmailKey, payload) {
+        var control = document.createElement('button');
+        control.type = 'button';
+        control.className = 'button button-secondary button-variant-2 mailbox-reading-case-link';
+        control.dataset.mailboxCaseSourceKey = sourceEmailKey;
+        if (payload && payload.case_id) {
+          control.classList.add(payload.is_closed ? 'is-closed' : 'is-open');
+          control.dataset.mailboxCaseEditOpen = '';
+          control.dataset.mailboxCaseId = String(payload.case_id);
+          control.textContent = payload.label || 'Offener Fall';
+          control.title = payload.case_number || '';
+        } else {
+          control.dataset.mailboxCaseOpen = '';
+          control.textContent = 'Fall anlegen';
+        }
+        return control;
       }
 
-      function openMailboxCaseComposer(button) {
+      function replaceMailboxCaseControl(control, sourceEmailKey, payload) {
+        if (!control) return;
+        control.replaceWith(mailboxCaseControl(sourceEmailKey, payload));
+      }
+
+      function loadMailboxCaseComposer(button, url, title) {
         if (!mailboxCaseComposer || !mailboxCaseComposerContent) return;
-        var sourceEmailKey = button.dataset.mailboxCaseSourceKey || '';
-        if (!sourceEmailKey) return;
         button.disabled = true;
-        window.fetch('/emails/cases/compose?source_email_key=' + encodeURIComponent(sourceEmailKey), {
+        window.fetch(url, {
           credentials: 'same-origin'
         })
           .then(function (response) {
@@ -415,6 +443,7 @@
           })
           .then(function (html) {
             mailboxCaseComposerContent.innerHTML = html;
+            if (mailboxCaseComposerTitle) mailboxCaseComposerTitle.textContent = title;
             mailboxCaseComposer.hidden = false;
             if (mailboxCaseComposerDrawer) mailboxCaseComposerDrawer.setAttribute('aria-hidden', 'false');
             window.requestAnimationFrame(function () {
@@ -427,6 +456,83 @@
           })
           .finally(function () {
             button.disabled = false;
+          });
+      }
+
+      function openMailboxCaseComposer(button) {
+        var sourceEmailKey = button.dataset.mailboxCaseSourceKey || '';
+        if (!sourceEmailKey) return;
+        loadMailboxCaseComposer(
+          button,
+          '/emails/cases/compose?source_email_key=' + encodeURIComponent(sourceEmailKey),
+          'Fall anlegen'
+        );
+      }
+
+      function openMailboxCaseEditor(button) {
+        var sourceEmailKey = button.dataset.mailboxCaseSourceKey || '';
+        var caseId = button.dataset.mailboxCaseId || '';
+        if (!sourceEmailKey || !/^\d+$/.test(caseId)) return;
+        loadMailboxCaseComposer(
+          button,
+          '/emails/cases/' + encodeURIComponent(caseId) + '/compose?source_email_key=' + encodeURIComponent(sourceEmailKey),
+          'Fall bearbeiten'
+        );
+      }
+
+      function openMailboxCaseDeleteDialog(button) {
+        var caseId = button.dataset.mailboxCaseId || '';
+        var sourceEmailKey = button.dataset.mailboxCaseSourceKey || '';
+        var form = button.closest('[data-mailbox-case-form]');
+        var csrfInput = form && form.querySelector('[name=csrf_token]');
+        if (!/^\d+$/.test(caseId) || !sourceEmailKey || !csrfInput) return;
+        mailboxCaseDeletePending = {
+          caseId: caseId,
+          sourceEmailKey: sourceEmailKey,
+          csrfToken: csrfInput.value || ''
+        };
+        if (mailboxCaseDeleteDialog && typeof mailboxCaseDeleteDialog.showModal === 'function') {
+          mailboxCaseDeleteDialog.showModal();
+          return;
+        }
+        if (window.confirm('Fall im Hub löschen?')) deleteMailboxCase();
+      }
+
+      function deleteMailboxCase() {
+        var pending = mailboxCaseDeletePending;
+        if (!pending) return;
+        if (mailboxCaseDeleteConfirm) mailboxCaseDeleteConfirm.disabled = true;
+        var body = new URLSearchParams({
+          csrf_token: pending.csrfToken,
+          source_email_key: pending.sourceEmailKey
+        });
+        window.fetch('/emails/cases/' + encodeURIComponent(pending.caseId) + '/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+          credentials: 'same-origin'
+        })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Der Fall konnte nicht gelöscht werden.');
+              return payload;
+            });
+          })
+          .then(function () {
+            var control = Array.from(document.querySelectorAll('[data-mailbox-case-edit-open]')).find(function (item) {
+              return item.dataset.mailboxCaseSourceKey === pending.sourceEmailKey && item.dataset.mailboxCaseId === pending.caseId;
+            });
+            replaceMailboxCaseControl(control, pending.sourceEmailKey, null);
+            if (mailboxCaseDeleteDialog) mailboxCaseDeleteDialog.close();
+            closeMailboxCaseComposer();
+          })
+          .catch(function (error) {
+            var form = mailboxCaseComposerContent && mailboxCaseComposerContent.querySelector('[data-mailbox-case-form]');
+            showMailboxCaseComposerError(form, error.message || 'Der Fall konnte nicht gelöscht werden.');
+          })
+          .finally(function () {
+            if (mailboxCaseDeleteConfirm) mailboxCaseDeleteConfirm.disabled = false;
+            mailboxCaseDeletePending = null;
           });
       }
 
@@ -1228,8 +1334,29 @@
         prepareMailboxDraftAction(button);
       });
       document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-mailbox-case-delete-cancel]')) {
+          if (mailboxCaseDeleteDialog) mailboxCaseDeleteDialog.close();
+          mailboxCaseDeletePending = null;
+          return;
+        }
+        if (event.target.closest('[data-mailbox-case-delete-confirm]')) {
+          deleteMailboxCase();
+          return;
+        }
+        var deleteButton = event.target.closest('[data-mailbox-case-delete-open]');
+        if (deleteButton) {
+          event.preventDefault();
+          openMailboxCaseDeleteDialog(deleteButton);
+          return;
+        }
         if (event.target.closest('[data-mailbox-case-close]')) {
           closeMailboxCaseComposer();
+          return;
+        }
+        var editButton = event.target.closest('[data-mailbox-case-edit-open]');
+        if (editButton) {
+          event.preventDefault();
+          openMailboxCaseEditor(editButton);
           return;
         }
         var button = event.target.closest('[data-mailbox-case-open]');
@@ -1259,14 +1386,15 @@
           })
           .then(function (payload) {
             var source = String(new FormData(form).get('source_email_key') || '');
-            var caseButton = Array.from(document.querySelectorAll('[data-mailbox-case-open]')).find(function (button) {
+            var isEdit = form.dataset.mailboxCaseMode === 'edit';
+            var caseButton = Array.from(document.querySelectorAll(isEdit ? '[data-mailbox-case-edit-open]' : '[data-mailbox-case-open]')).find(function (button) {
               return button.dataset.mailboxCaseSourceKey === source;
             });
-            replaceMailboxCaseButton(caseButton, payload);
+            replaceMailboxCaseControl(caseButton, source, payload);
             closeMailboxCaseComposer();
           })
           .catch(function (error) {
-            showMailboxCaseComposerError(form, error.message || 'Der Fall konnte nicht angelegt werden.');
+            showMailboxCaseComposerError(form, error.message || 'Der Fall konnte nicht gespeichert werden.');
           })
           .finally(function () {
             if (submit) submit.disabled = false;
