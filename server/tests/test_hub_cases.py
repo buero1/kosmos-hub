@@ -2,18 +2,21 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.customer_activity import CustomerTaskActivity
+from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_user import HubUser
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
+from app.services.hub_workflows import CASE_OPEN_REMINDER_WORKFLOW_KEY, HubWorkflowService
 from app.services.module_layouts import ModuleLayoutService
 
 
@@ -100,6 +103,71 @@ def test_hub_case_update_replaces_fields_and_customer_link():
         assert updated.customer_id == second_customer.id
         assert _service(db).list_cases()[0].status == "Abgeschlossen"
         assert db.get(HubCase, case.id) is not None
+
+
+def test_open_case_creates_a_popup_task_and_completion_removes_it():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Workflow Kunde", is_visible=True)
+        user = HubUser(username="operator", password_hash="hashed", role="admin")
+        db.add_all([customer, user])
+        db.flush()
+        service = _service(db)
+        case = service.create_case(
+            customer_id=customer.id,
+            submitted_values=_submitted_values(),
+            actor_username="operator",
+        )
+
+        task = db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id))
+        assert task is not None
+        assert task.name == "Ein offener Fall vom 09.09.2026 09:00"
+        assert task.created_by_username == "operator"
+        assert task.reminder_channel == "popup"
+        assert task.reminder_minutes_before == 0
+        assert task.due_at == datetime(2026, 9, 10, 3, 0)
+        assert any(
+            workflow.workflow_key == CASE_OPEN_REMINDER_WORKFLOW_KEY
+            for workflow in HubWorkflowService(db=db).list_workflows()
+        )
+
+        db.add(
+            CustomerActivityReminderNotification(
+                user_id=user.id,
+                customer_id=customer.id,
+                activity_kind="task",
+                activity_id=task.id,
+                reminder_key="primary",
+                remind_at=task.due_at,
+            )
+        )
+        db.flush()
+        service.update_case(
+            case_id=case.id,
+            customer_id=customer.id,
+            submitted_values=_submitted_values(**{"case_field__status": "Abgeschlossen"}),
+        )
+
+        assert db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id)) is None
+        assert db.scalar(select(CustomerActivityReminderNotification)) is None
+
+
+def test_case_delete_removes_its_workflow_task():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Löschkunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        case = _service(db).create_case(customer_id=customer.id, submitted_values=_submitted_values())
+        assert db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id)) is not None
+
+        _service(db).delete_case(case_id=case.id)
+
+        assert db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id)) is None
 
 
 def test_hub_case_detail_uses_the_saved_global_field_layout():

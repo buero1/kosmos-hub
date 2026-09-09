@@ -488,6 +488,7 @@ async def create_case_page(
         case = service.create_case(
             customer_id=customer_id,
             submitted_values=submitted_values,
+            actor_username=user.username,
         )
         if source_email is not None:
             service.link_email(case_id=case.id, source_email_key=source_email.key)
@@ -1542,7 +1543,11 @@ async def create_mailbox_case(
             raise HubCaseError("Diese E-Mail ist bereits mit einem Fall verknüpft.")
         if source_email.customer_id is not None and customer_id != source_email.customer_id:
             raise HubCaseError("Der Kundenbezug der ausgewählten E-Mail darf beim Anlegen nicht geändert werden.")
-        case = service.create_case(customer_id=customer_id, submitted_values=submitted_values)
+        case = service.create_case(
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+            actor_username=user.username,
+        )
         service.link_email(case_id=case.id, source_email_key=source_email.key)
         linked_case = service.linked_case_for_source_email(source_email_key=source_email.key)
         if linked_case is None:

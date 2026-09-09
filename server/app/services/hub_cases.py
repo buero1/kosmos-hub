@@ -18,6 +18,7 @@ from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS, HubCaseField
+from app.services.hub_workflows import HubWorkflowService
 from app.services.module_layouts import ModuleLayoutService
 
 
@@ -182,7 +183,13 @@ class HubCaseService:
             "case_field__created_time": self._now_form_value(),
         }
 
-    def create_case(self, *, customer_id: int | None, submitted_values: dict[str, str]) -> HubCase:
+    def create_case(
+        self,
+        *,
+        customer_id: int | None,
+        submitted_values: dict[str, str],
+        actor_username: str | None = None,
+    ) -> HubCase:
         customer = self._customer(customer_id)
         values = self._submitted_values(submitted_values, creating=True)
         if customer is not None:
@@ -195,6 +202,12 @@ class HubCaseService:
         self.db.flush()
         case.case_number = f"FALL-{case.id:06d}"
         self.db.flush()
+        HubWorkflowService(db=self.db).create_case_open_reminder(
+            case=case,
+            case_status=values.get("status", ""),
+            created_time=values.get("created_time", ""),
+            actor_username=actor_username,
+        )
         return case
 
     def source_email(self, *, source_email_key: str) -> HubCaseEmailSource:
@@ -298,6 +311,8 @@ class HubCaseService:
             values["customer_name"] = existing_values["customer_name"]
         case.encrypted_fields_json = self._encrypt_values(values)
         self.db.flush()
+        if values.get("status") == "Abgeschlossen":
+            HubWorkflowService(db=self.db).remove_case_open_reminder(case_id=case.id)
         return case
 
     def delete_case(self, *, case_id: int) -> HubCase:
@@ -305,6 +320,7 @@ class HubCaseService:
         case = self.db.get(HubCase, case_id)
         if case is None:
             raise HubCaseError("Der Fall wurde nicht gefunden.")
+        HubWorkflowService(db=self.db).remove_case_open_reminder(case_id=case.id)
         self.db.delete(case)
         self.db.flush()
         return case

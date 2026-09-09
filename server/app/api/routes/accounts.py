@@ -19,6 +19,7 @@ from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLi
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HubAccountService
 from app.services.hub_mailbox_accounts import HubMailboxAccountError, HubMailboxAccountService
+from app.services.hub_workflows import HubWorkflowService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
@@ -1464,6 +1465,7 @@ def _account_context(
         "email_composer_font_options": FONT_FAMILY_OPTIONS,
         "email_composer_font_size_options": FONT_SIZE_OPTIONS,
         "email_composer_line_height_options": LINE_HEIGHT_OPTIONS,
+        "workflows": HubWorkflowService(db=service.db).list_workflows(),
         "zoho_status": zoho_service.get_status(),
         "zoho_mapping": zoho_service.mapping_rows(),
         "zoho_data_centers": ZOHO_DATA_CENTERS.values(),

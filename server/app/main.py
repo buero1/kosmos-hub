@@ -25,6 +25,7 @@ from app.models.customer_activity_reminder_notification import CustomerActivityR
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_case import HubCase
+from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.email_compose_image import EmailComposeImage
@@ -45,6 +46,7 @@ from app.models.zoho_email_attachment_import import ZohoEmailAttachmentImport, Z
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.services.hub_accounts import HubAccountService
+from app.services.hub_workflows import HubWorkflowService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.customer_communications import CustomerCommunicationService
@@ -124,6 +126,10 @@ def _ensure_phase_one_schema() -> None:
                 connection.execute(text("CREATE UNIQUE INDEX ix_hub_cases_zoho_id ON hub_cases (zoho_id)"))
             logger.info("Added hub_cases.zoho_id index.")
 
+    if "hub_workflows" not in table_names:
+        HubWorkflow.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_workflows table.")
+
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created customer_zoho_notes table.")
@@ -174,6 +180,14 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
                 logger.info("Added customer_task_activities.reminder_minutes_before column.")
+            if "case_id" not in task_columns:
+                connection.execute(
+                    text("ALTER TABLE customer_task_activities ADD COLUMN case_id INT NULL AFTER customer_id")
+                )
+                connection.execute(
+                    text("CREATE INDEX ix_customer_task_activities_case_id ON customer_task_activities (case_id)")
+                )
+                logger.info("Added customer_task_activities.case_id column and index.")
 
     if "customer_zoho_emails" not in table_names:
         CustomerZohoEmail.__table__.create(bind=engine, checkfirst=True)
@@ -601,6 +615,9 @@ async def lifespan(_: FastAPI):
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
+        with SessionLocal() as db:
+            HubWorkflowService(db=db).ensure_default_workflows()
+            db.commit()
         _backfill_customer_zoho_email_headers()
         schedule_elapsed_customer_meetings()
         schedule_pending_user_deletions()
