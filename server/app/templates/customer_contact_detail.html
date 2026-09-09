@@ -26,7 +26,7 @@
       "CRM Kontakt",
       detail.name,
       status=contact_status,
-      has_actions=can_manage_contacts
+      has_actions=true
     ) %}
       {% if can_manage_contacts %}
         <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
@@ -41,6 +41,7 @@
         <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
           <summary class="detail-actions-menu-trigger" aria-label="Weitere Kontaktaktionen">&#8942;</summary>
           <div class="detail-actions-menu-popover">
+            <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="contact" data-agent-context-key="{{ detail.contact.id }}">In Agent-Kontext aufnehmen</button>
             {% if detail.contact.zoho_id and detail.customer %}
               <form method="post" action="/customers/{{ detail.customer.id }}/contacts/{{ detail.contact.id }}/sync">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -49,6 +50,14 @@
             {% endif %}
             <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-contact-delete-open>Kontakt löschen</button>
             <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="contact-fields">Layout bearbeiten</button>
+          </div>
+        </details>
+      {% endif %}
+      {% if not can_manage_contacts %}
+        <details class="detail-actions-menu" data-customer-actions-menu>
+          <summary class="detail-actions-menu-trigger" aria-label="Weitere Kontaktaktionen">&#8942;</summary>
+          <div class="detail-actions-menu-popover">
+            <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="contact" data-agent-context-key="{{ detail.contact.id }}">In Agent-Kontext aufnehmen</button>
           </div>
         </details>
       {% endif %}

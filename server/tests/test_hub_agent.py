@@ -10,7 +10,7 @@ from app.models.customer import Customer
 from app.models.customer_activity import CustomerCallActivity, CustomerTaskActivity
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.customer_contact import CustomerContact
-from app.models.hub_agent import HubAgentAction, HubAgentJob
+from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
@@ -205,13 +205,54 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     route = Path("app/api/routes/agent.py").read_text(encoding="utf-8")
     base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
 
-    assert "Jeder Schritt wird erst nach deinem Klick ausgeführt." in template
-    assert 'action="/agent/actions/{{ action.id }}/execute"' in template
-    assert "E-Mails werden nie automatisch versendet." in template
+    assert "schwebenden Button unten rechts" in template
     assert 'href="#agent-capabilities"' in template
     assert "agent-capability-status-{{ capability.status }}" in template
-    assert '@router.post("/actions/{action_id}/execute")' in route
+    assert '@router.post("/chat/messages")' in route
+    assert '@router.post("/chat/actions/{action_id}/execute")' in route
+    assert 'data-agent-float-open' in base_template
+    assert 'data-agent-context-add' in base_template
     assert '>Hub-Agent</a>' in base_template
+
+
+def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Kontext-Kunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        service = HubAgentService(db=db, cipher=cipher)
+
+        started = service.start_conversation(actor="hub-admin")
+        assert started.title == "Neue Unterhaltung"
+
+        chat = service.add_context(
+            actor="hub-admin",
+            conversation_id=started.conversation_id,
+            resource_type="customer",
+            resource_key=str(customer.id),
+        )
+        assert chat.conversation_id == started.conversation_id
+        assert [context.label for context in chat.contexts] == ["Kunde: Kontext-Kunde"]
+        assert db.scalars(select(HubAgentConversation)).one().created_by_username == "hub-admin"
+        assert db.scalars(select(HubAgentConversationContext)).one().resource_key == str(customer.id)
+
+        closed = service.close_conversation(actor="hub-admin", conversation_id=started.conversation_id)
+        assert closed.status == "completed"
+        try:
+            service.add_context(
+                actor="hub-admin",
+                conversation_id=started.conversation_id,
+                resource_type="customer",
+                resource_key=str(customer.id),
+            )
+        except HubAgentError as exc:
+            assert "abgeschlossen" in str(exc)
+        else:
+            raise AssertionError("Completed Hub-Agent conversations must be immutable.")
 
 
 def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():

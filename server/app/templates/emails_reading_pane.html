@@ -14,7 +14,7 @@
       <p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.cc_recipients %}<br>CC {{ selected.cc_recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}{% if selected.is_unread %} <span class="pill" data-mailbox-unread-status>Neu</span>{% endif %}</p>
       <div class="mailbox-reading-actions">
         {% if selected.kind not in ("draft", "system") %}
-          <a class="button button-secondary mailbox-reading-action" href="/agent?email_key={{ selected.key }}#agent-work">Mit Agent bearbeiten</a>
+          <button class="button button-secondary mailbox-reading-action" type="button" data-agent-context-add data-agent-context-type="email" data-agent-context-key="{{ selected.key }}">Mit Agent bearbeiten</button>
         {% endif %}
         {% if selected.direction == 'inbound' %}
           <button class="button button-variant-1 mailbox-reading-action" type="button" data-mailbox-compose-action="reply" data-mailbox-compose-customer-id="{{ selected.customer_id if selected.kind == 'linked' else '' }}" data-mailbox-compose-email-id="{{ selected.customer_email_id }}" aria-label="Antworten" title="Antworten">

@@ -25,7 +25,7 @@ from app.models.customer_activity_reminder_notification import CustomerActivityR
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_case import HubCase
-from app.models.hub_agent import HubAgentAction, HubAgentJob
+from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
@@ -131,9 +131,24 @@ def _ensure_phase_one_schema() -> None:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_workflows table.")
 
+    if "hub_agent_conversations" not in table_names:
+        HubAgentConversation.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_agent_conversations table.")
+
+    if "hub_agent_conversation_contexts" not in table_names:
+        HubAgentConversationContext.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_agent_conversation_contexts table.")
+
     if "hub_agent_jobs" not in table_names:
         HubAgentJob.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_agent_jobs table.")
+    else:
+        agent_job_columns = {column["name"] for column in inspector.get_columns("hub_agent_jobs")}
+        if "conversation_id" not in agent_job_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_agent_jobs ADD COLUMN conversation_id INT NULL"))
+                connection.execute(text("CREATE INDEX ix_hub_agent_jobs_conversation_id ON hub_agent_jobs (conversation_id)"))
+            logger.info("Added hub_agent_jobs.conversation_id column.")
 
     if "hub_agent_actions" not in table_names:
         HubAgentAction.__table__.create(bind=engine, checkfirst=True)

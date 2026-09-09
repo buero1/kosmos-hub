@@ -16,7 +16,7 @@ from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
-from app.models.hub_agent import HubAgentAction, HubAgentJob
+from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
@@ -66,6 +66,8 @@ __all__ = [
     "FleetRefreshSiteResult",
     "HubAccessToken",
     "HubAgentAction",
+    "HubAgentConversation",
+    "HubAgentConversationContext",
     "HubAgentJob",
     "HubCase",
     "HubCaseEmailLink",

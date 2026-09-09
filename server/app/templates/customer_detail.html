@@ -72,6 +72,9 @@
 {% macro customer_activity_complete_icon() %}
   <svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.7 12.9 C6.8 13.4, 8.2 14.8, 9.7 16.3 C12.1 13.1, 14.8 10.3, 18.3 7.8"/></g></svg>
 {% endmacro %}
+{% macro customer_agent_context_action(resource_type, resource_key, label) %}
+  <button class="customer-activity-entry-action" type="button" data-agent-context-add data-agent-context-type="{{ resource_type }}" data-agent-context-key="{{ resource_key }}" aria-label="{{ label }} in Agent-Kontext aufnehmen" title="In Agent-Kontext aufnehmen"><svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M5.1 17.4V7.2a1.5 1.5 0 0 1 1.5-1.5h14.3a1.5 1.5 0 0 1 1.5 1.5v8.7a1.5 1.5 0 0 1-1.5 1.5H10l-4.9 2.2Z"/><path d="M9.1 11.5h.01M12.1 11.5h.01M15.1 11.5h.01"/></g></svg></button>
+{% endmacro %}
 {% macro customer_note_entry_action(note, action) %}
   {% if action == "edit" %}
     <button class="customer-activity-entry-action" type="button" data-customer-note-edit data-customer-note-update-url="/customers/{{ detail.entry.customer.id }}/communications/notes/{{ note.id }}" data-customer-note-title="{{ note.title }}" data-customer-note-content="{{ note.content }}" aria-label="Notiz bearbeiten" title="Notiz bearbeiten">{{ customer_activity_entry_icon("edit") }}</button>
@@ -146,7 +149,7 @@
       "CRM customer",
       detail.entry.customer.name,
       status=detail.entry.account_status or "Status not available",
-      has_actions=can_manage_customer_fields or can_manage_communications
+      has_actions=true
     ) %}
         {% if can_manage_customer_fields and (detail.editable_profile_fields or detail.subforms) %}
           <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
@@ -165,6 +168,7 @@
           <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
+              <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
               {% if can_manage_communications %}
                 <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -174,6 +178,14 @@
               {% if can_manage_customer_fields and detail.display_profile_fields %}
                 <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="customer-fields">Layout bearbeiten</button>
               {% endif %}
+            </div>
+          </details>
+        {% endif %}
+        {% if not (can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields)) %}
+          <details class="detail-actions-menu" data-customer-actions-menu>
+            <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
+            <div class="detail-actions-menu-popover">
+              <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
             </div>
           </details>
         {% endif %}
@@ -380,6 +392,7 @@
                     </p>
                     {% if can_manage_communications %}
                       <div class="case-email-actions">
+                        <button class="button button-secondary button-variant-2 agent-context-action" type="button" data-agent-context-add data-agent-context-type="email" data-agent-context-key="linked-{{ detail.entry.customer.id }}-{{ email.id }}">In Agent-Kontext aufnehmen</button>
                         <a class="button button-secondary button-variant-2" href="/cases/new?source_email_key=linked-{{ detail.entry.customer.id }}-{{ email.id }}">Fall anlegen</a>
                         {% if detail.cases %}
                           <form method="post" action="/cases/email-links">
@@ -493,12 +506,13 @@
                 <article class="communication-entry">
                   <div class="communication-entry-heading">
                     <strong>{{ note.title }}</strong>
-                    {% if can_manage_communications %}
-                      <div class="customer-activity-entry-actions" role="group" aria-label="Notizaktionen">
+                    <div class="customer-activity-entry-actions" role="group" aria-label="Notizaktionen">
+                      {{ customer_agent_context_action("note", note.id, "Notiz") }}
+                      {% if can_manage_communications %}
                         {{ customer_note_entry_action(note, "edit") }}
                         {{ customer_note_entry_action(note, "delete") }}
-                      </div>
-                    {% endif %}
+                      {% endif %}
+                    </div>
                   </div>
                   {% if note.author or note.occurred_at %}
                     <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
@@ -562,6 +576,7 @@
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if call.status == "planned" %}Geplant{% elif call.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Anrufaktionen">
+                        {{ customer_agent_context_action("call", call.id, "Anruf") }}
                         {% if call.status == "planned" %}{{ customer_call_entry_action(call, "complete") }}{% endif %}
                         {{ customer_call_entry_action(call, "edit") }}
                         {{ customer_call_entry_action(call, "delete") }}
@@ -580,6 +595,7 @@
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if task.status == "planned" %}Geplant{% elif task.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Aufgabenaktionen">
+                        {{ customer_agent_context_action("task", task.id, "Aufgabe") }}
                         {% if task.status == "planned" %}{{ customer_task_entry_action(task, "complete") }}{% endif %}
                         {{ customer_task_entry_action(task, "edit") }}
                         {{ customer_task_entry_action(task, "delete") }}
@@ -599,6 +615,7 @@
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if meeting.status == "planned" %}Geplant{% elif meeting.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Meetingaktionen">
+                        {{ customer_agent_context_action("meeting", meeting.id, "Meeting") }}
                         {{ customer_meeting_entry_action(meeting, "edit") }}
                         {{ customer_meeting_entry_action(meeting, "delete") }}
                       </div>

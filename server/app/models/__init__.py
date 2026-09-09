@@ -18,7 +18,7 @@ from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
-from app.models.hub_agent import HubAgentAction, HubAgentJob
+from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshSiteResult
 from app.models.fleet_refresh_settings import FleetRefreshSettings

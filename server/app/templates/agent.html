@@ -5,182 +5,44 @@
     <aside class="account-page-sidebar">
       <p class="eyebrow">Hub-Agent</p>
       <nav class="account-section-nav" aria-label="Hub-Agent Bereiche">
-        <a href="#agent-work" aria-current="page">Arbeitsaufträge</a>
-        <a href="#agent-capabilities">Fähigkeiten</a>
+        <a href="#agent-capabilities" aria-current="page">Fähigkeiten</a>
       </nav>
     </aside>
     <section class="account-page-content">
-    <section class="agent-page">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">KI-Mitarbeiter</p>
-        <h2>Hub-Agent</h2>
-        <p class="subtle">Der Agent erstellt einen nachvollziehbaren Plan. Jeder Schritt wird erst nach deinem Klick ausgeführt.</p>
-      </div>
-      <span class="pill pill-success">Kontrollierte Aktionen</span>
-    </div>
-
-    {% if request.query_params.get("agent_job") %}
-      <p class="notice-success">Der Arbeitsplan wurde erstellt. Prüfe die Schritte und führe sie einzeln aus.</p>
-    {% endif %}
-    {% if request.query_params.get("agent_action") == "completed" %}
-      <p class="notice-success">Die Agent-Aktion wurde ausgeführt.</p>
-    {% elif request.query_params.get("agent_action") == "failed" %}
-      <p class="notice-error">Die Agent-Aktion konnte nicht ausgeführt werden. Die Ursache steht beim jeweiligen Schritt.</p>
-    {% elif request.query_params.get("agent_action") == "missing" %}
-      <p class="notice-error">Die Agent-Aktion ist nicht verfügbar.</p>
-    {% endif %}
-    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
-    {% if email_context_error %}<p class="notice-error">{{ email_context_error }}</p>{% endif %}
-
-    <section id="agent-work" class="account-section" data-agent-section>
-    {% if not provider_configured %}
-      <section class="agent-empty-state">
-        <p class="eyebrow">OpenAI-Verbindung benötigt</p>
-        <h3>Verbinde zuerst den KI-Anbieter</h3>
-        <p class="subtle">Der API-Schlüssel wird verschlüsselt auf dem Hub-Server gespeichert und nicht im Browser oder in Git abgelegt.</p>
-        <a class="button" href="/account#account-openai">OpenAI in Account öffnen</a>
-      </section>
-    {% else %}
-      <form class="agent-instruction-form" method="post" action="/agent">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {% if email_context %}
-          <input type="hidden" name="email_key" value="{{ email_context.key }}">
-          <section class="agent-email-context" aria-label="Ausgewählter E-Mail-Kontext">
-            <p class="eyebrow">E-Mail-Kontext</p>
-            <strong>{{ email_context.subject }}</strong>
-            <p class="subtle">{% if email_context.sender %}Von {{ email_context.sender }}{% endif %}{% if email_context.sender and email_context.recipients %} · {% endif %}{% if email_context.recipients %}An {{ email_context.recipients }}{% endif %}{% if email_context.customer_name %}<br>Kunde: {{ email_context.customer_name }}{% endif %}</p>
-            <a href="/agent#agent-work">E-Mail-Kontext entfernen</a>
+      <section id="agent-capabilities" class="agent-capabilities account-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">KI-Mitarbeiter</p>
+            <h2>Hub-Agent</h2>
+            <p class="subtle">Öffne den Agenten über den schwebenden Button unten rechts. Unterhaltungen und bewusst hinzugefügte Kontexte bleiben dort erhalten.</p>
+          </div>
+          <span class="pill pill-success">Kontrollierte Aktionen</span>
+        </div>
+        {% if not provider_configured %}
+          <section class="agent-empty-state">
+            <p class="eyebrow">OpenAI-Verbindung benötigt</p>
+            <h3>Verbinde zuerst den KI-Anbieter</h3>
+            <p class="subtle">Der API-Schlüssel wird verschlüsselt auf dem Hub-Server gespeichert und nicht im Browser oder in Git abgelegt.</p>
+            <a class="button" href="/account#account-openai">OpenAI in Account öffnen</a>
           </section>
         {% endif %}
-        <label for="agent-instruction">Was soll der Hub-Agent vorbereiten?</label>
-        <textarea id="agent-instruction" name="instruction" rows="5" maxlength="4000" required placeholder="Zum Beispiel: Lege einen neuen Kontakt an und bereite eine E-Mail für Ende der Woche vor.">{{ instruction }}</textarea>
-        <div class="agent-instruction-actions">
-          <p class="subtle">Der Agent kann Entwürfe, Kontakte, Notizen, Fälle sowie Aufgaben und Anrufe vorbereiten. E-Mails werden nie automatisch versendet.</p>
-          <button class="button" type="submit">Arbeitsplan erstellen</button>
+        <div class="agent-capability-table-wrap">
+          <table class="agent-capability-table">
+            <thead><tr><th>Fähigkeit</th><th>Status</th><th>Beschreibung</th></tr></thead>
+            <tbody>
+              {% for capability in capabilities %}
+                <tr>
+                  <td>{{ capability.name }}</td>
+                  <td><span class="agent-capability-status agent-capability-status-{{ capability.status }}">
+                    {% if capability.status == 'available' %}Verfügbar{% elif capability.status == 'planned' %}Geplant{% else %}Deaktiviert{% endif %}
+                  </span></td>
+                  <td>{{ capability.description }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
-      </form>
-    {% endif %}
-    </section>
-
-    <section id="agent-jobs" class="agent-jobs account-section" data-agent-section aria-label="Agent-Arbeitspläne">
-      <div class="section-heading section-heading-compact">
-        <div>
-          <p class="eyebrow">Verlauf</p>
-          <h3>Arbeitspläne</h3>
-        </div>
-      </div>
-      {% if jobs %}
-        {% for job in jobs %}
-          <article class="agent-job" id="agent-job-{{ job.id }}">
-            <div class="agent-job-heading">
-              <div>
-                <span class="agent-job-number">Auftrag #{{ job.id }}</span>
-                <h3>{{ job.summary }}</h3>
-                <p class="subtle">{{ job.created_at | berlin_time }}</p>
-              </div>
-              <span class="pill{% if job.status == 'completed' %} pill-success{% elif job.status == 'needs_attention' %} pill-warning{% endif %}">
-                {% if job.status == 'completed' %}Abgeschlossen{% elif job.status == 'needs_attention' %}Prüfung nötig{% else %}Bereit{% endif %}
-              </span>
-            </div>
-            <p class="agent-job-request"><strong>Deine Anweisung:</strong> {{ job.request_text }}</p>
-            <p class="agent-job-response">{{ job.response_text }}</p>
-            {% if job.actions %}
-              <ol class="agent-action-list">
-                {% for action in job.actions %}
-                  <li class="agent-action agent-action-{{ action.status }}">
-                    <div class="agent-action-main">
-                      <span class="agent-action-type">
-                        {% if action.action_type == 'create_contact' %}Kontakt{% elif action.action_type in ('create_task', 'update_task', 'complete_task', 'delete_task') %}Aufgabe{% elif action.action_type in ('schedule_call', 'update_call', 'complete_call', 'delete_call') %}Anruf{% elif action.action_type in ('create_case_from_email', 'link_email_to_case') %}Fall{% elif action.action_type == 'create_customer_note' %}Notiz{% else %}E-Mail-Entwurf{% endif %}
-                      </span>
-                      <h4>{{ action.title }}</h4>
-                      <p>{{ action.details }}</p>
-                      {% if action.preview_lines %}
-                        <dl class="agent-action-preview">
-                          {% for line in action.preview_lines %}<div><dt>Geplant</dt><dd>{{ line }}</dd></div>{% endfor %}
-                        </dl>
-                      {% endif %}
-                      {% if action.error %}<p class="notice-error">{{ action.error }}</p>{% endif %}
-                    </div>
-                    <div class="agent-action-controls">
-                      {% if action.status == 'proposed' %}
-                        <form method="post" action="/agent/actions/{{ action.id }}/execute">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                          <button class="button" type="submit">Ausführen</button>
-                        </form>
-                      {% elif action.result_href %}
-                        <a class="button button-secondary" href="{{ action.result_href }}">{{ action.result_label }}</a>
-                      {% endif %}
-                      <span class="agent-action-status">
-                        {% if action.status == 'completed' %}Erledigt{% elif action.status == 'failed' %}Fehlgeschlagen{% else %}Vorgeschlagen{% endif %}
-                      </span>
-                    </div>
-                  </li>
-                {% endfor %}
-              </ol>
-            {% else %}
-              <p class="subtle">Für diesen Auftrag waren noch keine umsetzbaren Schritte möglich.</p>
-            {% endif %}
-          </article>
-        {% endfor %}
-      {% else %}
-        <div class="agent-empty-state">
-          <h3>Noch kein Arbeitsplan</h3>
-          <p class="subtle">Beschreibe die gewünschte Arbeit in eigenen Worten. Der Agent stellt sie anschließend als überprüfbare Einzelschritte zusammen.</p>
-        </div>
-      {% endif %}
-    </section>
-    <section id="agent-capabilities" class="agent-capabilities account-section" data-agent-section>
-      <div class="section-heading section-heading-compact">
-        <div>
-          <p class="eyebrow">Werkzeugkasten</p>
-          <h3>Fähigkeiten</h3>
-          <p class="subtle">Verfügbar bedeutet: Der Agent kann die Fähigkeit im Arbeitsplan vorschlagen und nach deiner Bestätigung ausführen.</p>
-        </div>
-      </div>
-      <div class="agent-capability-table-wrap">
-        <table class="agent-capability-table">
-          <thead><tr><th>Fähigkeit</th><th>Status</th><th>Beschreibung</th></tr></thead>
-          <tbody>
-            {% for capability in capabilities %}
-              <tr>
-                <td>{{ capability.name }}</td>
-                <td><span class="agent-capability-status agent-capability-status-{{ capability.status }}">
-                  {% if capability.status == 'available' %}Verfügbar{% elif capability.status == 'planned' %}Geplant{% else %}Deaktiviert{% endif %}
-                </span></td>
-                <td>{{ capability.description }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </section>
+      </section>
     </section>
   </div>
-  <script>
-    (() => {
-      const page = document.querySelector("[data-agent-navigation]");
-      if (!page) return;
-      const links = Array.from(page.querySelectorAll(".account-section-nav a"));
-      const sections = Array.from(page.querySelectorAll("[data-agent-section]"));
-
-      const activate = () => {
-        const current = sections.find((section) => {
-          const bounds = section.getBoundingClientRect();
-          return bounds.top <= 120 && bounds.bottom > 120;
-        }) || sections[0];
-        links.forEach((link) => {
-          if (link.getAttribute("href") === `#${current.id}`) {
-            link.setAttribute("aria-current", "page");
-          } else {
-            link.removeAttribute("aria-current");
-          }
-        });
-      };
-      links.forEach((link) => link.addEventListener("click", () => window.setTimeout(activate, 0)));
-      window.addEventListener("scroll", activate, {passive: true});
-      activate();
-    })();
-  </script>
 {% endblock %}

@@ -1412,6 +1412,163 @@
         color: var(--muted);
         font-size: 0.78rem;
       }
+      .agent-launcher {
+        position: fixed;
+        right: 1.35rem;
+        bottom: 1.35rem;
+        z-index: 40;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        min-height: 3.25rem;
+        padding: 0.65rem 0.9rem;
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fffdf8;
+        box-shadow: 0 14px 30px rgba(17, 63, 55, 0.28);
+        cursor: pointer;
+        font: 700 0.88rem "Trebuchet MS", sans-serif;
+      }
+      .agent-launcher:hover,
+      .agent-launcher:focus-visible { background: #075f4e; }
+      .agent-launcher svg { width: 1.3rem; height: 1.3rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.9; }
+      .agent-launcher-badge {
+        display: inline-grid;
+        min-width: 1.25rem;
+        height: 1.25rem;
+        place-items: center;
+        padding: 0 0.22rem;
+        border-radius: 999px;
+        background: #fffdf8;
+        color: var(--accent);
+        font-size: 0.72rem;
+      }
+      .agent-float {
+        position: fixed;
+        right: 1.35rem;
+        bottom: 5.35rem;
+        z-index: 41;
+        display: flex;
+        flex-direction: column;
+        width: min(31rem, calc(100vw - 2rem));
+        height: min(44rem, calc(100vh - 7rem));
+        overflow: hidden;
+        border: 1px solid #a9c7ba;
+        border-radius: 22px;
+        background: rgba(255, 253, 248, 0.98);
+        box-shadow: 0 24px 58px rgba(40, 45, 44, 0.24);
+      }
+      .agent-float[hidden] { display: none; }
+      .agent-float-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.85rem 0.95rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .agent-float-heading { min-width: 0; }
+      .agent-float-heading .eyebrow { margin: 0; }
+      .agent-float-heading strong { display: block; overflow: hidden; margin-top: 0.08rem; text-overflow: ellipsis; white-space: nowrap; }
+      .agent-float-header-actions { display: flex; align-items: center; gap: 0.35rem; }
+      .agent-float-icon-button {
+        display: inline-grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #fffdf8;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .agent-float-icon-button:hover,
+      .agent-float-icon-button:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+      .agent-float-icon-button svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+      .agent-float-history {
+        padding: 0.55rem 0.95rem;
+        border-bottom: 1px solid var(--border);
+        background: rgba(247, 244, 237, 0.6);
+      }
+      .agent-float-history summary { cursor: pointer; color: var(--muted); font-size: 0.78rem; }
+      .agent-float-history-list { display: grid; gap: 0.35rem; margin-top: 0.55rem; }
+      .agent-float-history-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.45rem 0.55rem;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        text-align: left;
+      }
+      .agent-float-history-item:hover,
+      .agent-float-history-item.is-current { background: var(--accent-soft); }
+      .agent-float-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+      .agent-float-history-status { color: var(--muted); font-size: 0.72rem; }
+      .agent-float-contexts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding: 0.6rem 0.95rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .agent-float-contexts:empty { display: none; }
+      .agent-context-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        max-width: 100%;
+        padding: 0.25rem 0.4rem 0.25rem 0.55rem;
+        border: 1px solid #a9c7ba;
+        border-radius: 999px;
+        background: #eef6f2;
+        color: #075f4e;
+        font-size: 0.76rem;
+      }
+      .agent-context-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .agent-context-chip button { width: 1.15rem; height: 1.15rem; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; font-size: 0.95rem; line-height: 1; }
+      .agent-context-chip button:hover { background: rgba(7, 95, 78, 0.12); }
+      .agent-float-chat {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 0.75rem;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0.85rem 0.95rem 1rem;
+      }
+      .agent-float-chat .assistant-message { max-width: 94%; }
+      .agent-float-empty { margin: auto 0; }
+      .agent-chat-action-card {
+        display: grid;
+        gap: 0.4rem;
+        margin-top: 0.5rem;
+        padding: 0.65rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(247, 244, 237, 0.76);
+      }
+      .agent-chat-action-card strong { font-size: 0.88rem; }
+      .agent-chat-action-card p { margin: 0; font-size: 0.82rem; line-height: 1.4; }
+      .agent-chat-action-card ul { display: grid; gap: 0.16rem; margin: 0; padding-left: 1rem; font-size: 0.78rem; }
+      .agent-chat-action-footer { display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; margin-top: 0.15rem; }
+      .agent-chat-action-footer .button { min-height: 2rem; padding: 0.35rem 0.6rem; font-size: 0.78rem; }
+      .agent-chat-action-status { color: var(--muted); font-size: 0.75rem; }
+      .agent-float-composer { margin: 0.65rem; }
+      .agent-float-notice { margin: 0; padding: 0.6rem 0.95rem; border-top: 1px solid var(--border); color: #8a493c; font-size: 0.82rem; }
+      .agent-context-action { text-align: left; }
+      @media (max-width: 680px) {
+        .agent-launcher { right: 0.75rem; bottom: 0.75rem; min-height: 2.9rem; padding: 0.55rem 0.75rem; }
+        .agent-launcher-label { display: none; }
+        .agent-float { right: 0.75rem; bottom: 4.25rem; width: calc(100vw - 1.5rem); height: min(42rem, calc(100vh - 5.25rem)); }
+      }
       .agent-page {
         max-width: 68rem;
         display: grid;
@@ -3847,6 +4004,39 @@
         {% block content %}{% endblock %}
       </main>
     </div>
+    <button class="agent-launcher" type="button" data-agent-float-open aria-label="Hub-Agent öffnen" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a7.5 7.5 0 0 0-7.5 7.5c0 2.1.9 4 2.35 5.38L6 20.5l4.12-.9A7.5 7.5 0 1 0 12 3.5Z"/><path d="M8.5 11.2h.01M12 11.2h.01M15.5 11.2h.01"/></svg>
+      <span class="agent-launcher-label">Hub-Agent</span>
+      <span class="agent-launcher-badge" data-agent-float-badge hidden></span>
+    </button>
+    <section class="agent-float" data-agent-float hidden aria-label="Hub-Agent Unterhaltung">
+      <header class="agent-float-header">
+        <div class="agent-float-heading">
+          <p class="eyebrow">KI-Mitarbeiter</p>
+          <strong data-agent-float-title>Hub-Agent</strong>
+        </div>
+        <div class="agent-float-header-actions">
+          <button class="agent-float-icon-button" type="button" data-agent-float-new aria-label="Neue Unterhaltung" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="agent-float-icon-button" type="button" data-agent-float-complete aria-label="Unterhaltung abschließen" title="Unterhaltung abschließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.2 4.2L19 6.5"/></svg></button>
+          <button class="agent-float-icon-button" type="button" data-agent-float-close aria-label="Hub-Agent schließen" title="Schließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+      </header>
+      <details class="agent-float-history" data-agent-float-history>
+        <summary>Unterhaltungen</summary>
+        <div class="agent-float-history-list" data-agent-float-history-list></div>
+      </details>
+      <div class="agent-float-contexts" data-agent-float-contexts></div>
+      <div class="agent-float-chat" data-agent-float-messages aria-live="polite"></div>
+      <p class="agent-float-notice" data-agent-float-notice hidden></p>
+      <form class="assistant-composer agent-float-composer" data-agent-float-form>
+        <div class="assistant-composer-field">
+          <label class="visually-hidden" for="agent-float-instruction">Nachricht an den Hub-Agenten</label>
+          <textarea id="agent-float-instruction" rows="3" maxlength="4000" placeholder="Was soll der Hub-Agent vorbereiten?" data-agent-float-input></textarea>
+          <button class="assistant-send" type="submit" aria-label="Anweisung senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3.5-5.5L5 12Z"/><path d="m11.5 13.5 3.2-3.2"/></svg></button>
+        </div>
+        <div class="assistant-composer-meta"><span>Enter sendet, Umschalt+Enter fügt eine Zeile ein.</span><span>Jede Aktion braucht deine Bestätigung.</span></div>
+      </form>
+    </section>
     {% if can_use_global_email_composer and not request.url.path.startswith('/emails') %}
       {% include "partials/global_mailbox_composer.html" %}
     {% endif %}
@@ -5944,6 +6134,259 @@
             orderInput.value = JSON.stringify(itemKeys());
           });
         });
+
+        (function setupHubAgentFloat() {
+          var launcher = document.querySelector("[data-agent-float-open]");
+          var panel = document.querySelector("[data-agent-float]");
+          if (!launcher || !panel) { return; }
+
+          var title = panel.querySelector("[data-agent-float-title]");
+          var history = panel.querySelector("[data-agent-float-history]");
+          var historyList = panel.querySelector("[data-agent-float-history-list]");
+          var contexts = panel.querySelector("[data-agent-float-contexts]");
+          var messages = panel.querySelector("[data-agent-float-messages]");
+          var notice = panel.querySelector("[data-agent-float-notice]");
+          var form = panel.querySelector("[data-agent-float-form]");
+          var input = panel.querySelector("[data-agent-float-input]");
+          var badge = document.querySelector("[data-agent-float-badge]");
+          var state = { csrfToken: {{ csrf_token | tojson }}, chat: null, busy: false };
+
+          function createElement(name, className, text) {
+            var element = document.createElement(name);
+            if (className) { element.className = className; }
+            if (text !== undefined && text !== null) { element.textContent = text; }
+            return element;
+          }
+
+          function setNotice(message) {
+            notice.hidden = !message;
+            notice.textContent = message || "";
+          }
+
+          function formatStatus(status) {
+            if (status === "completed") { return "Abgeschlossen"; }
+            if (status === "needs_attention" || status === "failed") { return "Prüfung nötig"; }
+            if (status === "proposed") { return "Bestätigung nötig"; }
+            return "Aktiv";
+          }
+
+          function appendMessage(kind, label, text) {
+            var message = createElement("article", "assistant-message assistant-message-" + kind);
+            message.appendChild(createElement("span", "assistant-message-label", label));
+            message.appendChild(createElement("div", "assistant-message-text", text));
+            messages.appendChild(message);
+            return message;
+          }
+
+          function appendActionCard(parent, action, conversationStatus) {
+            var card = createElement("section", "agent-chat-action-card");
+            card.appendChild(createElement("strong", "", action.title));
+            card.appendChild(createElement("p", "", action.details));
+            if (action.preview_lines && action.preview_lines.length) {
+              var preview = createElement("ul");
+              action.preview_lines.forEach(function (line) {
+                preview.appendChild(createElement("li", "", line));
+              });
+              card.appendChild(preview);
+            }
+            if (action.error) {
+              card.appendChild(createElement("p", "notice-error", action.error));
+            }
+            var footer = createElement("div", "agent-chat-action-footer");
+            if (action.status === "proposed" && conversationStatus === "active") {
+              var execute = createElement("button", "button", "Ausführen");
+              execute.type = "button";
+              execute.dataset.agentFloatActionExecute = String(action.id);
+              footer.appendChild(execute);
+            } else if (action.result_href) {
+              var result = createElement("a", "button button-secondary", action.result_label || "Ergebnis öffnen");
+              result.href = action.result_href;
+              footer.appendChild(result);
+            }
+            footer.appendChild(createElement("span", "agent-chat-action-status", formatStatus(action.status)));
+            card.appendChild(footer);
+            parent.appendChild(card);
+          }
+
+          function render(payload) {
+            state.chat = payload;
+            state.csrfToken = payload.csrf_token || state.csrfToken;
+            setNotice("");
+            var conversation = payload.conversation || {};
+            title.textContent = conversation.title || "Hub-Agent";
+
+            contexts.replaceChildren();
+            (payload.contexts || []).forEach(function (context) {
+              var chip = createElement("span", "agent-context-chip");
+              chip.title = context.description || context.label;
+              chip.appendChild(createElement("span", "agent-context-chip-label", context.label));
+              if (conversation.status === "active") {
+                var remove = createElement("button", "", "×");
+                remove.type = "button";
+                remove.setAttribute("aria-label", context.label + " aus dem Kontext entfernen");
+                remove.dataset.agentFloatContextRemove = String(context.id);
+                chip.appendChild(remove);
+              }
+              contexts.appendChild(chip);
+            });
+
+            historyList.replaceChildren();
+            (payload.conversations || []).forEach(function (item) {
+              var itemButton = createElement("button", "agent-float-history-item", "");
+              itemButton.type = "button";
+              itemButton.dataset.agentFloatConversation = String(item.id);
+              if (item.id === conversation.id) { itemButton.classList.add("is-current"); }
+              itemButton.appendChild(createElement("span", "agent-float-history-title", item.title));
+              itemButton.appendChild(createElement("span", "agent-float-history-status", formatStatus(item.status)));
+              historyList.appendChild(itemButton);
+            });
+
+            messages.replaceChildren();
+            var proposedCount = 0;
+            (payload.messages || []).forEach(function (message) {
+              appendMessage("user", "Du", message.instruction);
+              var response = appendMessage("assistant", "Hub-Agent", message.response || message.summary);
+              (message.actions || []).forEach(function (action) {
+                if (action.status === "proposed") { proposedCount += 1; }
+                appendActionCard(response, action, conversation.status);
+              });
+            });
+            if (!(payload.messages || []).length) {
+              var empty = createElement("section", "assistant-chat-empty agent-float-empty");
+              empty.appendChild(createElement("h3", "", "Womit soll ich helfen?"));
+              empty.appendChild(createElement("p", "", "Du kannst eine Aufgabe beschreiben oder über das Kontextmenü bewusst eine E-Mail, Notiz, einen Kunden oder eine Aktivität hinzufügen."));
+              messages.appendChild(empty);
+            }
+            badge.hidden = proposedCount === 0;
+            badge.textContent = proposedCount ? String(proposedCount) : "";
+            panel.querySelector("[data-agent-float-complete]").disabled = conversation.status !== "active";
+            input.disabled = state.busy || conversation.status !== "active";
+            input.placeholder = conversation.status === "active" ? "Was soll der Hub-Agent vorbereiten?" : "Diese Unterhaltung ist abgeschlossen. Starte eine neue.";
+            messages.scrollTop = messages.scrollHeight;
+          }
+
+          function setBusy(busy) {
+            state.busy = busy;
+            panel.classList.toggle("is-busy", busy);
+            if (state.chat && state.chat.conversation) {
+              input.disabled = busy || state.chat.conversation.status !== "active";
+            } else {
+              input.disabled = busy;
+            }
+          }
+
+          function showPanel() {
+            panel.hidden = false;
+            launcher.setAttribute("aria-expanded", "true");
+          }
+
+          function hidePanel() {
+            panel.hidden = true;
+            launcher.setAttribute("aria-expanded", "false");
+          }
+
+          async function requestJson(url, options) {
+            var response = await window.fetch(url, options);
+            var payload = await response.json().catch(function () { return { error: "Die Antwort des Hub-Agenten konnte nicht gelesen werden." }; });
+            if (!response.ok) { throw new Error(payload.error || "Der Hub-Agent konnte die Anfrage nicht verarbeiten."); }
+            return payload;
+          }
+
+          async function loadChat(conversationId) {
+            setBusy(true);
+            try {
+              var suffix = conversationId ? "?conversation_id=" + encodeURIComponent(conversationId) : "";
+              render(await requestJson("/agent/chat" + suffix, { credentials: "same-origin" }));
+            } catch (error) {
+              setNotice(error.message);
+            } finally {
+              setBusy(false);
+            }
+          }
+
+          async function postChat(path, values) {
+            setBusy(true);
+            setNotice("");
+            try {
+              values = values || {};
+              values.csrf_token = state.csrfToken;
+              var body = new URLSearchParams();
+              Object.keys(values).forEach(function (key) { body.set(key, values[key] == null ? "" : String(values[key])); });
+              render(await requestJson(path, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                body: body.toString()
+              }));
+            } catch (error) {
+              setNotice(error.message);
+            } finally {
+              setBusy(false);
+            }
+          }
+
+          launcher.addEventListener("click", function () {
+            if (panel.hidden) {
+              showPanel();
+              if (!state.chat) { loadChat(); }
+              else { render(state.chat); }
+            } else {
+              hidePanel();
+            }
+          });
+
+          panel.querySelector("[data-agent-float-close]").addEventListener("click", hidePanel);
+          panel.querySelector("[data-agent-float-new]").addEventListener("click", function () { postChat("/agent/chat/new"); });
+          panel.querySelector("[data-agent-float-complete]").addEventListener("click", function () {
+            if (!state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
+            postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/close");
+          });
+
+          form.addEventListener("submit", function (event) {
+            event.preventDefault();
+            var instruction = input.value.trim();
+            if (!instruction || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
+            input.value = "";
+            postChat("/agent/chat/messages", { conversation_id: state.chat.conversation.id, instruction: instruction });
+          });
+          input.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              form.requestSubmit();
+            }
+          });
+
+          document.addEventListener("click", function (event) {
+            var contextTrigger = event.target.closest("[data-agent-context-add]");
+            if (contextTrigger) {
+              event.preventDefault();
+              var detailMenu = contextTrigger.closest("details");
+              if (detailMenu) { detailMenu.open = false; }
+              showPanel();
+              postChat("/agent/chat/context", {
+                resource_type: contextTrigger.dataset.agentContextType,
+                resource_key: contextTrigger.dataset.agentContextKey
+              });
+              return;
+            }
+            var conversationTrigger = event.target.closest("[data-agent-float-conversation]");
+            if (conversationTrigger) {
+              loadChat(conversationTrigger.dataset.agentFloatConversation);
+              return;
+            }
+            var removeTrigger = event.target.closest("[data-agent-float-context-remove]");
+            if (removeTrigger && state.chat && state.chat.conversation) {
+              postChat("/agent/chat/context/" + encodeURIComponent(removeTrigger.dataset.agentFloatContextRemove) + "/remove", {
+                conversation_id: state.chat.conversation.id
+              });
+              return;
+            }
+            var executeTrigger = event.target.closest("[data-agent-float-action-execute]");
+            if (executeTrigger) {
+              postChat("/agent/chat/actions/" + encodeURIComponent(executeTrigger.dataset.agentFloatActionExecute) + "/execute");
+            }
+          });
+        }());
       }());
     </script>
   </body>
