@@ -2862,6 +2862,11 @@
       .email-rich-editor .jodit-wysiwyg {
         min-height: 18rem;
       }
+      /* Jodit writes a smaller inline minimum to its iframe; keep 20 message lines visible. */
+      .email-compose-form .email-rich-editor .jodit-workplace,
+      .email-compose-form .email-rich-editor .jodit-wysiwyg_iframe {
+        min-height: 264px !important;
+      }
       /* Zoho layouts use tables for visual containers; keep their email-native styling intact. */
       .email-rich-editor .jodit-wysiwyg table {
         width: auto;

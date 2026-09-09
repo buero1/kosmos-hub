@@ -27,6 +27,18 @@ def test_global_mailbox_composer_applies_the_saved_default_sender_on_every_open(
     assert "globalMailboxLoadOptions().then(function () {\n              globalMailboxApplyDefaultSender();" in template
 
 
+def test_email_composers_show_twenty_message_lines():
+    main_composer = Path("app/templates/emails.html").read_text(encoding="utf-8")
+    global_composer = Path("app/templates/partials/global_mailbox_composer.html").read_text(encoding="utf-8")
+    base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    expected_editor = 'rows="20" data-email-compose-content'
+    assert expected_editor in main_composer
+    assert expected_editor in global_composer
+    assert ".email-compose-form .email-rich-editor .jodit-wysiwyg_iframe" in base_template
+    assert "min-height: 264px !important;" in base_template
+
+
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
