@@ -232,6 +232,10 @@ def test_hub_case_returns_the_case_for_one_email_and_rejects_a_second_case_link(
         with pytest.raises(HubCaseError, match="bereits mit einem anderen Fall"):
             service.link_email(case_id=second_case.id, source_email_key=f"unassigned-{mailbox_email.id}")
 
+        service.delete_case(case_id=first_case.id)
+
+        assert service.linked_case_for_source_email(source_email_key=f"unassigned-{mailbox_email.id}") is None
+
 
 def test_hub_case_rejects_linking_a_customer_email_to_another_customer_case():
     engine = create_engine("sqlite://")
