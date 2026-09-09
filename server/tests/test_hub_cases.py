@@ -204,6 +204,35 @@ def test_hub_case_links_customer_and_mailbox_emails_without_duplicates():
         assert [email.subject for email in service.get_detail(case_id=case.id).linked_emails] == ["Anfrage zum Fall"]
 
 
+def test_hub_case_returns_the_case_for_one_email_and_rejects_a_second_case_link():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        mailbox_email = HubMailboxEmail(
+            source="mittwald-imap",
+            direction="inbound",
+            is_unread=True,
+            fingerprint="m" * 64,
+            encrypted_payload_json=cipher.encrypt(json.dumps({"subject": "Neue Anfrage"})),
+            received_at=datetime(2026, 9, 9, 10, 0, tzinfo=UTC),
+        )
+        db.add(mailbox_email)
+        db.flush()
+        service = _service(db)
+        first_case = service.create_case(customer_id=None, submitted_values=_submitted_values())
+        second_case = service.create_case(customer_id=None, submitted_values=_submitted_values())
+        service.link_email(case_id=first_case.id, source_email_key=f"unassigned-{mailbox_email.id}")
+
+        linked_case = service.linked_case_for_source_email(source_email_key=f"unassigned-{mailbox_email.id}")
+
+        assert linked_case is not None
+        assert linked_case.case.id == first_case.id
+        with pytest.raises(HubCaseError, match="bereits mit einem anderen Fall"):
+            service.link_email(case_id=second_case.id, source_email_key=f"unassigned-{mailbox_email.id}")
+
+
 def test_hub_case_rejects_linking_a_customer_email_to_another_customer_case():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

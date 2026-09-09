@@ -219,6 +219,20 @@ class HubCaseService:
             customer_id=None,
         )
 
+    def linked_case_for_source_email(self, *, source_email_key: str) -> HubCaseListEntry | None:
+        """Return the one Hub case deliberately attached to a mailbox message."""
+        customer_email, mailbox_email = self._source_email_record(source_email_key=source_email_key)
+        statement = select(HubCase).join(HubCaseEmailLink).options(selectinload(HubCase.customer))
+        if customer_email is not None:
+            statement = statement.where(HubCaseEmailLink.customer_email_id == customer_email.id)
+        else:
+            assert mailbox_email is not None
+            statement = statement.where(HubCaseEmailLink.mailbox_email_id == mailbox_email.id)
+        case = self.db.scalar(statement.order_by(HubCaseEmailLink.created_at.desc(), HubCaseEmailLink.id.desc()))
+        if case is None:
+            return None
+        return self._list_entries([case])[0]
+
     def link_email(self, *, case_id: int, source_email_key: str) -> HubCaseEmailLink:
         """Attach one deliberately selected source email to a case, idempotently."""
         case = self.db.get(HubCase, case_id)
@@ -236,23 +250,25 @@ class HubCaseService:
                 raise HubCaseError("Diese Kunden-E-Mail kann nur einem Fall desselben Kunden zugeordnet werden.")
             existing = self.db.scalar(
                 select(HubCaseEmailLink).where(
-                    HubCaseEmailLink.case_id == case.id,
                     HubCaseEmailLink.customer_email_id == customer_email.id,
                 )
             )
             if existing is not None:
-                return existing
+                if existing.case_id == case.id:
+                    return existing
+                raise HubCaseError("Diese E-Mail ist bereits mit einem anderen Fall verknüpft.")
             link = HubCaseEmailLink(case=case, customer_email=customer_email)
         else:
             assert mailbox_email is not None
             existing = self.db.scalar(
                 select(HubCaseEmailLink).where(
-                    HubCaseEmailLink.case_id == case.id,
                     HubCaseEmailLink.mailbox_email_id == mailbox_email.id,
                 )
             )
             if existing is not None:
-                return existing
+                if existing.case_id == case.id:
+                    return existing
+                raise HubCaseError("Diese E-Mail ist bereits mit einem anderen Fall verknüpft.")
             link = HubCaseEmailLink(case=case, mailbox_email=mailbox_email)
         self.db.add(link)
         self.db.flush()

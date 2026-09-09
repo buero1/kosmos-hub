@@ -1,11 +1,20 @@
 <div class="mailbox-reading-pane">
   {% if selected %}
     <div class="mailbox-reading-heading">
-      <div><h3>{{ selected.subject }}</h3><p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.cc_recipients %}<br>CC {{ selected.cc_recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}{% if selected.is_unread %} <span class="pill" data-mailbox-unread-status>Neu</span>{% endif %}</p></div>
+      <div class="mailbox-reading-heading-copy">
+        <div class="mailbox-reading-subject-row">
+          <h3>{{ selected.subject }}</h3>
+          {% if selected.kind not in ("draft", "system") %}
+            {% if linked_case %}
+              <a class="button button-secondary button-variant-2 mailbox-reading-case-link" href="/cases/{{ linked_case.case.id }}">{% if linked_case.status | lower == "abgeschlossen" %}Fall abgeschlossen{% else %}Offener Fall{% endif %}</a>
+            {% else %}
+              <button class="button button-secondary button-variant-2 mailbox-reading-case-link" type="button" data-mailbox-case-open data-mailbox-case-source-key="{{ selected.key }}">Fall anlegen</button>
+            {% endif %}
+          {% endif %}
+        </div>
+        <p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.cc_recipients %}<br>CC {{ selected.cc_recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}{% if selected.is_unread %} <span class="pill" data-mailbox-unread-status>Neu</span>{% endif %}</p>
+      </div>
       <div class="mailbox-reading-actions">
-        {% if selected.kind not in ("draft", "system") %}
-          <a class="button button-secondary button-variant-2" href="/cases/new?source_email_key={{ selected.key }}">Fall anlegen</a>
-        {% endif %}
         {% if selected.direction == 'inbound' %}
           <button class="button button-variant-1 mailbox-reading-action" type="button" data-mailbox-compose-action="reply" data-mailbox-compose-customer-id="{{ selected.customer_id if selected.kind == 'linked' else '' }}" data-mailbox-compose-email-id="{{ selected.customer_email_id }}" aria-label="Antworten" title="Antworten">
             <svg class="mailbox-reading-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 6.8 4.8 11.8l5.4 5v-3.1c4.3 0 7.1 1.6 8.8 5.1-.4-5.6-3.4-9.2-8.8-9.4V6.8Z"/></svg>

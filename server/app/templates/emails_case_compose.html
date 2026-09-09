@@ -1,0 +1,18 @@
+{% from "partials/case_field_control.html" import case_field_control %}
+{% if source_email %}
+  <p class="notice-info">Der neue Fall wird mit der E-Mail „{{ source_email.subject }}“ verknüpft.</p>
+{% endif %}
+<p class="notice-error" data-mailbox-case-error hidden></p>
+<form method="post" action="/emails/cases" class="communication-form activity-compose-form customer-field-editor contact-create-form" data-mailbox-case-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="source_email_key" value="{{ source_email.key if source_email else '' }}">
+  <div class="customer-field-editor-grid">
+    {% for field in fields %}
+      {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
+    {% endfor %}
+  </div>
+  <div class="email-compose-actions">
+    <button class="button button-secondary" type="button" data-mailbox-case-close>Abbrechen</button>
+    <button class="button button-variant-1" type="submit" data-mailbox-case-submit>Fall anlegen</button>
+  </div>
+</form>

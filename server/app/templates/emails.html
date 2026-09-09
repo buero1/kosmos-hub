@@ -40,7 +40,10 @@
     .mailbox-message .pill { font-size: 0.7rem; }
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-    .mailbox-reading-heading h3 { margin: 0; font-size: 1.25rem; }
+    .mailbox-reading-heading-copy { flex: 1 1 auto; min-width: 0; }
+    .mailbox-reading-subject-row { display: flex; align-items: start; justify-content: space-between; gap: 0.75rem; }
+    .mailbox-reading-heading h3 { min-width: 0; margin: 0; font-size: 1.25rem; }
+    .mailbox-reading-case-link { flex: 0 0 auto; white-space: nowrap; }
     .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
     button.mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; background: transparent; color: var(--accent); line-height: 1; }
     button.mailbox-reading-action:hover { background: var(--accent-soft); }
@@ -218,6 +221,20 @@
     </aside>
   </div>
 
+  <div class="activity-compose-layer" data-mailbox-case-compose hidden>
+    <button class="activity-compose-backdrop" type="button" data-mailbox-case-close aria-label="Fallmaske schließen"></button>
+    <aside class="activity-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="mailbox-case-compose-title" aria-hidden="true" data-mailbox-case-compose-drawer tabindex="-1">
+      <div class="email-compose-header">
+        <div>
+          <p class="eyebrow">Fälle</p>
+          <h2 id="mailbox-case-compose-title">Fall anlegen</h2>
+        </div>
+        <button class="email-compose-close" type="button" data-mailbox-case-close aria-label="Fallmaske schließen">×</button>
+      </div>
+      <div data-mailbox-case-compose-content></div>
+    </aside>
+  </div>
+
   <section class="card mailbox-shell" data-mailbox-shell>
     <nav class="mailbox-folders" aria-label="E-Mail-Ordner">
       <a href="/emails?folder=inbox" data-mailbox-folder data-mailbox-folder-count="inbox"{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
@@ -284,6 +301,9 @@
       };
       var mailboxComposer = document.querySelector('[data-email-compose-layer]');
       var mailboxComposerTrigger = document.querySelector('[data-mailbox-email-compose-open]');
+      var mailboxCaseComposer = document.querySelector('[data-mailbox-case-compose]');
+      var mailboxCaseComposerDrawer = mailboxCaseComposer && mailboxCaseComposer.querySelector('[data-mailbox-case-compose-drawer]');
+      var mailboxCaseComposerContent = mailboxCaseComposer && mailboxCaseComposer.querySelector('[data-mailbox-case-compose-content]');
       var mailboxComposerForm = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-form]');
       var mailboxComposerSender = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-sender]');
       var mailboxComposerRecipient = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient]');
@@ -342,6 +362,69 @@
        var mailboxComposerDraftSession = 0;
        var mailboxComposerDraftStartedAt = 0;
        var mailboxComposerSubmitting = false;
+
+      function closeMailboxCaseComposer() {
+        if (!mailboxCaseComposer) return;
+        mailboxCaseComposer.classList.remove('is-open');
+        if (mailboxCaseComposerDrawer) mailboxCaseComposerDrawer.setAttribute('aria-hidden', 'true');
+        window.setTimeout(function () {
+          if (!mailboxCaseComposer.classList.contains('is-open')) mailboxCaseComposer.hidden = true;
+        }, 220);
+      }
+
+      function showMailboxCaseComposerError(form, message) {
+        var error = form && form.closest('[data-mailbox-case-compose-content]')
+          ? form.closest('[data-mailbox-case-compose-content]').querySelector('[data-mailbox-case-error]')
+          : mailboxCaseComposerContent && mailboxCaseComposerContent.querySelector('[data-mailbox-case-error]');
+        if (!error) return;
+        error.textContent = message;
+        error.hidden = false;
+      }
+
+      function replaceMailboxCaseButton(button, payload) {
+        if (!button || !payload || !payload.case_url) return;
+        var link = document.createElement('a');
+        link.className = 'button button-secondary button-variant-2 mailbox-reading-case-link';
+        link.href = payload.case_url;
+        link.textContent = payload.label || 'Offener Fall';
+        link.title = payload.case_number || '';
+        button.replaceWith(link);
+      }
+
+      function openMailboxCaseComposer(button) {
+        if (!mailboxCaseComposer || !mailboxCaseComposerContent) return;
+        var sourceEmailKey = button.dataset.mailboxCaseSourceKey || '';
+        if (!sourceEmailKey) return;
+        button.disabled = true;
+        window.fetch('/emails/cases/compose?source_email_key=' + encodeURIComponent(sourceEmailKey), {
+          credentials: 'same-origin'
+        })
+          .then(function (response) {
+            return response.text().then(function (html) {
+              if (!response.ok) {
+                var detail = 'Die Fallmaske konnte nicht vorbereitet werden.';
+                try { detail = JSON.parse(html).detail || detail; } catch (_error) {}
+                throw new Error(detail);
+              }
+              return html;
+            });
+          })
+          .then(function (html) {
+            mailboxCaseComposerContent.innerHTML = html;
+            mailboxCaseComposer.hidden = false;
+            if (mailboxCaseComposerDrawer) mailboxCaseComposerDrawer.setAttribute('aria-hidden', 'false');
+            window.requestAnimationFrame(function () {
+              mailboxCaseComposer.classList.add('is-open');
+              if (mailboxCaseComposerDrawer) mailboxCaseComposerDrawer.focus();
+            });
+          })
+          .catch(function (error) {
+            window.alert(error.message || 'Die Fallmaske konnte nicht vorbereitet werden.');
+          })
+          .finally(function () {
+            button.disabled = false;
+          });
+      }
 
       function mailboxComposerOption(select, value, label, dataEmail) {
         var option = document.createElement('option');
@@ -1139,6 +1222,51 @@
         if (!button) return;
         event.preventDefault();
         prepareMailboxDraftAction(button);
+      });
+      document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-mailbox-case-close]')) {
+          closeMailboxCaseComposer();
+          return;
+        }
+        var button = event.target.closest('[data-mailbox-case-open]');
+        if (!button) return;
+        event.preventDefault();
+        openMailboxCaseComposer(button);
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && mailboxCaseComposer && !mailboxCaseComposer.hidden) closeMailboxCaseComposer();
+      });
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.matches('[data-mailbox-case-form]')) return;
+        event.preventDefault();
+        var submit = form.querySelector('[data-mailbox-case-submit]');
+        if (submit) submit.disabled = true;
+        window.fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin'
+        })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Der Fall konnte nicht angelegt werden.');
+              return payload;
+            });
+          })
+          .then(function (payload) {
+            var source = String(new FormData(form).get('source_email_key') || '');
+            var caseButton = Array.from(document.querySelectorAll('[data-mailbox-case-open]')).find(function (button) {
+              return button.dataset.mailboxCaseSourceKey === source;
+            });
+            replaceMailboxCaseButton(caseButton, payload);
+            closeMailboxCaseComposer();
+          })
+          .catch(function (error) {
+            showMailboxCaseComposerError(form, error.message || 'Der Fall konnte nicht angelegt werden.');
+          })
+          .finally(function () {
+            if (submit) submit.disabled = false;
+          });
       });
 
       function updateMailboxHeight() {
