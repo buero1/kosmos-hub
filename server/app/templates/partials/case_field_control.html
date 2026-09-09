@@ -1,10 +1,10 @@
-{% macro case_field_control(field, value="", customers=(), selected_customer_id=None, is_new=false) %}
+{% macro case_field_control(field, value="", customers=(), selected_customer_id=None, is_new=false, lock_customer=false) %}
   <label class="customer-field-control">
     <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
     {% if field.key == "case_number" %}
       <input type="text" value="{{ value or 'Wird automatisch vergeben' }}" readonly>
     {% elif field.key == "customer_name" %}
-      <select name="customer_id">
+      <select name="customer_id"{% if lock_customer %} disabled{% endif %}>
         <option value="">Keinen Kunden verknüpfen</option>
         {% for customer in customers %}
           <option value="{{ customer.id }}"{% if customer.id == selected_customer_id %} selected{% endif %}>{{ customer.name }}</option>

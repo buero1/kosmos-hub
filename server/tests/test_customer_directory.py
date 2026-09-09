@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -107,6 +108,51 @@ def test_customer_directory_requires_explicit_review_before_linking_exact_domain
 
         service.link_exact_match(customer_id=customer.id, site_id=site.id)
         assert db.get(Site, site.id).customer_id == customer.id
+
+
+def test_customer_detail_offers_wordpress_shortcut_only_for_the_linked_login_domain():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Example Customer",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {"Arbeitsdomain-Login": "https://www.example-customer.de/wp-admin"},
+                        "field_metadata": {
+                            "work_domain_login": {"label": "Arbeitsdomain-Login"},
+                        },
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.flush()
+        matching_site = _site(site_id=1, domain="example-customer.de", customer_id=customer.id)
+        other_site = _site(site_id=2, domain="other-customer.de", customer_id=customer.id)
+        db.add_all([matching_site, other_site])
+        db.commit()
+
+        detail = _service(db).get_detail(customer_id=customer.id)
+
+        assert detail is not None
+        assert detail.wordpress_admin_site is not None
+        assert detail.wordpress_admin_site.id == matching_site.id
+
+
+def test_customer_detail_template_uses_secure_wordpress_shortcut_and_case_drawer():
+    template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+    routes = Path("app/api/routes/web.py").read_text(encoding="utf-8")
+
+    assert 'target="_blank" rel="noopener noreferrer"' in template
+    assert "wordpress_admin_quick_action(detail.wordpress_admin_site)" in template
+    assert "data-customer-case-edit-open" in template
+    assert "data-customer-case-delete-dialog" in template
+    assert '@router.get("/customers/{customer_id}/cases/{case_id}/compose"' in routes
+    assert '@router.post("/customers/{customer_id}/cases/{case_id}/delete"' in routes
 
 
 def test_customer_directory_rejects_non_matching_or_ambiguous_sites():

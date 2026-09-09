@@ -1708,6 +1708,117 @@ async def delete_mailbox_case(
     return {"case_id": case_id, "source_email_key": source_email.key}
 
 
+@router.get("/customers/{customer_id}/cases/{case_id}/compose", response_class=HTMLResponse)
+def customer_case_edit_compose(
+    customer_id: int,
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Render a customer-linked case editor in the customer detail drawer."""
+    _require_hub_admin(request)
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    detail = service.get_detail(case_id=case_id)
+    if detail is None or detail.case.customer_id != customer_id:
+        raise HTTPException(status_code=404, detail="Der Fall wurde bei diesem Kunden nicht gefunden.")
+    context = _case_create_context(request, db, selected_customer_id=customer_id)
+    context.update(
+        {
+            "fields": detail.fields,
+            "case_detail": detail,
+            "case_compose_mode": "customer",
+            "case_compose_action": f"/customers/{customer_id}/cases/{case_id}",
+        }
+    )
+    return templates.TemplateResponse(request, "emails_case_compose.html", context)
+
+
+@router.post("/customers/{customer_id}/cases/{case_id}", response_class=JSONResponse)
+async def update_customer_case(
+    customer_id: int,
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Save a case from its customer's detail drawer."""
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("case_field__")
+    }
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        existing_detail = service.get_detail(case_id=case_id)
+        if existing_detail is None or existing_detail.case.customer_id != customer_id:
+            raise HubCaseError("Der Fall wurde bei diesem Kunden nicht gefunden.")
+        was_completed = HubCaseService.is_completed_status(existing_detail.status)
+        case = service.update_case(
+            case_id=case_id,
+            customer_id=customer_id,
+            submitted_values=submitted_values,
+        )
+        updated_detail = service.get_detail(case_id=case.id)
+        if updated_detail is None:
+            raise HubCaseError("Der Fall wurde nicht gefunden.")
+        was_completed_now = not was_completed and HubCaseService.is_completed_status(updated_detail.status)
+    except HubCaseError as exc:
+        db.rollback()
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-case-from-customer",
+        result="ok",
+        detail=f"Updated Hub Case {case.id} from its customer detail page.",
+    )
+    db.commit()
+    return {
+        "case_id": case.id,
+        "case_number": service.case_number(case),
+        "completion_email": was_completed_now,
+    }
+
+
+@router.post("/customers/{customer_id}/cases/{case_id}/delete", response_class=JSONResponse)
+async def delete_customer_case(
+    customer_id: int,
+    case_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Delete a case from its customer detail drawer without touching Zoho."""
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        detail = service.get_detail(case_id=case_id)
+        if detail is None or detail.case.customer_id != customer_id:
+            raise HubCaseError("Der Fall wurde bei diesem Kunden nicht gefunden.")
+        case = service.delete_case(case_id=case_id)
+    except HubCaseError as exc:
+        db.rollback()
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-case-from-customer",
+        result="ok",
+        detail=f"Deleted Hub Case {case.id} from its customer detail page.",
+    )
+    db.commit()
+    return {"case_id": case_id}
+
+
 @router.get("/emails/folder", response_class=HTMLResponse)
 def mailbox_folder_panel(
     request: Request,
@@ -2310,6 +2421,7 @@ def customer_detail_page(
     layout_message: str = "",
     activity: str = "",
     activity_message: str = "",
+    completion_email: bool = False,
 ):
     cipher = get_secret_cipher()
     can_manage_customer_fields = getattr(request.state, "hub_user", None) is not None and request.state.hub_user.role == "admin"
@@ -2379,6 +2491,8 @@ def customer_detail_page(
                 "reminder_channel": "popup",
                 "reminder_minutes_before": 15,
             },
+            "completion_email_template_id": CASE_COMPLETION_EMAIL_TEMPLATE_ID if completion_email else "",
+            "completion_email_customer_id": customer_id if completion_email else None,
             "csrf_token": get_csrf_token(request),
         },
     )

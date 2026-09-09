@@ -75,6 +75,7 @@ class CustomerDirectoryDetail:
     profile_fields: tuple[CustomerProfileField, ...]
     contacts: tuple["CustomerContactProfile", ...]
     cases: tuple[HubCaseListEntry, ...] = ()
+    wordpress_admin_site: Site | None = None
     editable_profile_fields: tuple[CustomerProfileField, ...] = ()
     subforms: tuple[CustomerProfileSubform, ...] = ()
     display_profile_fields: tuple[CustomerProfileField, ...] = ()
@@ -286,11 +287,13 @@ class CustomerDirectoryService:
             display_profile_fields,
             tuple(field for field in profile_fields if field.editable),
         )
+        entry = self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields)
         return CustomerDirectoryDetail(
-            entry=self._build_entry(customer, linked_by_customer, unlinked_by_domain, profile_fields=profile_fields),
+            entry=entry,
             profile_fields=profile_fields,
             contacts=self._contact_profiles(customer),
             cases=HubCaseService(db=self.db, cipher=self.cipher).list_cases_for_customer(customer_id=customer.id),
+            wordpress_admin_site=self._wordpress_admin_site(entry=entry, profile_fields=profile_fields),
             editable_profile_fields=editable_profile_fields,
             subforms=self._profile_subforms(profile, include_sensitive=include_sensitive),
             display_profile_fields=display_profile_fields,
@@ -500,6 +503,27 @@ class CustomerDirectoryService:
             linked_sites=tuple(linked_by_customer.get(customer.id, [])),
             exact_match_candidate=candidate_sites[0] if len(candidate_sites) == 1 else None,
         )
+
+    @staticmethod
+    def _wordpress_admin_site(
+        *,
+        entry: CustomerDirectoryEntry,
+        profile_fields: tuple[CustomerProfileField, ...],
+    ) -> Site | None:
+        """Only offer the admin shortcut for the linked Hub site of this login domain."""
+        work_domain_login = next(
+            (field.value for field in profile_fields if field.key == "work_domain_login"),
+            None,
+        )
+        login_domain = ZohoCrmService.normalize_website_domain(work_domain_login)
+        if not login_domain:
+            return None
+        matching_sites = tuple(
+            site
+            for site in entry.linked_sites
+            if ZohoCrmService.normalize_website_domain(site.domain) == login_domain
+        )
+        return matching_sites[0] if len(matching_sites) == 1 else None
 
     def _profile_fields(self, customer: Customer, *, include_sensitive: bool = False) -> tuple[CustomerProfileField, ...]:
         return self._profile_fields_from_data(self._profile_data(customer), include_sensitive=include_sensitive)

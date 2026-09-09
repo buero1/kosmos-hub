@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/site_domain.html" import wordpress_admin_quick_action with context %}
 {% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% macro customer_profile_field_value(field) %}
+  {% if field.key == "website" and field.value %}
+    <a class="customer-field-url" href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
+  {% elif field.key == "work_domain_login" and field.value %}
+    {% if detail.wordpress_admin_site %}{{ wordpress_admin_quick_action(detail.wordpress_admin_site) }}{% endif %}
+    <span>{{ field.value }}</span>
+  {% else %}
+    {{ field.value }}
+  {% endif %}
+{% endmacro %}
 {% macro communication_email_address(address, prefix="") %}
   {% if address %}
     {% if can_manage_communications %}
@@ -208,7 +219,7 @@
                     {% for field in detail.summary_profile_fields %}
                       <div>
                         <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
-                        <dd>{{ field.value }}</dd>
+                        <dd>{{ customer_profile_field_value(field) }}</dd>
                       </div>
                     {% endfor %}
                   </dl>
@@ -220,7 +231,7 @@
                         {% for field in detail.following_profile_fields %}
                           <div>
                             <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
-                            <dd>{{ field.value }}</dd>
+                            <dd>{{ customer_profile_field_value(field) }}</dd>
                           </div>
                         {% endfor %}
                       </dl>
@@ -263,7 +274,7 @@
                       {% for field in tab.fields %}
                         <div>
                           <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
-                          <dd>{{ field.value }}</dd>
+                          <dd>{{ customer_profile_field_value(field) }}</dd>
                         </div>
                       {% endfor %}
                     </dl>
@@ -434,7 +445,7 @@
                   <tbody>
                     {% for entry in detail.cases %}
                       <tr>
-                        <td><a href="/cases/{{ entry.case.id }}">{{ entry.case_number }}</a></td>
+                        <td><button class="customer-case-panel-link" type="button" data-customer-case-edit-open data-customer-case-id="{{ entry.case.id }}">{{ entry.case_number }}</button></td>
                         <td>{{ entry.status }}</td>
                         <td>{{ entry.case_origin or "-" }}</td>
                         <td>{{ entry.created_time or "-" }}</td>
@@ -686,5 +697,204 @@
     </div>
   </section>
   {% include "partials/customer_activity_composer.html" %}
+  <div class="activity-compose-layer" data-customer-case-compose hidden>
+    <button class="activity-compose-backdrop" type="button" data-customer-case-close aria-label="Fallmaske schließen"></button>
+    <aside class="activity-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-case-compose-title" aria-hidden="true" data-customer-case-compose-drawer tabindex="-1">
+      <div class="email-compose-header">
+        <div>
+          <p class="eyebrow">Fälle</p>
+          <h2 id="customer-case-compose-title">Fall bearbeiten</h2>
+        </div>
+        <button class="email-compose-close" type="button" data-customer-case-close aria-label="Fallmaske schließen">×</button>
+      </div>
+      <div data-customer-case-compose-content></div>
+    </aside>
+  </div>
+
+  <dialog class="update-confirmation-dialog" data-customer-case-delete-dialog aria-labelledby="customer-case-delete-heading">
+    <div>
+      <h3 id="customer-case-delete-heading">Fall im Hub löschen?</h3>
+      <p>Der Fall wird nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" data-customer-case-delete-cancel>Abbrechen</button>
+        <button class="button button-danger" type="button" data-customer-case-delete-confirm>Fall löschen</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    (function () {
+      var customerId = {{ detail.entry.customer.id | tojson }};
+      var composer = document.querySelector('[data-customer-case-compose]');
+      var drawer = composer && composer.querySelector('[data-customer-case-compose-drawer]');
+      var content = composer && composer.querySelector('[data-customer-case-compose-content]');
+      var deleteDialog = document.querySelector('[data-customer-case-delete-dialog]');
+      var deleteConfirm = deleteDialog && deleteDialog.querySelector('[data-customer-case-delete-confirm]');
+      var deletePending = null;
+
+      function closeComposer() {
+        if (!composer) return;
+        composer.classList.remove('is-open');
+        if (drawer) drawer.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('activity-compose-open');
+        window.setTimeout(function () {
+          if (!composer.classList.contains('is-open')) composer.hidden = true;
+        }, 220);
+      }
+
+      function showError(form, message) {
+        var error = form && form.closest('[data-customer-case-compose-content]')
+          ? form.closest('[data-customer-case-compose-content]').querySelector('[data-customer-case-error]')
+          : content && content.querySelector('[data-customer-case-error]');
+        if (!error) return;
+        error.textContent = message;
+        error.hidden = false;
+      }
+
+      function openCaseEditor(button) {
+        var caseId = button.dataset.customerCaseId || '';
+        if (!composer || !content || !/^\d+$/.test(caseId)) return;
+        button.disabled = true;
+        window.fetch('/customers/' + encodeURIComponent(customerId) + '/cases/' + encodeURIComponent(caseId) + '/compose', {
+          credentials: 'same-origin'
+        })
+          .then(function (response) {
+            return response.text().then(function (html) {
+              if (!response.ok) {
+                var detail = 'Die Fallmaske konnte nicht vorbereitet werden.';
+                try { detail = JSON.parse(html).detail || detail; } catch (_error) {}
+                throw new Error(detail);
+              }
+              return html;
+            });
+          })
+          .then(function (html) {
+            content.innerHTML = html;
+            composer.hidden = false;
+            if (drawer) drawer.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('activity-compose-open');
+            window.requestAnimationFrame(function () {
+              composer.classList.add('is-open');
+              if (drawer) drawer.focus();
+            });
+          })
+          .catch(function (error) {
+            window.alert(error.message || 'Die Fallmaske konnte nicht vorbereitet werden.');
+          })
+          .finally(function () {
+            button.disabled = false;
+          });
+      }
+
+      function openDeleteDialog(button) {
+        var caseId = button.dataset.customerCaseId || '';
+        var form = button.closest('[data-customer-case-form]');
+        var csrfInput = form && form.querySelector('[name=csrf_token]');
+        if (!/^\d+$/.test(caseId) || !csrfInput) return;
+        deletePending = { caseId: caseId, csrfToken: csrfInput.value || '' };
+        if (deleteDialog && typeof deleteDialog.showModal === 'function') {
+          deleteDialog.showModal();
+          return;
+        }
+        if (window.confirm('Fall im Hub löschen?')) deleteCase();
+      }
+
+      function deleteCase() {
+        var pending = deletePending;
+        if (!pending) return;
+        if (deleteConfirm) deleteConfirm.disabled = true;
+        window.fetch(
+          '/customers/' + encodeURIComponent(customerId) + '/cases/' + encodeURIComponent(pending.caseId) + '/delete',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ csrf_token: pending.csrfToken }).toString(),
+            credentials: 'same-origin'
+          }
+        )
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Der Fall konnte nicht gelöscht werden.');
+              return payload;
+            });
+          })
+          .then(function () {
+            if (deleteDialog) deleteDialog.close();
+            closeComposer();
+            window.location.reload();
+          })
+          .catch(function (error) {
+            var form = content && content.querySelector('[data-customer-case-form]');
+            showError(form, error.message || 'Der Fall konnte nicht gelöscht werden.');
+          })
+          .finally(function () {
+            if (deleteConfirm) deleteConfirm.disabled = false;
+            deletePending = null;
+          });
+      }
+
+      document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-customer-case-delete-cancel]')) {
+          if (deleteDialog) deleteDialog.close();
+          deletePending = null;
+          return;
+        }
+        if (event.target.closest('[data-customer-case-delete-confirm]')) {
+          deleteCase();
+          return;
+        }
+        var deleteButton = event.target.closest('[data-customer-case-delete-open]');
+        if (deleteButton) {
+          event.preventDefault();
+          openDeleteDialog(deleteButton);
+          return;
+        }
+        if (event.target.closest('[data-customer-case-close]')) {
+          closeComposer();
+          return;
+        }
+        var openButton = event.target.closest('[data-customer-case-edit-open]');
+        if (!openButton) return;
+        event.preventDefault();
+        openCaseEditor(openButton);
+      });
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && composer && !composer.hidden) closeComposer();
+      });
+
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !form.matches('[data-customer-case-form]')) return;
+        event.preventDefault();
+        var submit = form.querySelector('[data-customer-case-submit]');
+        if (submit) submit.disabled = true;
+        window.fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+          credentials: 'same-origin'
+        })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Der Fall konnte nicht gespeichert werden.');
+              return payload;
+            });
+          })
+          .then(function (payload) {
+            if (payload.completion_email) {
+              window.location.assign('/customers/' + encodeURIComponent(customerId) + '?completion_email=true#customer-communications');
+              return;
+            }
+            window.location.reload();
+          })
+          .catch(function (error) {
+            showError(form, error.message || 'Der Fall konnte nicht gespeichert werden.');
+          })
+          .finally(function () {
+            if (submit) submit.disabled = false;
+          });
+      });
+    })();
+  </script>
 
 {% endblock %}
