@@ -11,7 +11,7 @@ from sqlalchemy import inspect, select, text
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api.routes import accounts, assistant, desktop_notifications, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, agent, assistant, desktop_notifications, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
@@ -25,6 +25,7 @@ from app.models.customer_activity_reminder_notification import CustomerActivityR
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_case import HubCase
+from app.models.hub_agent import HubAgentAction, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
@@ -129,6 +130,14 @@ def _ensure_phase_one_schema() -> None:
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_workflows table.")
+
+    if "hub_agent_jobs" not in table_names:
+        HubAgentJob.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_agent_jobs table.")
+
+    if "hub_agent_actions" not in table_names:
+        HubAgentAction.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_agent_actions table.")
 
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
@@ -731,6 +740,7 @@ def create_app() -> FastAPI:
             or request.url.path == "/updates"
             or request.url.path.startswith("/plugin-installations")
             or request.url.path.startswith("/assistant")
+            or request.url.path.startswith("/agent")
             or request.url.path.startswith("/api/v1/desktop")
         ):
             # Dynamic inventory, user, and update data must not be served from a browser cache.
@@ -743,6 +753,7 @@ def create_app() -> FastAPI:
     app.include_router(desktop_notifications.router)
     app.include_router(accounts.bootstrap_router)
     app.include_router(assistant.router)
+    app.include_router(agent.router)
     app.include_router(sites.router)
     app.include_router(site_abilities.router)
     app.include_router(site_backups.router)

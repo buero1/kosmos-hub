@@ -331,7 +331,7 @@ class CustomerDirectoryService:
         customer = None
         if customer_id is not None:
             customer = self.db.get(Customer, customer_id)
-            if customer is None or not customer.is_visible:
+            if customer is None:
                 raise ValueError("Der ausgewählte Kunde ist nicht verfügbar.")
         contact = CustomerContact(
             customer=customer,
@@ -366,7 +366,7 @@ class CustomerDirectoryService:
             contact.customer = None
         else:
             customer = self.db.get(Customer, customer_id)
-            if customer is None or not customer.is_visible:
+            if customer is None:
                 raise ValueError("Der ausgewählte Kunde ist nicht verfügbar.")
             contact.customer = customer
         self.db.flush()

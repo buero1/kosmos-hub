@@ -1412,6 +1412,126 @@
         color: var(--muted);
         font-size: 0.78rem;
       }
+      .agent-page {
+        max-width: 68rem;
+        display: grid;
+        gap: 1.25rem;
+      }
+      .agent-instruction-form,
+      .agent-job,
+      .agent-empty-state {
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 252, 246, 0.78);
+        box-shadow: 0 10px 24px rgba(40, 45, 44, 0.05);
+      }
+      .agent-instruction-form {
+        display: grid;
+        gap: 0.7rem;
+        padding: 1rem;
+      }
+      .agent-instruction-form label,
+      .agent-instruction-form textarea { display: block; width: 100%; }
+      .agent-instruction-form label { font-weight: 700; }
+      .agent-instruction-form textarea {
+        min-height: 8rem;
+        resize: vertical;
+        font: inherit;
+        line-height: 1.45;
+      }
+      .agent-instruction-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .agent-instruction-actions p { margin: 0; max-width: 45rem; }
+      .agent-empty-state { padding: 1.15rem; }
+      .agent-empty-state h3 { margin: 0.15rem 0 0.5rem; }
+      .agent-empty-state p:last-child { margin-bottom: 0; }
+      .agent-jobs { display: grid; gap: 0.85rem; }
+      .section-heading-compact { margin-bottom: 0; }
+      .agent-job { padding: 1rem; }
+      .agent-job-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+      .agent-job-number,
+      .agent-action-type {
+        color: var(--accent);
+        font: 700 0.7rem "Trebuchet MS", sans-serif;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .agent-job h3 { margin: 0.2rem 0; }
+      .agent-job-heading .subtle { margin: 0; font-size: 0.82rem; }
+      .agent-job-request {
+        margin: 0.9rem 0 0.5rem;
+        padding-top: 0.8rem;
+        border-top: 1px solid var(--border);
+      }
+      .agent-job-response { margin: 0; white-space: pre-wrap; }
+      .agent-action-list {
+        display: grid;
+        gap: 0.7rem;
+        margin: 1rem 0 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: agent-action;
+      }
+      .agent-action {
+        counter-increment: agent-action;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 1rem;
+        padding: 0.9rem 0 0.1rem 2rem;
+        border-top: 1px solid var(--border);
+        position: relative;
+      }
+      .agent-action::before {
+        content: counter(agent-action);
+        position: absolute;
+        left: 0;
+        top: 1rem;
+        width: 1.3rem;
+        height: 1.3rem;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font: 700 0.72rem "Trebuchet MS", sans-serif;
+      }
+      .agent-action h4 { margin: 0.15rem 0 0.25rem; }
+      .agent-action p { margin: 0; }
+      .agent-action-preview {
+        display: grid;
+        gap: 0.3rem;
+        margin: 0.7rem 0 0;
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+      .agent-action-preview div { display: grid; grid-template-columns: 4.6rem minmax(0, 1fr); gap: 0.5rem; }
+      .agent-action-preview dt { font-weight: 700; }
+      .agent-action-preview dd { margin: 0; overflow-wrap: anywhere; }
+      .agent-action-controls {
+        display: grid;
+        justify-items: end;
+        align-content: start;
+        gap: 0.5rem;
+      }
+      .agent-action-controls form { margin: 0; }
+      .agent-action-status { color: var(--muted); font-size: 0.78rem; }
+      .agent-action-completed::before { background: #d8efe1; color: #216841; }
+      .agent-action-failed::before { background: #f5ded8; color: #9c3c2e; }
+      @media (max-width: 700px) {
+        .agent-instruction-actions,
+        .agent-job-heading { align-items: stretch; flex-direction: column; }
+        .agent-action { grid-template-columns: 1fr; }
+        .agent-action-controls { justify-items: start; }
+      }
       .account-panel form {
         display: grid;
         gap: 0.7rem;
@@ -3686,6 +3806,7 @@
           <a href="/updates"{% if request.url.path.startswith("/updates") %} class="is-active"{% endif %}>Update workbench</a>
           <a href="/plugin-installations"{% if request.url.path.startswith("/plugin-installations") %} class="is-active"{% endif %}>Plugin installation</a>
           <a href="/assistant"{% if request.url.path.startswith("/assistant") %} class="is-active"{% endif %}>Assistant</a>
+          <a href="/agent"{% if request.url.path.startswith("/agent") %} class="is-active"{% endif %}>Hub-Agent</a>
           <a href="/account"{% if request.url.path.startswith("/account") %} class="is-active"{% endif %}>Account</a>
           <a href="/styling"{% if request.url.path.startswith("/styling") %} class="is-active"{% endif %}>Styling</a>
           <a href="/healthz">Health</a>
