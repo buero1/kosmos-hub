@@ -1179,36 +1179,16 @@
       }
       .account-workflow-table tbody tr:last-child td { border-bottom: 0; }
       .account-workflow-table td:last-child { white-space: nowrap; }
-      .account-workflow-name {
-        border: 0;
-        background: transparent;
-        color: var(--accent);
-        display: inline-flex;
-        align-items: center;
-        gap: 0.42rem;
-        cursor: pointer;
-        font: inherit;
-        font-weight: 700;
+      .account-workflow-disclosure {
+        display: block;
+        gap: 0;
         padding: 0;
-        text-align: left;
-        text-decoration: none;
       }
-      .account-workflow-name::before {
-        content: "";
-        width: 0;
-        height: 0;
-        border-top: 0.28rem solid transparent;
-        border-bottom: 0.28rem solid transparent;
-        border-left: 0.4rem solid var(--muted);
-        transition: transform 150ms ease;
-      }
-      .account-workflow-name:hover,
-      .account-workflow-name:focus-visible,
-      .account-workflow-name.is-active {
+      .account-workflow-disclosure summary:hover,
+      .account-workflow-disclosure summary:focus-visible {
         color: #075f4e;
         text-decoration: none;
       }
-      .account-workflow-name.is-active::before { transform: rotate(90deg); }
       .account-workflow-description { margin-top: 0.15rem; }
       .account-workflow-description[hidden] { display: none; }
       .account-panel label.checkbox-label {

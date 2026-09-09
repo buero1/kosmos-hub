@@ -279,14 +279,13 @@
             {% for workflow in workflows %}
               <tr>
                 <td>
-                  <button
-                    type="button"
-                    class="account-workflow-name"
-                    data-workflow-link
+                  <details
+                    class="account-details account-workflow-disclosure"
+                    data-workflow-disclosure
                     data-workflow-target="workflow-description-{{ workflow.id }}"
-                    aria-controls="workflow-description-{{ workflow.id }}"
-                    aria-expanded="false"
-                  >{{ workflow.title }}</button>
+                  >
+                    <summary aria-controls="workflow-description-{{ workflow.id }}">{{ workflow.title }}</summary>
+                  </details>
                 </td>
                 <td>{{ workflow.module_label }}</td>
                 <td><time datetime="{{ workflow.created_at.isoformat() }}">{{ workflow.created_at | berlin_time }}</time></td>
@@ -918,22 +917,22 @@
           selectSection(link.getAttribute("href").slice(1), { updateHash: true });
         });
       });
-      const workflowLinks = Array.from(page.querySelectorAll("[data-workflow-link]"));
+      const workflowDisclosures = Array.from(page.querySelectorAll("[data-workflow-disclosure]"));
       const workflowDescriptions = Array.from(page.querySelectorAll("[data-workflow-description]"));
-      workflowLinks.forEach((link) => {
-        link.addEventListener("click", () => {
-          const targetId = link.dataset.workflowTarget;
+      workflowDisclosures.forEach((disclosure) => {
+        disclosure.addEventListener("toggle", () => {
+          const targetId = disclosure.dataset.workflowTarget;
           const target = workflowDescriptions.find((description) => description.id === targetId);
-          const shouldShow = target ? target.hidden : false;
+          if (!disclosure.open) {
+            if (target) target.hidden = true;
+            return;
+          }
+          workflowDisclosures.forEach((candidate) => {
+            if (candidate !== disclosure) candidate.open = false;
+          });
           workflowDescriptions.forEach((description) => {
-            description.hidden = true;
+            description.hidden = description.id !== targetId;
           });
-          workflowLinks.forEach((candidate) => {
-            const isActive = shouldShow && candidate === link;
-            candidate.classList.toggle("is-active", isActive);
-            candidate.setAttribute("aria-expanded", String(isActive));
-          });
-          if (target) target.hidden = !shouldShow;
         });
       });
       window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));
