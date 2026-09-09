@@ -39,14 +39,14 @@
     .mailbox-message.is-unread .mailbox-message-subject, .mailbox-message.is-unread time { color: #1d63b8; font-weight: 700; }
     .mailbox-message .pill { font-size: 0.7rem; }
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
-    .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-    .mailbox-reading-heading-copy { flex: 1 1 auto; min-width: 0; }
-    .mailbox-reading-subject-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; }
+    .mailbox-reading-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "subject subject" "meta actions"; gap: 0.5rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+    .mailbox-reading-subject-row { grid-area: subject; display: grid; grid-template-columns: minmax(0, 4fr) minmax(8rem, 1fr); align-items: start; gap: 0.75rem; width: 100%; }
     .mailbox-reading-heading h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 1.25rem; }
-    .mailbox-reading-case-link { justify-self: end; align-self: start; border-radius: 999px; white-space: nowrap; }
+    .mailbox-reading-case-link { justify-self: end; align-self: start; margin: 0; border-radius: 999px; white-space: nowrap; }
     a.mailbox-reading-case-link.is-open, button.mailbox-reading-case-link.is-open { border-color: #d99191; background: #fde7e7; color: #9d2424; }
     a.mailbox-reading-case-link.is-open:hover, button.mailbox-reading-case-link.is-open:hover { border-color: #bf5f5f; background: #fbd8d8; color: #7e1c1c; }
-    .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
+    .mailbox-reading-meta { grid-area: meta; }
+    .mailbox-reading-actions { grid-area: actions; display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
     button.mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; background: transparent; color: var(--accent); line-height: 1; }
     button.mailbox-reading-action:hover { background: var(--accent-soft); }
     button.mailbox-reading-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
