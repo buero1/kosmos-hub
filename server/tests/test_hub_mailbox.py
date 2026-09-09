@@ -376,6 +376,58 @@ def test_mailbox_prepares_replies_and_forwards_for_unassigned_inbound_emails():
         assert threaded_message_id == "<original@example.de>"
 
 
+def test_mailbox_forwards_stored_attachments_from_unassigned_inbound_emails(tmp_path):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    storage = EmailAttachmentStorage(root=tmp_path / "attachments", cipher=cipher, min_free_bytes=0)
+
+    with Session(engine) as db:
+        inbound = HubMailboxEmail(
+            source="mittwald-imap",
+            direction="inbound",
+            is_unread=True,
+            fingerprint="f" * 64,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Unterlagen",
+                        "from": {"email": "contact@example.de"},
+                        "attachments": [{"id": "source-attachment", "name": "unterlagen.pdf"}],
+                    }
+                )
+            ),
+            received_at=datetime(2026, 9, 9, 8, 0, tzinfo=UTC),
+        )
+        db.add(inbound)
+        db.flush()
+        db.add(
+            HubMailboxAttachment(
+                email_id=inbound.id,
+                source="mittwald-imap",
+                source_attachment_id="source-attachment",
+                storage_key=storage.store(b"PDF-Inhalt"),
+                content_type="application/pdf",
+                byte_size=10,
+                stored_at=datetime.now(UTC),
+            )
+        )
+        db.flush()
+
+        service = HubMailboxService(
+            db=db,
+            cipher=cipher,
+            public_base_url="https://hub.example.test",
+            attachment_storage=storage,
+        )
+        attachments = service._forwarded_unassigned_attachments(email_id=inbound.id)
+
+        assert len(attachments) == 1
+        assert attachments[0].filename == "unterlagen.pdf"
+        assert attachments[0].content == b"PDF-Inhalt"
+        assert attachments[0].content_type == "application/pdf"
+
+
 def test_mailbox_sends_direct_email_via_mittwald_and_keeps_a_local_attachment(monkeypatch, tmp_path):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

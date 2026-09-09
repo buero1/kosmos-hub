@@ -393,8 +393,7 @@ class HubMailboxService:
             email_id=reply_to_email_id,
             recipient_email=normalized_recipient_email,
         )
-        if forward_from_email_id is not None:
-            self._require_inbound_unassigned_email(email_id=forward_from_email_id)
+        forwarded_attachments = self._forwarded_unassigned_attachments(email_id=forward_from_email_id)
 
         transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
         sender = next(
@@ -426,7 +425,7 @@ class HubMailboxService:
             cc_emails,
             excluded_emails={sender.email, normalized_recipient_email},
         )
-        normalized_attachments = self._validated_direct_attachments(attachments)
+        normalized_attachments = self._validated_direct_attachments((*attachments, *forwarded_attachments))
         now = datetime.now(UTC)
         payload_attachments = [
             {
@@ -660,6 +659,27 @@ class HubMailboxService:
         if message_id and re.fullmatch(r"<[^<>\r\n]{1,498}>", message_id):
             return message_id
         return None
+
+    def _forwarded_unassigned_attachments(
+        self,
+        *,
+        email_id: int | None,
+    ) -> tuple[CustomerCommunicationAttachmentUpload, ...]:
+        if email_id is None:
+            return ()
+        email = self._require_inbound_unassigned_email(email_id=email_id)
+        payload = self._payload(email.encrypted_payload_json)
+        attachments: list[CustomerCommunicationAttachmentUpload] = []
+        for attachment in self.communications._email_attachments(payload):
+            downloaded = self.download_unassigned_attachment(email_id=email.id, attachment_id=attachment.id)
+            attachments.append(
+                CustomerCommunicationAttachmentUpload(
+                    filename=downloaded.filename,
+                    content=downloaded.content,
+                    content_type=downloaded.content_type,
+                )
+            )
+        return tuple(attachments)
 
     def discard_draft(self, *, draft_id: int) -> bool:
         draft = self.db.get(HubMailboxEmail, draft_id)
