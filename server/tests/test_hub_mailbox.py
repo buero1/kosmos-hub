@@ -19,6 +19,14 @@ from app.services.email_attachment_storage import EmailAttachmentStorage
 from app.services.hub_mailbox import HubMailboxService
 
 
+def test_global_mailbox_composer_applies_the_saved_default_sender_on_every_open():
+    template = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    assert "if (!globalMailboxSender || globalMailboxSender.value) return;" in template
+    assert "globalMailboxApplyNewEmailDefaults();\n                globalMailboxApplyDefaultSender();" in template
+    assert "globalMailboxLoadOptions().then(function () {\n              globalMailboxApplyDefaultSender();" in template
+
+
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

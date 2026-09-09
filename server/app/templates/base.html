@@ -4256,6 +4256,7 @@
           }
 
           function globalMailboxApplyDefaultSender() {
+            if (!globalMailboxSender || globalMailboxSender.value) return;
             globalMailboxSender.value = globalMailboxDefaultSenderEmail || (
               Array.from(globalMailboxSender.options).find(function (option) { return option.value; }) || {}
             ).value || "";
@@ -4287,6 +4288,7 @@
                 globalMailboxDefaultTemplateId = payload.default_template_id || "";
                 globalMailboxLoaded = true;
                 globalMailboxApplyNewEmailDefaults();
+                globalMailboxApplyDefaultSender();
                 globalMailboxStatusMessage(payload.sender_error || "Kontakt oder E-Mail-Adresse eingeben.");
                 globalMailboxUpdateSubmit();
               })
@@ -4548,6 +4550,7 @@
             document.body.classList.add("email-compose-open");
             var customerId = trigger.dataset.emailComposeCustomerId || "";
             globalMailboxLoadOptions().then(function () {
+              globalMailboxApplyDefaultSender();
               var recipientEmail = trigger.dataset.recipientEmail || "";
               if (recipientEmail) {
                 globalMailboxRecipient.value = recipientEmail;
