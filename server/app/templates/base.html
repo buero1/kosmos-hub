@@ -1162,6 +1162,7 @@
       .account-workflow-table {
         width: 100%;
         border-collapse: collapse;
+        border-top: 1px solid var(--border);
       }
       .account-workflow-table th,
       .account-workflow-table td {
@@ -1182,19 +1183,30 @@
         border: 0;
         background: transparent;
         color: var(--accent);
-        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.42rem;
         cursor: pointer;
         font: inherit;
         font-weight: 700;
         padding: 0;
         text-align: left;
+        text-decoration: none;
+      }
+      .account-workflow-name::before {
+        content: "\\25B8";
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1;
+        transition: transform 150ms ease;
       }
       .account-workflow-name:hover,
       .account-workflow-name:focus-visible,
       .account-workflow-name.is-active {
         color: #075f4e;
-        text-decoration: underline;
+        text-decoration: none;
       }
+      .account-workflow-name.is-active::before { transform: rotate(90deg); }
       .account-workflow-description { margin-top: 0.15rem; }
       .account-workflow-description[hidden] { display: none; }
       .account-panel label.checkbox-label {
