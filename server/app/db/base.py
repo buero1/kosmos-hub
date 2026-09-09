@@ -14,6 +14,8 @@ from app.models.hub_access_token import HubAccessToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
+from app.models.hub_case import HubCase
+from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
@@ -61,6 +63,8 @@ __all__ = [
     "FleetRefreshRun",
     "FleetRefreshSiteResult",
     "HubAccessToken",
+    "HubCase",
+    "HubCaseEmailLink",
     "HubDesktopDevice",
     "HubMailboxAccount",
     "HubMailboxAttachment",

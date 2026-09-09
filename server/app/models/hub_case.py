@@ -20,3 +20,4 @@ class HubCase(TimestampMixin, Base):
     zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     customer = relationship("Customer")
+    email_links = relationship("HubCaseEmailLink", back_populates="case", cascade="all, delete-orphan")

@@ -8,11 +8,15 @@ import json
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import SecretCipher
 from app.models.customer import Customer
+from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_case import HubCase
+from app.models.hub_case_email_link import HubCaseEmailLink
+from app.models.hub_mailbox_email import HubMailboxEmail
+from app.services.customer_communications import CustomerCommunicationService
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS, HubCaseField
 from app.services.module_layouts import ModuleLayoutService
 
@@ -52,6 +56,40 @@ class HubCaseDetail:
     case_number: str
     fields: tuple[HubCaseFieldValue, ...]
     status: str
+    linked_emails: tuple["HubCaseLinkedEmail", ...]
+
+
+@dataclass(frozen=True)
+class HubCaseEmailSource:
+    """A selected mailbox message that may be attached to a case."""
+
+    key: str
+    subject: str
+    customer_id: int | None
+
+
+@dataclass(frozen=True)
+class HubCaseLinkedEmailAttachment:
+    id: str
+    filename: str
+    download_url: str
+
+
+@dataclass(frozen=True)
+class HubCaseLinkedEmail:
+    link_id: int
+    source_key: str
+    subject: str
+    sender: str | None
+    recipients: str | None
+    direction: str
+    is_unread: bool
+    occurred_at: datetime | None
+    preview_html: str | None
+    attachments: tuple[HubCaseLinkedEmailAttachment, ...]
+    can_load_content: bool
+    last_error: str | None
+    mailbox_folder: str
 
 
 class HubCaseService:
@@ -118,7 +156,14 @@ class HubCaseService:
         )
 
     def get_detail(self, *, case_id: int) -> HubCaseDetail | None:
-        case = self.db.get(HubCase, case_id)
+        case = self.db.scalar(
+            select(HubCase)
+            .options(
+                selectinload(HubCase.email_links).selectinload(HubCaseEmailLink.customer_email),
+                selectinload(HubCase.email_links).selectinload(HubCaseEmailLink.mailbox_email),
+            )
+            .where(HubCase.id == case_id)
+        )
         if case is None:
             return None
         values = self._values(case)
@@ -128,6 +173,7 @@ class HubCaseService:
             case_number=self.case_number(case),
             fields=self._field_display_layout(fields),
             status=values.get("status") or "-",
+            linked_emails=self._linked_emails(case),
         )
 
     def new_form_values(self) -> dict[str, str]:
@@ -150,6 +196,74 @@ class HubCaseService:
         case.case_number = f"FALL-{case.id:06d}"
         self.db.flush()
         return case
+
+    def source_email(self, *, source_email_key: str) -> HubCaseEmailSource:
+        """Resolve a mailbox key without guessing a relationship from email content."""
+        customer_email, mailbox_email = self._source_email_record(source_email_key=source_email_key)
+        if customer_email is not None:
+            payload = self._payload(customer_email.encrypted_payload_json)
+            return HubCaseEmailSource(
+                key=f"linked-{customer_email.customer_id}-{customer_email.id}",
+                subject=CustomerCommunicationService._text(payload.get("subject")) or "Ohne Betreff",
+                customer_id=customer_email.customer_id,
+            )
+        assert mailbox_email is not None
+        payload = self._payload(mailbox_email.encrypted_payload_json)
+        return HubCaseEmailSource(
+            key=f"unassigned-{mailbox_email.id}",
+            subject=(
+                CustomerCommunicationService._text(payload.get("betreff"))
+                or CustomerCommunicationService._text(payload.get("subject"))
+                or "Ohne Betreff"
+            ),
+            customer_id=None,
+        )
+
+    def link_email(self, *, case_id: int, source_email_key: str) -> HubCaseEmailLink:
+        """Attach one deliberately selected source email to a case, idempotently."""
+        case = self.db.get(HubCase, case_id)
+        if case is None:
+            raise HubCaseError("Der Fall wurde nicht gefunden.")
+        customer_email, mailbox_email = self._source_email_record(source_email_key=source_email_key)
+        if customer_email is not None:
+            if case.customer_id is None:
+                customer = self._customer(customer_email.customer_id)
+                case.customer = customer
+                values = self._values(case)
+                values["customer_name"] = customer.name if customer is not None else ""
+                case.encrypted_fields_json = self._encrypt_values(values)
+            elif case.customer_id != customer_email.customer_id:
+                raise HubCaseError("Diese Kunden-E-Mail kann nur einem Fall desselben Kunden zugeordnet werden.")
+            existing = self.db.scalar(
+                select(HubCaseEmailLink).where(
+                    HubCaseEmailLink.case_id == case.id,
+                    HubCaseEmailLink.customer_email_id == customer_email.id,
+                )
+            )
+            if existing is not None:
+                return existing
+            link = HubCaseEmailLink(case=case, customer_email=customer_email)
+        else:
+            assert mailbox_email is not None
+            existing = self.db.scalar(
+                select(HubCaseEmailLink).where(
+                    HubCaseEmailLink.case_id == case.id,
+                    HubCaseEmailLink.mailbox_email_id == mailbox_email.id,
+                )
+            )
+            if existing is not None:
+                return existing
+            link = HubCaseEmailLink(case=case, mailbox_email=mailbox_email)
+        self.db.add(link)
+        self.db.flush()
+        return link
+
+    def unlink_email(self, *, case_id: int, link_id: int) -> None:
+        link = self.db.get(HubCaseEmailLink, link_id)
+        if link is None or link.case_id != case_id:
+            raise HubCaseError("Die E-Mail-Verknüpfung wurde nicht gefunden.")
+        self.db.delete(link)
+        self.db.flush()
 
     def update_case(self, *, case_id: int, customer_id: int | None, submitted_values: dict[str, str]) -> HubCase:
         case = self.db.get(HubCase, case_id)
@@ -190,6 +304,152 @@ class HubCaseService:
         if customer is None or not customer.is_visible:
             raise HubCaseError("Der ausgewählte Kunde ist nicht verfügbar.")
         return customer
+
+    def _source_email_record(
+        self,
+        *,
+        source_email_key: str,
+    ) -> tuple[CustomerZohoEmail | None, HubMailboxEmail | None]:
+        key = source_email_key.strip()
+        if key.startswith("linked-"):
+            try:
+                customer_text, email_text = key.removeprefix("linked-").split("-", 1)
+                customer_id = int(customer_text)
+                email_id = int(email_text)
+            except ValueError as exc:
+                raise HubCaseError("Die ausgewählte E-Mail ist ungültig.") from exc
+            email = self.db.scalar(
+                select(CustomerZohoEmail).where(
+                    CustomerZohoEmail.customer_id == customer_id,
+                    CustomerZohoEmail.id == email_id,
+                )
+            )
+            if email is None:
+                raise HubCaseError("Die ausgewählte E-Mail wurde nicht gefunden.")
+            return email, None
+        if key.startswith("unassigned-"):
+            try:
+                email_id = int(key.removeprefix("unassigned-"))
+            except ValueError as exc:
+                raise HubCaseError("Die ausgewählte E-Mail ist ungültig.") from exc
+            email = self.db.get(HubMailboxEmail, email_id)
+            if email is None:
+                raise HubCaseError("Die ausgewählte E-Mail wurde nicht gefunden.")
+            return None, email
+        raise HubCaseError("Diese E-Mail kann nicht mit einem Fall verknüpft werden.")
+
+    def _linked_emails(self, case: HubCase) -> tuple[HubCaseLinkedEmail, ...]:
+        views = [self._linked_email_view(link) for link in case.email_links]
+        available_views = [view for view in views if view is not None]
+        available_views.sort(key=lambda view: view.link_id, reverse=True)
+        return tuple(available_views)
+
+    def _linked_email_view(self, link: HubCaseEmailLink) -> HubCaseLinkedEmail | None:
+        if link.customer_email is not None:
+            email = link.customer_email
+            payload = self._payload(email.encrypted_payload_json)
+            content = CustomerCommunicationService._text(payload.get("content"))
+            attachments = tuple(
+                HubCaseLinkedEmailAttachment(
+                    id=attachment.id,
+                    filename=attachment.filename,
+                    download_url=(
+                        f"/customers/{email.customer_id}/communications/emails/{email.id}/attachments/{attachment.id}"
+                    ),
+                )
+                for attachment in CustomerCommunicationService._email_attachments(payload)
+            )
+            return HubCaseLinkedEmail(
+                link_id=link.id,
+                source_key=f"linked-{email.customer_id}-{email.id}",
+                subject=CustomerCommunicationService._text(payload.get("subject")) or "Ohne Betreff",
+                sender=CustomerCommunicationService._people_text(payload.get("from")),
+                recipients=CustomerCommunicationService._people_text(payload.get("to")),
+                direction=email.direction,
+                is_unread=email.is_unread,
+                occurred_at=email.zoho_sent_at or email.created_at,
+                preview_html=CustomerCommunicationService._email_preview_document(
+                    content,
+                    image_url_prefix=f"/customers/{email.customer_id}/communications/emails/{email.id}/images",
+                ),
+                attachments=attachments,
+                can_load_content=content is None and bool(email.zoho_message_id and email.zoho_module and email.zoho_record_id),
+                last_error=email.last_error,
+                mailbox_folder=self._mailbox_folder(mailbox_state=email.mailbox_state, direction=email.direction),
+            )
+        if link.mailbox_email is not None:
+            email = link.mailbox_email
+            payload = self._payload(email.encrypted_payload_json)
+            content = self._mailbox_content(payload)
+            attachments = tuple(
+                HubCaseLinkedEmailAttachment(
+                    id=attachment.id,
+                    filename=attachment.filename,
+                    download_url=f"/emails/unassigned/{email.id}/attachments/{attachment.id}",
+                )
+                for attachment in CustomerCommunicationService._email_attachments(payload)
+            )
+            return HubCaseLinkedEmail(
+                link_id=link.id,
+                source_key=f"unassigned-{email.id}",
+                subject=(
+                    CustomerCommunicationService._text(payload.get("betreff"))
+                    or CustomerCommunicationService._text(payload.get("subject"))
+                    or "Ohne Betreff"
+                ),
+                sender=CustomerCommunicationService._people_text(
+                    payload.get("absender") or payload.get("sender") or payload.get("from")
+                ),
+                recipients=CustomerCommunicationService._people_text(
+                    payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")
+                ),
+                direction=email.direction,
+                is_unread=email.is_unread,
+                occurred_at=email.received_at,
+                preview_html=CustomerCommunicationService._email_preview_document(content),
+                attachments=attachments,
+                can_load_content=False,
+                last_error=email.last_error,
+                mailbox_folder=self._mailbox_folder(mailbox_state=email.mailbox_state, direction=email.direction),
+            )
+        return None
+
+    def _payload(self, encrypted_payload_json: str) -> dict[str, object]:
+        try:
+            payload = self.cipher.decrypt(encrypted_payload_json)
+            decoded = json.loads(payload)
+        except Exception:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
+    @staticmethod
+    def _mailbox_content(payload: dict[str, object]) -> str | None:
+        containers = [payload]
+        for key in ("data", "payload", "record", "current_record", "currentrecord", "aufzeichnung"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                containers.append(value)
+            elif isinstance(value, str):
+                try:
+                    decoded = json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(decoded, dict):
+                    containers.append(decoded)
+        for container in containers:
+            for key in ("content", "body", "message", "html", "nachricht", "email_content", "mail_content"):
+                content = CustomerCommunicationService._text(container.get(key))
+                if content:
+                    return content
+        return None
+
+    @staticmethod
+    def _mailbox_folder(*, mailbox_state: str, direction: str) -> str:
+        if mailbox_state == "draft":
+            return "drafts"
+        if mailbox_state in {"trash", "spam"}:
+            return mailbox_state
+        return "inbox" if direction == "inbound" else "sent"
 
     def _submitted_values(
         self,

@@ -3,6 +3,9 @@
     <div class="mailbox-reading-heading">
       <div><h3>{{ selected.subject }}</h3><p class="mailbox-reading-meta">{% if selected.sender %}Von {{ selected.sender }}{% endif %}{% if selected.sender and selected.recipients %} · {% endif %}{% if selected.recipients %}An {{ selected.recipients }}{% endif %}{% if selected.cc_recipients %}<br>CC {{ selected.cc_recipients }}{% endif %}{% if selected.occurred_at %}<br>{{ selected.occurred_at | berlin_time }}{% endif %}</p></div>
       <div class="mailbox-reading-actions">
+        {% if selected.kind not in ("draft", "system") %}
+          <a class="button button-secondary button-variant-2" href="/cases/new?source_email_key={{ selected.key }}">Fall anlegen</a>
+        {% endif %}
         {% if selected.kind == 'linked' and selected.direction == 'inbound' %}
           <button class="button button-variant-1 mailbox-reading-action" type="button" data-mailbox-compose-action="reply" data-mailbox-compose-customer-id="{{ selected.customer_id }}" data-mailbox-compose-email-id="{{ selected.customer_email_id }}" aria-label="Antworten" title="Antworten">
             <svg class="mailbox-reading-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 6.8 4.8 11.8l5.4 5v-3.1c4.3 0 7.1 1.6 8.8 5.1-.4-5.6-3.4-9.2-8.8-9.4V6.8Z"/></svg>

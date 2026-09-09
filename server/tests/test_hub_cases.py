@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -7,7 +8,10 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_case import HubCase
+from app.models.hub_case_email_link import HubCaseEmailLink
+from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_user import HubUser
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
 from app.services.module_layouts import ModuleLayoutService
@@ -141,3 +145,87 @@ def test_hub_case_delete_removes_only_the_hub_case():
 
         assert deleted.id == case_id
         assert db.get(HubCase, case_id) is None
+
+
+def test_hub_case_links_customer_and_mailbox_emails_without_duplicates():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="E-Mail Kunde", is_visible=True)
+        customer_email = CustomerZohoEmail(
+            customer=customer,
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps({"subject": "Anfrage zum Fall", "from": {"email": "kunde@example.de"}, "content": "<p>Bitte helfen.</p>"})
+            ),
+            zoho_sent_at=datetime(2026, 9, 9, 10, 0, tzinfo=UTC),
+        )
+        mailbox_email = HubMailboxEmail(
+            source="mittwald-imap",
+            direction="outbound",
+            is_unread=False,
+            fingerprint="m" * 64,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps({"subject": "Rückfrage", "sender": "team@example.de", "content": "<p>Bitte um Rückruf.</p>"})
+            ),
+            received_at=datetime(2026, 9, 9, 11, 0, tzinfo=UTC),
+        )
+        db.add_all([customer, customer_email, mailbox_email])
+        db.flush()
+
+        service = _service(db)
+        case = service.create_case(customer_id=customer.id, submitted_values=_submitted_values())
+        first_link = service.link_email(
+            case_id=case.id,
+            source_email_key=f"linked-{customer.id}-{customer_email.id}",
+        )
+        duplicate_link = service.link_email(
+            case_id=case.id,
+            source_email_key=f"linked-{customer.id}-{customer_email.id}",
+        )
+        second_link = service.link_email(case_id=case.id, source_email_key=f"unassigned-{mailbox_email.id}")
+        db.commit()
+
+        assert duplicate_link.id == first_link.id
+        assert db.query(HubCaseEmailLink).count() == 2
+        detail = service.get_detail(case_id=case.id)
+        assert detail is not None
+        assert [email.subject for email in detail.linked_emails] == ["Rückfrage", "Anfrage zum Fall"]
+        assert detail.linked_emails[1].preview_html is not None
+        assert "Bitte helfen." in detail.linked_emails[1].preview_html
+        assert detail.linked_emails[0].mailbox_folder == "sent"
+
+        service.unlink_email(case_id=case.id, link_id=second_link.id)
+        db.commit()
+        assert [email.subject for email in service.get_detail(case_id=case.id).linked_emails] == ["Anfrage zum Fall"]
+
+
+def test_hub_case_rejects_linking_a_customer_email_to_another_customer_case():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        email_customer = Customer(name="E-Mail Kunde", is_visible=True)
+        other_customer = Customer(name="Anderer Kunde", is_visible=True)
+        customer_email = CustomerZohoEmail(
+            customer=email_customer,
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt('{"subject":"Anfrage"}'),
+        )
+        db.add_all([email_customer, other_customer, customer_email])
+        db.flush()
+        service = _service(db)
+        case = service.create_case(customer_id=other_customer.id, submitted_values=_submitted_values())
+
+        with pytest.raises(HubCaseError, match="desselben Kunden"):
+            service.link_email(
+                case_id=case.id,
+                source_email_key=f"linked-{email_customer.id}-{customer_email.id}",
+            )

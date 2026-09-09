@@ -62,7 +62,7 @@ from app.services.plugin_installation_packages import PluginInstallationPackageS
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
-from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
+from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, HubCaseError, HubCaseService
 from app.services.zoho_case_import import ZohoCaseImportService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -438,9 +438,29 @@ def synchronize_all_cases(
 def new_case_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    source_email_key: str = "",
 ):
     _require_hub_admin(request)
-    return templates.TemplateResponse(request, "case_create.html", _case_create_context(request, db))
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    try:
+        source_email = service.source_email(source_email_key=source_email_key) if source_email_key else None
+    except HubCaseError as exc:
+        return templates.TemplateResponse(
+            request,
+            "case_create.html",
+            _case_create_context(request, db, error=str(exc)),
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request,
+        "case_create.html",
+        _case_create_context(
+            request,
+            db,
+            selected_customer_id=source_email.customer_id if source_email is not None else None,
+            source_email=source_email,
+        ),
+    )
 
 
 @router.post("/cases")
@@ -457,12 +477,20 @@ async def create_case_page(
         if isinstance(value, str) and str(key).startswith("case_field__")
     }
     raw_customer_id = str(form.get("customer_id") or "").strip()
+    source_email_key = str(form.get("source_email_key") or "").strip()
+    service = HubCaseService(db=db, cipher=get_secret_cipher())
+    source_email: HubCaseEmailSource | None = None
     try:
         customer_id = int(raw_customer_id) if raw_customer_id else None
-        case = HubCaseService(db=db, cipher=get_secret_cipher()).create_case(
+        source_email = service.source_email(source_email_key=source_email_key) if source_email_key else None
+        if source_email is not None and source_email.customer_id is not None and customer_id != source_email.customer_id:
+            raise HubCaseError("Der Kundenbezug der ausgewählten E-Mail darf beim Anlegen nicht geändert werden.")
+        case = service.create_case(
             customer_id=customer_id,
             submitted_values=submitted_values,
         )
+        if source_email is not None:
+            service.link_email(case_id=case.id, source_email_key=source_email.key)
     except (ValueError, HubCaseError) as exc:
         db.rollback()
         return templates.TemplateResponse(
@@ -473,6 +501,7 @@ async def create_case_page(
                 db,
                 selected_customer_id=int(raw_customer_id) if raw_customer_id.isdigit() else None,
                 submitted_values=submitted_values,
+                source_email=source_email,
                 error=str(exc),
             ),
             status_code=400,
@@ -484,10 +513,61 @@ async def create_case_page(
         source="hub-web",
         action="create-hub-case",
         result="ok",
-        detail=f"Created Hub Case {case.id}; case data is not retained in the audit log.",
+        detail=(
+            f"Created Hub Case {case.id} and linked one selected email; case data is not retained in the audit log."
+            if source_email is not None
+            else f"Created Hub Case {case.id}; case data is not retained in the audit log."
+        ),
     )
     db.commit()
+    if source_email is not None:
+        query = urlencode({"email_link": "success", "email_link_message": "Die ausgewählte E-Mail wurde mit diesem Fall verknüpft."})
+        return RedirectResponse(url=f"/cases/{case.id}?{query}#case-emails", status_code=303)
     return RedirectResponse(url=f"/cases/{case.id}", status_code=303)
+
+
+@router.post("/cases/email-links")
+async def link_customer_email_to_case(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    raw_case_id = str(form.get("case_id") or "").strip()
+    source_email_key = str(form.get("source_email_key") or "").strip()
+    try:
+        case_id = int(raw_case_id)
+        service = HubCaseService(db=db, cipher=get_secret_cipher())
+        source_email = service.source_email(source_email_key=source_email_key)
+        if source_email.customer_id is None:
+            raise HubCaseError("Diese E-Mail kann nur über die E-Mail-Zentrale einem Fall zugeordnet werden.")
+        service.link_email(case_id=case_id, source_email_key=source_email.key)
+    except (ValueError, HubCaseError) as exc:
+        db.rollback()
+        if source_email_key.startswith("linked-"):
+            try:
+                customer_id = int(source_email_key.removeprefix("linked-").split("-", 1)[0])
+            except ValueError:
+                customer_id = 0
+            if customer_id:
+                return _customer_communication_redirect(customer_id, "error", str(exc))
+        return RedirectResponse(url="/emails?case_link=error", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="link-email-to-hub-case",
+        result="ok",
+        detail=f"Linked one selected customer email to Hub Case {case_id}.",
+    )
+    db.commit()
+    return _customer_communication_redirect(
+        source_email.customer_id,
+        "success",
+        "Die E-Mail wurde dem ausgewählten Fall zugeordnet.",
+    )
 
 
 @router.get("/cases/{case_id}", response_class=HTMLResponse)
@@ -499,6 +579,8 @@ def case_detail_page(
     fields_message: str = "",
     layout: str = "",
     layout_message: str = "",
+    email_link: str = "",
+    email_link_message: str = "",
 ):
     _require_hub_admin(request)
     service = HubCaseService(db=db, cipher=get_secret_cipher())
@@ -516,8 +598,40 @@ def case_detail_page(
             fields_message=fields_message,
             layout=layout,
             layout_message=layout_message,
+            email_link=email_link,
+            email_link_message=email_link_message,
         ),
     )
+
+
+@router.post("/cases/{case_id}/email-links/{link_id}/delete")
+async def unlink_email_from_case(
+    case_id: int,
+    link_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        HubCaseService(db=db, cipher=get_secret_cipher()).unlink_email(case_id=case_id, link_id=link_id)
+    except HubCaseError as exc:
+        db.rollback()
+        query = urlencode({"email_link": "error", "email_link_message": str(exc)})
+        return RedirectResponse(url=f"/cases/{case_id}?{query}#case-emails", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="unlink-email-from-hub-case",
+        result="ok",
+        detail=f"Removed one email link from Hub Case {case_id}.",
+    )
+    db.commit()
+    query = urlencode({"email_link": "success", "email_link_message": "Die E-Mail-Verknüpfung wurde gelöst."})
+    return RedirectResponse(url=f"/cases/{case_id}?{query}#case-emails", status_code=303)
 
 
 @router.post("/cases/{case_id}/fields")
@@ -4918,6 +5032,7 @@ def _case_create_context(
     *,
     selected_customer_id: int | None = None,
     submitted_values: dict[str, str] | None = None,
+    source_email: HubCaseEmailSource | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
     service = HubCaseService(db=db, cipher=get_secret_cipher())
@@ -4927,6 +5042,7 @@ def _case_create_context(
         "fields": HUB_CASE_FIELDS,
         "customers": service.list_linkable_customers(),
         "selected_customer_id": selected_customer_id,
+        "source_email": source_email,
         "submitted_values": values,
         "error": error,
         "csrf_token": get_csrf_token(request),
@@ -4942,6 +5058,8 @@ def _case_detail_context(
     fields_message: str,
     layout: str,
     layout_message: str,
+    email_link: str,
+    email_link_message: str,
 ) -> dict[str, object]:
     return {
         "detail": detail,
@@ -4950,6 +5068,8 @@ def _case_detail_context(
         "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
         "layout_state": layout if layout in {"success", "error"} else "",
         "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
+        "email_link_state": email_link if email_link in {"success", "error"} else "",
+        "email_link_message": email_link_message[:500] if email_link in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
     }
 

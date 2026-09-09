@@ -367,6 +367,23 @@
                       {% if email.recipients %}An {{ email.recipients }}{% endif %}
                       {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
                     </p>
+                    {% if can_manage_communications %}
+                      <div class="case-email-actions">
+                        <a class="button button-secondary button-variant-2" href="/cases/new?source_email_key=linked-{{ detail.entry.customer.id }}-{{ email.id }}">Fall anlegen</a>
+                        {% if detail.cases %}
+                          <form method="post" action="/cases/email-links">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <input type="hidden" name="source_email_key" value="linked-{{ detail.entry.customer.id }}-{{ email.id }}">
+                            <label class="visually-hidden" for="case-email-{{ email.id }}">Fall auswählen</label>
+                            <select id="case-email-{{ email.id }}" name="case_id" class="control-variant-2" required>
+                              <option value="">Fall zuordnen ...</option>
+                              {% for entry in detail.cases %}<option value="{{ entry.case.id }}">{{ entry.case_number }} · {{ entry.status }}</option>{% endfor %}
+                            </select>
+                            <button class="button button-secondary button-variant-2" type="submit">Zuordnen</button>
+                          </form>
+                        {% endif %}
+                      </div>
+                    {% endif %}
                     {% if email.preview_html %}
                       <details class="communication-content communication-content-with-actions" data-email-preview data-email-unread="{{ 'true' if email.is_unread else 'false' }}" data-email-read-url="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/read" data-email-read-csrf="{{ csrf_token }}">
                         <summary>E-Mail-Vorschau anzeigen</summary>

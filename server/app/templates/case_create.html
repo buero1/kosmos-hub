@@ -10,6 +10,9 @@
     {% endcall %}
 
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if source_email %}
+      <p class="notice-info">Der neue Fall wird mit der E-Mail „{{ source_email.subject }}“ verknüpft.</p>
+    {% endif %}
     <article class="card customer-detail-panel">
       <div class="customer-detail-panel-heading">
         <div>
@@ -20,6 +23,7 @@
       </div>
       <form id="case-create-form" method="post" action="/cases" class="communication-form customer-field-editor contact-create-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {% if source_email %}<input type="hidden" name="source_email_key" value="{{ source_email.key }}">{% endif %}
         <div class="customer-field-editor-grid">
           {% for field in fields %}
             {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}

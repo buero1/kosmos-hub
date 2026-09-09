@@ -25,6 +25,7 @@
 
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
     {% if layout_state and layout_message %}<p class="notice-{{ layout_state }}">{{ layout_message }}</p>{% endif %}
+    {% if email_link_state and email_link_message %}<p class="notice-{{ email_link_state }}">{{ email_link_message }}</p>{% endif %}
     <div class="customer-detail-layout">
       <div class="customer-detail-main-column">
         <article id="case-fields" class="card customer-detail-panel" data-layout-editor="case-fields">
@@ -74,6 +75,55 @@
               </div>
             </form>
           </section>
+        </article>
+        <article id="case-emails" class="card customer-detail-panel case-linked-emails-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">E-Mails</p>
+              <h3>Verknüpfte E-Mails</h3>
+              <p class="subtle">E-Mails, aus denen dieser Fall angelegt oder diesem Fall bewusst zugeordnet wurde.</p>
+            </div>
+          </div>
+          {% for email in detail.linked_emails %}
+            <article class="communication-entry">
+              <div class="communication-entry-heading">
+                <strong>{{ email.subject }}</strong>
+                <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
+                {% if email.is_unread %}<span class="pill">Neu</span>{% endif %}
+              </div>
+              <p class="subtle">
+                {% if email.sender %}Von {{ email.sender }}{% endif %}
+                {% if email.sender and email.recipients %} · {% endif %}
+                {% if email.recipients %}An {{ email.recipients }}{% endif %}
+                {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
+              </p>
+              {% if email.preview_html %}
+                <details class="communication-content communication-content-with-actions" data-email-preview>
+                  <summary>E-Mail-Vorschau anzeigen</summary>
+                  <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe>
+                </details>
+              {% elif email.can_load_content %}
+                <p class="subtle">Der Inhalt liegt noch nicht im Hub vor. Er kann in der E-Mail-Zentrale nachgeladen werden.</p>
+              {% else %}
+                <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
+              {% endif %}
+              {% if email.attachments %}
+                <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
+                  {% for attachment in email.attachments %}<li><a href="{{ attachment.download_url }}">{{ attachment.filename }}</a></li>{% endfor %}
+                </ul>
+              {% endif %}
+              <div class="case-email-actions">
+                <a class="button button-secondary button-variant-2" href="/emails?folder={{ email.mailbox_folder }}&selected={{ email.source_key }}">In E-Mail-Zentrale öffnen</a>
+                <form method="post" action="/cases/{{ detail.case.id }}/email-links/{{ email.link_id }}/delete">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="button button-secondary button-variant-2" type="submit">Verknüpfung lösen</button>
+                </form>
+              </div>
+              {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
+            </article>
+          {% else %}
+            <p class="subtle">Noch keine E-Mails mit diesem Fall verknüpft.</p>
+          {% endfor %}
         </article>
       </div>
 
