@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parseaddr
+from html import escape
 from hashlib import sha256
 from secrets import token_hex
 
@@ -374,14 +376,25 @@ class HubMailboxService:
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
         source: str = _DIRECT_SEND_SOURCE,
         message_id: str | None = None,
+        reply_to_email_id: int | None = None,
+        forward_from_email_id: int | None = None,
     ) -> HubMailboxEmail:
         """Send an email without a customer link and retain a local sent copy."""
         if source not in {_DIRECT_SEND_SOURCE, TASK_EMAIL_REMINDER_SOURCE, MAILBOX_HEALTH_ALERT_SOURCE}:
             raise ValueError("Unbekannte Quelle für die Hub-E-Mail.")
+        if reply_to_email_id is not None and forward_from_email_id is not None:
+            raise ValueError("Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein.")
         recipient_name, parsed_recipient_email = parseaddr(recipient_email.strip())
         normalized_recipient_email = parsed_recipient_email.strip().casefold()
         if not normalized_recipient_email or "@" not in normalized_recipient_email:
             raise ValueError("Gib eine gültige Empfängeradresse ein.")
+
+        reply_to_message_id = self._unassigned_reply_message_id(
+            email_id=reply_to_email_id,
+            recipient_email=normalized_recipient_email,
+        )
+        if forward_from_email_id is not None:
+            self._require_inbound_unassigned_email(email_id=forward_from_email_id)
 
         transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
         sender = next(
@@ -459,7 +472,7 @@ class HubMailboxService:
                 subject=normalized_subject,
                 html_content=compilation.compiled_html,
                 cc_recipients=cc_recipients,
-                reply_to_message_id=None,
+                reply_to_message_id=reply_to_message_id,
                 attachments=tuple(
                     HubMailboxTransportAttachment(
                         filename=attachment.filename,
@@ -501,6 +514,11 @@ class HubMailboxService:
             "attachments": payload_attachments,
             "message_id": delivery.message_id,
             "sent_time": delivery.sent_at.isoformat(),
+            "in_reply_to": {
+                "email_id": reply_to_email_id,
+                "message_id": reply_to_message_id,
+            } if reply_to_email_id is not None else None,
+            "forwarded_from_email_id": forward_from_email_id,
         }, ensure_ascii=False))
         self.db.flush()
         return email
@@ -541,6 +559,107 @@ class HubMailboxService:
             "reply_to_email_id": self._text(payload.get("reply_to_email_id")) or "",
             "forward_from_email_id": self._text(payload.get("forward_from_email_id")) or "",
         }
+
+    def get_unassigned_email_compose_context(self, *, email_id: int, action: str) -> dict[str, object]:
+        """Build reply or forward content for any incoming mailbox message without a customer link."""
+        if action not in {"reply", "reply_all", "forward"}:
+            raise ValueError("Unbekannte E-Mail-Aktion.")
+        email = self._require_inbound_unassigned_email(email_id=email_id)
+        payload = self._payload(email.encrypted_payload_json)
+        original_content = self._unassigned_content(payload) or ""
+        original_subject = self._text(payload.get("betreff")) or self._text(payload.get("subject")) or "Ohne Betreff"
+        subject = original_subject
+        original_sender = self._people(
+            payload.get("absender") or payload.get("sender") or payload.get("from")
+        ) or "Unbekannt"
+
+        if action in {"reply", "reply_all"}:
+            sender_addresses = self.communications._email_addresses(
+                payload.get("absender") or payload.get("sender") or payload.get("from")
+            )
+            if len(sender_addresses) != 1:
+                raise ValueError("Der Absender dieser E-Mail ist nicht eindeutig.")
+            recipient_email = sender_addresses[0]
+            if not re.match(r"^\s*re\s*:", subject, flags=re.IGNORECASE):
+                subject = f"Re: {subject}"
+            signature_html = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
+            signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
+            quoted_content = self.communications._sanitized_email_content(original_content) if original_content else ""
+            content = (
+                "<p><br><br></p>"
+                f"{signature_section}"
+                f"<p><strong>Am {escape(email.received_at.isoformat())} schrieb {escape(original_sender)}:</strong></p>"
+                "<p><br></p>"
+                '<blockquote style="margin: 0 0 0 0.8ex; border-left: 1px solid #c7c7c7; padding-left: 1em;">'
+                f"{quoted_content}</blockquote>"
+            )
+            if len(content) > 50_000:
+                raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig zu zitieren.")
+            cc_emails = sorted(
+                (
+                    set(self.communications._email_addresses(payload.get("to")))
+                    | set(self.communications._email_addresses(payload.get("cc")))
+                ) - {recipient_email}
+            ) if action == "reply_all" else []
+            return {
+                "action": action,
+                "customer_id": None,
+                "recipient": None,
+                "recipient_email": recipient_email,
+                "subject": subject[:500],
+                "content": content,
+                "cc_emails": cc_emails,
+                "reply_to_email_id": email.id,
+                "forward_from_email_id": None,
+            }
+
+        if not re.match(r"^\s*fwd\s*:", subject, flags=re.IGNORECASE):
+            subject = f"Fwd: {subject}"
+        original_recipients = self._people(
+            payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient") or payload.get("to")
+        ) or "Unbekannt"
+        metadata = (
+            "<hr><p><strong>Weitergeleitete Nachricht</strong><br>"
+            f"Von: {escape(original_sender)}<br>"
+            f"An: {escape(original_recipients)}<br>"
+            f"Datum: {escape(email.received_at.isoformat())}<br>"
+            f"Betreff: {escape(original_subject)}</p>"
+        )
+        content = f"<p><br></p>{metadata}{self.communications._sanitized_email_content(original_content) if original_content else ''}"
+        if len(content) > 50_000:
+            raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig weiterzuleiten.")
+        return {
+            "action": "forward",
+            "customer_id": None,
+            "recipient": None,
+            "recipient_email": "",
+            "subject": subject[:500],
+            "content": content,
+            "cc_emails": [],
+            "reply_to_email_id": None,
+            "forward_from_email_id": email.id,
+        }
+
+    def _require_inbound_unassigned_email(self, *, email_id: int) -> HubMailboxEmail:
+        email = self.db.get(HubMailboxEmail, email_id)
+        if email is None or email.direction != "inbound":
+            raise ValueError("Nur auf eingegangene E-Mails kann geantwortet oder weitergeleitet werden.")
+        return email
+
+    def _unassigned_reply_message_id(self, *, email_id: int | None, recipient_email: str) -> str | None:
+        if email_id is None:
+            return None
+        email = self._require_inbound_unassigned_email(email_id=email_id)
+        payload = self._payload(email.encrypted_payload_json)
+        sender_addresses = self.communications._email_addresses(
+            payload.get("absender") or payload.get("sender") or payload.get("from")
+        )
+        if len(sender_addresses) != 1 or sender_addresses[0] != recipient_email:
+            raise ValueError("Eine Antwort muss an den Absender der ursprünglichen E-Mail gesendet werden.")
+        message_id = self._text(payload.get("mittwald_message_id") or payload.get("message_id"))
+        if message_id and re.fullmatch(r"<[^<>\r\n]{1,498}>", message_id):
+            return message_id
+        return None
 
     def discard_draft(self, *, draft_id: int) -> bool:
         draft = self.db.get(HubMailboxEmail, draft_id)

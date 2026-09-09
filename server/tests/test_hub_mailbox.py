@@ -326,6 +326,56 @@ def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():
         assert service.get_folder_counts()["drafts"] == 0
 
 
+def test_mailbox_prepares_replies_and_forwards_for_unassigned_inbound_emails():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        inbound = HubMailboxEmail(
+            source="mittwald-imap",
+            direction="inbound",
+            is_unread=True,
+            fingerprint="r" * 64,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Rückfrage zur Website",
+                        "from": {"name": "Example Contact", "email": "contact@example.de"},
+                        "to": [{"email": "info@kosmos-medien.de"}],
+                        "cc": [{"email": "team@example.de"}],
+                        "content": "<p>Bitte um Rückmeldung.</p>",
+                        "mittwald_message_id": "<original@example.de>",
+                    }
+                )
+            ),
+            received_at=datetime(2026, 9, 9, 8, 0, tzinfo=UTC),
+        )
+        db.add(inbound)
+        db.flush()
+
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        reply = service.get_unassigned_email_compose_context(email_id=inbound.id, action="reply_all")
+        forward = service.get_unassigned_email_compose_context(email_id=inbound.id, action="forward")
+
+        assert reply["recipient"] is None
+        assert reply["recipient_email"] == "contact@example.de"
+        assert reply["subject"] == "Re: Rückfrage zur Website"
+        assert reply["cc_emails"] == ["info@kosmos-medien.de", "team@example.de"]
+        assert reply["reply_to_email_id"] == inbound.id
+        assert "Bitte um Rückmeldung." in str(reply["content"])
+        assert forward["recipient_email"] == ""
+        assert forward["subject"] == "Fwd: Rückfrage zur Website"
+        assert forward["forward_from_email_id"] == inbound.id
+        assert "Weitergeleitete Nachricht" in str(forward["content"])
+
+        threaded_message_id = service._unassigned_reply_message_id(
+            email_id=inbound.id,
+            recipient_email="contact@example.de",
+        )
+        assert threaded_message_id == "<original@example.de>"
+
+
 def test_mailbox_sends_direct_email_via_mittwald_and_keeps_a_local_attachment(monkeypatch, tmp_path):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

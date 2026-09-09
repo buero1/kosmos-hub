@@ -614,13 +614,16 @@
         var action = button.dataset.mailboxComposeAction || '';
         var customerId = button.dataset.mailboxComposeCustomerId || '';
         var emailId = button.dataset.mailboxComposeEmailId || '';
-        if (!action || !customerId || !emailId) return;
+        if (!action || !emailId) return;
         beginMailboxComposerDraftSession();
         if (mailboxComposerActionController) mailboxComposerActionController.abort();
         mailboxComposerActionController = new AbortController();
         button.disabled = true;
+        var composeContextUrl = customerId
+          ? '/emails/linked/' + encodeURIComponent(customerId) + '/' + encodeURIComponent(emailId) + '/compose-context?action=' + encodeURIComponent(action)
+          : '/emails/unassigned/' + encodeURIComponent(emailId) + '/compose-context?action=' + encodeURIComponent(action);
         window.fetch(
-          '/emails/linked/' + encodeURIComponent(customerId) + '/' + encodeURIComponent(emailId) + '/compose-context?action=' + encodeURIComponent(action),
+          composeContextUrl,
           { credentials: 'same-origin', signal: mailboxComposerActionController.signal }
         )
           .then(function (response) {

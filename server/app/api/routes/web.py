@@ -1834,6 +1834,25 @@ def mailbox_draft_compose_context(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/emails/unassigned/{email_id}/compose-context", response_class=JSONResponse)
+def mailbox_unassigned_email_compose_context(
+    email_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    action: str = "",
+):
+    """Prepare a direct Mittwald reply or forward for an inbound mailbox email."""
+    _require_hub_admin(request)
+    try:
+        return HubMailboxService(
+            db=db,
+            cipher=get_secret_cipher(),
+            public_base_url=get_settings().public_base_url,
+        ).get_unassigned_email_compose_context(email_id=email_id, action=action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/emails/drafts", response_class=JSONResponse)
 def save_mailbox_draft(
     request: Request,
@@ -1908,6 +1927,8 @@ async def send_direct_mailbox_email(
     content: Annotated[str, Form()] = "",
     cc_emails: Annotated[str, Form()] = "",
     draft_id: Annotated[str, Form()] = "",
+    reply_to_email_id: Annotated[str, Form()] = "",
+    forward_from_email_id: Annotated[str, Form()] = "",
     attachments: Annotated[list[UploadFile] | None, File()] = None,
     csrf_token: Annotated[str, Form()] = "",
 ):
@@ -1920,6 +1941,8 @@ async def send_direct_mailbox_email(
         public_base_url=get_settings().public_base_url,
     )
     try:
+        reply_to_id = int(reply_to_email_id) if reply_to_email_id.strip() else None
+        forward_from_id = int(forward_from_email_id) if forward_from_email_id.strip() else None
         uploaded_attachments: list[CustomerCommunicationAttachmentUpload] = []
         for attachment in attachments or []:
             if not attachment.filename:
@@ -1938,6 +1961,8 @@ async def send_direct_mailbox_email(
             content=content,
             cc_emails=cc_emails,
             attachments=tuple(uploaded_attachments),
+            reply_to_email_id=reply_to_id,
+            forward_from_email_id=forward_from_id,
         )
         if draft_id.strip().isdigit():
             mailbox.discard_draft(draft_id=int(draft_id))
