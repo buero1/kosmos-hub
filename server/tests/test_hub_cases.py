@@ -16,7 +16,11 @@ from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_user import HubUser
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseError, HubCaseService
-from app.services.hub_workflows import CASE_OPEN_REMINDER_WORKFLOW_KEY, HubWorkflowService
+from app.services.hub_workflows import (
+    CASE_COMPLETION_EMAIL_TEMPLATE_ID,
+    CASE_OPEN_REMINDER_WORKFLOW_KEY,
+    HubWorkflowService,
+)
 from app.services.module_layouts import ModuleLayoutService
 
 
@@ -132,6 +136,14 @@ def test_open_case_creates_a_popup_task_and_completion_removes_it():
             workflow.workflow_key == CASE_OPEN_REMINDER_WORKFLOW_KEY
             for workflow in HubWorkflowService(db=db).list_workflows()
         )
+        workflow = next(
+            workflow
+            for workflow in HubWorkflowService(db=db).list_workflows()
+            if workflow.workflow_key == CASE_OPEN_REMINDER_WORKFLOW_KEY
+        )
+        assert workflow.module_label == "Fälle · Neuer Fall, Abschluss"
+        assert "Nach Erledigung Änderungswunsch hub" in workflow.description
+        assert CASE_COMPLETION_EMAIL_TEMPLATE_ID.startswith("hub-template-")
 
         db.add(
             CustomerActivityReminderNotification(

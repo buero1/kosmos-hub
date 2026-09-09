@@ -1,4 +1,4 @@
-<div class="email-compose-layer" data-email-compose-layer data-global-mailbox-composer hidden>
+<div class="email-compose-layer" data-email-compose-layer data-global-mailbox-composer{% if completion_email_template_id %} data-email-compose-autostart-template-id="{{ completion_email_template_id }}"{% endif %}{% if completion_email_customer_id %} data-email-compose-autostart-customer-id="{{ completion_email_customer_id }}"{% endif %} hidden>
   <button class="email-compose-backdrop" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen"></button>
   <aside class="email-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="email-compose-title" aria-hidden="true" data-email-compose-drawer tabindex="-1">
     <div class="email-compose-header">

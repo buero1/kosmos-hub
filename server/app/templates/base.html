@@ -3965,6 +3965,8 @@
           var globalMailboxDraftSession = 0;
           var globalMailboxDraftStartedAt = 0;
           var globalMailboxSubmitting = false;
+          var globalMailboxAutostartTemplateId = globalMailboxComposer.dataset.emailComposeAutostartTemplateId || "";
+          var globalMailboxAutostartCustomerId = globalMailboxComposer.dataset.emailComposeAutostartCustomerId || "";
 
           function globalMailboxStatusMessage(message) {
             if (globalMailboxStatus) globalMailboxStatus.textContent = message;
@@ -4683,6 +4685,25 @@
           document.addEventListener("keydown", function (event) {
             if (event.key === "Escape" && !globalMailboxComposer.hidden) globalMailboxClose();
           });
+          if (globalMailboxAutostartTemplateId) {
+            globalMailboxResetAction(false);
+            globalMailboxOpen({ dataset: { emailComposeCustomerId: globalMailboxAutostartCustomerId } });
+            globalMailboxLoadOptions()
+              .then(function () {
+                var completionTemplate = globalMailboxTemplates.find(function (template) {
+                  return String(template.id) === String(globalMailboxAutostartTemplateId);
+                });
+                if (!completionTemplate) {
+                  throw new Error("Die Abschlussvorlage ist nicht mehr im Hub verfügbar.");
+                }
+                globalMailboxTemplate.value = completionTemplate.id;
+                globalMailboxTemplateSearch.value = completionTemplate.name;
+                globalMailboxTemplate.dispatchEvent(new Event("change", { bubbles: true }));
+              })
+              .catch(function (error) {
+                globalMailboxStatusMessage(error.message || "Die Abschlussvorlage konnte nicht geladen werden.");
+              });
+          }
         }
 
         var customerActivityComposer = document.querySelector("[data-customer-activity-compose]");

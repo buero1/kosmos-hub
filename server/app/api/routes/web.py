@@ -63,6 +63,7 @@ from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, 
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, HubCaseError, HubCaseService
+from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -582,6 +583,7 @@ def case_detail_page(
     layout_message: str = "",
     email_link: str = "",
     email_link_message: str = "",
+    completion_email: bool = False,
 ):
     _require_hub_admin(request)
     service = HubCaseService(db=db, cipher=get_secret_cipher())
@@ -601,6 +603,12 @@ def case_detail_page(
             layout_message=layout_message,
             email_link=email_link,
             email_link_message=email_link_message,
+            completion_email_template_id=(
+                CASE_COMPLETION_EMAIL_TEMPLATE_ID
+                if completion_email and HubCaseService.is_completed_status(detail.status)
+                else ""
+            ),
+            completion_email_customer_id=detail.case.customer_id if completion_email else None,
         ),
     )
 
@@ -652,10 +660,19 @@ async def update_case_fields(
     raw_customer_id = str(form.get("customer_id") or "").strip()
     try:
         customer_id = int(raw_customer_id) if raw_customer_id else None
-        case = HubCaseService(db=db, cipher=get_secret_cipher()).update_case(
+        service = HubCaseService(db=db, cipher=get_secret_cipher())
+        existing_detail = service.get_detail(case_id=case_id)
+        if existing_detail is None:
+            raise HubCaseError("Der Fall wurde nicht gefunden.")
+        was_completed = HubCaseService.is_completed_status(existing_detail.status)
+        case = service.update_case(
             case_id=case_id,
             customer_id=customer_id,
             submitted_values=submitted_values,
+        )
+        was_completed_now = (
+            not was_completed
+            and HubCaseService.is_completed_status(submitted_values.get("case_field__status", ""))
         )
     except (ValueError, HubCaseError) as exc:
         db.rollback()
@@ -671,7 +688,13 @@ async def update_case_fields(
         detail=f"Updated Hub Case {case.id}; case data is not retained in the audit log.",
     )
     db.commit()
-    query = urlencode({"fields": "success", "fields_message": "Falldaten wurden im Hub gespeichert."})
+    query = {
+        "fields": "success",
+        "fields_message": "Falldaten wurden im Hub gespeichert.",
+    }
+    if was_completed_now:
+        query["completion_email"] = "true"
+    query = urlencode(query)
     return RedirectResponse(url=f"/cases/{case_id}?{query}", status_code=303)
 
 
@@ -5313,6 +5336,8 @@ def _case_detail_context(
     layout_message: str,
     email_link: str,
     email_link_message: str,
+    completion_email_template_id: str = "",
+    completion_email_customer_id: int | None = None,
 ) -> dict[str, object]:
     return {
         "detail": detail,
@@ -5323,6 +5348,8 @@ def _case_detail_context(
         "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "email_link_state": email_link if email_link in {"success", "error"} else "",
         "email_link_message": email_link_message[:500] if email_link in {"success", "error"} else "",
+        "completion_email_template_id": completion_email_template_id,
+        "completion_email_customer_id": completion_email_customer_id,
         "csrf_token": get_csrf_token(request),
     }
 

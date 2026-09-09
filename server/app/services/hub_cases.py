@@ -311,7 +311,7 @@ class HubCaseService:
             values["customer_name"] = existing_values["customer_name"]
         case.encrypted_fields_json = self._encrypt_values(values)
         self.db.flush()
-        if values.get("status") == "Abgeschlossen":
+        if self.is_completed_status(values.get("status", "")):
             HubWorkflowService(db=self.db).remove_case_open_reminder(case_id=case.id)
         return case
 
@@ -328,6 +328,10 @@ class HubCaseService:
     @staticmethod
     def case_number(case: HubCase) -> str:
         return case.case_number or f"FALL-{case.id:06d}"
+
+    @staticmethod
+    def is_completed_status(status: str) -> bool:
+        return status.strip().casefold() == "abgeschlossen"
 
     def _customer(self, customer_id: int | None) -> Customer | None:
         if customer_id is None:

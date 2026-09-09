@@ -16,12 +16,16 @@ from app.services.task_email_reminders import TaskEmailReminderService
 
 
 CASE_OPEN_REMINDER_WORKFLOW_KEY = "case-open-popup-reminder"
+# This Hub-managed template remains stable even if its display name changes later.
+CASE_COMPLETION_EMAIL_TEMPLATE_ID = "hub-template-d183cf19fa8b41a78d32892037fe8f39"
 _BERLIN = ZoneInfo("Europe/Berlin")
 _CASE_OPEN_REMINDER_DESCRIPTION = (
     "Bei jedem neu angelegten, noch offenen Fall erstellt der Hub automatisch eine Aufgabe "
     "mit Popup-Erinnerung. Die Aufgabe wird 20 Stunden nach dem Erstellungszeitpunkt des Falls "
     "fällig und heißt \"Ein offener Fall vom <Erstellungszeitpunkt>\". Wird der Fall abgeschlossen "
-    "oder gelöscht, entfernt der Hub die zugehörige Aufgabe einschließlich noch offener Popup-Erinnerungen."
+    "oder gelöscht, entfernt der Hub die zugehörige Aufgabe einschließlich noch offener Popup-Erinnerungen. "
+    "Beim ersten Speichern mit Status \"Abgeschlossen\" öffnet der Hub außerdem eine neue E-Mail mit "
+    "der fest hinterlegten Vorlage \"Nach Erledigung Änderungswunsch hub\"."
 )
 
 
@@ -36,12 +40,15 @@ class HubWorkflowService:
             select(HubWorkflow).where(HubWorkflow.workflow_key == CASE_OPEN_REMINDER_WORKFLOW_KEY)
         )
         if workflow is not None:
+            workflow.module_label = "Fälle · Neuer Fall, Abschluss"
+            workflow.description = _CASE_OPEN_REMINDER_DESCRIPTION
+            self.db.flush()
             return
         self.db.add(
             HubWorkflow(
                 workflow_key=CASE_OPEN_REMINDER_WORKFLOW_KEY,
                 title="Offenen Fall nachfassen",
-                module_label="Fälle · Neuer Fall",
+                module_label="Fälle · Neuer Fall, Abschluss",
                 description=_CASE_OPEN_REMINDER_DESCRIPTION,
             )
         )
