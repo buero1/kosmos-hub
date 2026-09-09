@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
@@ -8,12 +9,13 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerCallActivity, CustomerTaskActivity
-from app.models.customer_communication import CustomerZohoEmail
+from app.models.customer_communication import CustomerZohoEmail, CustomerZohoNote
 from app.models.customer_contact import CustomerContact
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
+from app.models.site import Site
 from app.services.hub_agent import HubAgentEmailContext, HubAgentError, HubAgentService
 
 
@@ -255,6 +257,131 @@ def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
             raise AssertionError("Completed Hub-Agent conversations must be immutable.")
 
 
+def test_hub_agent_builds_a_current_customer_dossier_for_the_chat_context():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(
+            name="Wissen-Kunde",
+            is_visible=True,
+            website_domain="wissen-kunde.example",
+            encrypted_profile_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "fields": {
+                            "Telefon": "089 123456",
+                            "Rechnungsadresse - Stadt": "München",
+                        }
+                    }
+                )
+            ),
+        )
+        db.add(customer)
+        db.flush()
+        db.add_all(
+            [
+                CustomerContact(
+                    customer_id=customer.id,
+                    encrypted_profile_json=cipher.encrypt(
+                        json.dumps(
+                            {
+                                "fields": {
+                                    "Name": "Max Mustermann",
+                                    "E-Mail": "max@wissen-kunde.example",
+                                    "Mobil": "0170 1234567",
+                                }
+                            }
+                        )
+                    ),
+                ),
+                Site(
+                    uuid="00000000-0000-0000-0000-000000000001",
+                    customer_id=customer.id,
+                    domain="wissen-kunde.example",
+                    home_url="https://wissen-kunde.example",
+                    site_url="https://wissen-kunde.example/wp-admin",
+                    status="verified",
+                ),
+                HubCase(
+                    customer_id=customer.id,
+                    case_number="FALL-000001",
+                    encrypted_fields_json=cipher.encrypt(
+                        json.dumps(
+                            {
+                                "status": "Neu",
+                                "case_reason": "Änderungswunsch",
+                                "case_origin": "E-Mail",
+                                "created_time": "2026-09-09T09:30",
+                                "description": "Startseite anpassen",
+                            }
+                        )
+                    ),
+                ),
+                CustomerTaskActivity(
+                    customer_id=customer.id,
+                    name="Änderungswunsch prüfen",
+                    status="planned",
+                    due_at=datetime(2026, 9, 10, 9, 0),
+                    reminder_channel="popup",
+                    reminder_minutes_before=15,
+                    description="Mit dem Kunden abstimmen",
+                ),
+                CustomerZohoNote(
+                    customer_id=customer.id,
+                    source="hub",
+                    encrypted_payload_json=cipher.encrypt(
+                        json.dumps({"title": "Telefonat", "content": "Der Kunde erwartet den Rückruf am Freitag."})
+                    ),
+                ),
+                CustomerZohoEmail(
+                    customer_id=customer.id,
+                    source="hub",
+                    direction="inbound",
+                    encrypted_payload_json=cipher.encrypt(
+                        json.dumps(
+                            {
+                                "subject": "Bitte um Änderung",
+                                "from": {"name": "Max Mustermann", "email": "max@wissen-kunde.example"},
+                                "to": [{"email": "info@kosmos-medien.de"}],
+                                "content": "<p>Bitte passen Sie die Startseite bis Freitag an.</p>",
+                            }
+                        )
+                    ),
+                    encrypted_header_json="",
+                ),
+            ]
+        )
+        db.flush()
+
+        service = HubAgentService(db=db, cipher=cipher)
+        conversation = service.start_conversation(actor="hub-admin")
+        service.add_context(
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+            resource_type="customer",
+            resource_key=str(customer.id),
+        )
+        active_conversation = service._conversation_for_actor(
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+            create_if_missing=False,
+        )
+        dossier = "\n".join(service._conversation_prompt_contexts(active_conversation, exclude_email_key=""))
+
+        assert "Telefon: 089 123456" in dossier
+        assert "München" in dossier
+        assert "Max Mustermann" in dossier
+        assert "max@wissen-kunde.example" in dossier
+        assert "wissen-kunde.example/wp-admin" in dossier
+        assert "FALL-000001" in dossier
+        assert "Änderungswunsch prüfen" in dossier
+        assert "Der Kunde erwartet den Rückruf am Freitag." in dossier
+        assert "Bitte um Änderung" in dossier
+        assert "Bitte passen Sie die Startseite bis Freitag an." in dossier
+
+
 def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
     capabilities = {capability.key: capability for capability in HubAgentService.capabilities()}
 
@@ -262,6 +389,7 @@ def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
     assert capabilities["create_task"].status == "available"
     assert capabilities["create_email_draft"].status == "available"
     assert capabilities["email_context"].status == "available"
+    assert capabilities["customer_dossier"].status == "available"
     assert capabilities["case_management"].status == "available"
     assert capabilities["customer_notes"].status == "available"
     assert capabilities["calendar_management"].status == "available"
