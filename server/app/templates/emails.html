@@ -41,9 +41,11 @@
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: flex; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
     .mailbox-reading-heading-copy { flex: 1 1 auto; min-width: 0; }
-    .mailbox-reading-subject-row { display: flex; align-items: start; justify-content: space-between; gap: 0.75rem; }
-    .mailbox-reading-heading h3 { min-width: 0; margin: 0; font-size: 1.25rem; }
-    .mailbox-reading-case-link { flex: 0 0 auto; white-space: nowrap; }
+    .mailbox-reading-subject-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; }
+    .mailbox-reading-heading h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 1.25rem; }
+    .mailbox-reading-case-link { justify-self: end; align-self: start; border-radius: 999px; white-space: nowrap; }
+    a.mailbox-reading-case-link.is-open, button.mailbox-reading-case-link.is-open { border-color: #d99191; background: #fde7e7; color: #9d2424; }
+    a.mailbox-reading-case-link.is-open:hover, button.mailbox-reading-case-link.is-open:hover { border-color: #bf5f5f; background: #fbd8d8; color: #7e1c1c; }
     .mailbox-reading-actions { display: flex; align-items: center; justify-content: end; gap: 0.35rem; }
     button.mailbox-reading-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; background: transparent; color: var(--accent); line-height: 1; }
     button.mailbox-reading-action:hover { background: var(--accent-soft); }
@@ -384,7 +386,7 @@
       function replaceMailboxCaseButton(button, payload) {
         if (!button || !payload || !payload.case_url) return;
         var link = document.createElement('a');
-        link.className = 'button button-secondary button-variant-2 mailbox-reading-case-link';
+        link.className = 'button button-secondary button-variant-2 mailbox-reading-case-link' + (payload.is_closed ? '' : ' is-open');
         link.href = payload.case_url;
         link.textContent = payload.label || 'Offener Fall';
         link.title = payload.case_number || '';
