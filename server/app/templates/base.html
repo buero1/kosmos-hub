@@ -1194,10 +1194,12 @@
         text-decoration: none;
       }
       .account-workflow-name::before {
-        content: "\\25B8";
-        color: var(--muted);
-        font-size: 0.85rem;
-        line-height: 1;
+        content: "";
+        width: 0;
+        height: 0;
+        border-top: 0.28rem solid transparent;
+        border-bottom: 0.28rem solid transparent;
+        border-left: 0.4rem solid var(--muted);
         transition: transform 150ms ease;
       }
       .account-workflow-name:hover,
