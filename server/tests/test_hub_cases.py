@@ -170,6 +170,19 @@ def test_case_delete_removes_its_workflow_task():
         assert db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id)) is None
 
 
+def test_open_case_without_customer_still_creates_a_popup_task():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        case = _service(db).create_case(customer_id=None, submitted_values=_submitted_values())
+
+        task = db.scalar(select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id))
+        assert task is not None
+        assert task.customer_id is None
+        assert task.reminder_channel == "popup"
+
+
 def test_hub_case_detail_uses_the_saved_global_field_layout():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

@@ -56,7 +56,7 @@ class CustomerTaskActivity(TimestampMixin, Base):
     __table_args__ = (Index("ix_customer_task_activities_customer_due_at", "customer_id", "due_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
     case_id: Mapped[int | None] = mapped_column(ForeignKey("hub_cases.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned")

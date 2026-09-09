@@ -68,7 +68,7 @@ class HubWorkflowService:
         workflow = self.db.scalar(
             select(HubWorkflow).where(HubWorkflow.workflow_key == CASE_OPEN_REMINDER_WORKFLOW_KEY)
         )
-        if workflow is None or not workflow.is_enabled or case.customer_id is None or case_status == "Abgeschlossen":
+        if workflow is None or not workflow.is_enabled or case_status == "Abgeschlossen":
             return None
         existing = self.db.scalar(
             select(CustomerTaskActivity).where(CustomerTaskActivity.case_id == case.id)

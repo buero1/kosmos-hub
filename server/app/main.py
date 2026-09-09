@@ -149,6 +149,7 @@ def _ensure_phase_one_schema() -> None:
 
     optional_activity_customer_tables = (
         "customer_call_activities",
+        "customer_task_activities",
         "customer_meeting_activities",
         "customer_activity_reminder_notifications",
     )
