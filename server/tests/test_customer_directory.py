@@ -62,6 +62,19 @@ def test_customer_detail_lists_only_cases_linked_to_the_customer():
                         json.dumps({"status": "Abgeschlossen", "case_origin": "Telefon"})
                     ),
                 ),
+                HubCase(
+                    customer=linked_customer,
+                    case_number="FALL-000003",
+                    encrypted_fields_json=cipher.encrypt(
+                        json.dumps(
+                            {
+                                "status": "Neu",
+                                "case_origin": "Webformular",
+                                "created_time": "2026-09-10T09:00",
+                            }
+                        )
+                    ),
+                ),
             ]
         )
         db.commit()
@@ -70,6 +83,7 @@ def test_customer_detail_lists_only_cases_linked_to_the_customer():
 
         assert detail is not None
         assert [(entry.case_number, entry.status, entry.case_origin, entry.created_time) for entry in detail.cases] == [
+            ("FALL-000003", "Neu", "Webformular", "10.09.2026 09:00"),
             ("FALL-000001", "Neu", "E-Mail", "09.09.2026 10:15")
         ]
 

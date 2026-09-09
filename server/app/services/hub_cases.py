@@ -68,7 +68,7 @@ class HubCaseService:
         self.cipher = cipher
 
     def list_cases(self) -> tuple[HubCaseListEntry, ...]:
-        cases = self.db.scalars(select(HubCase).order_by(HubCase.created_at.desc(), HubCase.id.desc())).all()
+        cases = self.db.scalars(select(HubCase)).all()
         return self._list_entries(cases)
 
     def list_cases_for_customer(self, *, customer_id: int) -> tuple[HubCaseListEntry, ...]:
@@ -76,14 +76,18 @@ class HubCaseService:
         cases = self.db.scalars(
             select(HubCase)
             .where(HubCase.customer_id == customer_id)
-            .order_by(HubCase.created_at.desc(), HubCase.id.desc())
         ).all()
         return self._list_entries(cases)
 
     def _list_entries(self, cases: list[HubCase]) -> tuple[HubCaseListEntry, ...]:
         entries: list[HubCaseListEntry] = []
-        for case in cases:
-            values = self._values(case)
+        cases_with_values = [(case, self._values(case)) for case in cases]
+        # The business creation time is encrypted with the case data, so order after decrypting it.
+        cases_with_values.sort(
+            key=lambda item: self._case_creation_sort_key(case=item[0], values=item[1]),
+            reverse=True,
+        )
+        for case, values in cases_with_values:
             entries.append(
                 HubCaseListEntry(
                     case=case,
@@ -95,6 +99,12 @@ class HubCaseService:
                 )
             )
         return tuple(entries)
+
+    @staticmethod
+    def _case_creation_sort_key(*, case: HubCase, values: dict[str, str]) -> tuple[bool, str, str, int]:
+        created_time = values.get("created_time", "")
+        imported_at = case.created_at.isoformat() if case.created_at is not None else ""
+        return (bool(created_time), created_time, imported_at, case.id)
 
     def list_linkable_customers(self) -> tuple[Customer, ...]:
         return tuple(
