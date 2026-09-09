@@ -6,6 +6,8 @@
       <p class="eyebrow">Hub-Agent</p>
       <nav class="account-section-nav" aria-label="Hub-Agent Bereiche">
         <a href="#agent-capabilities" aria-current="page">Fähigkeiten</a>
+        <a href="#agent-completed-chats">Abgeschlossene Chats</a>
+        <a href="#agent-deleted-chats">Gelöschte Chats</a>
       </nav>
     </aside>
     <section class="account-page-content">
@@ -42,6 +44,66 @@
             </tbody>
           </table>
         </div>
+      </section>
+      <section id="agent-completed-chats" class="agent-chat-archive account-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Unterhaltungen</p>
+            <h2>Abgeschlossene Chats</h2>
+            <p class="subtle">Abgeschlossene Unterhaltungen bleiben erhalten und sind im schwebenden Chat nicht mehr bearbeitbar.</p>
+          </div>
+        </div>
+        {% if completed_chats %}
+          <div class="agent-chat-archive-table-wrap">
+            <table class="agent-chat-archive-table">
+              <thead><tr><th>Unterhaltung</th><th>Kontexte</th><th>Abgeschlossen am</th></tr></thead>
+              <tbody>
+                {% for chat in completed_chats %}
+                  <tr>
+                    <td>{{ chat.title }}</td>
+                    <td>{{ chat.context_count }}</td>
+                    <td>{{ chat.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <section class="agent-empty-state agent-chat-archive-empty">
+            <h3>Noch keine abgeschlossenen Chats</h3>
+            <p class="subtle">Eine Unterhaltung erscheint hier, nachdem sie im Hub-Agenten abgeschlossen wurde.</p>
+          </section>
+        {% endif %}
+      </section>
+      <section id="agent-deleted-chats" class="agent-chat-archive account-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Papierkorb</p>
+            <h2>Gelöschte Chats</h2>
+            <p class="subtle">Gelöschte Unterhaltungen werden zunächst nur aus dem aktiven Chat-Verlauf entfernt und bleiben hier gespeichert.</p>
+          </div>
+        </div>
+        {% if deleted_chats %}
+          <div class="agent-chat-archive-table-wrap">
+            <table class="agent-chat-archive-table">
+              <thead><tr><th>Unterhaltung</th><th>Kontexte</th><th>Gelöscht am</th></tr></thead>
+              <tbody>
+                {% for chat in deleted_chats %}
+                  <tr>
+                    <td>{{ chat.title }}</td>
+                    <td>{{ chat.context_count }}</td>
+                    <td>{{ chat.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <section class="agent-empty-state agent-chat-archive-empty">
+            <h3>Keine gelöschten Chats</h3>
+            <p class="subtle">Das Löschen im Hub-Agenten verschiebt eine Unterhaltung zunächst hierher.</p>
+          </section>
+        {% endif %}
       </section>
     </section>
   </div>

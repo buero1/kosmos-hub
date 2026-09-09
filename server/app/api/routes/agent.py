@@ -26,7 +26,9 @@ def agent_page(
     db: Annotated[Session, Depends(get_db)],
 ):
     user = _current_user(request)
-    provider = AiProviderConfigService(db=db, cipher=get_secret_cipher()).get_openai_config()
+    cipher = get_secret_cipher()
+    provider = AiProviderConfigService(db=db, cipher=cipher).get_openai_config()
+    agent_service = HubAgentService(db=db, cipher=cipher)
     return templates.TemplateResponse(
         request,
         "agent.html",
@@ -34,6 +36,8 @@ def agent_page(
             "user": user,
             "provider_configured": provider is not None and provider.enabled,
             "capabilities": HubAgentService.capabilities(),
+            "completed_chats": agent_service.list_archived_conversations(actor=user.username, status="completed"),
+            "deleted_chats": agent_service.list_archived_conversations(actor=user.username, status="deleted"),
         },
     )
 
@@ -140,6 +144,34 @@ def close_agent_chat(
     service = HubAgentService(db=db, cipher=get_secret_cipher())
     try:
         chat = service.close_conversation(actor=user.username, conversation_id=conversation_id)
+        db.commit()
+    except HubAgentError as exc:
+        db.rollback()
+        return _chat_error(str(exc), status_code=400)
+    return JSONResponse(_chat_payload(request, chat))
+
+
+@router.post("/chat/{conversation_id}/delete")
+def delete_agent_chat(
+    conversation_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    require_csrf(request, csrf_token)
+    user = _current_user(request)
+    service = HubAgentService(db=db, cipher=get_secret_cipher())
+    try:
+        chat = service.delete_conversation(actor=user.username, conversation_id=conversation_id)
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="hub-agent",
+            action="agent-conversation-deleted",
+            result="success",
+            detail=f"Hub agent conversation {conversation_id} was moved to deleted chats.",
+        )
         db.commit()
     except HubAgentError as exc:
         db.rollback()

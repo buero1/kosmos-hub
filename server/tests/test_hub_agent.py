@@ -212,9 +212,13 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert "agent-capability-status-{{ capability.status }}" in template
     assert '@router.post("/chat/messages")' in route
     assert '@router.post("/chat/actions/{action_id}/execute")' in route
+    assert '@router.post("/chat/{conversation_id}/delete")' in route
     assert 'data-agent-float-open' in base_template
     assert 'data-agent-context-add' in base_template
+    assert 'data-agent-float-delete' in base_template
     assert '>Hub-Agent</a>' in base_template
+    assert 'href="#agent-completed-chats"' in template
+    assert 'href="#agent-deleted-chats"' in template
 
 
 def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
@@ -244,6 +248,10 @@ def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
 
         closed = service.close_conversation(actor="hub-admin", conversation_id=started.conversation_id)
         assert closed.status == "completed"
+        assert closed.conversations == ()
+        assert [chat.id for chat in service.list_archived_conversations(actor="hub-admin", status="completed")] == [
+            started.conversation_id
+        ]
         try:
             service.add_context(
                 actor="hub-admin",
@@ -255,6 +263,14 @@ def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
             assert "abgeschlossen" in str(exc)
         else:
             raise AssertionError("Completed Hub-Agent conversations must be immutable.")
+
+        active = service.start_conversation(actor="hub-admin")
+        after_delete = service.delete_conversation(actor="hub-admin", conversation_id=active.conversation_id)
+        assert after_delete.conversation_id != active.conversation_id
+        assert db.get(HubAgentConversation, active.conversation_id).status == "deleted"
+        assert [chat.id for chat in service.list_archived_conversations(actor="hub-admin", status="deleted")] == [
+            active.conversation_id
+        ]
 
 
 def test_hub_agent_builds_a_current_customer_dossier_for_the_chat_context():

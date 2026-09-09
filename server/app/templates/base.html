@@ -1714,6 +1714,24 @@
       .agent-capability-status-available { background: #d8efe1; color: #216841; }
       .agent-capability-status-planned { background: #e5e9f8; color: #385f9e; }
       .agent-capability-status-disabled { background: #f1e4e0; color: #8a493c; }
+      .agent-chat-archive {
+        display: grid;
+        gap: 0.8rem;
+        margin-top: 1.25rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 252, 246, 0.78);
+      }
+      .agent-chat-archive .section-heading { margin: 0; }
+      .agent-chat-archive .section-heading .subtle { margin: 0.25rem 0 0; }
+      .agent-chat-archive-table-wrap { overflow-x: auto; }
+      .agent-chat-archive-table { width: 100%; min-width: 34rem; border-collapse: collapse; }
+      .agent-chat-archive-table th,
+      .agent-chat-archive-table td { padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+      .agent-chat-archive-table th { color: var(--muted); font: 700 0.72rem "Trebuchet MS", sans-serif; letter-spacing: 0.07em; text-transform: uppercase; }
+      .agent-chat-archive-table td:first-child { font-weight: 700; }
+      .agent-chat-archive-empty { padding: 0.85rem; box-shadow: none; }
       @media (max-width: 700px) {
         .agent-instruction-actions,
         .agent-job-heading { align-items: stretch; flex-direction: column; }
@@ -4018,6 +4036,7 @@
         <div class="agent-float-header-actions">
           <button class="agent-float-icon-button" type="button" data-agent-float-new aria-label="Neue Unterhaltung" title="Neue Unterhaltung"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
           <button class="agent-float-icon-button" type="button" data-agent-float-complete aria-label="Unterhaltung abschließen" title="Unterhaltung abschließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.2 4.2L19 6.5"/></svg></button>
+          <button class="agent-float-icon-button" type="button" data-agent-float-delete aria-label="Unterhaltung löschen" title="Unterhaltung löschen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
           <button class="agent-float-icon-button" type="button" data-agent-float-close aria-label="Hub-Agent schließen" title="Schließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </div>
       </header>
@@ -6165,6 +6184,7 @@
 
           function formatStatus(status) {
             if (status === "completed") { return "Abgeschlossen"; }
+            if (status === "deleted") { return "Gelöscht"; }
             if (status === "needs_attention" || status === "failed") { return "Prüfung nötig"; }
             if (status === "proposed") { return "Bestätigung nötig"; }
             return "Aktiv";
@@ -6260,8 +6280,9 @@
             badge.hidden = proposedCount === 0;
             badge.textContent = proposedCount ? String(proposedCount) : "";
             panel.querySelector("[data-agent-float-complete]").disabled = conversation.status !== "active";
+            panel.querySelector("[data-agent-float-delete]").disabled = conversation.status !== "active";
             input.disabled = state.busy || conversation.status !== "active";
-            input.placeholder = conversation.status === "active" ? "Was soll der Hub-Agent vorbereiten?" : "Diese Unterhaltung ist abgeschlossen. Starte eine neue.";
+            input.placeholder = conversation.status === "active" ? "Was soll der Hub-Agent vorbereiten?" : "Diese Unterhaltung ist nicht mehr aktiv. Starte eine neue.";
             messages.scrollTop = messages.scrollHeight;
           }
 
@@ -6340,6 +6361,11 @@
           panel.querySelector("[data-agent-float-complete]").addEventListener("click", function () {
             if (!state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
             postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/close");
+          });
+          panel.querySelector("[data-agent-float-delete]").addEventListener("click", function () {
+            if (!state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
+            if (!window.confirm("Diese Unterhaltung wird in Gelöschte Chats verschoben.")) { return; }
+            postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/delete");
           });
 
           form.addEventListener("submit", function (event) {

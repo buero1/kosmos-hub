@@ -239,7 +239,10 @@ class HubAgentService:
         conversations = self.db.scalars(
             select(HubAgentConversation)
             .options(selectinload(HubAgentConversation.contexts))
-            .where(HubAgentConversation.created_by_username == actor)
+            .where(
+                HubAgentConversation.created_by_username == actor,
+                HubAgentConversation.status == "active",
+            )
             .order_by(HubAgentConversation.updated_at.desc(), HubAgentConversation.id.desc())
             .limit(20)
         ).all()
@@ -317,10 +320,54 @@ class HubAgentService:
     def close_conversation(self, *, actor: str, conversation_id: int) -> HubAgentChatView:
         conversation = self._conversation_for_actor(actor=actor, conversation_id=conversation_id, create_if_missing=False)
         assert conversation is not None
+        if conversation.status != "active":
+            raise HubAgentError("Diese Unterhaltung ist bereits abgeschlossen oder gelöscht.")
         conversation.status = "completed"
         self._touch_conversation(conversation)
         self.db.flush()
         return self.chat_view(actor=actor, conversation_id=conversation.id)
+
+    def delete_conversation(self, *, actor: str, conversation_id: int) -> HubAgentChatView:
+        """Move a conversation to the recoverable deleted-chat area."""
+        conversation = self._conversation_for_actor(actor=actor, conversation_id=conversation_id, create_if_missing=False)
+        assert conversation is not None
+        if conversation.status == "deleted":
+            raise HubAgentError("Diese Unterhaltung wurde bereits gelöscht.")
+        conversation.status = "deleted"
+        self._touch_conversation(conversation)
+        self.db.flush()
+        # A deleted chat must not remain the current floating conversation.
+        return self.chat_view(actor=actor)
+
+    def list_archived_conversations(
+        self,
+        *,
+        actor: str,
+        status: str,
+        limit: int = 100,
+    ) -> tuple[HubAgentConversationSummary, ...]:
+        if status not in {"completed", "deleted"}:
+            raise HubAgentError("Der angeforderte Chat-Bereich ist ungültig.")
+        conversations = self.db.scalars(
+            select(HubAgentConversation)
+            .options(selectinload(HubAgentConversation.contexts))
+            .where(
+                HubAgentConversation.created_by_username == actor,
+                HubAgentConversation.status == status,
+            )
+            .order_by(HubAgentConversation.updated_at.desc(), HubAgentConversation.id.desc())
+            .limit(limit)
+        ).all()
+        return tuple(
+            HubAgentConversationSummary(
+                id=conversation.id,
+                title=self._conversation_title(conversation),
+                status=conversation.status,
+                updated_at=conversation.updated_at,
+                context_count=len(conversation.contexts),
+            )
+            for conversation in conversations
+        )
 
     def chat(self, *, instruction: str, actor: str, conversation_id: int) -> HubAgentChatView:
         conversation = self._conversation_for_actor(actor=actor, conversation_id=conversation_id, create_if_missing=False)
