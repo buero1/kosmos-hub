@@ -771,7 +771,8 @@ class CustomerActivityService:
 
     def _customer_or_error(self, customer_id: int) -> Customer:
         customer = self.db.get(Customer, customer_id)
-        if customer is None or not customer.is_visible:
+        # Activities belong to an explicitly opened customer, including hidden Test-Kunden.
+        if customer is None:
             raise CustomerActivityError("Der Kunde wurde nicht gefunden.")
         return customer
 

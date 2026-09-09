@@ -89,6 +89,30 @@ def test_schedule_call_stores_berlin_time_as_utc_and_lists_it():
         assert [(reminder.channel, reminder.minutes_before) for reminder in call.reminders] == [("popup", 5), ("email", 15)]
 
 
+def test_test_customer_can_receive_customer_activities_when_hidden_from_standard_lists():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        test_customer = Customer(name="Test-Kunde", is_visible=False)
+        db.add(test_customer)
+        db.flush()
+
+        task = CustomerActivityService(db=db).schedule_task(
+            customer_id=test_customer.id,
+            actor="hub-admin",
+            name="Test-Aufgabe",
+            status="planned",
+            due_date="2026-09-10",
+            due_time="09:00",
+            reminder_channel="popup",
+            reminder_minutes_before="0",
+            description="",
+        )
+
+        assert task.customer_id == test_customer.id
+
+
 def test_calendar_calls_and_meetings_can_be_saved_without_a_customer():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
