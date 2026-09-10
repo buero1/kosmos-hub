@@ -48,10 +48,15 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert expected_prompt in main_composer
     assert expected_prompt in global_composer
     assert "Markierten Text überarbeiten ..." in main_composer
-    assert 'data-email-ai-accept>Akzeptieren' in main_composer
-    assert 'data-email-ai-reject>Verwerfen' in global_composer
+    assert 'data-email-ai-accept aria-label="Änderung akzeptieren" title="Änderung akzeptieren"' in main_composer
+    assert 'data-email-ai-reject aria-label="Änderung verwerfen" title="Änderung verwerfen"' in global_composer
+    assert 'class="email-editor-ai-prompt-action-icon"' in main_composer
+    assert 'class="email-editor-ai-prompt-action-icon"' in global_composer
     assert "data-email-ai-prompt-submit" in global_composer
     assert ".email-editor-ai-prompt {" in base_template
+    assert "position: fixed;" in base_template
+    assert "layer.appendChild(prompt)" in base_template
+    assert "actions.hidden = !pending;" in base_template
     assert "/emails/ai/rewrite" in base_template
     assert "data-email-ai-original" in base_template
     assert "is-email-ai-locked" in base_template

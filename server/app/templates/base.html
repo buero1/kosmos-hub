@@ -3196,9 +3196,9 @@
       .email-editor-ai-shell { position: relative; }
       .email-editor-ai-shell .email-rich-editor .jodit-container { padding-bottom: 5.2rem; }
       .email-editor-ai-prompt {
-        position: absolute;
-        z-index: 1;
-        right: 50%;
+        position: fixed;
+        z-index: 101;
+        right: max(22.5vw, 14rem);
         bottom: 1rem;
         display: grid;
         grid-template-columns: 1.1rem minmax(0, 1fr) auto 2rem;
@@ -3214,7 +3214,7 @@
         box-shadow: 0 12px 24px rgba(32, 50, 58, 0.14);
       }
       .email-editor-ai-prompt-icon { width: 1.05rem; height: 1.05rem; fill: color-mix(in srgb, var(--accent) 72%, #fffdfa); }
-      .email-compose-form .email-editor-ai-prompt input {
+      .email-editor-ai-prompt input {
         width: 100%;
         min-width: 0;
         min-height: 0;
@@ -3229,8 +3229,8 @@
         font: inherit;
         line-height: 1.35;
       }
-      .email-compose-form .email-editor-ai-prompt input:disabled { opacity: 1; cursor: not-allowed; }
-      .email-compose-form .email-editor-ai-prompt input:disabled::placeholder { color: color-mix(in srgb, var(--muted) 80%, #fffdfa); }
+      .email-editor-ai-prompt input:disabled { opacity: 1; cursor: not-allowed; }
+      .email-editor-ai-prompt input:disabled::placeholder { color: color-mix(in srgb, var(--muted) 80%, #fffdfa); }
       .email-editor-ai-prompt-submit {
         display: grid;
         width: 2rem;
@@ -3248,8 +3248,9 @@
       .email-editor-ai-prompt-submit:disabled { cursor: not-allowed; opacity: 1; }
       .email-editor-ai-prompt-submit svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
       .email-editor-ai-prompt-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
-      .email-editor-ai-prompt-action { min-height: 2rem; margin: 0; padding: 0.25rem 0.55rem; font-size: 0.75rem; white-space: nowrap; }
+      .email-editor-ai-prompt-action { display: grid; width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; place-items: center; margin: 0; padding: 0; }
       .email-editor-ai-prompt-accept { background: #dff3e5; border-color: #83b894; color: #1f6e47; }
+      .email-editor-ai-prompt-action-icon { width: 1.05rem; height: 1.05rem; }
       .email-editor-ai-prompt-feedback {
         position: absolute;
         right: 0;
@@ -3318,6 +3319,7 @@
         .communication-heading-actions { justify-content: flex-start; }
         .email-compose-drawer,
         .activity-compose-drawer { width: 100vw; }
+        .email-editor-ai-prompt { right: 50%; }
         .email-compose-recipient-fields { grid-template-columns: 1fr; }
         .activity-compose-two-columns,
         .activity-compose-datetime { grid-template-columns: 1fr; }
@@ -4086,6 +4088,8 @@
         var pendingByContent = new WeakMap();
         var busyByContent = new WeakMap();
         var lockByContent = new WeakMap();
+        var promptByContent = new WeakMap();
+        var shellByPrompt = new WeakMap();
         var editorApi = window.KosmosEmailEditors;
         var originalGetHTML = editorApi && editorApi.getHTML;
 
@@ -4101,6 +4105,10 @@
           } catch (_error) {
             return null;
           }
+        }
+
+        function promptShell(prompt) {
+          return shellByPrompt.get(prompt) || prompt.closest(".email-editor-ai-shell");
         }
 
         function isInsideBody(node, body) {
@@ -4274,9 +4282,9 @@
         }
 
         function requestRewrite(prompt) {
-          var shell = prompt.closest(".email-editor-ai-shell");
+          var shell = promptShell(prompt);
           var content = shell && shell.querySelector("[data-email-compose-content]");
-          var form = prompt.closest("form");
+          var form = content && content.closest("form");
           var controls = promptControls(prompt);
           if (!content || !controls.input || !controls.submit || busyByContent.has(content) || pendingByContent.has(content)) return;
           var instruction = controls.input.value.trim();
@@ -4334,10 +4342,14 @@
         }
 
         function installPrompt(prompt) {
-          var shell = prompt.closest(".email-editor-ai-shell");
+          var shell = promptShell(prompt);
           var content = shell && shell.querySelector("[data-email-compose-content]");
           var controls = promptControls(prompt);
           if (!content || !controls.input || !controls.submit) return;
+          shellByPrompt.set(prompt, shell);
+          promptByContent.set(content, prompt);
+          var layer = shell.closest("[data-email-compose-layer]");
+          if (layer && prompt.parentElement !== layer) layer.appendChild(prompt);
           bindSelectionTracking(content, 0);
           controls.submit.addEventListener("click", function () { requestRewrite(prompt); });
           controls.input.addEventListener("keydown", function (event) {
@@ -4369,7 +4381,7 @@
           var content = event.target.querySelector && event.target.querySelector("[data-email-compose-content]");
           if (!content || (!pendingByContent.has(content) && !busyByContent.has(content))) return;
           event.preventDefault();
-          var prompt = content.closest(".email-editor-ai-shell").querySelector("[data-email-ai-prompt]");
+          var prompt = promptByContent.get(content);
           if (prompt) setFeedback(prompt, "Bitte den KI-Vorschlag zuerst akzeptieren oder verwerfen.", true);
         }, true);
       })();
