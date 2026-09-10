@@ -3193,7 +3193,7 @@
         height: 264px !important;
         min-height: 264px !important;
         max-height: 264px !important;
-        overflow: hidden;
+        overflow-y: auto;
       }
       .email-compose-form .email-rich-editor .jodit-wysiwyg_iframe {
         height: 264px !important;
@@ -3240,10 +3240,10 @@
       .email-compose-form .email-editor-ai-prompt input:disabled::placeholder { color: color-mix(in srgb, var(--muted) 80%, #fffdfa); }
       .email-editor-ai-prompt-submit {
         display: grid;
-        width: 2rem;
-        min-width: 2rem;
-        height: 2rem;
-        min-height: 2rem;
+        width: var(--control-v1-height);
+        min-width: var(--control-v1-height);
+        height: var(--control-v1-height);
+        min-height: var(--control-v1-height);
         place-items: center;
         margin: 0;
         padding: 0;
@@ -3253,7 +3253,7 @@
         color: color-mix(in srgb, var(--accent) 58%, #fffdfa);
       }
       .email-editor-ai-prompt-submit:disabled { cursor: not-allowed; opacity: 1; }
-      .email-editor-ai-prompt-submit svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+      .email-editor-ai-prompt-submit svg { width: 1.65rem; height: 1.65rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
       .email-editor-ai-prompt-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
       .email-editor-ai-prompt button.email-editor-ai-prompt-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; line-height: 1; }
       .email-editor-ai-prompt-accept { background: #dff3e5; border-color: #83b894; color: #1f6e47; }
@@ -4102,6 +4102,28 @@
           return shell && shell.querySelector(".jodit-wysiwyg_iframe");
         }
 
+        function constrainComposerEditor(content) {
+          if (!content || !content.closest(".email-compose-form")) return;
+          var frame = editorFrame(content);
+          if (!frame) return;
+          frame.setAttribute("scrolling", "yes");
+          try {
+            var documentElement = frame.contentDocument && frame.contentDocument.documentElement;
+            var body = frame.contentDocument && frame.contentDocument.body;
+            if (documentElement) {
+              documentElement.style.height = "264px";
+              documentElement.style.overflowY = "auto";
+            }
+            if (body) {
+              body.style.height = "264px";
+              body.style.minHeight = "264px";
+              body.style.overflowY = "auto";
+            }
+          } catch (_error) {
+            // The iframe can still be loading; selection tracking will retry shortly.
+          }
+        }
+
         function editorBody(content) {
           var frame = editorFrame(content);
           try {
@@ -4229,6 +4251,7 @@
             if (attempt < 30) window.setTimeout(function () { bindSelectionTracking(content, attempt + 1); }, 100);
             return;
           }
+          constrainComposerEditor(content);
           if (body.dataset.emailAiSelectionTracking === "true") return;
           body.dataset.emailAiSelectionTracking = "true";
           var record = function () { captureSelection(content); };
