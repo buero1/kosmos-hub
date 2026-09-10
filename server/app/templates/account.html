@@ -313,8 +313,8 @@
         <p class="subtle">Lege Zugänge für weitere Personen an. Administratoren können den Hub vollständig verwalten; Mitarbeiter erhalten die aktuell eingeschränkten Rechte.</p>
       </div>
       <div class="table-scroll">
-        <table>
-          <thead><tr><th>Benutzername</th><th>Rolle</th><th>Status</th><th>Letzter Login</th><th>Erstellt</th></tr></thead>
+        <table class="account-users-table">
+          <thead><tr><th>Benutzername</th><th>Rolle</th><th>Status</th><th>Letzter Login</th><th>Erstellt</th><th></th></tr></thead>
           <tbody>
             {% for account_user in hub_users %}
               <tr>
@@ -323,6 +323,30 @@
                 <td><span class="pill">{% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}</span></td>
                 <td>{% if account_user.last_login_at %}{{ account_user.last_login_at | berlin_time }}{% else %}Noch nie{% endif %}</td>
                 <td>{{ account_user.created_at | berlin_time }}</td>
+                <td class="account-user-actions-cell">
+                  <details class="account-user-actions">
+                    <summary>Bearbeiten</summary>
+                    <form method="post" action="/account/users/{{ account_user.id }}" class="account-user-edit-form">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <label><span>Benutzername</span><input type="text" name="username" value="{{ account_user.username }}" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" required></label>
+                      <label>
+                        <span>Rolle</span>
+                        <select name="role">
+                          {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+                        </select>
+                      </label>
+                      <label><span>Neues Passwort <small>(optional)</small></span><input type="password" name="password" autocomplete="new-password" minlength="12"></label>
+                      <label><span>Passwort bestätigen</span><input type="password" name="password_confirmation" autocomplete="new-password" minlength="12"></label>
+                      <div class="account-user-action-buttons">
+                        <button class="button button-secondary" type="submit">Speichern</button>
+                      </div>
+                    </form>
+                    <form method="post" action="/account/users/{{ account_user.id }}/delete" onsubmit="return window.confirm('Benutzer {{ account_user.username }} wirklich löschen?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-danger" type="submit">Löschen</button>
+                    </form>
+                  </details>
+                </td>
               </tr>
             {% endfor %}
           </tbody>

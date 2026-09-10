@@ -32,6 +32,7 @@ from app.services.email_composer_settings import (
     EmailComposerSettingsService,
 )
 from app.services.email_attachment_storage import EmailAttachmentStorageError
+from app.services.email_compose_images import EmailComposeImageService
 from app.services.maintenance_worker import (
     schedule_pending_zoho_email_attachment_import,
     schedule_pending_zoho_email_content_import,
@@ -211,6 +212,91 @@ def create_hub_user(
     )
     db.commit()
     return RedirectResponse(url="/account?user=created#account-users", status_code=303)
+
+
+@router.post("/users/{user_id}")
+def update_hub_user(
+    request: Request,
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    username: Annotated[str, Form()] = "",
+    role: Annotated[str, Form()] = "viewer",
+    password: Annotated[str, Form()] = "",
+    password_confirmation: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    service = _account_service(db)
+    try:
+        user = service.update_user(
+            user_id=user_id,
+            username=username,
+            role=role,
+            password=password,
+            password_confirmation=password_confirmation,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, actor, service, error=str(exc), error_section="account-users"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=actor.username,
+        source="hub-account",
+        action="update-hub-user",
+        result="success",
+        detail=f"Updated Hub user {user.username} with role {user.role}.",
+    )
+    db.commit()
+    if user.id == actor.id:
+        request.session.clear()
+        request.session.update({"user_id": user.id, "session_version": user.session_version})
+    return RedirectResponse(url="/account?user=updated#account-users", status_code=303)
+
+
+@router.post("/users/{user_id}/delete")
+def delete_hub_user(
+    request: Request,
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    service = _account_service(db)
+    try:
+        deleted_username, image_storage_keys = service.delete_user(user_id=user_id)
+    except ValueError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, actor, service, error=str(exc), error_section="account-users"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=actor.username,
+        source="hub-account",
+        action="delete-hub-user",
+        result="success",
+        detail=f"Deleted Hub user {deleted_username}.",
+    )
+    db.commit()
+    image_service = EmailComposeImageService(db=db, cipher=get_secret_cipher())
+    for storage_key in image_storage_keys:
+        image_service.storage.remove(storage_key)
+    if user_id == actor.id:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+    return RedirectResponse(url="/account?user=deleted#account-users", status_code=303)
 
 
 @router.post("/task-reminder-email")

@@ -6,12 +6,21 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from email.utils import parseaddr
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.hub_access_token import HubAccessToken
 from app.models.hub_desktop_device import HubDesktopDevice
+from app.models.email_compose_image import EmailComposeImage
+from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
+from app.models.ai_provider_config import AiProviderConfig
+from app.models.fleet_refresh_settings import FleetRefreshSettings
+from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.module_layout import ModuleLayout
+from app.models.provider_credential import ProviderCredential
+from app.models.styling_settings import StylingSettings
+from app.models.zoho_connection import ZohoConnection
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
 
@@ -62,6 +71,77 @@ class HubAccountService:
         self.db.add(user)
         self.db.flush()
         return user
+
+    def update_user(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        role: str,
+        password: str = "",
+        password_confirmation: str = "",
+    ) -> HubUser:
+        user = self.get_user(user_id)
+        if user is None:
+            raise ValueError("Dieser Hub-Benutzer wurde nicht gefunden.")
+
+        normalized_username = self.normalize_username(username)
+        normalized_role = role.strip().casefold()
+        if normalized_role not in HUB_USER_ROLES:
+            raise ValueError("Bitte eine gültige Benutzerrolle auswählen.")
+        if self.db.scalar(
+            select(HubUser.id).where(HubUser.username == normalized_username).where(HubUser.id != user.id)
+        ) is not None:
+            raise ValueError("Dieser Benutzername ist bereits vergeben.")
+        if user.role == "admin" and normalized_role != "admin" and self._admin_count() <= 1:
+            raise ValueError("Der letzte Administrator kann nicht zur Mitarbeiterrolle geändert werden.")
+        if password or password_confirmation:
+            if password != password_confirmation:
+                raise ValueError("Die Passwortbestätigung stimmt nicht überein.")
+            self.validate_password(password)
+            user.password_hash = hash_password(password)
+            user.session_version += 1
+
+        user.username = normalized_username
+        user.role = normalized_role
+        self.db.flush()
+        return user
+
+    def delete_user(self, *, user_id: int) -> tuple[str, tuple[str, ...]]:
+        user = self.get_user(user_id)
+        if user is None:
+            raise ValueError("Dieser Hub-Benutzer wurde nicht gefunden.")
+        if user.role == "admin" and self._admin_count() <= 1:
+            raise ValueError("Der letzte Administrator kann nicht gelöscht werden.")
+
+        image_storage_keys = tuple(
+            self.db.scalars(select(EmailComposeImage.storage_key).where(EmailComposeImage.created_by_user_id == user.id))
+        )
+        self.db.execute(delete(HubAccessToken).where(HubAccessToken.user_id == user.id))
+        self.db.execute(delete(HubDesktopDevice).where(HubDesktopDevice.user_id == user.id))
+        self.db.execute(delete(CustomerActivityReminderNotification).where(CustomerActivityReminderNotification.user_id == user.id))
+        self.db.execute(delete(EmailComposeImage).where(EmailComposeImage.created_by_user_id == user.id))
+
+        # Shared settings remain available; only their former editor is cleared.
+        for model in (
+            AiProviderConfig,
+            FleetRefreshSettings,
+            HubMailboxAccount,
+            ModuleLayout,
+            ProviderCredential,
+            StylingSettings,
+            ZohoConnection,
+        ):
+            self.db.execute(
+                update(model)
+                .where(model.configured_by_user_id == user.id)
+                .values(configured_by_user_id=None)
+            )
+
+        username = user.username
+        self.db.delete(user)
+        self.db.flush()
+        return username, image_storage_keys
 
     def authenticate(self, username: str, password: str) -> HubUser | None:
         user = self.db.scalar(select(HubUser).where(HubUser.username == self.normalize_username(username)))
@@ -289,6 +369,9 @@ class HubAccountService:
 
     def _digest_token(self, token: str) -> str:
         return hmac.new(self._token_key, token.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _admin_count(self) -> int:
+        return sum(1 for role in self.db.scalars(select(HubUser.role)) if role == "admin")
 
 
 def hash_password(password: str) -> str:

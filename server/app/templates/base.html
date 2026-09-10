@@ -1191,6 +1191,34 @@
       }
       .account-workflow-description { margin-top: 0.15rem; }
       .account-workflow-description[hidden] { display: none; }
+      .account-users-table th:last-child,
+      .account-users-table td:last-child { text-align: right; }
+      .account-user-actions { position: relative; }
+      .account-user-actions summary {
+        color: var(--accent);
+        cursor: pointer;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .account-user-actions summary:hover,
+      .account-user-actions summary:focus-visible { color: #075f4e; text-decoration: none; }
+      .account-user-actions[open] {
+        position: absolute;
+        z-index: 4;
+        right: 0;
+        width: min(22rem, calc(100vw - 3rem));
+        padding: 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #fffdf8;
+        box-shadow: 0 12px 28px rgba(29, 42, 47, 0.16);
+        text-align: left;
+      }
+      .account-user-actions[open] summary { margin-bottom: 0.75rem; }
+      .account-user-edit-form { display: grid; gap: 0.65rem; }
+      .account-user-actions form { margin: 0; }
+      .account-user-action-buttons { display: flex; justify-content: flex-end; }
+      .account-user-actions > form:last-child { display: flex; justify-content: flex-end; margin-top: 0.65rem; }
       .account-panel label.checkbox-label {
         display: flex;
         align-items: center;
