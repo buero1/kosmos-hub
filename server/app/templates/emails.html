@@ -40,8 +40,10 @@
     .mailbox-message .pill { font-size: 0.7rem; }
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "subject subject" "meta actions"; gap: 0.5rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-    .mailbox-reading-subject-row { grid-area: subject; display: grid; grid-template-columns: minmax(0, 4fr) minmax(8rem, 1fr); align-items: start; gap: 0.75rem; width: 100%; }
+    .mailbox-reading-subject-row { grid-area: subject; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; width: 100%; }
     .mailbox-reading-heading h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 1.25rem; }
+    .mailbox-reading-subject-actions { display: flex; align-items: start; justify-content: end; gap: 0.35rem; }
+    .mailbox-reading-agent-action { margin: 0; white-space: nowrap; }
     .mailbox-reading-case-link { justify-self: end; align-self: start; margin: 0; border-radius: 999px; white-space: nowrap; }
     a.mailbox-reading-case-link.is-open, button.mailbox-reading-case-link.is-open { border-color: #d99191; background: #fde7e7; color: #9d2424; }
     a.mailbox-reading-case-link.is-open:hover, button.mailbox-reading-case-link.is-open:hover { border-color: #bf5f5f; background: #fbd8d8; color: #7e1c1c; }

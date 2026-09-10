@@ -100,6 +100,19 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert "ohne Tabellen oder ganze Absätze" not in base_template
 
 
+def test_mailbox_places_agent_action_directly_before_case_action_in_subject_row():
+    reading_pane = Path("app/templates/emails_reading_pane.html").read_text(encoding="utf-8")
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
+
+    subject_actions = reading_pane.index('class="mailbox-reading-subject-actions"')
+    agent_action = reading_pane.index("Mit Agent bearbeiten")
+    case_action = reading_pane.index("Fall anlegen")
+
+    assert subject_actions < agent_action < case_action
+    assert reading_pane.index('class="mailbox-reading-actions"') > case_action
+    assert ".mailbox-reading-subject-actions { display: flex;" in mailbox_template
+
+
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
