@@ -54,8 +54,11 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert 'class="email-editor-ai-prompt-action-icon"' in global_composer
     assert "data-email-ai-prompt-submit" in global_composer
     assert ".email-editor-ai-prompt {" in base_template
-    assert "position: fixed;" in base_template
-    assert "layer.appendChild(prompt)" in base_template
+    assert "position: absolute;" in base_template
+    assert "right: 50%;" in base_template
+    assert "width: var(--control-v1-height); min-width: var(--control-v1-height);" in base_template
+    assert ".email-editor-ai-prompt-action-icon { width: 1.65rem; height: 1.65rem; }" in base_template
+    assert "layer.appendChild(prompt)" not in base_template
     assert "actions.hidden = !pending;" in base_template
     assert "/emails/ai/rewrite" in base_template
     assert "data-email-ai-original" in base_template
