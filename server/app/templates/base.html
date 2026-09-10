@@ -3189,9 +3189,16 @@
         min-height: 18rem;
       }
       /* Jodit writes a smaller inline minimum to its iframe; keep 20 message lines visible. */
-      .email-compose-form .email-rich-editor .jodit-workplace,
-      .email-compose-form .email-rich-editor .jodit-wysiwyg_iframe {
+      .email-compose-form .email-rich-editor .jodit-workplace {
+        height: 264px !important;
         min-height: 264px !important;
+        max-height: 264px !important;
+        overflow: hidden;
+      }
+      .email-compose-form .email-rich-editor .jodit-wysiwyg_iframe {
+        height: 264px !important;
+        min-height: 264px !important;
+        max-height: 264px !important;
       }
       .email-editor-ai-shell { position: relative; }
       .email-editor-ai-shell .email-rich-editor .jodit-container { padding-bottom: 5.2rem; }
@@ -3248,9 +3255,9 @@
       .email-editor-ai-prompt-submit:disabled { cursor: not-allowed; opacity: 1; }
       .email-editor-ai-prompt-submit svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
       .email-editor-ai-prompt-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
-      .email-editor-ai-prompt-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; }
+      .email-editor-ai-prompt button.email-editor-ai-prompt-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; line-height: 1; }
       .email-editor-ai-prompt-accept { background: #dff3e5; border-color: #83b894; color: #1f6e47; }
-      .email-editor-ai-prompt-action-icon { width: 1.65rem; height: 1.65rem; }
+      .email-editor-ai-prompt-action-icon { display: block; width: 1.65rem; height: 1.65rem; }
       .email-editor-ai-prompt-feedback {
         position: absolute;
         right: 0;
