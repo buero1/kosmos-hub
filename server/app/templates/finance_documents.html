@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ module.label }} · Finance · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}<p class="notice-success">{{ module.singular }} wurde im Hub angelegt.</p>{% endif %}
+    {% if deleted %}<p class="notice-success">{{ module.singular }} wurde im Hub gelöscht.</p>{% endif %}
+    <div class="section-heading"><div><p class="eyebrow">Finance</p><h2>{{ module.label }}</h2></div><div class="communication-heading-actions"><a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a></div></div>
+    <article class="card customer-detail-panel"><div class="table-scroll"><table class="finance-directory-table"><thead><tr><th>{% if module.number_attribute %}{{ "Auftragsnummer" if module.key == "orders" else "Rechnungsnummer" }}{% else %}Bezeichnung{% endif %}</th><th>Status</th><th>Kunde</th><th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% else %}Nächstes Rechnungsdatum{% endif %}</th><th>Gesamt</th></tr></thead><tbody>{% for entry in entries %}<tr><td><a href="/finance/{{ module.key }}/{{ entry.document.id }}">{{ entry.identifier }}</a></td><td>{{ entry.status }}</td><td>{% if entry.document.customer %}<a href="/customers/{{ entry.document.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td><td>{{ entry.document_date }}</td><td>{{ entry.total_gross }}</td></tr>{% else %}<tr><td colspan="5">Noch keine {{ module.label|lower }} vorhanden.</td></tr>{% endfor %}</tbody></table></div></article>
+  </section>
+{% endblock %}

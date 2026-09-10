@@ -75,6 +75,7 @@ from app.services.hub_finance import (
     HubFinanceService,
 )
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
+from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES, HubFinanceDocumentError, HubFinanceDocumentService
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
@@ -1251,6 +1252,175 @@ async def delete_finance_offer(offer_id: int, request: Request, db: Annotated[Se
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action="delete-finance-offer", result="ok", detail=f"Deleted Finance Offer {offer.id}; no Zoho Books record was changed.")
     db.commit()
     return RedirectResponse(url="/finance/offers?deleted=true", status_code=303)
+
+
+@router.get("/finance/{module_key}", response_class=HTMLResponse)
+def finance_documents_page(
+    module_key: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: bool = False,
+    deleted: bool = False,
+):
+    _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    return templates.TemplateResponse(
+        request,
+        "finance_documents.html",
+        {
+            "module": module,
+            "entries": HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).list_documents(module=module),
+            "created": created,
+            "deleted": deleted,
+        },
+    )
+
+
+@router.get("/finance/{module_key}/new", response_class=HTMLResponse)
+def new_finance_document_page(module_key: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "finance_document_create.html", _finance_document_create_context(request, db, module=_finance_document_module(module_key)))
+
+
+@router.post("/finance/{module_key}")
+async def create_finance_document_page(module_key: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    submitted_values = _finance_submitted_values(form, prefix="document_")
+    customer_id = _optional_form_id(form.get("customer_id"))
+    contact_id = _optional_form_id(form.get("contact_id"))
+    link_id = _optional_form_id(form.get("linked_record_id"))
+    try:
+        document = HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).create_document(
+            module=module,
+            customer_id=customer_id,
+            contact_id=contact_id,
+            link_id=link_id,
+            submitted_values=submitted_values,
+        )
+    except (ValueError, HubFinanceDocumentError) as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "finance_document_create.html",
+            _finance_document_create_context(
+                request,
+                db,
+                module=module,
+                selected_customer_id=customer_id,
+                selected_contact_id=contact_id,
+                selected_link_id=link_id,
+                submitted_values=submitted_values,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"create-finance-{module.key}", result="ok", detail=f"Created Finance {module.singular} {document.id}; document data is not retained in the audit log.")
+    db.commit()
+    return RedirectResponse(url=f"/finance/{module.key}/{document.id}", status_code=303)
+
+
+@router.get("/finance/{module_key}/{document_id}", response_class=HTMLResponse)
+def finance_document_detail_page(
+    module_key: str,
+    document_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
+):
+    _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    detail = service.get_detail(module=module, document_id=document_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Finance document not found.")
+    return templates.TemplateResponse(
+        request,
+        "finance_document_detail.html",
+        _finance_document_detail_context(
+            request,
+            service=service,
+            module=module,
+            detail=detail,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
+    )
+
+
+@router.post("/finance/{module_key}/{document_id}/fields")
+async def update_finance_document_fields(module_key: str, document_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    try:
+        document = HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).update_document(
+            module=module,
+            document_id=document_id,
+            customer_id=_optional_form_id(form.get("customer_id")),
+            contact_id=_optional_form_id(form.get("contact_id")),
+            link_id=_optional_form_id(form.get("linked_record_id")),
+            submitted_values=_finance_submitted_values(form, prefix="document_"),
+        )
+    except (ValueError, HubFinanceDocumentError) as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"update-finance-{module.key}", result="ok", detail=f"Updated Finance {module.singular} {document.id}; document data is not retained in the audit log.")
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Die Daten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}#finance-document-fields", status_code=303)
+
+
+@router.post("/finance/{module_key}/{document_id}/layout")
+async def update_finance_document_layout(module_key: str, document_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    if service.get_detail(module=module, document_id=document_id) is None:
+        raise HTTPException(status_code=404, detail="Finance document not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=module.layout_key,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in module.fields),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}#finance-document-fields", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"update-finance-{module.key}-layout", result="ok", detail=f"Updated the global Finance {module.singular} field layout.")
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": f"Das Feld-Layout für {module.singular.lower()} wurde gespeichert."})
+    return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}#finance-document-fields", status_code=303)
+
+
+@router.post("/finance/{module_key}/{document_id}/delete")
+async def delete_finance_document(module_key: str, document_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    module = _finance_document_module(module_key)
+    try:
+        document = HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).delete_document(module=module, document_id=document_id)
+    except HubFinanceDocumentError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"delete-finance-{module.key}", result="ok", detail=f"Deleted Finance {module.singular} {document.id}; no Zoho Books record was changed.")
+    db.commit()
+    return RedirectResponse(url=f"/finance/{module.key}?deleted=true", status_code=303)
 
 
 @router.get("/calendar", response_class=HTMLResponse)
@@ -6036,6 +6206,108 @@ def _finance_offer_line_form_rows(values: dict[str, str]) -> list[dict[str, str]
     for key, value in values.items():
         parts = key.split("__")
         if len(parts) != 3 or parts[0] != "offer_line" or not parts[1].isdigit():
+            continue
+        rows.setdefault(int(parts[1]), {})[parts[2]] = str(value)
+    defaults = {
+        "article_id": "",
+        "name": "",
+        "sku": "",
+        "description": "",
+        "quantity": "1",
+        "unit": "",
+        "unit_price": "",
+        "discount_percent": "0",
+        "tax_rate": "19",
+    }
+    return [{**defaults, **rows[index]} for index in sorted(rows)] or [defaults]
+
+
+def _finance_document_module(module_key: str):
+    module = FINANCE_DOCUMENT_MODULES.get(module_key)
+    if module is None:
+        raise HTTPException(status_code=404, detail="Finance module not found.")
+    return module
+
+
+def _finance_document_create_context(
+    request: Request,
+    db: Session,
+    *,
+    module: object,
+    selected_customer_id: int | None = None,
+    selected_contact_id: int | None = None,
+    selected_link_id: int | None = None,
+    submitted_values: dict[str, str] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    values = service.new_form_values(module=module)
+    values.update(submitted_values or {})
+    return {
+        "module": module,
+        "fields": module.fields,
+        "articles": service.article_options(),
+        "customers": service.list_linkable_customers(),
+        "contacts": service.list_linkable_contacts(),
+        "link_options": service.link_options(module=module),
+        "selected_customer_id": selected_customer_id,
+        "selected_contact_id": selected_contact_id,
+        "selected_link_id": selected_link_id,
+        "submitted_values": values,
+        "line_rows": _finance_document_line_form_rows(values),
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_document_detail_context(
+    request: Request,
+    *,
+    service: HubFinanceDocumentService,
+    module: object,
+    detail: object,
+    fields: str,
+    fields_message: str,
+    layout: str,
+    layout_message: str,
+) -> dict[str, object]:
+    line_rows = [
+        {
+            "article_id": str(line.article_id or ""),
+            "name": line.name,
+            "sku": line.sku,
+            "description": line.description,
+            "quantity": line.quantity,
+            "unit": line.unit,
+            "unit_price": line.unit_price,
+            "discount_percent": line.discount_percent,
+            "tax_rate": line.tax_rate,
+        }
+        for line in detail.lines
+    ] or _finance_document_line_form_rows(service.new_form_values(module=module))
+    selected_link_id = getattr(detail.document, f"{module.link_attribute}_id", None) if module.link_attribute else None
+    return {
+        "module": module,
+        "detail": detail,
+        "articles": service.article_options(),
+        "customers": service.list_linkable_customers(),
+        "contacts": service.list_linkable_contacts(),
+        "link_options": service.link_options(module=module),
+        "selected_link_id": selected_link_id,
+        "line_rows": line_rows,
+        "fields_state": fields if fields in {"success", "error"} else "",
+        "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+        "layout_state": layout if layout in {"success", "error"} else "",
+        "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_document_line_form_rows(values: dict[str, str]) -> list[dict[str, str]]:
+    rows: dict[int, dict[str, str]] = {}
+    for key, value in values.items():
+        parts = key.split("__")
+        if len(parts) != 3 or parts[0] != "document_line" or not parts[1].isdigit():
             continue
         rows.setdefault(int(parts[1]), {})[parts[2]] = str(value)
     defaults = {

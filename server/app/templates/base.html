@@ -2245,6 +2245,7 @@
       .finance-position-details > strong,
       .finance-position-details > small,
       .finance-position-details > p { margin: 0; }
+      .finance-address-snapshot { margin: 0; white-space: pre-line; }
       .finance-position-details small,
       .finance-positions-table td > small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.78rem; }
       .finance-positions-table input,
@@ -4245,9 +4246,9 @@
             <div class="app-navigation-group-links">
               <a href="/finance/articles"{% if request.url.path.startswith("/finance/articles") %} class="is-active"{% endif %}>Artikel</a>
               <a href="/finance/offers"{% if request.url.path.startswith("/finance/offers") %} class="is-active"{% endif %}>Angebote</a>
-              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Aufträge</span>
-              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Rechnungen</span>
-              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Periodische Rechnungen</span>
+              <a href="/finance/orders"{% if request.url.path.startswith("/finance/orders") %} class="is-active"{% endif %}>Aufträge</a>
+              <a href="/finance/invoices"{% if request.url.path.startswith("/finance/invoices") %} class="is-active"{% endif %}>Rechnungen</a>
+              <a href="/finance/recurring-invoices"{% if request.url.path.startswith("/finance/recurring-invoices") %} class="is-active"{% endif %}>Periodische Rechnungen</a>
             </div>
           </details>
           <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>

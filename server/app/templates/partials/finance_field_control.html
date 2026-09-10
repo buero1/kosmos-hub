@@ -1,4 +1,4 @@
-{% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article") %}
+{% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article", link_options=(), selected_link_id=None) %}
   <label class="customer-field-control">
     <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
     {% if field.read_only %}
@@ -13,6 +13,11 @@
         <option value="">Keinen Ansprechpartner verknüpfen</option>
         {% for contact in contacts %}<option value="{{ contact.id }}" data-customer-id="{{ contact.customer_id }}"{% if contact.id == selected_contact_id %} selected{% endif %}>{{ contact.name }} · {{ contact.customer_name }}</option>{% endfor %}
       </select>
+    {% elif field.key in ("linked_offer", "linked_order") %}
+      <select name="linked_record_id" data-finance-linked-record>
+        <option value="">Keinen Beleg verknüpfen</option>
+        {% for record in link_options %}<option value="{{ record.id }}" data-customer-id="{{ record.customer_id or '' }}"{% if record.id == selected_link_id %} selected{% endif %}>{{ record.label }}</option>{% endfor %}
+      </select>
     {% elif field.display_type == "Auswahlliste" %}
       <select name="{% if field.key in ('customer', 'contact') %}{{ field.key }}_id{% else %}{{ field_prefix }}_field__{{ field.key }}{% endif %}"{% if field.required %} required{% endif %}>
         <option value="">Auswählen</option>
@@ -24,6 +29,8 @@
       <input type="date" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
     {% elif field.display_type == "Mehrzeilen" %}
       <textarea name="{{ field_prefix }}_field__{{ field.key }}" rows="5">{{ value }}</textarea>
+    {% elif field.display_type == "Boolesch" %}
+      <label class="lead-boolean-control"><input type="checkbox" name="{{ field_prefix }}_field__{{ field.key }}" value="true"{% if value in (true, "true", "True", "1") %} checked{% endif %}> Ja</label>
     {% else %}
       <input type="text" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
     {% endif %}

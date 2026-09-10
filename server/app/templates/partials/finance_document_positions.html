@@ -1,0 +1,78 @@
+<article class="card customer-detail-panel finance-positions-panel" data-finance-document-position-editor>
+  <div class="customer-detail-panel-heading"><div><p class="eyebrow">Repeater</p><h3>Positionen</h3><p class="subtle">Artikel, Menge, Tarif, USt. und Betrag werden zeilenweise geführt.</p></div></div>
+  <div class="table-scroll">
+    <table class="finance-positions-table">
+      <thead><tr><th>Artikeldetails</th><th>Menge</th><th>Tarif</th><th>USt.</th><th>Betrag netto</th><th class="finance-position-action-heading"><span class="visually-hidden">Aktion</span></th></tr></thead>
+      <tbody data-finance-document-position-rows>
+        {% for row in line_rows %}
+          <tr data-finance-document-position-row>
+            <td class="finance-position-details">
+              <select name="document_line__{{ loop.index0 }}__article_id" data-finance-document-line-article><option value="">Freitextposition</option>{% for article in articles %}<option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"{% if row.article_id|string == article.article.id|string %} selected{% endif %}>{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>{% endfor %}</select>
+              <input type="text" name="document_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Bezeichnung" data-finance-document-line-field="name">
+              <input type="text" name="document_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" placeholder="Artikelnummer / SKU" data-finance-document-line-field="sku">
+              <textarea name="document_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description">{{ row.description }}</textarea>
+            </td>
+            <td><input type="number" name="document_line__{{ loop.index0 }}__quantity" value="{{ row.quantity }}" min="0.001" step="0.001" inputmode="decimal" data-finance-document-line-field="quantity"><input type="text" name="document_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-document-line-field="unit"></td>
+            <td><input type="number" name="document_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price }}" min="0" step="0.01" inputmode="decimal" data-finance-document-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="document_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent }}" min="0" max="100" step="0.01" inputmode="decimal" data-finance-document-line-field="discount_percent"></label></td>
+            <td><select name="document_line__{{ loop.index0 }}__tax_rate" data-finance-document-line-field="tax_rate"><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
+            <td class="finance-position-amount" data-finance-document-line-amount>0,00 EUR</td><td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-document-position-remove>&times;</button></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="finance-positions-footer"><button class="button button-secondary button-variant-2" type="button" data-finance-document-position-add>Neue Position hinzufügen</button><dl class="finance-totals" data-finance-document-totals><div><dt>Zwischensumme</dt><dd data-finance-document-total="subtotal">0,00 EUR</dd></div><div><dt>Rabatt</dt><dd data-finance-document-total="discount">0,00 EUR</dd></div><div><dt>USt.</dt><dd data-finance-document-total="tax">0,00 EUR</dd></div><div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-document-total="total">0,00 EUR</dd></div></dl></div>
+  <template data-finance-document-position-template>
+    <tr data-finance-document-position-row>
+      <td class="finance-position-details"><select name="document_line__INDEX__article_id" data-finance-document-line-article><option value="">Freitextposition</option>{% for article in articles %}<option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}">{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>{% endfor %}</select><input type="text" name="document_line__INDEX__name" placeholder="Bezeichnung" data-finance-document-line-field="name"><input type="text" name="document_line__INDEX__sku" placeholder="Artikelnummer / SKU" data-finance-document-line-field="sku"><textarea name="document_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description"></textarea></td>
+      <td><input type="number" name="document_line__INDEX__quantity" value="1" min="0.001" step="0.001" inputmode="decimal" data-finance-document-line-field="quantity"><input type="text" name="document_line__INDEX__unit" placeholder="Einheit" data-finance-document-line-field="unit"></td>
+      <td><input type="number" name="document_line__INDEX__unit_price" min="0" step="0.01" inputmode="decimal" data-finance-document-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="document_line__INDEX__discount_percent" value="0" min="0" max="100" step="0.01" inputmode="decimal" data-finance-document-line-field="discount_percent"></label></td>
+      <td><select name="document_line__INDEX__tax_rate" data-finance-document-line-field="tax_rate"><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td><td class="finance-position-amount" data-finance-document-line-amount>0,00 EUR</td><td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-document-position-remove>&times;</button></td>
+    </tr>
+  </template>
+</article>
+<script>
+  (function () {
+    function number(value) { return Number(String(value || '').replace(',', '.')) || 0; }
+    function money(value, currency) { return new Intl.NumberFormat('de-DE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(value); }
+    document.querySelectorAll('[data-finance-document-position-editor]').forEach(function (editor) {
+      var form = editor.closest('form');
+      var rows = editor.querySelector('[data-finance-document-position-rows]');
+      var template = editor.querySelector('[data-finance-document-position-template]');
+      var currency = function () { var field = form.querySelector('select[name="document_field__currency"]'); return field && field.value ? field.value : 'EUR'; };
+      function update() {
+        var sums = { subtotal: 0, net: 0, tax: 0 };
+        rows.querySelectorAll('[data-finance-document-position-row]').forEach(function (row) {
+          var quantity = number(row.querySelector('[data-finance-document-line-field="quantity"]').value);
+          var price = number(row.querySelector('[data-finance-document-line-field="unit_price"]').value);
+          var discount = Math.min(100, Math.max(0, number(row.querySelector('[data-finance-document-line-field="discount_percent"]').value)));
+          var net = quantity * price * (1 - discount / 100);
+          var tax = net * number(row.querySelector('[data-finance-document-line-field="tax_rate"]').value) / 100;
+          sums.subtotal += quantity * price; sums.net += net; sums.tax += tax;
+          row.querySelector('[data-finance-document-line-amount]').textContent = money(net, currency());
+        });
+        editor.querySelector('[data-finance-document-total="subtotal"]').textContent = money(sums.subtotal, currency());
+        editor.querySelector('[data-finance-document-total="discount"]').textContent = money(sums.subtotal - sums.net, currency());
+        editor.querySelector('[data-finance-document-total="tax"]').textContent = money(sums.tax, currency());
+        editor.querySelector('[data-finance-document-total="total"]').textContent = money(sums.net + sums.tax, currency());
+      }
+      function bind(row) {
+        row.addEventListener('input', update);
+        row.addEventListener('change', function (event) {
+          if (event.target.matches('[data-finance-document-line-article]')) {
+            var option = event.target.options[event.target.selectedIndex];
+            [['name', 'name'], ['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price']].forEach(function (pair) { var field = row.querySelector('[data-finance-document-line-field="' + pair[0] + '"]'); if (field && option.dataset[pair[1]]) { field.value = option.dataset[pair[1]]; } });
+            var tax = row.querySelector('[data-finance-document-line-field="tax_rate"]'); if (tax && option.dataset.tax) { tax.value = option.dataset.tax; }
+          }
+          update();
+        });
+        row.querySelector('[data-finance-document-position-remove]').addEventListener('click', function () { row.remove(); update(); });
+      }
+      rows.querySelectorAll('[data-finance-document-position-row]').forEach(bind);
+      var nextIndex = rows.querySelectorAll('[data-finance-document-position-row]').length;
+      editor.querySelector('[data-finance-document-position-add]').addEventListener('click', function () { var fragment = template.content.cloneNode(true); fragment.querySelectorAll('[name]').forEach(function (field) { field.name = field.name.replace(/INDEX/g, String(nextIndex)); }); var row = fragment.querySelector('[data-finance-document-position-row]'); rows.appendChild(fragment); bind(row); nextIndex += 1; update(); });
+      var currencyField = form.querySelector('select[name="document_field__currency"]'); if (currencyField) { currencyField.addEventListener('change', update); }
+      update();
+    });
+  }());
+</script>
