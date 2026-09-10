@@ -32,6 +32,7 @@ ZOHO_CONTACT_MODULE = "Contacts"
 ZOHO_CASE_MODULE = "Cases"
 ZOHO_LEAD_MODULE = "Leads"
 _ZOHO_EMAIL_HISTORY_MODULES = frozenset({ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZOHO_LEAD_MODULE})
+_ZOHO_NOTE_MODULES = frozenset({ZOHO_ACCOUNT_MODULE, ZOHO_LEAD_MODULE})
 # Request the complete CRM API scope once. Individual Hub workflows still decide
 # whether a connected capability may create, change, or delete CRM data.
 _ZOHO_CRM_SCOPE_VALUES = (
@@ -398,12 +399,18 @@ class ZohoCrmService:
 
     def list_account_notes(self, account_id: str) -> list[dict[str, object]]:
         """Return the Zoho notes attached to one Account, newest data included."""
+        return self.list_record_notes(ZOHO_ACCOUNT_MODULE, account_id)
+
+    def list_record_notes(self, module: str, record_id: str) -> list[dict[str, object]]:
+        """Return the Zoho notes attached to an Account or Lead, newest data included."""
+        if module not in _ZOHO_NOTE_MODULES:
+            raise ZohoCrmError("Zoho notes are only supported for Accounts and Leads.")
         connection = self._require_communication_connection()
         records: list[dict[str, object]] = []
         for page in range(1, _MAX_PAGE_REQUESTS + 1):
             response = self._api_get(
                 connection,
-                f"/crm/v8/{ZOHO_ACCOUNT_MODULE}/{account_id}/Notes",
+                f"/crm/v8/{module}/{record_id}/Notes",
                 {
                     "fields": "id,Note_Title,Note_Content,Created_Time,Modified_Time,Created_By,Modified_By",
                     "per_page": "200",

@@ -27,6 +27,7 @@ from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_case import HubCase
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_email import HubLeadEmail
+from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
@@ -138,6 +139,10 @@ def _ensure_phase_one_schema() -> None:
     if "hub_lead_emails" not in table_names:
         HubLeadEmail.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_lead_emails table.")
+
+    if "hub_lead_notes" not in table_names:
+        HubLeadNote.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_lead_notes table.")
 
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)

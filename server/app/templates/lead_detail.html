@@ -58,6 +58,23 @@
                   </div>
                 </article>
               {% endfor %}
+              <article id="lead-notes" class="card customer-detail-panel lead-subform-panel">
+                <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Notizen</h3><p class="subtle">Notizen der vergangenen zwölf Monate.</p></div></div>
+                <div class="customer-section-expandable" data-expandable-section>
+                  <div data-expandable-content>
+                    {% for note in lead_notes %}
+                      <article class="communication-entry">
+                        <div class="communication-entry-heading"><strong>{{ note.title }}</strong></div>
+                        {% if note.author or note.occurred_at %}<p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>{% endif %}
+                        <p class="communication-note-content">{{ note.content }}</p>
+                      </article>
+                    {% else %}
+                      <p class="subtle">Keine verknüpften Notizen aus den vergangenen zwölf Monaten vorhanden.</p>
+                    {% endfor %}
+                  </div>
+                  <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+                </div>
+              </article>
               <article id="lead-emails" class="card customer-detail-panel lead-subform-panel">
                 <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Verknüpfte E-Mails</h3><p class="subtle">E-Mail-Kopf und Inhalt der vergangenen zwölf Monate.</p></div></div>
                 <div class="customer-section-expandable" data-expandable-section>

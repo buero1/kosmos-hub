@@ -67,6 +67,7 @@ from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, H
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
 from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadError, HubLeadService
 from app.services.hub_lead_emails import HubLeadEmailService
+from app.services.hub_lead_notes import HubLeadNoteService
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
@@ -445,6 +446,7 @@ def lead_detail_page(
             "layout_state": layout if layout in {"success", "error"} else "",
             "layout_message": layout_message[:500],
             "lead_emails": HubLeadEmailService(db=db, cipher=get_secret_cipher()).list_email_views(lead_id=lead_id),
+            "lead_notes": HubLeadNoteService(db=db, cipher=get_secret_cipher()).list_note_views(lead_id=lead_id),
             "csrf_token": get_csrf_token(request),
         },
     )

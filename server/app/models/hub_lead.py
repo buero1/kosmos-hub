@@ -18,3 +18,4 @@ class HubLead(TimestampMixin, Base):
     zoho_imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     zoho_emails = relationship("HubLeadEmail", back_populates="lead", cascade="all, delete-orphan")
+    zoho_notes = relationship("HubLeadNote", back_populates="lead", cascade="all, delete-orphan")

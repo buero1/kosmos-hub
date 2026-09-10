@@ -17,6 +17,7 @@ from app.models.hub_user import HubUser
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_lead import HubLead
+from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
@@ -73,6 +74,7 @@ __all__ = [
     "HubCase",
     "HubCaseEmailLink",
     "HubLead",
+    "HubLeadNote",
     "HubWorkflow",
     "HubDesktopDevice",
     "HubMailboxAccount",
