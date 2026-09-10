@@ -15,6 +15,7 @@
         <a href="#account-openai">OpenAI</a>
         <a href="#account-provider-licenses">Provider licenses</a>
         <a href="#account-zoho">Zoho CRM</a>
+        <a href="#account-zoho-books">Zoho Books</a>
         {% if user.role == "admin" %}<a href="#account-refresh-settings">Refresh settings</a>{% endif %}
         <a href="#account-session">Session</a>
       </nav>
@@ -119,6 +120,24 @@
     {% endif %}
     {% if request.query_params.get("zoho") in ["connect-failed", "mapping-failed", "sync-failed", "email-templates-failed", "not-approved"] %}
       <p class="notice-error" data-account-notice-section="account-zoho">{{ zoho_status.last_error or "The Zoho action could not be completed." }}</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "connected" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Zoho Books ist verbunden. Die ausgewählte Organisation kann künftig lesend in den Hub importiert werden.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "organization-selection-required" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Zoho Books ist verbunden. Wähle noch die Organisation aus, die der Hub verwenden soll.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "organization-selected" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Organisation wurde ausgewählt.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "organizations-refreshed" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Die verfügbaren Zoho-Books-Organisationen wurden aktualisiert.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "removed" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Verbindung wurde entfernt. Zoho CRM bleibt unverändert verbunden.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") in ["connect-failed", "not-approved", "refresh-failed"] %}
+      <p class="notice-error" data-account-notice-section="account-zoho-books">{{ zoho_books_status.last_error or "Die Zoho-Books-Aktion konnte nicht ausgeführt werden." }}</p>
     {% endif %}
     {% if error %}<p class="notice-error" data-account-notice-section="{{ error_section }}">{{ error }}</p>{% endif %}
     <form id="account-security" class="account-panel account-section" data-account-section method="post" action="/account/password">
@@ -304,6 +323,80 @@
           <textarea readonly>{{ workflow.description }}</textarea>
         </label>
       {% endfor %}
+    </section>
+    <section id="account-zoho-books" class="account-panel account-panel-wide account-section" data-account-section>
+      <div class="zoho-heading-copy">
+        <p class="eyebrow">Buchhaltungsintegration</p>
+        <h3>Zoho Books</h3>
+        <p class="subtle">Die Verbindung ist getrennt von Zoho CRM. Sie verwendet einen eigenen, verschlüsselt gespeicherten Books-Refresh-Token und erhält ausschließlich Lesezugriff auf Einstellungen und Felder, Artikel, Kontakte, Angebote, Rechnungen, Gutschriften, Zahlungen und Aufträge.</p>
+        {% if zoho_books_status.last_error %}<p class="notice-error">Letzte Zoho-Books-Aktion: {{ zoho_books_status.last_error }}</p>{% endif %}
+      </div>
+      <details class="account-details zoho-area" {% if not zoho_books_status.connected or zoho_books_status.requires_organization_selection %}open{% endif %}>
+        <summary>Verbindung</summary>
+        <div class="zoho-area-content">
+          {% if zoho_books_status.crm_client_available or zoho_books_status.configured %}
+            <div class="zoho-connection-status">
+              <p class="subtle">Rechenzentrum: <strong>{{ zoho_books_status.data_center.label }}</strong>. {% if zoho_books_status.connected %}Verbunden seit {{ zoho_books_status.connected_at | berlin_time }}.{% else %}Noch nicht verbunden.{% endif %}</p>
+              {% if user.role == "admin" and zoho_books_status.crm_client_available %}<a class="button button-variant-1 zoho-reconnect-action" href="/account/zoho-books/connect">{% if zoho_books_status.connected %}Zoho Books erneut verbinden{% else %}Zoho Books verbinden{% endif %}</a>{% endif %}
+            </div>
+            {% if zoho_books_status.crm_client_available %}<p class="subtle">Für die Freigabe wird die bereits unter Zoho CRM hinterlegte OAuth-Anwendung verwendet. Das bestehende CRM-Token wird dabei weder ersetzt noch verändert.</p>{% endif %}
+          {% else %}
+            <p class="subtle">Hinterlege zuerst unter Zoho CRM die OAuth-Clientdaten. Danach kann der Hub damit separat einen reinen Zoho-Books-Lesezugriff anfordern.</p>
+          {% endif %}
+        </div>
+      </details>
+      {% if zoho_books_status.connected %}
+        <details class="account-details zoho-area" {% if zoho_books_status.requires_organization_selection %}open{% endif %}>
+          <summary>Organisation</summary>
+          <div class="zoho-area-content">
+            {% if zoho_books_status.organization_id %}
+              <p class="subtle">Ausgewählte Organisation: <strong>{{ zoho_books_status.organization_name }}</strong> (ID {{ zoho_books_status.organization_id }}).</p>
+            {% else %}
+              <p class="notice-warning">Wähle die Organisation aus, deren Daten der Hub später lesen darf.</p>
+            {% endif %}
+            {% if zoho_books_status.available_organizations %}
+              {% if user.role == "admin" %}
+                <form class="zoho-credentials-form" method="post" action="/account/zoho-books/organization">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <label>
+                    <span>Zoho-Books-Organisation</span>
+                    <select name="organization_id" required>
+                      {% for organization in zoho_books_status.available_organizations %}
+                        <option value="{{ organization.id }}" {% if organization.id == zoho_books_status.organization_id %}selected{% endif %}>{{ organization.name }}{% if organization.is_default %} (Standard){% endif %}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <button class="button button-secondary" type="submit">Organisation speichern</button>
+                </form>
+              {% endif %}
+            {% endif %}
+            {% if user.role == "admin" %}
+              <form class="zoho-area-action" method="post" action="/account/zoho-books/organizations/refresh">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="button button-secondary" type="submit">Organisationen aktualisieren</button>
+              </form>
+            {% endif %}
+          </div>
+        </details>
+        {% if zoho_books_status.ready_for_import %}
+          <details class="account-details zoho-area">
+            <summary>Bereit für Datenimport</summary>
+            <div class="zoho-area-content">
+              <p class="subtle">Die Verbindung ist eingerichtet. Im nächsten Schritt können wir die Felddefinitionen, Artikel sowie die gewünschten Beleg- und Kontakthistorien lesend in eigene Hub-Module importieren. Dieser Schritt schreibt nichts nach Zoho Books zurück.</p>
+            </div>
+          </details>
+        {% endif %}
+      {% endif %}
+      {% if zoho_books_status.configured and user.role == "admin" %}
+        <details class="account-details zoho-area zoho-disconnect-details">
+          <summary>Zoho Books trennen</summary>
+          <p class="subtle">Entfernt nur den verschlüsselten Zoho-Books-Zugang und die dafür kopierten OAuth-Clientdaten. Die Zoho-CRM-Verbindung bleibt bestehen.</p>
+          <form class="zoho-disconnect-action" method="post" action="/account/zoho-books/remove">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-danger" type="submit">Zoho-Books-Verbindung entfernen</button>
+          </form>
+        </details>
+      {% endif %}
     </section>
     {% if user.role == "admin" %}
     <section id="account-users" class="account-panel account-panel-wide account-section" data-account-section>
@@ -1029,6 +1122,7 @@
         if (parameters.has("mcp_token")) return "account-mcp";
         if (parameters.has("openai")) return "account-openai";
         if (parameters.has("provider_license") || parameters.has("crocoblock")) return "account-provider-licenses";
+        if (parameters.has("zoho_books")) return "account-zoho-books";
         if (parameters.has("zoho")) return "account-zoho";
         return "";
       };

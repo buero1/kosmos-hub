@@ -23,6 +23,7 @@ from app.services.hub_workflows import HubWorkflowService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
+from app.services.zoho_books import ZohoBooksError, ZohoBooksService
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.email_composer_settings import (
     FONT_FAMILY_OPTIONS,
@@ -946,6 +947,22 @@ def connect_zoho(request: Request, db: Annotated[Session, Depends(get_db)]):
     return RedirectResponse(url=authorization_url, status_code=303)
 
 
+@router.get("/zoho-books/connect")
+def connect_zoho_books(request: Request, db: Annotated[Session, Depends(get_db)]):
+    user = _require_admin_user(request)
+    service = _zoho_books_service(db)
+    state = service.new_oauth_state()
+    try:
+        service.prepare_authorization(actor=user)
+        authorization_url = service.build_authorization_url(state=state)
+    except ZohoBooksError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+    request.session["zoho_books_oauth_state"] = state
+    return RedirectResponse(url=authorization_url, status_code=303)
+
+
 @router.get("/zoho/callback")
 def zoho_callback(
     request: Request,
@@ -955,6 +972,41 @@ def zoho_callback(
     error: str = "",
 ):
     user = _require_admin_user(request)
+    expected_books_state = request.session.pop("zoho_books_oauth_state", "")
+    if expected_books_state:
+        service = _zoho_books_service(db)
+        if not isinstance(expected_books_state, str) or not compare_digest(expected_books_state, state):
+            service.record_error("Der Status der Zoho-Books-Verbindung passt nicht. Starte die Verbindung erneut.")
+            db.commit()
+            return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+        if error:
+            service.record_error("Der Zoho-Books-Zugriff wurde nicht freigegeben.")
+            db.commit()
+            return RedirectResponse(url="/account?zoho_books=not-approved", status_code=303)
+        try:
+            organizations = service.complete_authorization(code=code)
+            status = service.get_status()
+        except ZohoBooksError as exc:
+            service.record_error(str(exc))
+            db.commit()
+            return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho-books",
+            action="connect-zoho-books",
+            result="success",
+            detail=(
+                "Connected Zoho Books with read-only access for settings, items, contacts, quotes, invoices, "
+                "credit notes, customer payments, and sales orders. "
+                f"{len(organizations)} accessible organization(s) were found."
+            ),
+        )
+        db.commit()
+        outcome = "connected" if status.ready_for_import else "organization-selection-required"
+        return RedirectResponse(url=f"/account?zoho_books={outcome}", status_code=303)
+
     expected_state = request.session.pop("zoho_oauth_state", "")
     if not isinstance(expected_state, str) or not expected_state or not compare_digest(expected_state, state):
         _zoho_service(db).record_error("The Zoho connection state did not match. Start the connection again.")
@@ -988,6 +1040,66 @@ def zoho_callback(
     )
     db.commit()
     return RedirectResponse(url="/account?zoho=connected", status_code=303)
+
+
+@router.post("/zoho-books/organization")
+def select_zoho_books_organization(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    organization_id: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_books_service(db)
+    try:
+        connection = service.select_organization(actor=user, organization_id=organization_id)
+    except ZohoBooksError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc), error_section="account-zoho-books"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-books",
+        action="select-zoho-books-organization",
+        result="success",
+        detail=f"Selected Zoho Books organization {connection.organization_id} ({connection.organization_name}).",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho_books=organization-selected", status_code=303)
+
+
+@router.post("/zoho-books/organizations/refresh")
+def refresh_zoho_books_organizations(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_books_service(db)
+    try:
+        organizations = service.refresh_organizations()
+    except ZohoBooksError as exc:
+        service.record_error(str(exc))
+        db.commit()
+        return RedirectResponse(url="/account?zoho_books=refresh-failed", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-books",
+        action="refresh-zoho-books-organizations",
+        result="success",
+        detail=f"Refreshed {len(organizations)} accessible Zoho Books organization(s).",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho_books=organizations-refreshed", status_code=303)
 
 
 @router.post("/zoho/mapping")
@@ -1496,6 +1608,37 @@ def remove_zoho_connection(
     return RedirectResponse(url="/account?zoho=removed", status_code=303)
 
 
+@router.post("/zoho-books/remove")
+def remove_zoho_books_connection(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = _zoho_books_service(db)
+    try:
+        service.remove_connection(actor=user)
+    except ZohoBooksError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc), error_section="account-zoho-books"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-books",
+        action="remove-zoho-books-connection",
+        result="success",
+        detail="Removed the encrypted Zoho Books OAuth token and copied client credentials. Zoho CRM remains connected.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?zoho_books=removed", status_code=303)
+
+
 @bootstrap_router.post("/internal/bootstrap-token")
 def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_db)]):
     # This endpoint is only reachable from an SSH shell on the Hub host, never through the public proxy.
@@ -1515,6 +1658,14 @@ def _account_service(db: Session) -> HubAccountService:
 
 def _zoho_service(db: Session) -> ZohoCrmService:
     return ZohoCrmService(
+        db=db,
+        cipher=get_secret_cipher(),
+        public_base_url=get_settings().public_base_url,
+    )
+
+
+def _zoho_books_service(db: Session) -> ZohoBooksService:
+    return ZohoBooksService(
         db=db,
         cipher=get_secret_cipher(),
         public_base_url=get_settings().public_base_url,
@@ -1543,6 +1694,7 @@ def _account_context(
     new_zoho_email_workflow_webhook_url: str | None = None,
 ) -> dict:
     zoho_service = _zoho_service(service.db)
+    zoho_books_service = _zoho_books_service(service.db)
     return {
         "user": user,
         "hub_users": service.list_users() if user.role == "admin" else (),
@@ -1599,6 +1751,7 @@ def _account_context(
         "zoho_status": zoho_service.get_status(),
         "zoho_mapping": zoho_service.mapping_rows(),
         "zoho_data_centers": ZOHO_DATA_CENTERS.values(),
+        "zoho_books_status": zoho_books_service.get_status(),
     }
 
 
@@ -1651,6 +1804,8 @@ def _account_section_for_path(path: str) -> str:
         return "account-provider-licenses"
     if path == "/account/fleet-refresh-settings":
         return "account-refresh-settings"
+    if path.startswith("/account/zoho-books"):
+        return "account-zoho-books"
     if path.startswith("/account/zoho"):
         return "account-zoho"
     return "account-security"

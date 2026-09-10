@@ -50,6 +50,7 @@ from app.models.zoho_email_content_import import ZohoEmailContentImport, ZohoEma
 from app.models.zoho_email_attachment_import import ZohoEmailAttachmentImport, ZohoEmailAttachmentImportItem
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
+from app.models.zoho_books_connection import ZohoBooksConnection
 from app.services.hub_accounts import HubAccountService
 from app.services.hub_workflows import HubWorkflowService
 from app.services.email_ai_prompt_presets import EmailAiPromptPresetService
@@ -143,6 +144,10 @@ def _ensure_phase_one_schema() -> None:
     if "hub_lead_notes" not in table_names:
         HubLeadNote.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_lead_notes table.")
+
+    if "zoho_books_connections" not in table_names:
+        ZohoBooksConnection.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created zoho_books_connections table.")
 
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)

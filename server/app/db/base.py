@@ -48,6 +48,7 @@ from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.models.zoho_connection import ZohoConnection
+from app.models.zoho_books_connection import ZohoBooksConnection
 from app.models.base import Base
 
 __all__ = [
@@ -105,6 +106,7 @@ __all__ = [
     "UpdatePlan",
     "UpdatePlanItem",
     "ZohoConnection",
+    "ZohoBooksConnection",
     "ZohoEmailWorkflowDelivery",
     "ZohoEmailWorkflowWebhook",
     "ZohoEmailContentImport",
