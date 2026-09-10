@@ -25,10 +25,12 @@ from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS, ZOHO_ACCOUNT_SUBFORMS, ZohoAccountField
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
+from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
 ZOHO_CASE_MODULE = "Cases"
+ZOHO_LEAD_MODULE = "Leads"
 # Request the complete CRM API scope once. Individual Hub workflows still decide
 # whether a connected capability may create, change, or delete CRM data.
 _ZOHO_CRM_SCOPE_VALUES = (
@@ -62,6 +64,7 @@ _BINARY_DOWNLOAD_TIMEOUT_SECONDS = 90
 _MAX_PAGE_REQUESTS = 10
 _MAX_FIELDS_PER_ZOHO_REQUEST = 50
 _MAX_CASE_PAGE_REQUESTS = 100
+_MAX_LEAD_PAGE_REQUESTS = 100
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 _MAX_CONTACT_FIELD_LENGTH = 1_000
 _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
@@ -1037,6 +1040,75 @@ class ZohoCrmService:
         else:
             raise ZohoCrmError("Zoho returned more than 20,000 Cases. The import was not changed.")
         return list(records_by_id.values())
+
+    def list_lead_records(self) -> list[dict[str, object]]:
+        """Return every Lead and its reviewed subform rows for a one-time Hub import."""
+        connection = self._require_connected_connection()
+        requested_fields = sorted({field.api_name for field in HUB_LEAD_FIELDS} | {"Modified_Time"})
+        records_by_id: dict[str, dict[str, object]] = {}
+        for offset in range(0, len(requested_fields), _MAX_FIELDS_PER_ZOHO_REQUEST):
+            field_chunk = requested_fields[offset : offset + _MAX_FIELDS_PER_ZOHO_REQUEST]
+            for page in range(1, _MAX_LEAD_PAGE_REQUESTS + 1):
+                response = self._api_get(
+                    connection,
+                    f"/crm/v8/{ZOHO_LEAD_MODULE}",
+                    {"fields": ",".join(field_chunk), "per_page": "200", "page": str(page)},
+                    allow_empty_response=True,
+                )
+                data = response.get("data")
+                if not isinstance(data, list):
+                    raise ZohoCrmError("Zoho returned an invalid Leads response. No Leads were imported.")
+                for record in data:
+                    if not isinstance(record, dict):
+                        continue
+                    lead_id = self._as_text(record.get("id"))
+                    if lead_id:
+                        records_by_id.setdefault(lead_id, {"id": lead_id}).update(record)
+                info = response.get("info")
+                if not (isinstance(info, dict) and info.get("more_records") is True):
+                    break
+            else:
+                raise ZohoCrmError("Zoho returned more than 20,000 Leads. No Leads were imported.")
+
+        subform_rows = self._get_all_lead_subform_records(connection)
+        for lead_id, record in records_by_id.items():
+            record["_hub_lead_subforms"] = {
+                key: rows_by_lead.get(lead_id, [])
+                for key, rows_by_lead in subform_rows.items()
+            }
+        return list(records_by_id.values())
+
+    def _get_all_lead_subform_records(
+        self,
+        connection: ZohoConnection,
+    ) -> dict[str, dict[str, list[dict[str, object]]]]:
+        result: dict[str, dict[str, list[dict[str, object]]]] = {}
+        for subform in HUB_LEAD_SUBFORMS:
+            requested_fields = sorted({field.api_name for field in subform.fields} | {"Parent_Id"})
+            rows_by_lead: dict[str, list[dict[str, object]]] = {}
+            for page in range(1, _MAX_LEAD_PAGE_REQUESTS + 1):
+                response = self._api_get(
+                    connection,
+                    f"/crm/v8/{subform.module}",
+                    {"fields": ",".join(requested_fields), "per_page": "200", "page": str(page)},
+                    allow_empty_response=True,
+                )
+                data = response.get("data")
+                if not isinstance(data, list):
+                    raise ZohoCrmError(f"Zoho returned an invalid {subform.label} response. No Leads were imported.")
+                for row in data:
+                    if not isinstance(row, dict):
+                        continue
+                    parent_id = self._lookup_record_id(row.get("Parent_Id"))
+                    if parent_id:
+                        rows_by_lead.setdefault(parent_id, []).append(row)
+                info = response.get("info")
+                if not (isinstance(info, dict) and info.get("more_records") is True):
+                    break
+            else:
+                raise ZohoCrmError(f"Zoho returned more than 20,000 {subform.label} rows. No Leads were imported.")
+            result[subform.key] = rows_by_lead
+        return result
 
     def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
         requested_fields = ",".join(

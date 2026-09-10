@@ -28,7 +28,7 @@ class HubLeadFieldValue:
     label: str
     display_type: str
     value: str
-    form_value: str | tuple[str, ...]
+    form_value: str | tuple[str, ...] | bool
     required: bool = False
     read_only: bool = False
     options: tuple[tuple[str, str], ...] = ()
@@ -163,6 +163,9 @@ class HubLeadService:
             selected = tuple(value for value in self._as_values(raw_value) if value)
             value = ", ".join(self._display_option(definition, item) or item for item in selected)
             form_value: str | tuple[str, ...] = selected
+        elif definition.display_type == "Boolesch":
+            form_value = bool(raw_value)
+            value = "Ja" if form_value else "Nein"
         else:
             form_value = self._text(raw_value)
             value = self._display_option(definition, form_value) or form_value
