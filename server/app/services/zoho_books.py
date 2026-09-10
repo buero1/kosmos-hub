@@ -25,7 +25,6 @@ _ZOHO_BOOKS_SCOPE_VALUES = (
     "ZohoBooks.contacts.READ",
     "ZohoBooks.estimates.READ",
     "ZohoBooks.invoices.READ",
-    "ZohoBooks.recurringinvoices.READ",
     "ZohoBooks.customerpayments.READ",
     "ZohoBooks.creditnotes.READ",
     "ZohoBooks.salesorders.READ",
