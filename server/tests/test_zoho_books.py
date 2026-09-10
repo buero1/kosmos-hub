@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -11,6 +12,30 @@ from app.models.zoho_connection import ZohoConnection
 from app.services.hub_accounts import hash_password
 from app.services.zoho_books import ZOHO_BOOKS_SCOPES, ZohoBooksError, ZohoBooksService
 from app.services.zoho_crm import ZohoCrmError
+
+
+def test_books_connect_persists_the_pending_connection_before_redirecting_to_zoho(monkeypatch):
+    from app.api.routes import accounts
+
+    prepared: list[HubUser] = []
+    fake_service = SimpleNamespace(
+        new_oauth_state=lambda: "b" * 43,
+        prepare_authorization=lambda *, actor: prepared.append(actor),
+        build_authorization_url=lambda *, state: f"https://accounts.zoho.com/oauth/v2/auth?state={state}",
+        record_error=lambda _message: None,
+    )
+    commits: list[bool] = []
+    monkeypatch.setattr(accounts, "_zoho_books_service", lambda _db: fake_service)
+    user = SimpleNamespace(role="admin")
+    request = SimpleNamespace(state=SimpleNamespace(hub_user=user), session={})
+    db = SimpleNamespace(commit=lambda: commits.append(True))
+
+    response = accounts.connect_zoho_books(request=request, db=db)
+
+    assert prepared == [user]
+    assert commits == [True]
+    assert request.session["zoho_books_oauth_state"] == "b" * 43
+    assert response.headers["location"] == f"https://accounts.zoho.com/oauth/v2/auth?state={'b' * 43}"
 
 
 def _user() -> HubUser:

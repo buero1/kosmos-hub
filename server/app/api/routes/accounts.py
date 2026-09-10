@@ -955,6 +955,9 @@ def connect_zoho_books(request: Request, db: Annotated[Session, Depends(get_db)]
     try:
         service.prepare_authorization(actor=user)
         authorization_url = service.build_authorization_url(state=state)
+        # The callback arrives in a later request, so its separate database
+        # session must be able to load this pending Books connection.
+        db.commit()
     except ZohoBooksError as exc:
         service.record_error(str(exc))
         db.commit()
