@@ -188,6 +188,7 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
             "delete_call",
             "delete_task",
             "link_email_to_case",
+            "open_email_reply",
             "schedule_call",
             "update_call",
             "update_task",
@@ -206,6 +207,7 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     template = Path("app/templates/agent.html").read_text(encoding="utf-8")
     route = Path("app/api/routes/agent.py").read_text(encoding="utf-8")
     base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
+    emails_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
 
     assert "schwebenden Button unten rechts" in template
     assert 'href="#agent-capabilities"' in template
@@ -221,6 +223,9 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert '>Hub-Agent</a>' in base_template
     assert 'href="#agent-completed-chats"' in template
     assert 'href="#agent-deleted-chats"' in template
+    assert "function openAgentReplyFromQuery()" in emails_template
+    assert "agent_reply" in emails_template
+    assert "prepareMailboxComposerAction(replyButton)" in emails_template
 
 
 def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
@@ -448,6 +453,7 @@ def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
     assert capabilities["create_contact"].status == "available"
     assert capabilities["create_task"].status == "available"
     assert capabilities["create_email_draft"].status == "available"
+    assert capabilities["open_email_reply"].status == "available"
     assert capabilities["email_context"].status == "available"
     assert capabilities["customer_dossier"].status == "available"
     assert capabilities["case_management"].status == "available"
@@ -489,6 +495,41 @@ def test_hub_agent_binds_case_actions_to_the_selected_email_context_only():
         assert "E-Mail als Kontext" in str(exc)
     else:
         raise AssertionError("Case actions must not be proposed without a selected email.")
+
+
+def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
+    raw_plan = {
+        "summary": "Antwort vorbereiten",
+        "response": "Ich öffne den vorhandenen Antworteditor.",
+        "actions": [
+            {
+                "action_type": "open_email_reply",
+                "title": "Antwort im E-Mail-Editor öffnen",
+                "details": "Empfänger und Betreff werden aus der eingegangenen E-Mail übernommen.",
+                "input": {},
+            }
+        ],
+    }
+    context = HubAgentEmailContext(
+        key="linked-7-11",
+        subject="Änderungswunsch",
+        sender="",
+        recipients="",
+        customer_id=7,
+        customer_name="Kontext-Kunde",
+        body_text="",
+        attachment_names=(),
+    )
+
+    plan = HubAgentService._normalize_plan(raw_plan, email_context=context)
+
+    assert plan["actions"][0]["input"] == {"email_key": "linked-7-11"}
+    try:
+        HubAgentService._normalize_plan(raw_plan)
+    except HubAgentError as exc:
+        assert "Antwort benötigt eine ausgewählte E-Mail" in str(exc)
+    else:
+        raise AssertionError("Reply actions must not be proposed without a selected email.")
 
 
 def test_hub_agent_uses_selected_email_for_case_creation_and_linking():
@@ -560,6 +601,17 @@ def test_hub_agent_uses_selected_email_for_case_creation_and_linking():
         linked = service.execute_action(action_id=link_action.id, actor="hub-admin")
         assert linked.status == "completed"
         assert len(db.scalars(select(HubCaseEmailLink)).all()) == 2
+
+        reply_action = _add_action(
+            db,
+            cipher,
+            action_type="open_email_reply",
+            input_values={"email_key": context.key},
+        )
+        reply = service.execute_action(action_id=reply_action.id, actor="hub-admin")
+        assert reply.status == "completed"
+        assert reply.result_label == "Antwort im E-Mail-Editor öffnen"
+        assert reply.result_href == f"/emails?folder=inbox&selected={context.key}&agent_reply=1"
 
 
 def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):

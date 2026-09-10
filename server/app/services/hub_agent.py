@@ -47,12 +47,13 @@ _ACTION_TYPES = frozenset(
         "complete_call",
         "delete_call",
         "create_email_draft",
+        "open_email_reply",
         "create_case_from_email",
         "link_email_to_case",
         "create_customer_note",
     }
 )
-_EMAIL_CONTEXT_ACTION_TYPES = frozenset({"create_case_from_email", "link_email_to_case"})
+_EMAIL_CONTEXT_ACTION_TYPES = frozenset({"create_case_from_email", "link_email_to_case", "open_email_reply"})
 _CUSTOMER_ACTION_TYPES = frozenset(
     {
         "create_task",
@@ -113,6 +114,12 @@ HUB_AGENT_CAPABILITIES = (
         name="E-Mail-Entwürfe erstellen",
         status="available",
         description="Erstellt einen bereinigten Entwurf im Hub-Ordner „Entwürfe“, ohne ihn zu versenden.",
+    ),
+    HubAgentCapability(
+        key="open_email_reply",
+        name="E-Mail-Antworten vorbereiten",
+        status="available",
+        description="Öffnet für eine ausgewählte eingegangene E-Mail den vorhandenen Hub-Antworteditor mit Empfänger, Betreff, Signatur und Zitat.",
     ),
     HubAgentCapability(
         key="email_context",
@@ -1096,6 +1103,9 @@ class HubAgentService:
                 "Wenn Angaben fehlen, erkläre sie im response-Text und schlage keine unvollständige Aktion vor. "
                 "Ein Kontakt braucht mindestens Anrede und Nachname. Eine Aufgabe braucht einen exakten Kunden-Namen, ein Datum im Format YYYY-MM-DD und eine Uhrzeit HH:MM. "
                 "Ein E-Mail-Entwurf braucht Empfängeradresse, Betreff und sicheren HTML-Inhalt mit einfachen p- und br-Tags. "
+                "Wenn genau ein E-Mail-Kontext vorliegt und der Nutzer um eine Antwort bittet, verwende ausschließlich die Aktion open_email_reply. "
+                "Diese öffnet den vorhandenen Hub-Antworteditor; Empfänger, Re:-Betreff, Signatur und Zitierverlauf werden dort wie beim manuellen Antworten erstellt. "
+                "Fordere für diese Aktion weder Empfängeradresse noch Betreff oder HTML-Inhalt an und verwende dafür niemals create_email_draft. "
                 "Zum Ändern, Abschließen oder Löschen einer Aufgabe oder eines Anrufs ist der exakte Kunden- und Aktionsname erforderlich. "
                 "Ein Anruf braucht für die Anlage oder Änderung Datum YYYY-MM-DD, Uhrzeit HH:MM und Dauer in Minuten. "
                 "Einen Fall aus einer E-Mail darfst du nur bei vorhandenem E-Mail-Kontext vorschlagen; nutze Fall-Grund aus der vorgegebenen Auswahl und setze den Ursprung nicht selbst. "
@@ -1337,6 +1347,8 @@ class HubAgentService:
             return self._delete_call(input_values)
         if action_type == "create_email_draft":
             return self._create_email_draft(input_values)
+        if action_type == "open_email_reply":
+            return self._open_email_reply(input_values)
         if action_type == "create_case_from_email":
             return self._create_case_from_email(input_values, actor=actor)
         if action_type == "link_email_to_case":
@@ -1488,6 +1500,39 @@ class HubAgentService:
             forward_from_email_id="",
         )
         return {"label": "E-Mail-Entwurf öffnen", "href": f"/emails?folder=drafts&selected=unassigned-{draft.id}"}
+
+    def _open_email_reply(self, values: dict[str, Any]) -> dict[str, str]:
+        """Open the same reply flow the user reaches through the manual reply arrow."""
+        email_key = self._required_text(values.get("email_key"), "E-Mail-Kontext")
+        if email_key.startswith("linked-"):
+            try:
+                customer_text, email_text = email_key.removeprefix("linked-").split("-", 1)
+                customer_id = int(customer_text)
+                email_id = int(email_text)
+            except ValueError as exc:
+                raise HubAgentError("Die ausgewählte E-Mail ist ungültig.") from exc
+            email = self.db.scalar(
+                select(CustomerZohoEmail).where(
+                    CustomerZohoEmail.customer_id == customer_id,
+                    CustomerZohoEmail.id == email_id,
+                )
+            )
+            if email is None or email.direction != "inbound":
+                raise HubAgentError("Nur auf eingegangene E-Mails kann geantwortet werden.")
+        elif email_key.startswith("unassigned-"):
+            try:
+                email_id = int(email_key.removeprefix("unassigned-"))
+            except ValueError as exc:
+                raise HubAgentError("Die ausgewählte E-Mail ist ungültig.") from exc
+            email = self.db.get(HubMailboxEmail, email_id)
+            if email is None or email.direction != "inbound" or email.mailbox_state == "draft":
+                raise HubAgentError("Nur auf eingegangene E-Mails kann geantwortet werden.")
+        else:
+            raise HubAgentError("Diese E-Mail kann nicht beantwortet werden.")
+        return {
+            "label": "Antwort im E-Mail-Editor öffnen",
+            "href": f"/emails?folder=inbox&selected={email_key}&agent_reply=1",
+        }
 
     def _create_case_from_email(self, values: dict[str, Any], *, actor: str) -> dict[str, str]:
         source_key = self._required_text(values.get("email_key"), "E-Mail-Kontext")
@@ -1682,6 +1727,12 @@ class HubAgentService:
                 )
                 if line
             )
+        if action_type == "open_email_reply":
+            return (
+                "Die vorhandene Hub-Antwort wird geöffnet.",
+                "Empfänger, Re:-Betreff, Signatur und Zitat übernimmt der E-Mail-Editor.",
+                "Die E-Mail wird nicht automatisch versendet.",
+            )
         if action_type == "create_case_from_email":
             return tuple(
                 line
@@ -1737,6 +1788,8 @@ class HubAgentService:
             input_values = action["input"]
             if action["action_type"] in _EMAIL_CONTEXT_ACTION_TYPES:
                 if not valid_email_keys:
+                    if action["action_type"] == "open_email_reply":
+                        raise HubAgentError("Eine Antwort benötigt eine ausgewählte E-Mail als Kontext.")
                     raise HubAgentError("Ein Fall aus einer E-Mail benötigt eine ausgewählte E-Mail als Kontext.")
                 requested_email_key = cls._text(input_values.get("email_key"))
                 if len(valid_email_keys) == 1:

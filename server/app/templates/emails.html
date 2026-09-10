@@ -848,6 +848,26 @@
           });
       }
 
+      function openAgentReplyFromQuery() {
+        var url = new URL(window.location.href);
+        if (url.searchParams.get('agent_reply') !== '1') return;
+        var selected = url.searchParams.get('selected') || '';
+        var linked = /^linked-(\d+)-(\d+)$/.exec(selected);
+        var unassigned = /^unassigned-(\d+)$/.exec(selected);
+        if (!linked && !unassigned) return;
+        url.searchParams.delete('agent_reply');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+        var replyButton = document.createElement('button');
+        replyButton.dataset.mailboxComposeAction = 'reply';
+        replyButton.dataset.mailboxComposeCustomerId = linked ? linked[1] : '';
+        replyButton.dataset.mailboxComposeEmailId = linked ? linked[2] : unassigned[1];
+        window.setTimeout(function () {
+          prepareMailboxComposerAction(replyButton);
+        }, 0);
+      }
+
+      openAgentReplyFromQuery();
+
       function prepareMailboxDraftAction(button) {
         if (!mailboxComposerTrigger) return;
         var draftId = button.dataset.mailboxDraftId || '';
