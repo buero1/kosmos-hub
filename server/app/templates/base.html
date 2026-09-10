@@ -3208,7 +3208,7 @@
         right: 50%;
         bottom: 1rem;
         display: grid;
-        grid-template-columns: 1.1rem minmax(0, 1fr) auto var(--control-v1-height);
+        grid-template-columns: 1.1rem minmax(0, 1fr) var(--control-v1-height);
         align-items: center;
         gap: 0.55rem;
         width: min(calc(100% - 2rem), 33rem);
@@ -3219,6 +3219,9 @@
         border-radius: 13px;
         background: rgba(255, 253, 248, 0.98);
         box-shadow: 0 12px 24px rgba(32, 50, 58, 0.14);
+      }
+      .email-editor-ai-prompt.has-email-ai-suggestion {
+        grid-template-columns: 1.1rem minmax(0, 1fr) auto var(--control-v1-height);
       }
       .email-editor-ai-prompt-icon { width: 1.05rem; height: 1.05rem; fill: color-mix(in srgb, var(--accent) 72%, #fffdfa); }
       .email-compose-form .email-editor-ai-prompt input {
@@ -4229,6 +4232,7 @@
           if (controls.input) controls.input.disabled = pending;
           if (controls.submit) controls.submit.disabled = pending;
           if (controls.actions) controls.actions.hidden = !pending;
+          prompt.classList.toggle("has-email-ai-suggestion", pending);
         }
 
         function readSelection(content) {
