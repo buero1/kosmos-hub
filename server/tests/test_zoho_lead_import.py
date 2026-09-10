@@ -7,6 +7,7 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.hub_lead import HubLead
 from app.services.hub_leads import HubLeadService
+from app.services.zoho_crm import ZohoCrmService
 from app.services.zoho_lead_import import ZohoLeadImportService
 
 
@@ -79,3 +80,39 @@ def test_zoho_lead_import_creates_and_updates_encrypted_hub_leads_without_deleti
         updated_detail = HubLeadService(db=db, cipher=cipher).get_detail(lead_id=imported.id)
         assert updated_detail is not None
         assert updated_detail.name == "Erika Aktualisiert"
+
+
+def test_lead_pagination_continues_with_zoho_page_token_after_2000_rows(monkeypatch):
+    service = ZohoCrmService(db=None, cipher=None, public_base_url="https://hub.example")  # type: ignore[arg-type]
+    responses = [
+        {"data": [{"id": str(page)}], "info": {"more_records": True}}
+        for page in range(1, 10)
+    ]
+    responses.append(
+        {
+            "data": [{"id": "10"}],
+            "info": {"more_records": True, "next_page_token": "after-2000"},
+        }
+    )
+    responses.append({"data": [{"id": "11"}], "info": {"more_records": False}})
+    requests: list[dict[str, str]] = []
+
+    def fake_api_get(_connection, _path, query, *, allow_empty_response):
+        assert allow_empty_response is True
+        requests.append(query)
+        return responses.pop(0)
+
+    monkeypatch.setattr(service, "_api_get", fake_api_get)
+
+    pages = list(
+        service._get_all_lead_module_pages(
+            object(),
+            module="Leads",
+            requested_fields=["Last_Name"],
+            label="Leads",
+        )
+    )
+
+    assert [page["data"][0]["id"] for page in pages] == [str(number) for number in range(1, 12)]
+    assert requests[-1]["page_token"] == "after-2000"
+    assert "page" not in requests[-1]

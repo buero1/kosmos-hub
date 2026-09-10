@@ -64,7 +64,8 @@ _BINARY_DOWNLOAD_TIMEOUT_SECONDS = 90
 _MAX_PAGE_REQUESTS = 10
 _MAX_FIELDS_PER_ZOHO_REQUEST = 50
 _MAX_CASE_PAGE_REQUESTS = 100
-_MAX_LEAD_PAGE_REQUESTS = 100
+_MAX_LEAD_DISCRETE_PAGE_REQUESTS = 10
+_MAX_LEAD_PAGE_TOKEN_REQUESTS = 490
 _MAX_EMAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 _MAX_CONTACT_FIELD_LENGTH = 1_000
 _ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 90
@@ -1048,27 +1049,19 @@ class ZohoCrmService:
         records_by_id: dict[str, dict[str, object]] = {}
         for offset in range(0, len(requested_fields), _MAX_FIELDS_PER_ZOHO_REQUEST):
             field_chunk = requested_fields[offset : offset + _MAX_FIELDS_PER_ZOHO_REQUEST]
-            for page in range(1, _MAX_LEAD_PAGE_REQUESTS + 1):
-                response = self._api_get(
-                    connection,
-                    f"/crm/v8/{ZOHO_LEAD_MODULE}",
-                    {"fields": ",".join(field_chunk), "per_page": "200", "page": str(page)},
-                    allow_empty_response=True,
-                )
+            for response in self._get_all_lead_module_pages(
+                connection,
+                module=ZOHO_LEAD_MODULE,
+                requested_fields=field_chunk,
+                label="Leads",
+            ):
                 data = response.get("data")
-                if not isinstance(data, list):
-                    raise ZohoCrmError("Zoho returned an invalid Leads response. No Leads were imported.")
                 for record in data:
                     if not isinstance(record, dict):
                         continue
                     lead_id = self._as_text(record.get("id"))
                     if lead_id:
                         records_by_id.setdefault(lead_id, {"id": lead_id}).update(record)
-                info = response.get("info")
-                if not (isinstance(info, dict) and info.get("more_records") is True):
-                    break
-            else:
-                raise ZohoCrmError("Zoho returned more than 20,000 Leads. No Leads were imported.")
 
         subform_rows = self._get_all_lead_subform_records(connection)
         for lead_id, record in records_by_id.items():
@@ -1086,29 +1079,70 @@ class ZohoCrmService:
         for subform in HUB_LEAD_SUBFORMS:
             requested_fields = sorted({field.api_name for field in subform.fields} | {"Parent_Id"})
             rows_by_lead: dict[str, list[dict[str, object]]] = {}
-            for page in range(1, _MAX_LEAD_PAGE_REQUESTS + 1):
-                response = self._api_get(
-                    connection,
-                    f"/crm/v8/{subform.module}",
-                    {"fields": ",".join(requested_fields), "per_page": "200", "page": str(page)},
-                    allow_empty_response=True,
-                )
+            for response in self._get_all_lead_module_pages(
+                connection,
+                module=subform.module,
+                requested_fields=requested_fields,
+                label=subform.label,
+            ):
                 data = response.get("data")
-                if not isinstance(data, list):
-                    raise ZohoCrmError(f"Zoho returned an invalid {subform.label} response. No Leads were imported.")
                 for row in data:
                     if not isinstance(row, dict):
                         continue
                     parent_id = self._lookup_record_id(row.get("Parent_Id"))
                     if parent_id:
                         rows_by_lead.setdefault(parent_id, []).append(row)
-                info = response.get("info")
-                if not (isinstance(info, dict) and info.get("more_records") is True):
-                    break
-            else:
-                raise ZohoCrmError(f"Zoho returned more than 20,000 {subform.label} rows. No Leads were imported.")
             result[subform.key] = rows_by_lead
         return result
+
+    def _get_all_lead_module_pages(
+        self,
+        connection: ZohoConnection,
+        *,
+        module: str,
+        requested_fields: list[str],
+        label: str,
+    ):
+        """Follow Zoho's page token after its 2,000-row discrete-page limit."""
+        next_page_token = ""
+        for page in range(1, _MAX_LEAD_DISCRETE_PAGE_REQUESTS + 1):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{module}",
+                {"fields": ",".join(requested_fields), "per_page": "200", "page": str(page)},
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError(f"Zoho returned an invalid {label} response. No Leads were imported.")
+            yield response
+            info = response.get("info")
+            if not (isinstance(info, dict) and info.get("more_records") is True):
+                return
+            if page == _MAX_LEAD_DISCRETE_PAGE_REQUESTS:
+                next_page_token = self._as_text(info.get("next_page_token"))
+                if not next_page_token:
+                    raise ZohoCrmError(f"Zoho did not provide a continuation token for {label}. No Leads were imported.")
+
+        for _ in range(_MAX_LEAD_PAGE_TOKEN_REQUESTS):
+            response = self._api_get(
+                connection,
+                f"/crm/v8/{module}",
+                {"fields": ",".join(requested_fields), "per_page": "200", "page_token": next_page_token},
+                allow_empty_response=True,
+            )
+            data = response.get("data")
+            if not isinstance(data, list):
+                raise ZohoCrmError(f"Zoho returned an invalid {label} response. No Leads were imported.")
+            yield response
+            info = response.get("info")
+            if not (isinstance(info, dict) and info.get("more_records") is True):
+                return
+            next_page_token = self._as_text(info.get("next_page_token"))
+            if not next_page_token:
+                raise ZohoCrmError(f"Zoho did not provide a continuation token for {label}. No Leads were imported.")
+
+        raise ZohoCrmError(f"Zoho returned more than 100,000 {label}. No Leads were imported.")
 
     def _get_all_contact_records(self, connection: ZohoConnection) -> list[dict[str, object]]:
         requested_fields = ",".join(
