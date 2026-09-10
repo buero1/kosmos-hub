@@ -214,7 +214,11 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
 
     assert "schwebenden Button unten rechts" in template
     assert 'href="#agent-capabilities"' in template
+    assert 'href="#agent-email-ai-prompts"' in template
+    assert "KI-Schnellaktionen" in template
+    assert 'action="/agent/email-ai-prompts"' in template
     assert "agent-capability-status-{{ capability.status }}" in template
+    assert '@router.post("/email-ai-prompts")' in route
     assert '@router.post("/chat/messages")' in route
     assert '@router.post("/chat/actions/{action_id}/execute")' in route
     assert '@router.post("/chat/{conversation_id}/delete")' in route

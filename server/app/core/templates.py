@@ -11,6 +11,7 @@ from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.services.site_admin_launch import SiteAdminLaunchService
 from app.services.email_composer_settings import EmailComposerRuntimeSettings, EmailComposerSettingsService
+from app.services.email_ai_prompt_presets import DEFAULT_EMAIL_AI_PROMPT_PRESETS, EmailAiPromptPresetService
 from app.services.styling_settings import StylingRuntimeSettings, StylingSettingsService
 
 
@@ -22,6 +23,7 @@ def _shared_template_context(request: Request) -> dict[str, object]:
         "can_use_global_email_composer": user is not None and user.role == "admin",
         "unread_email_count": _unread_email_count(user),
         "email_composer_settings": _email_composer_settings(),
+        "email_ai_prompt_presets": _email_ai_prompt_presets(),
         "styling": _styling_settings(),
         "agent_page_context": _agent_page_context(request),
     }
@@ -94,6 +96,15 @@ def _email_composer_settings() -> EmailComposerRuntimeSettings:
             return EmailComposerSettingsService(db=db).get_runtime_settings()
     except Exception:
         return EmailComposerRuntimeSettings()
+
+
+def _email_ai_prompt_presets():
+    """Make enabled email AI shortcuts available in every composer variant."""
+    try:
+        with SessionLocal() as db:
+            return EmailAiPromptPresetService(db=db).list_presets(enabled_only=True)
+    except Exception:
+        return DEFAULT_EMAIL_AI_PROMPT_PRESETS
 
 
 def _unread_email_count(user) -> int:

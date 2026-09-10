@@ -6,6 +6,7 @@
       <p class="eyebrow">Hub-Agent</p>
       <nav class="account-section-nav" aria-label="Hub-Agent Bereiche">
         <a href="#agent-capabilities" aria-current="page">Fähigkeiten</a>
+        <a href="#agent-email-ai-prompts">E-Mail-Schnellaktionen</a>
         <a href="#agent-completed-chats">Abgeschlossene Chats</a>
         <a href="#agent-deleted-chats">Gelöschte Chats</a>
       </nav>
@@ -44,6 +45,46 @@
             </tbody>
           </table>
         </div>
+      </section>
+      <section id="agent-email-ai-prompts" class="agent-email-ai-prompts account-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">E-Mail-Editor</p>
+            <h2>KI-Schnellaktionen</h2>
+            <p class="subtle">Diese Auswahl erscheint beim Klick auf das KI-Zeichen im E-Mail-Editor. Ein Klick führt die hinterlegte Anweisung sofort für die Markierung oder die gesamte E-Mail aus.</p>
+          </div>
+        </div>
+        {% if request.query_params.get("email_ai_prompts") == "saved" %}
+          <p class="notice-success">Die KI-Schnellaktionen wurden gespeichert.</p>
+        {% endif %}
+        <form method="post" action="/agent/email-ai-prompts" class="agent-email-ai-prompt-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="agent-email-ai-prompt-table-wrap">
+            <table class="agent-email-ai-prompt-table">
+              <thead><tr><th>Auswahl</th><th>Direkte Anweisung an die KI</th><th>Aktiv</th></tr></thead>
+              <tbody>
+                {% for preset in email_ai_prompt_presets %}
+                  <tr>
+                    <td>
+                      <input type="hidden" name="preset_id" value="{{ preset.id }}">
+                      <input name="label" maxlength="120" value="{{ preset.label }}" aria-label="Bezeichnung von {{ preset.label }}">
+                    </td>
+                    <td><textarea name="instruction" rows="2" maxlength="1000" aria-label="Direkte Anweisung für {{ preset.label }}">{{ preset.instruction }}</textarea></td>
+                    <td><label class="agent-email-ai-prompt-enabled"><input type="checkbox" name="enabled_preset_id" value="{{ preset.id }}"{% if preset.is_enabled %} checked{% endif %}> <span>Aktiv</span></label></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <button class="button" type="submit">Schnellaktionen speichern</button>
+        </form>
+        <form method="post" action="/agent/email-ai-prompts" class="agent-email-ai-prompt-add-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <h3>Neue Schnellaktion</h3>
+          <label>Bezeichnung<input name="new_label" maxlength="120" placeholder="Zum Beispiel: Freundlicher formulieren"></label>
+          <label>Direkte Anweisung an die KI<textarea name="new_instruction" rows="2" maxlength="1000" placeholder="Zum Beispiel: Freundlicher formulieren"></textarea></label>
+          <button class="button button-secondary" type="submit">Hinzufügen</button>
+        </form>
       </section>
       <section id="agent-completed-chats" class="agent-chat-archive account-section">
         <div class="section-heading">

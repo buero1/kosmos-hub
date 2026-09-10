@@ -31,6 +31,7 @@ from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.email_compose_image import EmailComposeImage
 from app.models.email_composer_settings import EmailComposerSettings
+from app.models.email_ai_prompt_preset import EmailAiPromptPreset
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
 from app.models.hub_mailbox_email import HubMailboxAttachment
@@ -48,6 +49,7 @@ from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.services.hub_accounts import HubAccountService
 from app.services.hub_workflows import HubWorkflowService
+from app.services.email_ai_prompt_presets import EmailAiPromptPresetService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
 from app.services.customer_communications import CustomerCommunicationService
@@ -153,6 +155,10 @@ def _ensure_phase_one_schema() -> None:
     if "hub_agent_actions" not in table_names:
         HubAgentAction.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_agent_actions table.")
+
+    if "email_ai_prompt_presets" not in table_names:
+        EmailAiPromptPreset.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created email_ai_prompt_presets table.")
 
     if "customer_zoho_notes" not in table_names:
         CustomerZohoNote.__table__.create(bind=engine, checkfirst=True)
@@ -642,6 +648,7 @@ async def lifespan(_: FastAPI):
         _ensure_phase_one_schema()
         with SessionLocal() as db:
             HubWorkflowService(db=db).ensure_default_workflows()
+            EmailAiPromptPresetService(db=db).ensure_default_presets()
             db.commit()
         _backfill_customer_zoho_email_headers()
         schedule_elapsed_customer_meetings()

@@ -1714,6 +1714,44 @@
       .agent-capability-status-available { background: #d8efe1; color: #216841; }
       .agent-capability-status-planned { background: #e5e9f8; color: #385f9e; }
       .agent-capability-status-disabled { background: #f1e4e0; color: #8a493c; }
+      .agent-email-ai-prompts {
+        display: grid;
+        gap: 0.9rem;
+        margin-top: 1.25rem;
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: rgba(255, 252, 246, 0.78);
+      }
+      .agent-email-ai-prompts .section-heading { margin: 0; }
+      .agent-email-ai-prompts .section-heading .subtle { margin: 0.25rem 0 0; }
+      .agent-email-ai-prompt-form,
+      .agent-email-ai-prompt-add-form { display: grid; gap: 0.75rem; }
+      .agent-email-ai-prompt-table-wrap { overflow-x: auto; }
+      .agent-email-ai-prompt-table { width: 100%; min-width: 48rem; border-collapse: collapse; }
+      .agent-email-ai-prompt-table th,
+      .agent-email-ai-prompt-table td { padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+      .agent-email-ai-prompt-table th { color: var(--muted); font: 700 0.72rem "Trebuchet MS", sans-serif; letter-spacing: 0.07em; text-transform: uppercase; }
+      .agent-email-ai-prompt-table input:not([type="checkbox"]),
+      .agent-email-ai-prompt-table textarea,
+      .agent-email-ai-prompt-add-form input,
+      .agent-email-ai-prompt-add-form textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: #fffdf8;
+        color: var(--ink);
+        font: inherit;
+        line-height: 1.35;
+        padding: 0.5rem 0.58rem;
+      }
+      .agent-email-ai-prompt-table textarea,
+      .agent-email-ai-prompt-add-form textarea { resize: vertical; }
+      .agent-email-ai-prompt-enabled { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 700; }
+      .agent-email-ai-prompt-add-form { max-width: 44rem; padding-top: 0.95rem; border-top: 1px solid var(--border); }
+      .agent-email-ai-prompt-add-form h3 { margin: 0; }
+      .agent-email-ai-prompt-add-form label { display: grid; gap: 0.3rem; color: var(--muted); font-weight: 700; }
       .agent-chat-archive {
         display: grid;
         gap: 0.8rem;
@@ -3223,7 +3261,22 @@
       .email-editor-ai-prompt.has-email-ai-suggestion {
         grid-template-columns: 1.1rem minmax(0, 1fr) auto var(--control-v1-height);
       }
-      .email-editor-ai-prompt-icon { width: 1.05rem; height: 1.05rem; fill: color-mix(in srgb, var(--accent) 72%, #fffdfa); }
+      .email-editor-ai-prompt-menu-trigger {
+        display: grid;
+        width: 1.75rem;
+        height: 1.75rem;
+        margin: -0.35rem;
+        padding: 0.35rem;
+        place-items: center;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: color-mix(in srgb, var(--accent) 72%, #fffdfa);
+      }
+      .email-editor-ai-prompt-menu-trigger:hover:not(:disabled),
+      .email-editor-ai-prompt-menu-trigger[aria-expanded="true"] { background: color-mix(in srgb, var(--accent) 10%, #fffdfa); }
+      .email-editor-ai-prompt-menu-trigger:disabled { cursor: not-allowed; opacity: 0.58; }
+      .email-editor-ai-prompt-icon { width: 1.05rem; height: 1.05rem; fill: currentColor; }
       .email-compose-form .email-editor-ai-prompt input {
         width: 100%;
         min-width: 0;
@@ -3266,6 +3319,36 @@
       .email-editor-ai-prompt button.email-editor-ai-prompt-action[data-email-ai-reject] { border: 0; background: #fff0f0; color: #9d2424; }
       .email-editor-ai-prompt button.email-editor-ai-prompt-action[data-email-ai-reject]:hover { background: #f9dede; color: #7e1c1c; }
       .email-editor-ai-prompt-action-icon { display: block; width: 1.65rem; height: 1.65rem; }
+      .email-editor-ai-prompt-menu {
+        position: absolute;
+        z-index: 2;
+        bottom: calc(100% + 0.45rem);
+        left: 0;
+        display: grid;
+        width: min(23rem, calc(100vw - 3rem));
+        gap: 0.15rem;
+        padding: 0.35rem;
+        border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+        border-radius: 10px;
+        background: #fffdf8;
+        box-shadow: 0 12px 24px rgba(32, 50, 58, 0.14);
+      }
+      .email-editor-ai-prompt-menu[hidden] { display: none; }
+      .email-editor-ai-prompt-menu button {
+        width: 100%;
+        padding: 0.52rem 0.62rem;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-size: 0.84rem;
+        font-weight: 700;
+        line-height: 1.3;
+        text-align: left;
+      }
+      .email-editor-ai-prompt-menu button:hover,
+      .email-editor-ai-prompt-menu button:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
       .email-editor-ai-prompt-feedback {
         position: absolute;
         right: 0;
@@ -4211,6 +4294,8 @@
           return {
             input: prompt.querySelector("[data-email-ai-prompt-input]"),
             submit: prompt.querySelector("[data-email-ai-prompt-submit]"),
+            presetTrigger: prompt.querySelector("[data-email-ai-preset-trigger]"),
+            presetMenu: prompt.querySelector("[data-email-ai-preset-menu]"),
             actions: prompt.querySelector("[data-email-ai-prompt-actions]"),
             accept: prompt.querySelector("[data-email-ai-accept]"),
             reject: prompt.querySelector("[data-email-ai-reject]"),
@@ -4230,8 +4315,17 @@
           var controls = promptControls(prompt);
           if (controls.input) controls.input.disabled = pending;
           if (controls.submit) controls.submit.disabled = pending;
+          if (controls.presetTrigger) controls.presetTrigger.disabled = pending;
           if (controls.actions) controls.actions.hidden = !pending;
+          setPresetMenuOpen(prompt, false);
           prompt.classList.toggle("has-email-ai-suggestion", pending);
+        }
+
+        function setPresetMenuOpen(prompt, open) {
+          var controls = promptControls(prompt);
+          if (!controls.presetTrigger || !controls.presetMenu) return;
+          controls.presetMenu.hidden = !open;
+          controls.presetTrigger.setAttribute("aria-expanded", String(open));
         }
 
         function readSelection(content) {
@@ -4352,6 +4446,8 @@
           setEditorLocked(content, true);
           controls.input.disabled = true;
           controls.submit.disabled = true;
+          if (controls.presetTrigger) controls.presetTrigger.disabled = true;
+          setPresetMenuOpen(prompt, false);
           setFeedback(prompt, "KI erstellt einen Änderungsvorschlag ...", false);
           var data = new URLSearchParams({
             csrf_token: csrf.value,
@@ -4380,6 +4476,7 @@
             setEditorLocked(content, false);
             controls.input.disabled = false;
             controls.submit.disabled = false;
+            if (controls.presetTrigger) controls.presetTrigger.disabled = false;
             setFeedback(prompt, error && error.message ? error.message : "Die KI-Überarbeitung konnte nicht erstellt werden.", true);
           }).finally(function () {
             busyByContent.delete(content);
@@ -4393,6 +4490,22 @@
           if (!content || !controls.input || !controls.submit) return;
           bindSelectionTracking(content, 0);
           controls.submit.addEventListener("click", function () { requestRewrite(prompt); });
+          if (controls.presetTrigger && controls.presetMenu) {
+            controls.presetTrigger.addEventListener("click", function (event) {
+              event.stopPropagation();
+              setPresetMenuOpen(prompt, controls.presetMenu.hidden);
+            });
+            controls.presetMenu.querySelectorAll("[data-email-ai-preset]").forEach(function (option) {
+              option.addEventListener("click", function () {
+                controls.input.value = option.dataset.emailAiPresetInstruction || "";
+                setPresetMenuOpen(prompt, false);
+                requestRewrite(prompt);
+              });
+            });
+            document.addEventListener("click", function (event) {
+              if (!prompt.contains(event.target)) setPresetMenuOpen(prompt, false);
+            });
+          }
           controls.input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();

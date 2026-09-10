@@ -5,6 +5,7 @@ from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.email_compose_image import EmailComposeImage
 from app.models.email_composer_settings import EmailComposerSettings
+from app.models.email_ai_prompt_preset import EmailAiPromptPreset
 from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder, CustomerTaskActivity
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder

@@ -49,6 +49,10 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert expected_prompt in global_composer
     assert "E-Mail oder markierten Text überarbeiten ..." in main_composer
     assert "E-Mail oder markierten Text überarbeiten ..." in global_composer
+    assert "data-email-ai-preset-trigger" in main_composer
+    assert "data-email-ai-preset-trigger" in global_composer
+    assert "data-email-ai-preset-menu" in main_composer
+    assert "data-email-ai-preset-instruction" in global_composer
     assert 'data-email-ai-accept aria-label="Änderung akzeptieren" title="Änderung akzeptieren"' in main_composer
     assert 'data-email-ai-reject aria-label="Änderung verwerfen" title="Änderung verwerfen"' in global_composer
     assert 'class="email-editor-ai-prompt-action-icon"' in main_composer
@@ -90,6 +94,9 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert "readSelection(content) || selectionByContent.get(content) || wholeEmailSelection(content)" in base_template
     assert "selected.isWholeEmail" in base_template
     assert "Die E-Mail enthält noch keinen Text, den die KI überarbeiten kann." in base_template
+    assert "function setPresetMenuOpen(prompt, open)" in base_template
+    assert "controls.input.value = option.dataset.emailAiPresetInstruction || \"\";" in base_template
+    assert "setPresetMenuOpen(prompt, false);" in base_template
     assert "ohne Tabellen oder ganze Absätze" not in base_template
 
 
