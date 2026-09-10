@@ -3208,7 +3208,7 @@
         right: 50%;
         bottom: 1rem;
         display: grid;
-        grid-template-columns: 1.1rem minmax(0, 1fr) auto 2rem;
+        grid-template-columns: 1.1rem minmax(0, 1fr) auto var(--control-v1-height);
         align-items: center;
         gap: 0.55rem;
         width: min(calc(100% - 2rem), 33rem);
@@ -4116,12 +4116,14 @@
             var documentElement = frame.contentDocument && frame.contentDocument.documentElement;
             var body = frame.contentDocument && frame.contentDocument.body;
             if (documentElement) {
-              documentElement.style.height = "264px";
-              documentElement.style.overflowY = "auto";
+              documentElement.style.height = "100%";
+              documentElement.style.overflow = "hidden";
             }
             if (body) {
-              body.style.height = "264px";
-              body.style.minHeight = "264px";
+              body.style.height = "100%";
+              body.style.minHeight = "100%";
+              body.style.boxSizing = "border-box";
+              body.style.margin = "0";
               body.style.overflowY = "auto";
             }
           } catch (_error) {
