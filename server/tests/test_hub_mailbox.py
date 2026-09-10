@@ -57,6 +57,7 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert "is-email-ai-locked" in base_template
     assert "#dff3e5" in base_template
     assert "var includesBlock" in base_template
+    assert "var previewFragment = selected.range.cloneContents();" in base_template
     assert "ohne Tabellen oder ganze Absätze" not in base_template
 
 

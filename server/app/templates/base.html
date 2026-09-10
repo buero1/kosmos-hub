@@ -4234,7 +4234,8 @@
           if (!body || !isInsideBody(selected.range.startContainer, body) || !isInsideBody(selected.range.endContainer, body)) {
             throw new Error("Die Markierung ist nicht mehr verfügbar. Bitte markiere den Text erneut.");
           }
-          var includesBlock = Boolean(fragment.querySelector("table, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6"));
+          var previewFragment = selected.range.cloneContents();
+          var includesBlock = Boolean(previewFragment.querySelector("table, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6"));
           var original = body.ownerDocument.createElement(includesBlock ? "div" : "del");
           original.dataset.emailAiOriginal = "true";
           original.style.cssText = "color: #718078; opacity: 0.66; text-decoration: line-through;" + (includesBlock ? " display: block;" : "");
