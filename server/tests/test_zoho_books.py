@@ -75,6 +75,7 @@ def test_books_reuses_the_configured_oauth_client_but_stores_a_separate_connecti
         assert connection.encrypted_client_id == crm_connection.encrypted_client_id
         assert connection.encrypted_client_secret == crm_connection.encrypted_client_secret
         assert connection.scopes == ZOHO_BOOKS_SCOPES
+        assert "ZohoBooks.recurringinvoices.READ" in connection.scopes
         assert parsed["scope"] == [ZOHO_BOOKS_SCOPES]
         assert parsed["redirect_uri"] == ["https://hub.example/account/zoho/callback"]
         assert parsed["access_type"] == ["offline"]

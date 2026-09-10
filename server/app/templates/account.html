@@ -328,7 +328,7 @@
       <div class="zoho-heading-copy">
         <p class="eyebrow">Buchhaltungsintegration</p>
         <h3>Zoho Books</h3>
-        <p class="subtle">Die Verbindung ist getrennt von Zoho CRM. Sie verwendet einen eigenen, verschlüsselt gespeicherten Books-Refresh-Token und erhält ausschließlich Lesezugriff auf Einstellungen und Felder, Artikel, Kontakte, Angebote, Rechnungen, Gutschriften, Zahlungen und Aufträge.</p>
+        <p class="subtle">Die Verbindung ist getrennt von Zoho CRM. Sie verwendet einen eigenen, verschlüsselt gespeicherten Books-Refresh-Token und erhält ausschließlich Lesezugriff auf Einstellungen und Felder, Artikel, Kontakte, Angebote, Rechnungen, periodische Rechnungen, Gutschriften, Zahlungen und Aufträge.</p>
         {% if zoho_books_status.last_error %}<p class="notice-error">Letzte Zoho-Books-Aktion: {{ zoho_books_status.last_error }}</p>{% endif %}
       </div>
       <details class="account-details zoho-area" {% if not zoho_books_status.connected or zoho_books_status.requires_organization_selection %}open{% endif %}>

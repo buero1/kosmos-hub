@@ -1002,7 +1002,7 @@ def zoho_callback(
             result="success",
             detail=(
                 "Connected Zoho Books with read-only access for settings, items, contacts, quotes, invoices, "
-                "credit notes, customer payments, and sales orders. "
+                "recurring invoices, credit notes, customer payments, and sales orders. "
                 f"{len(organizations)} accessible organization(s) were found."
             ),
         )
