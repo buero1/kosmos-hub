@@ -3,7 +3,8 @@
 {% block content %}
   <style>
     .mailbox-header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
-    .mailbox-header-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.55rem; }
+    .mailbox-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 0.55rem; }
+    .mailbox-header-actions .button { margin: 0; }
     .mailbox-header h2 { margin: 0.18rem 0 0; }
     .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
     .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }

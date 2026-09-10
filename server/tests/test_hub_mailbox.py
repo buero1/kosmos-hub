@@ -113,6 +113,13 @@ def test_mailbox_places_agent_action_directly_before_case_action_in_subject_row(
     assert ".mailbox-reading-subject-actions { display: flex;" in mailbox_template
 
 
+def test_mailbox_header_actions_align_the_template_link_with_new_email_button():
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
+
+    assert ".mailbox-header-actions { display: flex; flex-wrap: wrap; align-items: center;" in mailbox_template
+    assert ".mailbox-header-actions .button { margin: 0; }" in mailbox_template
+
+
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
