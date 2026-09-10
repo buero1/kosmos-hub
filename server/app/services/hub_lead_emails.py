@@ -87,6 +87,7 @@ class ZohoLeadEmailImportService:
     """Import recent, complete Zoho Lead email bodies once into Hub storage."""
 
     _LOOKBACK = timedelta(days=365)
+    _COMMIT_BATCH_SIZE = 50
 
     def __init__(self, *, db: Session, cipher: SecretCipher, zoho_service: ZohoCrmService):
         self.db = db
@@ -100,7 +101,7 @@ class ZohoLeadEmailImportService:
             select(HubLead).where(HubLead.zoho_id.is_not(None)).order_by(HubLead.id.asc())
         ).all()
         known = {
-            (email.lead_id, email.zoho_message_id): email
+            (email.lead_id, email.zoho_message_id)
             for email in self.db.scalars(select(HubLeadEmail)).all()
         }
         counters = {
@@ -114,6 +115,7 @@ class ZohoLeadEmailImportService:
             "failed_leads": 0,
         }
 
+        pending_in_batch = 0
         for lead in leads:
             if not lead.zoho_id:
                 continue
@@ -170,10 +172,17 @@ class ZohoLeadEmailImportService:
                     zoho_imported_at=imported_at,
                 )
                 self.db.add(email)
-                known[(lead.id, message_id)] = email
+                known.add((lead.id, message_id))
                 counters["imported_emails"] += 1
+                pending_in_batch += 1
+                if pending_in_batch >= self._COMMIT_BATCH_SIZE:
+                    # The Zoho API can take a long time. Commit small batches so the
+                    # database connection stays active and a retry resumes safely.
+                    self.db.commit()
+                    pending_in_batch = 0
 
-        self.db.flush()
+        if pending_in_batch:
+            self.db.commit()
         return ZohoLeadEmailImportResult(**counters)
 
     def _encrypt_payload(self, payload: dict[str, object]) -> str:

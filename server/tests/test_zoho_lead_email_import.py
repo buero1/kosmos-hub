@@ -51,6 +51,25 @@ class FakeZohoLeadEmailService:
         return {"content": "<p>Vielen Dank für Ihre Anfrage.</p>"}
 
 
+class BatchFakeZohoLeadEmailService(FakeZohoLeadEmailService):
+    def list_record_email_headers(self, module: str, record_id: str) -> list[dict[str, object]]:
+        return [
+            {
+                "message_id": "recent-message-1",
+                "subject": "Erste Anfrage",
+                "time": "2026-09-09T10:00:00+02:00",
+            },
+            {
+                "message_id": "recent-message-2",
+                "subject": "Zweite Anfrage",
+                "time": "2026-09-09T11:00:00+02:00",
+            },
+        ]
+
+    def get_record_email(self, **kwargs: object) -> dict[str, object]:
+        return {"content": "<p>Vollständiger Inhalt.</p>"}
+
+
 def test_imports_only_recent_lead_emails_with_encrypted_complete_content_and_is_repeatable():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -90,3 +109,25 @@ def test_imports_only_recent_lead_emails_with_encrypted_complete_content_and_is_
         assert repeat.imported_emails == 0
         assert repeat.retained_emails == 1
         assert len(zoho.content_requests) == 1
+
+
+def test_import_commits_small_batches_so_a_later_run_can_resume():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        lead = HubLead(zoho_id="zoho-lead-1", encrypted_profile_json=cipher.encrypt('{"fields": {}}'))
+        db.add(lead)
+        db.commit()
+
+        importer = ZohoLeadEmailImportService(
+            db=db,
+            cipher=cipher,
+            zoho_service=BatchFakeZohoLeadEmailService(),  # type: ignore[arg-type]
+        )
+        importer._COMMIT_BATCH_SIZE = 1
+        result = importer.import_recent_emails(now=datetime(2026, 9, 10, 12, 0, tzinfo=UTC))
+
+        assert result.imported_emails == 2
+        assert db.scalars(select(HubLeadEmail)).all()
