@@ -58,6 +58,38 @@
                   </div>
                 </article>
               {% endfor %}
+              <article id="lead-emails" class="card customer-detail-panel lead-subform-panel">
+                <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Verknüpfte E-Mails</h3><p class="subtle">E-Mail-Kopf und Inhalt der vergangenen zwölf Monate.</p></div></div>
+                <div class="customer-section-expandable" data-expandable-section>
+                  <div data-expandable-content>
+                    {% for email in lead_emails %}
+                      <article class="communication-entry">
+                        <div class="communication-entry-heading">
+                          <strong>{{ email.subject }}</strong>
+                          <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
+                        </div>
+                        <p class="subtle">
+                          {% if email.sender %}Von {{ email.sender }}{% endif %}
+                          {% if email.sender and email.recipients %} · {% endif %}
+                          {% if email.recipients %}An {{ email.recipients }}{% endif %}
+                          {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
+                        </p>
+                        {% if email.preview_html %}
+                          <details class="communication-content">
+                            <summary>E-Mail-Vorschau anzeigen</summary>
+                            <iframe class="communication-email-preview" title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" srcdoc="{{ email.preview_html }}"></iframe>
+                          </details>
+                        {% else %}
+                          <p class="notice-warning">Der importierte E-Mail-Inhalt konnte nicht gelesen werden.</p>
+                        {% endif %}
+                      </article>
+                    {% else %}
+                      <p class="subtle">Keine verknüpften E-Mails aus den vergangenen zwölf Monaten vorhanden.</p>
+                    {% endfor %}
+                  </div>
+                  <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+                </div>
+              </article>
             </div>
           </div>
 

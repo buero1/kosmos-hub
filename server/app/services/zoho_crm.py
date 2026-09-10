@@ -31,6 +31,7 @@ ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
 ZOHO_CASE_MODULE = "Cases"
 ZOHO_LEAD_MODULE = "Leads"
+_ZOHO_EMAIL_HISTORY_MODULES = frozenset({ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZOHO_LEAD_MODULE})
 # Request the complete CRM API scope once. Individual Hub workflows still decide
 # whether a connected capability may create, change, or delete CRM data.
 _ZOHO_CRM_SCOPE_VALUES = (
@@ -420,9 +421,9 @@ class ZohoCrmService:
         return records
 
     def list_record_email_headers(self, module: str, record_id: str) -> list[dict[str, object]]:
-        """Return up to 100 email headers for an Account or Contact related list."""
-        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
-            raise ZohoCrmError("Zoho email history is only supported for Accounts and Contacts.")
+        """Return email headers for a supported Zoho record related list."""
+        if module not in _ZOHO_EMAIL_HISTORY_MODULES:
+            raise ZohoCrmError("Zoho email history is only supported for Accounts, Contacts and Leads.")
         connection = self._require_communication_connection()
         records: list[dict[str, object]] = []
         next_index = "0"
@@ -505,9 +506,9 @@ class ZohoCrmService:
         message_id: str,
         user_id: str | None = None,
     ) -> dict[str, object]:
-        """Load a single email body only when the user asks to view it."""
-        if module not in {ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE}:
-            raise ZohoCrmError("Zoho email history is only supported for Accounts and Contacts.")
+        """Load a single email body only when a supported Hub flow needs it."""
+        if module not in _ZOHO_EMAIL_HISTORY_MODULES:
+            raise ZohoCrmError("Zoho email history is only supported for Accounts, Contacts and Leads.")
         connection = self._require_communication_connection()
         response = self._api_get(
             connection,

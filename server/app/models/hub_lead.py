@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
@@ -16,3 +16,5 @@ class HubLead(TimestampMixin, Base):
     encrypted_profile_json: Mapped[str] = mapped_column(Text(), nullable=False)
     zoho_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     zoho_imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    zoho_emails = relationship("HubLeadEmail", back_populates="lead", cascade="all, delete-orphan")
