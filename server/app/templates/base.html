@@ -6337,12 +6337,14 @@
               values.csrf_token = state.csrfToken;
               var body = new URLSearchParams();
               Object.keys(values).forEach(function (key) { body.set(key, values[key] == null ? "" : String(values[key])); });
-              render(await requestJson(path, {
+              var payload = await requestJson(path, {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
                 body: body.toString()
-              }));
+              });
+              render(payload);
+              return payload;
             } catch (error) {
               setNotice(error.message);
             } finally {
@@ -6385,12 +6387,25 @@
             postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/delete");
           });
 
+          function openPreparedReplyDraft(payload) {
+            var messages = payload && payload.messages || [];
+            var latestMessage = messages[messages.length - 1];
+            if (!latestMessage) { return; }
+            var draftAction = (latestMessage.actions || []).find(function (action) {
+              return action.type === "create_email_reply_draft" && action.status === "completed" && action.result_href;
+            });
+            if (draftAction) { window.location.assign(draftAction.result_href); }
+          }
+
           form.addEventListener("submit", function (event) {
             event.preventDefault();
             var instruction = input.value.trim();
             if (!instruction || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
             input.value = "";
-            postChat("/agent/chat/messages", { conversation_id: state.chat.conversation.id, instruction: instruction });
+            postChat("/agent/chat/messages", {
+              conversation_id: state.chat.conversation.id,
+              instruction: instruction
+            }).then(openPreparedReplyDraft);
           });
           input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {

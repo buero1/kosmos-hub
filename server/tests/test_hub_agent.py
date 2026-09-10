@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -176,6 +177,8 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
     assert captured["api_key"] == "test-key"
     assert captured["payload"]["store"] is False
     assert captured["payload"]["tool_choice"] == {"type": "function", "name": "propose_hub_actions"}
+    assert "create_email_reply_draft" in captured["payload"]["instructions"]
+    assert "ohne Rückfragen" in captured["payload"]["instructions"]
     assert captured["payload"]["tools"][0]["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"] == sorted(
         {
             "complete_call",
@@ -188,7 +191,7 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
             "delete_call",
             "delete_task",
             "link_email_to_case",
-            "open_email_reply",
+            "create_email_reply_draft",
             "schedule_call",
             "update_call",
             "update_task",
@@ -223,9 +226,11 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert '>Hub-Agent</a>' in base_template
     assert 'href="#agent-completed-chats"' in template
     assert 'href="#agent-deleted-chats"' in template
-    assert "function openAgentReplyFromQuery()" in emails_template
-    assert "agent_reply" in emails_template
-    assert "prepareMailboxComposerAction(replyButton)" in emails_template
+    assert "function openAgentReplyDraftFromQuery()" in emails_template
+    assert "agent_reply_draft" in emails_template
+    assert "prepareMailboxDraftAction(draftButton)" in emails_template
+    assert "function openPreparedReplyDraft(payload)" in base_template
+    assert 'action.type === "create_email_reply_draft"' in base_template
 
 
 def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
@@ -453,7 +458,7 @@ def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
     assert capabilities["create_contact"].status == "available"
     assert capabilities["create_task"].status == "available"
     assert capabilities["create_email_draft"].status == "available"
-    assert capabilities["open_email_reply"].status == "available"
+    assert capabilities["create_email_reply_draft"].status == "available"
     assert capabilities["email_context"].status == "available"
     assert capabilities["customer_dossier"].status == "available"
     assert capabilities["case_management"].status == "available"
@@ -503,10 +508,10 @@ def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
         "response": "Ich öffne den vorhandenen Antworteditor.",
         "actions": [
             {
-                "action_type": "open_email_reply",
-                "title": "Antwort im E-Mail-Editor öffnen",
+                "action_type": "create_email_reply_draft",
+                "title": "Antwortentwurf erstellen",
                 "details": "Empfänger und Betreff werden aus der eingegangenen E-Mail übernommen.",
-                "input": {},
+                "input": {"email_html": "<p>Guten Tag,</p><p>vielen Dank.</p>"},
             }
         ],
     }
@@ -523,7 +528,10 @@ def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
 
     plan = HubAgentService._normalize_plan(raw_plan, email_context=context)
 
-    assert plan["actions"][0]["input"] == {"email_key": "linked-7-11"}
+    assert plan["actions"][0]["input"] == {
+        "email_html": "<p>Guten Tag,</p><p>vielen Dank.</p>",
+        "email_key": "linked-7-11",
+    }
     try:
         HubAgentService._normalize_plan(raw_plan)
     except HubAgentError as exc:
@@ -532,7 +540,7 @@ def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
         raise AssertionError("Reply actions must not be proposed without a selected email.")
 
 
-def test_hub_agent_uses_selected_email_for_case_creation_and_linking():
+def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_drafts(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     cipher = SecretCipher("a" * 32)
@@ -602,16 +610,108 @@ def test_hub_agent_uses_selected_email_for_case_creation_and_linking():
         assert linked.status == "completed"
         assert len(db.scalars(select(HubCaseEmailLink)).all()) == 2
 
+        monkeypatch.setattr(
+            "app.services.hub_agent.CustomerCommunicationService.get_email_reply",
+            lambda self, **kwargs: SimpleNamespace(
+                email_id=first_email.id,
+                recipient_key="contact-1",
+                recipient_name="Max Mustermann",
+                recipient_email="max@example.test",
+                subject="Re: Änderungswunsch",
+                content="<p><br><br></p><p><strong>Am heute schrieb Max Mustermann:</strong></p><blockquote>Bitte die Startseite ändern.</blockquote>",
+            ),
+        )
         reply_action = _add_action(
             db,
             cipher,
-            action_type="open_email_reply",
-            input_values={"email_key": context.key},
+            action_type="create_email_reply_draft",
+            input_values={"email_key": context.key, "email_html": "<p>Guten Tag,</p><p>Vielen Dank für Ihre Nachricht.</p>"},
         )
         reply = service.execute_action(action_id=reply_action.id, actor="hub-admin")
+        draft = db.scalars(select(HubMailboxEmail).where(HubMailboxEmail.mailbox_state == "draft")).one()
+        draft_payload = json.loads(cipher.decrypt(draft.encrypted_payload_json))
         assert reply.status == "completed"
-        assert reply.result_label == "Antwort im E-Mail-Editor öffnen"
-        assert reply.result_href == f"/emails?folder=inbox&selected={context.key}&agent_reply=1"
+        assert reply.result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1"
+        assert draft_payload["recipient_key"] == "contact-1"
+        assert draft_payload["content"].startswith("<p>Guten Tag,</p>")
+        assert "Bitte die Startseite ändern." in draft_payload["content"]
+
+
+def test_hub_agent_creates_a_reply_draft_immediately_without_an_execute_click(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        inbound = HubMailboxEmail(
+            source="mittwald-imap",
+            direction="inbound",
+            is_unread=True,
+            mailbox_state="active",
+            fingerprint="a" * 64,
+            encrypted_payload_json=cipher.encrypt(
+                json.dumps(
+                    {
+                        "subject": "Rückfrage zur Website",
+                        "from": {"name": "Frau Beispiel", "email": "frau@example.test"},
+                        "content": "Bitte geben Sie kurz Bescheid.",
+                    }
+                )
+            ),
+            received_at=datetime(2026, 9, 10, 9, 0),
+        )
+        db.add(inbound)
+        db.flush()
+
+        service = HubAgentService(db=db, cipher=cipher)
+        conversation = service.start_conversation(actor="hub-admin")
+        service.add_context(
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+            resource_type="email",
+            resource_key=f"unassigned-{inbound.id}",
+        )
+        monkeypatch.setattr(
+            service.provider_service,
+            "get_enabled_openai_api_key",
+            lambda: (SimpleNamespace(model="test-model"), "test-key"),
+        )
+        monkeypatch.setattr(service.provider_service, "record_request_success", lambda config: None)
+        monkeypatch.setattr(
+            service,
+            "_create_plan",
+            lambda **kwargs: {
+                "summary": "Antwort formulieren",
+                "response": "Ich habe einen Antwortentwurf vorbereitet.",
+                "actions": [
+                    {
+                        "action_type": "create_email_reply_draft",
+                        "title": "Antwortentwurf erstellen",
+                        "details": "Der Entwurf wird nicht versendet.",
+                        "input": {
+                            "email_key": f"unassigned-{inbound.id}",
+                            "email_html": "<p>Guten Tag Frau Beispiel,</p><p>vielen Dank für Ihre Nachricht.</p>",
+                        },
+                    }
+                ],
+            },
+        )
+
+        job = service.plan(
+            instruction="Bitte freundlich antworten.",
+            actor="hub-admin",
+            conversation_id=conversation.conversation_id,
+        )
+
+        assert job.status == "completed"
+        assert job.actions[0].status == "completed"
+        draft = db.scalars(select(HubMailboxEmail).where(HubMailboxEmail.mailbox_state == "draft")).one()
+        assert job.actions[0].result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1"
+        draft_payload = json.loads(cipher.decrypt(draft.encrypted_payload_json))
+        assert draft_payload["recipient_email"] == "frau@example.test"
+        assert draft_payload["subject"] == "Re: Rückfrage zur Website"
+        assert draft_payload["content"].startswith("<p>Guten Tag Frau Beispiel,</p>")
+        assert "Am 2026-09-10T09:00:00 schrieb" in draft_payload["content"]
 
 
 def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):

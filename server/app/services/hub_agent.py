@@ -47,13 +47,13 @@ _ACTION_TYPES = frozenset(
         "complete_call",
         "delete_call",
         "create_email_draft",
-        "open_email_reply",
+        "create_email_reply_draft",
         "create_case_from_email",
         "link_email_to_case",
         "create_customer_note",
     }
 )
-_EMAIL_CONTEXT_ACTION_TYPES = frozenset({"create_case_from_email", "link_email_to_case", "open_email_reply"})
+_EMAIL_CONTEXT_ACTION_TYPES = frozenset({"create_case_from_email", "link_email_to_case", "create_email_reply_draft"})
 _CUSTOMER_ACTION_TYPES = frozenset(
     {
         "create_task",
@@ -116,10 +116,10 @@ HUB_AGENT_CAPABILITIES = (
         description="Erstellt einen bereinigten Entwurf im Hub-Ordner „Entwürfe“, ohne ihn zu versenden.",
     ),
     HubAgentCapability(
-        key="open_email_reply",
-        name="E-Mail-Antworten vorbereiten",
+        key="create_email_reply_draft",
+        name="E-Mail-Antworten entwerfen",
         status="available",
-        description="Öffnet für eine ausgewählte eingegangene E-Mail den vorhandenen Hub-Antworteditor mit Empfänger, Betreff, Signatur und Zitat.",
+        description="Formuliert für eine ausgewählte eingegangene E-Mail einen nicht versendeten Antwortentwurf mit Empfänger, Betreff, Signatur und Zitat.",
     ),
     HubAgentCapability(
         key="email_context",
@@ -219,7 +219,7 @@ class HubAgentChatView:
 
 
 class HubAgentService:
-    """Turns a request into a stored plan, then executes one approved action at a time."""
+    """Turns a request into durable Hub actions, with safe reply drafts prepared immediately."""
 
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -451,6 +451,15 @@ class HubAgentService:
                 )
             )
         self.db.flush()
+        reply_draft_actions = [
+            action
+            for action in job.actions
+            if action.action_type == "create_email_reply_draft"
+        ]
+        # A reply draft is safe to prepare immediately: it stays unsent until the user
+        # explicitly chooses the existing send button in the regular mail editor.
+        if len(job.actions) == 1 and len(reply_draft_actions) == 1:
+            self.execute_action(action_id=reply_draft_actions[0].id, actor=actor)
         if conversation is not None:
             if self._conversation_title(conversation) == "Neue Unterhaltung":
                 conversation.encrypted_title_json = self._encrypt_json({"title": plan["summary"][:120]})
@@ -1103,9 +1112,11 @@ class HubAgentService:
                 "Wenn Angaben fehlen, erkläre sie im response-Text und schlage keine unvollständige Aktion vor. "
                 "Ein Kontakt braucht mindestens Anrede und Nachname. Eine Aufgabe braucht einen exakten Kunden-Namen, ein Datum im Format YYYY-MM-DD und eine Uhrzeit HH:MM. "
                 "Ein E-Mail-Entwurf braucht Empfängeradresse, Betreff und sicheren HTML-Inhalt mit einfachen p- und br-Tags. "
-                "Wenn genau ein E-Mail-Kontext vorliegt und der Nutzer um eine Antwort bittet, verwende ausschließlich die Aktion open_email_reply. "
-                "Diese öffnet den vorhandenen Hub-Antworteditor; Empfänger, Re:-Betreff, Signatur und Zitierverlauf werden dort wie beim manuellen Antworten erstellt. "
-                "Fordere für diese Aktion weder Empfängeradresse noch Betreff oder HTML-Inhalt an und verwende dafür niemals create_email_draft. "
+                "Wenn genau ein E-Mail-Kontext vorliegt und der Nutzer um eine Antwort bittet, verwende ausschließlich die Aktion create_email_reply_draft. "
+                "Formuliere dafür ohne Rückfragen sofort einen vollständigen, sachlichen Antworttext als sicheres HTML mit einfachen p- und br-Tags im Feld email_html. "
+                "Leite die Anrede aus der E-Mail ab, wenn sie eindeutig ist; andernfalls nutze „Guten Tag“. Ergänze weder Signatur noch Zitat, weil der vorhandene Hub-Antworteditor beides selbst einfügt. "
+                "Fordere für diese Aktion weder Empfängeradresse noch Betreff noch eine Erlaubnis zum Entwurf an und verwende dafür niemals create_email_draft. "
+                "Wenn die gewünschte Aussage nicht vollständig bestimmt ist, formuliere eine zurückhaltende Antwort ohne erfundene Zusagen. "
                 "Zum Ändern, Abschließen oder Löschen einer Aufgabe oder eines Anrufs ist der exakte Kunden- und Aktionsname erforderlich. "
                 "Ein Anruf braucht für die Anlage oder Änderung Datum YYYY-MM-DD, Uhrzeit HH:MM und Dauer in Minuten. "
                 "Einen Fall aus einer E-Mail darfst du nur bei vorhandenem E-Mail-Kontext vorschlagen; nutze Fall-Grund aus der vorgegebenen Auswahl und setze den Ursprung nicht selbst. "
@@ -1347,8 +1358,8 @@ class HubAgentService:
             return self._delete_call(input_values)
         if action_type == "create_email_draft":
             return self._create_email_draft(input_values)
-        if action_type == "open_email_reply":
-            return self._open_email_reply(input_values)
+        if action_type == "create_email_reply_draft":
+            return self._create_email_reply_draft(input_values)
         if action_type == "create_case_from_email":
             return self._create_case_from_email(input_values, actor=actor)
         if action_type == "link_email_to_case":
@@ -1501,9 +1512,18 @@ class HubAgentService:
         )
         return {"label": "E-Mail-Entwurf öffnen", "href": f"/emails?folder=drafts&selected=unassigned-{draft.id}"}
 
-    def _open_email_reply(self, values: dict[str, Any]) -> dict[str, str]:
-        """Open the same reply flow the user reaches through the manual reply arrow."""
+    def _create_email_reply_draft(self, values: dict[str, Any]) -> dict[str, str]:
+        """Create an unsent reply draft on top of the manual reply context."""
         email_key = self._required_text(values.get("email_key"), "E-Mail-Kontext")
+        reply_html = self._required_text(values.get("email_html"), "Antworttext")
+        if "<" not in reply_html or ">" not in reply_html:
+            reply_html = f"<p>{escape(reply_html)}</p>"
+        mailbox = HubMailboxService(
+            db=self.db,
+            cipher=self.cipher,
+            public_base_url=get_settings().public_base_url,
+        )
+        reply_html = mailbox.communications._sanitized_email_content(reply_html)
         if email_key.startswith("linked-"):
             try:
                 customer_text, email_text = email_key.removeprefix("linked-").split("-", 1)
@@ -1511,27 +1531,53 @@ class HubAgentService:
                 email_id = int(email_text)
             except ValueError as exc:
                 raise HubAgentError("Die ausgewählte E-Mail ist ungültig.") from exc
-            email = self.db.scalar(
-                select(CustomerZohoEmail).where(
-                    CustomerZohoEmail.customer_id == customer_id,
-                    CustomerZohoEmail.id == email_id,
-                )
+            reply = CustomerCommunicationService(
+                db=self.db,
+                cipher=self.cipher,
+                public_base_url=get_settings().public_base_url,
+            ).get_email_reply(
+                customer_id=customer_id,
+                email_id=email_id,
             )
-            if email is None or email.direction != "inbound":
-                raise HubAgentError("Nur auf eingegangene E-Mails kann geantwortet werden.")
+            draft = mailbox.save_draft(
+                draft_id=None,
+                sender_email=DEFAULT_HUB_MAILBOX_SENDER_EMAIL,
+                recipient_email=reply.recipient_email,
+                recipient_key=reply.recipient_key,
+                recipient_customer_id=customer_id,
+                recipient_name=reply.recipient_name,
+                subject=reply.subject,
+                content=f"{reply_html}{reply.content}",
+                cc_emails="",
+                template_id="",
+                reply_to_email_id=str(reply.email_id),
+                forward_from_email_id="",
+            )
         elif email_key.startswith("unassigned-"):
             try:
                 email_id = int(email_key.removeprefix("unassigned-"))
             except ValueError as exc:
                 raise HubAgentError("Die ausgewählte E-Mail ist ungültig.") from exc
-            email = self.db.get(HubMailboxEmail, email_id)
-            if email is None or email.direction != "inbound" or email.mailbox_state == "draft":
-                raise HubAgentError("Nur auf eingegangene E-Mails kann geantwortet werden.")
+            reply = mailbox.get_unassigned_email_compose_context(email_id=email_id, action="reply")
+            draft = mailbox.save_draft(
+                draft_id=None,
+                sender_email=DEFAULT_HUB_MAILBOX_SENDER_EMAIL,
+                recipient_email=self._required_text(reply.get("recipient_email"), "Empfängeradresse"),
+                recipient_key="",
+                recipient_customer_id=None,
+                recipient_name="",
+                subject=self._required_text(reply.get("subject"), "E-Mail-Betreff"),
+                content=f"{reply_html}{self._required_text(reply.get('content'), 'Antwortinhalt')}",
+                cc_emails="",
+                template_id="",
+                reply_to_email_id=str(reply.get("reply_to_email_id") or ""),
+                forward_from_email_id="",
+            )
         else:
             raise HubAgentError("Diese E-Mail kann nicht beantwortet werden.")
         return {
-            "label": "Antwort im E-Mail-Editor öffnen",
-            "href": f"/emails?folder=inbox&selected={email_key}&agent_reply=1",
+            "label": "Antwortentwurf im E-Mail-Editor öffnen",
+            "href": f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1",
         }
 
     def _create_case_from_email(self, values: dict[str, Any], *, actor: str) -> dict[str, str]:
@@ -1727,9 +1773,9 @@ class HubAgentService:
                 )
                 if line
             )
-        if action_type == "open_email_reply":
+        if action_type == "create_email_reply_draft":
             return (
-                "Die vorhandene Hub-Antwort wird geöffnet.",
+                "Der Antworttext wird direkt als unversendeter Entwurf angelegt.",
                 "Empfänger, Re:-Betreff, Signatur und Zitat übernimmt der E-Mail-Editor.",
                 "Die E-Mail wird nicht automatisch versendet.",
             )
@@ -1781,6 +1827,13 @@ class HubAgentService:
         if not isinstance(raw_actions, list) or len(raw_actions) > 5:
             raise HubAgentError("OpenAI hat ungültige Aktionsvorschläge geliefert.")
         actions = [cls._normalize_action(action) for action in raw_actions]
+        reply_draft_actions = [
+            action
+            for action in actions
+            if action["action_type"] == "create_email_reply_draft"
+        ]
+        if reply_draft_actions and len(actions) != 1:
+            raise HubAgentError("Ein Antwortentwurf darf nicht mit weiteren Agent-Aktionen kombiniert werden.")
         valid_email_keys = set(allowed_email_keys)
         if email_context is not None:
             valid_email_keys.add(email_context.key)
@@ -1788,7 +1841,7 @@ class HubAgentService:
             input_values = action["input"]
             if action["action_type"] in _EMAIL_CONTEXT_ACTION_TYPES:
                 if not valid_email_keys:
-                    if action["action_type"] == "open_email_reply":
+                    if action["action_type"] == "create_email_reply_draft":
                         raise HubAgentError("Eine Antwort benötigt eine ausgewählte E-Mail als Kontext.")
                     raise HubAgentError("Ein Fall aus einer E-Mail benötigt eine ausgewählte E-Mail als Kontext.")
                 requested_email_key = cls._text(input_values.get("email_key"))
@@ -1796,6 +1849,8 @@ class HubAgentService:
                     input_values["email_key"] = next(iter(valid_email_keys))
                 elif requested_email_key not in valid_email_keys:
                     raise HubAgentError("Für diesen Fall muss eine der ausgewählten E-Mails eindeutig angegeben werden.")
+            if action["action_type"] == "create_email_reply_draft" and not cls._text(input_values.get("email_html")):
+                raise HubAgentError("Der Antwortentwurf enthält keinen Antworttext.")
             if (
                 email_context is not None
                 and email_context.customer_name

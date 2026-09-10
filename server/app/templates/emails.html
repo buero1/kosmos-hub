@@ -848,25 +848,20 @@
           });
       }
 
-      function openAgentReplyFromQuery() {
+      function openAgentReplyDraftFromQuery() {
         var url = new URL(window.location.href);
-        if (url.searchParams.get('agent_reply') !== '1') return;
+        if (url.searchParams.get('agent_reply_draft') !== '1') return;
         var selected = url.searchParams.get('selected') || '';
-        var linked = /^linked-(\d+)-(\d+)$/.exec(selected);
-        var unassigned = /^unassigned-(\d+)$/.exec(selected);
-        if (!linked && !unassigned) return;
-        url.searchParams.delete('agent_reply');
+        var draft = /^unassigned-(\d+)$/.exec(selected);
+        if (!draft) return;
+        url.searchParams.delete('agent_reply_draft');
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-        var replyButton = document.createElement('button');
-        replyButton.dataset.mailboxComposeAction = 'reply';
-        replyButton.dataset.mailboxComposeCustomerId = linked ? linked[1] : '';
-        replyButton.dataset.mailboxComposeEmailId = linked ? linked[2] : unassigned[1];
+        var draftButton = document.createElement('button');
+        draftButton.dataset.mailboxDraftId = draft[1];
         window.setTimeout(function () {
-          prepareMailboxComposerAction(replyButton);
+          prepareMailboxDraftAction(draftButton);
         }, 0);
       }
-
-      openAgentReplyFromQuery();
 
       function prepareMailboxDraftAction(button) {
         if (!mailboxComposerTrigger) return;
@@ -899,6 +894,8 @@
             mailboxComposerActionController = null;
           });
       }
+
+      openAgentReplyDraftFromQuery();
 
       function saveMailboxDraft(options) {
         options = options || {};
