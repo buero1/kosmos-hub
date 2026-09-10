@@ -641,7 +641,7 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
                 recipient_name="Max Mustermann",
                 recipient_email="max@example.test",
                 subject="Re: Änderungswunsch",
-                content="<br><p><strong>Am heute schrieb Max Mustermann:</strong></p><blockquote>Bitte die Startseite ändern.</blockquote>",
+                content="<br><br><p><strong>Am heute schrieb Max Mustermann:</strong></p><blockquote>Bitte die Startseite ändern.</blockquote>",
             ),
         )
         reply_action = _add_action(

@@ -397,7 +397,7 @@ def test_mailbox_prepares_replies_and_forwards_for_unassigned_inbound_emails():
         assert reply["subject"] == "Re: Rückfrage zur Website"
         assert reply["cc_emails"] == ["info@kosmos-medien.de", "team@example.de"]
         assert reply["reply_to_email_id"] == inbound.id
-        assert str(reply["content"]).startswith("<br>")
+        assert str(reply["content"]).startswith("<br><br>")
         assert "Bitte um Rückmeldung." in str(reply["content"])
         assert forward["recipient_email"] == ""
         assert forward["subject"] == "Fwd: Rückfrage zur Website"
