@@ -3193,7 +3193,7 @@
         height: 264px !important;
         min-height: 264px !important;
         max-height: 264px !important;
-        overflow-y: auto;
+        overflow: hidden;
       }
       .email-compose-form .email-rich-editor .jodit-wysiwyg_iframe {
         height: 264px !important;
@@ -3253,10 +3253,15 @@
         color: color-mix(in srgb, var(--accent) 58%, #fffdfa);
       }
       .email-editor-ai-prompt-submit:disabled { cursor: not-allowed; opacity: 1; }
+      .email-editor-ai-prompt-submit:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, #fffdfa); color: color-mix(in srgb, var(--accent) 72%, #fffdfa); }
       .email-editor-ai-prompt-submit svg { width: 1.65rem; height: 1.65rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
       .email-editor-ai-prompt-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
+      .email-editor-ai-prompt-actions[hidden] { display: none; }
       .email-editor-ai-prompt button.email-editor-ai-prompt-action { display: grid; width: var(--control-v1-height); min-width: var(--control-v1-height); height: var(--control-v1-height); min-height: var(--control-v1-height); place-items: center; margin: 0; padding: 0; line-height: 1; }
-      .email-editor-ai-prompt-accept { background: #dff3e5; border-color: #83b894; color: #1f6e47; }
+      .email-editor-ai-prompt button.email-editor-ai-prompt-accept { border: 0; background: #dff3e5; color: #1f6e47; }
+      .email-editor-ai-prompt button.email-editor-ai-prompt-accept:hover { background: #cdebd8; color: #155a38; }
+      .email-editor-ai-prompt button.email-editor-ai-prompt-action[data-email-ai-reject] { border: 0; background: #fff0f0; color: #9d2424; }
+      .email-editor-ai-prompt button.email-editor-ai-prompt-action[data-email-ai-reject]:hover { background: #f9dede; color: #7e1c1c; }
       .email-editor-ai-prompt-action-icon { display: block; width: 1.65rem; height: 1.65rem; }
       .email-editor-ai-prompt-feedback {
         position: absolute;
@@ -4106,7 +4111,7 @@
           if (!content || !content.closest(".email-compose-form")) return;
           var frame = editorFrame(content);
           if (!frame) return;
-          frame.setAttribute("scrolling", "yes");
+          frame.setAttribute("scrolling", "auto");
           try {
             var documentElement = frame.contentDocument && frame.contentDocument.documentElement;
             var body = frame.contentDocument && frame.contentDocument.body;
