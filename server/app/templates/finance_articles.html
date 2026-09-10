@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Artikel · Finance · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}<p class="notice-success">Der Artikel wurde im Hub angelegt.</p>{% endif %}
+    {% if deleted %}<p class="notice-success">Der Artikel wurde im Hub gelöscht.</p>{% endif %}
+    <div class="section-heading"><div><p class="eyebrow">Finance</p><h2>Artikel</h2></div><div class="communication-heading-actions"><a class="button button-variant-1" href="/finance/articles/new">Artikel neu anlegen</a></div></div>
+    <article class="card customer-detail-panel"><div class="table-scroll"><table class="finance-directory-table"><thead><tr><th>Name</th><th>Artikelnummer / SKU</th><th>Status</th><th>Art</th><th>Verkaufspreis netto</th><th>MwSt.</th></tr></thead><tbody>{% for entry in entries %}<tr><td><a href="/finance/articles/{{ entry.article.id }}">{{ entry.name }}</a></td><td>{{ entry.sku }}</td><td>{{ entry.status }}</td><td>{{ entry.kind }}</td><td>{{ entry.net_price }}</td><td>{{ entry.tax_rate }}</td></tr>{% else %}<tr><td colspan="6">Noch keine Artikel vorhanden.</td></tr>{% endfor %}</tbody></table></div></article>
+  </section>
+{% endblock %}

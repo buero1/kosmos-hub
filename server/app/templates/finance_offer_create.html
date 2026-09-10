@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/finance_field_control.html" import finance_field_control %}
+{% block title %}Angebot neu anlegen · Finance · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% call module_detail_header("/finance/offers", "Zurück zu Angebote", "Finance", "Angebot neu anlegen", has_actions=true) %}<a class="button button-secondary button-variant-1" href="/finance/offers">Abbrechen</a><button class="button button-variant-1" type="submit" form="finance-offer-create-form">Angebot anlegen</button>{% endcall %}
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <form id="finance-offer-create-form" method="post" action="/finance/offers" class="communication-form finance-offer-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Angebote</p><h3>Alle Felder</h3><p class="subtle">Das Angebot wird ausschließlich im Hub gespeichert.</p></div></div><div class="customer-field-editor-grid">{% for field in fields %}{{ finance_field_control(field, submitted_values.get("offer_field__" ~ field.key, ""), customers, contacts, selected_customer_id, selected_contact_id, "offer") }}{% endfor %}</div></article>{% include "partials/finance_offer_positions.html" %}</form>
+  </section>
+{% endblock %}

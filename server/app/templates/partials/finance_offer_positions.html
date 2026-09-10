@@ -1,0 +1,139 @@
+<article class="card customer-detail-panel finance-positions-panel" data-finance-position-editor>
+  <div class="customer-detail-panel-heading">
+    <div>
+      <p class="eyebrow">Repeater</p>
+      <h3>Positionen</h3>
+      <p class="subtle">Artikel, Menge, Tarif, USt. und Betrag werden wie auf dem Angebot zeilenweise geführt.</p>
+    </div>
+  </div>
+  <div class="table-scroll">
+    <table class="finance-positions-table">
+      <thead><tr><th>Artikeldetails</th><th>Menge</th><th>Tarif</th><th>USt.</th><th>Betrag netto</th><th class="finance-position-action-heading"><span class="visually-hidden">Aktion</span></th></tr></thead>
+      <tbody data-finance-position-rows>
+        {% for row in line_rows %}
+          <tr data-finance-position-row>
+            <td class="finance-position-details">
+              <select name="offer_line__{{ loop.index0 }}__article_id" data-finance-line-article>
+                <option value="">Freitextposition</option>
+                {% for article in articles %}
+                  <option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"{% if row.article_id|string == article.article.id|string %} selected{% endif %}>{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Bezeichnung" data-finance-line-field="name">
+              <input type="text" name="offer_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" placeholder="Artikelnummer / SKU" data-finance-line-field="sku">
+              <textarea name="offer_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description">{{ row.description }}</textarea>
+            </td>
+            <td><input type="number" name="offer_line__{{ loop.index0 }}__quantity" value="{{ row.quantity }}" min="0.001" step="0.001" inputmode="decimal" data-finance-line-field="quantity"><input type="text" name="offer_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-line-field="unit"></td>
+            <td><input type="number" name="offer_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price }}" min="0" step="0.01" inputmode="decimal" data-finance-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="offer_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent }}" min="0" max="100" step="0.01" inputmode="decimal" data-finance-line-field="discount_percent"></label></td>
+            <td><select name="offer_line__{{ loop.index0 }}__tax_rate" data-finance-line-field="tax_rate"><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
+            <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
+            <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="finance-positions-footer">
+    <button class="button button-secondary button-variant-2" type="button" data-finance-position-add>Neue Position hinzufügen</button>
+    <dl class="finance-totals" data-finance-totals>
+      <div><dt>Zwischensumme</dt><dd data-finance-total="subtotal">0,00 EUR</dd></div>
+      <div><dt>Rabatt</dt><dd data-finance-total="discount">0,00 EUR</dd></div>
+      <div><dt>USt.</dt><dd data-finance-total="tax">0,00 EUR</dd></div>
+      <div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-total="total">0,00 EUR</dd></div>
+    </dl>
+  </div>
+  <template data-finance-position-template>
+    <tr data-finance-position-row>
+      <td class="finance-position-details">
+        <select name="offer_line__INDEX__article_id" data-finance-line-article>
+          <option value="">Freitextposition</option>
+          {% for article in articles %}<option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}">{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>{% endfor %}
+        </select>
+        <input type="text" name="offer_line__INDEX__name" placeholder="Bezeichnung" data-finance-line-field="name">
+        <input type="text" name="offer_line__INDEX__sku" placeholder="Artikelnummer / SKU" data-finance-line-field="sku">
+        <textarea name="offer_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"></textarea>
+      </td>
+      <td><input type="number" name="offer_line__INDEX__quantity" value="1" min="0.001" step="0.001" inputmode="decimal" data-finance-line-field="quantity"><input type="text" name="offer_line__INDEX__unit" placeholder="Einheit" data-finance-line-field="unit"></td>
+      <td><input type="number" name="offer_line__INDEX__unit_price" min="0" step="0.01" inputmode="decimal" data-finance-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="offer_line__INDEX__discount_percent" value="0" min="0" max="100" step="0.01" inputmode="decimal" data-finance-line-field="discount_percent"></label></td>
+      <td><select name="offer_line__INDEX__tax_rate" data-finance-line-field="tax_rate"><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td>
+      <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
+      <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
+    </tr>
+  </template>
+</article>
+<script>
+  (function () {
+    function parseNumber(value) { return Number(String(value || '').replace(',', '.')) || 0; }
+    function editorCurrency(editor) {
+      var select = editor.closest('form').querySelector('select[name="offer_field__currency"]');
+      return select && select.value ? select.value : 'EUR';
+    }
+    function formatMoney(value, currency) {
+      return new Intl.NumberFormat('de-DE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(value);
+    }
+    function updateRow(editor, row) {
+      var quantity = parseNumber(row.querySelector('[data-finance-line-field="quantity"]').value);
+      var price = parseNumber(row.querySelector('[data-finance-line-field="unit_price"]').value);
+      var discount = Math.min(100, Math.max(0, parseNumber(row.querySelector('[data-finance-line-field="discount_percent"]').value)));
+      var net = quantity * price * (1 - discount / 100);
+      row.querySelector('[data-finance-line-amount]').textContent = formatMoney(net, editorCurrency(editor));
+      return { subtotal: quantity * price, net: net, tax: net * parseNumber(row.querySelector('[data-finance-line-field="tax_rate"]').value) / 100 };
+    }
+    function updateTotals(editor) {
+      var sums = { subtotal: 0, net: 0, tax: 0 };
+      editor.querySelectorAll('[data-finance-position-row]').forEach(function (row) {
+        var values = updateRow(editor, row);
+        sums.subtotal += values.subtotal; sums.net += values.net; sums.tax += values.tax;
+      });
+      var currency = editorCurrency(editor);
+      editor.querySelector('[data-finance-total="subtotal"]').textContent = formatMoney(sums.subtotal, currency);
+      editor.querySelector('[data-finance-total="discount"]').textContent = formatMoney(sums.subtotal - sums.net, currency);
+      editor.querySelector('[data-finance-total="tax"]').textContent = formatMoney(sums.tax, currency);
+      editor.querySelector('[data-finance-total="total"]').textContent = formatMoney(sums.net + sums.tax, currency);
+    }
+    function bindRow(editor, row) {
+      row.addEventListener('input', function () { updateTotals(editor); });
+      row.addEventListener('change', function (event) {
+        if (event.target.matches('[data-finance-line-article]')) {
+          var option = event.target.options[event.target.selectedIndex];
+          [['name', 'name'], ['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price']].forEach(function (pair) {
+            var field = row.querySelector('[data-finance-line-field="' + pair[0] + '"]');
+            if (field && option.dataset[pair[1]]) { field.value = option.dataset[pair[1]]; }
+          });
+          var tax = row.querySelector('[data-finance-line-field="tax_rate"]');
+          if (tax && option.dataset.tax) { tax.value = option.dataset.tax.replace(' %', ''); }
+        }
+        updateTotals(editor);
+      });
+      row.querySelector('[data-finance-position-remove]').addEventListener('click', function () { row.remove(); updateTotals(editor); });
+    }
+    document.querySelectorAll('[data-finance-position-editor]').forEach(function (editor) {
+      var rows = editor.querySelector('[data-finance-position-rows]');
+      var template = editor.querySelector('[data-finance-position-template]');
+      var nextIndex = rows.querySelectorAll('[data-finance-position-row]').length;
+      rows.querySelectorAll('[data-finance-position-row]').forEach(function (row) { bindRow(editor, row); });
+      editor.querySelector('[data-finance-position-add]').addEventListener('click', function () {
+        var fragment = template.content.cloneNode(true);
+        fragment.querySelectorAll('[name]').forEach(function (element) { element.name = element.name.replace(/INDEX/g, String(nextIndex)); });
+        var row = fragment.querySelector('[data-finance-position-row]');
+        rows.appendChild(fragment); bindRow(editor, row); nextIndex += 1; updateTotals(editor);
+      });
+      var form = editor.closest('form');
+      var currency = form.querySelector('select[name="offer_field__currency"]');
+      if (currency) { currency.addEventListener('change', function () { updateTotals(editor); }); }
+      var customer = form.querySelector('[data-finance-customer]');
+      var contact = form.querySelector('[data-finance-contact]');
+      function filterContacts() {
+        if (!customer || !contact) { return; }
+        Array.prototype.forEach.call(contact.options, function (option) {
+          if (!option.dataset.customerId) { return; }
+          var available = !customer.value || option.dataset.customerId === customer.value;
+          option.hidden = !available; option.disabled = !available;
+          if (!available && option.selected) { contact.value = ''; }
+        });
+      }
+      if (customer) { customer.addEventListener('change', filterContacts); filterContacts(); }
+      updateTotals(editor);
+    });
+  }());
+</script>

@@ -68,6 +68,13 @@ from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFOR
 from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadError, HubLeadService
 from app.services.hub_lead_emails import HubLeadEmailService
 from app.services.hub_lead_notes import HubLeadNoteService
+from app.services.hub_finance import (
+    ARTICLE_FIELDS_LAYOUT_KEY,
+    OFFER_FIELDS_LAYOUT_KEY,
+    HubFinanceError,
+    HubFinanceService,
+)
+from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
@@ -936,6 +943,314 @@ async def delete_case_from_hub(
     )
     db.commit()
     return RedirectResponse(url="/cases?deleted=true", status_code=303)
+
+
+@router.get("/finance")
+def finance_page(request: Request):
+    _require_hub_admin(request)
+    return RedirectResponse(url="/finance/articles", status_code=303)
+
+
+@router.get("/finance/articles", response_class=HTMLResponse)
+def finance_articles_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: bool = False,
+    deleted: bool = False,
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "finance_articles.html",
+        {
+            "entries": HubFinanceService(db=db, cipher=get_secret_cipher()).list_articles(),
+            "created": created,
+            "deleted": deleted,
+        },
+    )
+
+
+@router.get("/finance/articles/new", response_class=HTMLResponse)
+def new_finance_article_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "finance_article_create.html", _finance_article_create_context(request, db))
+
+
+@router.post("/finance/articles")
+async def create_finance_article_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = _finance_submitted_values(form, prefix="article_field__")
+    try:
+        article = HubFinanceService(db=db, cipher=get_secret_cipher()).create_article(submitted_values=submitted_values)
+    except HubFinanceError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "finance_article_create.html",
+            _finance_article_create_context(request, db, submitted_values=submitted_values, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-finance-article",
+        result="ok",
+        detail=f"Created Finance Article {article.id}; article data is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/finance/articles/{article.id}", status_code=303)
+
+
+@router.get("/finance/articles/{article_id}", response_class=HTMLResponse)
+def finance_article_detail_page(
+    article_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
+):
+    _require_hub_admin(request)
+    service = HubFinanceService(db=db, cipher=get_secret_cipher())
+    detail = service.get_article_detail(article_id=article_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    return templates.TemplateResponse(
+        request,
+        "finance_article_detail.html",
+        _finance_article_detail_context(
+            request,
+            detail=detail,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
+    )
+
+
+@router.post("/finance/articles/{article_id}/fields")
+async def update_finance_article_fields(article_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        article = HubFinanceService(db=db, cipher=get_secret_cipher()).update_article(
+            article_id=article_id,
+            submitted_values=_finance_submitted_values(form, prefix="article_field__"),
+        )
+    except HubFinanceError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/articles/{article_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-finance-article",
+        result="ok",
+        detail=f"Updated Finance Article {article.id}; article data is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Artikeldaten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/finance/articles/{article_id}?{query}#finance-article-fields", status_code=303)
+
+
+@router.post("/finance/articles/{article_id}/layout")
+async def update_finance_article_layout(article_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    if HubFinanceService(db=db, cipher=get_secret_cipher()).get_article_detail(article_id=article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=ARTICLE_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in ARTICLE_FIELDS),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/finance/articles/{article_id}?{query}#finance-article-fields", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="update-finance-article-layout", result="ok", detail="Updated the global finance article field layout.")
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Artikelfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/finance/articles/{article_id}?{query}#finance-article-fields", status_code=303)
+
+
+@router.post("/finance/articles/{article_id}/delete")
+async def delete_finance_article(article_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        article = HubFinanceService(db=db, cipher=get_secret_cipher()).delete_article(article_id=article_id)
+    except HubFinanceError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/articles/{article_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="delete-finance-article", result="ok", detail=f"Deleted Finance Article {article.id}; no Zoho Books record was changed.")
+    db.commit()
+    return RedirectResponse(url="/finance/articles?deleted=true", status_code=303)
+
+
+@router.get("/finance/offers", response_class=HTMLResponse)
+def finance_offers_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: bool = False,
+    deleted: bool = False,
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "finance_offers.html",
+        {
+            "entries": HubFinanceService(db=db, cipher=get_secret_cipher()).list_offers(),
+            "created": created,
+            "deleted": deleted,
+        },
+    )
+
+
+@router.get("/finance/offers/new", response_class=HTMLResponse)
+def new_finance_offer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "finance_offer_create.html", _finance_offer_create_context(request, db))
+
+
+@router.post("/finance/offers")
+async def create_finance_offer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = _finance_submitted_values(form, prefix="offer_")
+    customer_id = _optional_form_id(form.get("customer_id"))
+    contact_id = _optional_form_id(form.get("contact_id"))
+    try:
+        offer = HubFinanceService(db=db, cipher=get_secret_cipher()).create_offer(
+            customer_id=customer_id,
+            contact_id=contact_id,
+            submitted_values=submitted_values,
+        )
+    except (ValueError, HubFinanceError) as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "finance_offer_create.html",
+            _finance_offer_create_context(
+                request,
+                db,
+                selected_customer_id=customer_id,
+                selected_contact_id=contact_id,
+                submitted_values=submitted_values,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="create-finance-offer", result="ok", detail=f"Created Finance Offer {offer.id}; offer data is not retained in the audit log.")
+    db.commit()
+    return RedirectResponse(url=f"/finance/offers/{offer.id}", status_code=303)
+
+
+@router.get("/finance/offers/{offer_id}", response_class=HTMLResponse)
+def finance_offer_detail_page(
+    offer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
+):
+    _require_hub_admin(request)
+    service = HubFinanceService(db=db, cipher=get_secret_cipher())
+    detail = service.get_offer_detail(offer_id=offer_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Offer not found.")
+    return templates.TemplateResponse(
+        request,
+        "finance_offer_detail.html",
+        _finance_offer_detail_context(
+            request,
+            service=service,
+            detail=detail,
+            fields=fields,
+            fields_message=fields_message,
+            layout=layout,
+            layout_message=layout_message,
+        ),
+    )
+
+
+@router.post("/finance/offers/{offer_id}/fields")
+async def update_finance_offer_fields(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        offer = HubFinanceService(db=db, cipher=get_secret_cipher()).update_offer(
+            offer_id=offer_id,
+            customer_id=_optional_form_id(form.get("customer_id")),
+            contact_id=_optional_form_id(form.get("contact_id")),
+            submitted_values=_finance_submitted_values(form, prefix="offer_"),
+        )
+    except (ValueError, HubFinanceError) as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="update-finance-offer", result="ok", detail=f"Updated Finance Offer {offer.id}; offer data is not retained in the audit log.")
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Angebotsdaten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}#finance-offer-fields", status_code=303)
+
+
+@router.post("/finance/offers/{offer_id}/layout")
+async def update_finance_offer_layout(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    if HubFinanceService(db=db, cipher=get_secret_cipher()).get_offer_detail(offer_id=offer_id) is None:
+        raise HTTPException(status_code=404, detail="Offer not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=OFFER_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in OFFER_FIELDS),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}#finance-offer-fields", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="update-finance-offer-layout", result="ok", detail="Updated the global finance offer field layout.")
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Angebotsfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}#finance-offer-fields", status_code=303)
+
+
+@router.post("/finance/offers/{offer_id}/delete")
+async def delete_finance_offer(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        offer = HubFinanceService(db=db, cipher=get_secret_cipher()).delete_offer(offer_id=offer_id)
+    except HubFinanceError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="delete-finance-offer", result="ok", detail=f"Deleted Finance Offer {offer.id}; no Zoho Books record was changed.")
+    db.commit()
+    return RedirectResponse(url="/finance/offers?deleted=true", status_code=303)
 
 
 @router.get("/calendar", response_class=HTMLResponse)
@@ -5613,6 +5928,141 @@ def _case_create_context(
         "error": error,
         "csrf_token": get_csrf_token(request),
     }
+
+
+def _finance_article_create_context(
+    request: Request,
+    db: Session,
+    *,
+    submitted_values: dict[str, str] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    values = HubFinanceService(db=db, cipher=get_secret_cipher()).new_article_values()
+    values.update(submitted_values or {})
+    return {
+        "fields": ARTICLE_FIELDS,
+        "submitted_values": values,
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_article_detail_context(
+    request: Request,
+    *,
+    detail: object,
+    fields: str,
+    fields_message: str,
+    layout: str,
+    layout_message: str,
+) -> dict[str, object]:
+    return {
+        "detail": detail,
+        "fields_state": fields if fields in {"success", "error"} else "",
+        "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+        "layout_state": layout if layout in {"success", "error"} else "",
+        "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_offer_create_context(
+    request: Request,
+    db: Session,
+    *,
+    selected_customer_id: int | None = None,
+    selected_contact_id: int | None = None,
+    submitted_values: dict[str, str] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    service = HubFinanceService(db=db, cipher=get_secret_cipher())
+    values = service.new_offer_values()
+    values.update(submitted_values or {})
+    return {
+        "fields": OFFER_FIELDS,
+        "articles": service.article_options(),
+        "customers": service.list_linkable_customers(),
+        "contacts": service.list_linkable_contacts(),
+        "selected_customer_id": selected_customer_id,
+        "selected_contact_id": selected_contact_id,
+        "submitted_values": values,
+        "line_rows": _finance_offer_line_form_rows(values),
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_offer_detail_context(
+    request: Request,
+    *,
+    service: HubFinanceService,
+    detail: object,
+    fields: str,
+    fields_message: str,
+    layout: str,
+    layout_message: str,
+) -> dict[str, object]:
+    line_rows = []
+    for line in detail.lines:
+        line_rows.append({
+            "article_id": str(line.article_id or ""),
+            "name": line.name,
+            "sku": line.sku,
+            "description": line.description,
+            "quantity": line.quantity,
+            "unit": line.unit,
+            "unit_price": line.unit_price,
+            "discount_percent": line.discount_percent,
+            "tax_rate": line.tax_rate,
+        })
+    if not line_rows:
+        line_rows = _finance_offer_line_form_rows(service.new_offer_values())
+    return {
+        "detail": detail,
+        "articles": service.article_options(),
+        "customers": service.list_linkable_customers(),
+        "contacts": service.list_linkable_contacts(),
+        "line_rows": line_rows,
+        "fields_state": fields if fields in {"success", "error"} else "",
+        "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
+        "layout_state": layout if layout in {"success", "error"} else "",
+        "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _finance_offer_line_form_rows(values: dict[str, str]) -> list[dict[str, str]]:
+    rows: dict[int, dict[str, str]] = {}
+    for key, value in values.items():
+        parts = key.split("__")
+        if len(parts) != 3 or parts[0] != "offer_line" or not parts[1].isdigit():
+            continue
+        rows.setdefault(int(parts[1]), {})[parts[2]] = str(value)
+    defaults = {
+        "article_id": "",
+        "name": "",
+        "sku": "",
+        "description": "",
+        "quantity": "1",
+        "unit": "",
+        "unit_price": "",
+        "discount_percent": "0",
+        "tax_rate": "19",
+    }
+    return [{**defaults, **rows[index]} for index in sorted(rows)] or [defaults]
+
+
+def _finance_submitted_values(form: object, *, prefix: str) -> dict[str, str]:
+    return {
+        str(key): str(value)
+        for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith(prefix)
+    }
+
+
+def _optional_form_id(raw_value: object) -> int | None:
+    value = str(raw_value or "").strip()
+    return int(value) if value else None
 
 
 def _lead_create_context(

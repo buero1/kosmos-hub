@@ -128,6 +128,39 @@
         color: #075f4e;
         background: var(--accent-soft);
       }
+      .app-navigation-group { display: grid; gap: 0.15rem; }
+      .app-navigation-group-summary {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.62rem 0.7rem;
+        border-radius: 9px;
+        color: var(--ink);
+        cursor: pointer;
+        font: 700 0.84rem "Trebuchet MS", sans-serif;
+        list-style: none;
+      }
+      .app-navigation-group-summary::-webkit-details-marker { display: none; }
+      .app-navigation-group-summary::before {
+        width: 0.42rem;
+        height: 0.42rem;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        content: "";
+        transform: rotate(-45deg);
+        transition: transform 140ms ease;
+      }
+      .app-navigation-group[open] .app-navigation-group-summary::before { transform: rotate(45deg); }
+      .app-navigation-group-summary:hover,
+      .app-navigation-group-summary:focus-visible,
+      .app-navigation-group-summary.is-active { color: #075f4e; background: var(--accent-soft); }
+      .app-navigation-group-links { display: grid; gap: 0.1rem; margin: 0.1rem 0 0.2rem 1.15rem; }
+      .app-navigation .app-navigation-group-links a,
+      .app-navigation-placeholder {
+        padding: 0.45rem 0.7rem;
+        font-size: 0.79rem;
+      }
+      .app-navigation-placeholder { color: var(--muted); font: 700 0.79rem "Trebuchet MS", sans-serif; }
       .app-main {
         width: 100%;
         min-width: 0;
@@ -2198,6 +2231,53 @@
         overflow-x: auto;
         border-radius: 18px;
       }
+      .finance-directory-table { min-width: 760px; }
+      .finance-offer-form { display: grid; gap: 1rem; }
+      .finance-positions-panel { overflow: visible; }
+      .finance-positions-table { min-width: 940px; }
+      .finance-positions-table th { color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; }
+      .finance-positions-table th:first-child { width: 43%; }
+      .finance-positions-table th:nth-child(2) { width: 13%; }
+      .finance-positions-table th:nth-child(3) { width: 16%; }
+      .finance-positions-table th:nth-child(4) { width: 10%; }
+      .finance-positions-table th:nth-child(5) { width: 14%; }
+      .finance-position-details { display: grid; gap: 0.45rem; }
+      .finance-position-details > strong,
+      .finance-position-details > small,
+      .finance-position-details > p { margin: 0; }
+      .finance-position-details small,
+      .finance-positions-table td > small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.78rem; }
+      .finance-positions-table input,
+      .finance-positions-table select,
+      .finance-positions-table textarea { width: 100%; min-width: 0; }
+      .finance-positions-table td:nth-child(2),
+      .finance-positions-table td:nth-child(3) { min-width: 8.8rem; }
+      .finance-position-discount { display: grid; gap: 0.2rem; margin-top: 0.45rem; color: var(--muted); font-size: 0.76rem; }
+      .finance-position-amount { color: var(--ink); font-weight: 700; white-space: nowrap; }
+      .finance-position-action-heading,
+      .finance-positions-table td:last-child { width: 2.6rem; padding-left: 0.25rem; padding-right: 0.25rem; text-align: center; }
+      .finance-position-remove {
+        width: 1.85rem;
+        height: 1.85rem;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: #f6e2d9;
+        color: #843a26;
+        cursor: pointer;
+        font: 700 1.15rem/1 Arial, sans-serif;
+      }
+      .finance-position-remove:hover,
+      .finance-position-remove:focus-visible { background: #efd0c1; outline: 2px solid #843a26; outline-offset: 2px; }
+      .finance-positions-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem); align-items: start; gap: 1.5rem; }
+      .finance-totals { display: grid; margin: 0; border: 1px solid var(--border); border-radius: var(--control-v1-radius); overflow: hidden; }
+      .finance-totals div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
+      .finance-totals div:last-child { border-bottom: 0; }
+      .finance-totals dt { color: var(--muted); }
+      .finance-totals dd { margin: 0; font-weight: 700; white-space: nowrap; }
+      .finance-totals .finance-total-grand { background: var(--accent-soft); color: var(--ink); }
+      .finance-totals .finance-total-grand dt,
+      .finance-totals .finance-total-grand dd { color: inherit; font-size: 1rem; }
       .update-workbench-table {
         min-width: 1320px;
       }
@@ -4036,6 +4116,8 @@
         }
         .customer-fields-grid,
         .customer-field-editor-grid { grid-template-columns: 1fr; }
+        .finance-positions-footer { grid-template-columns: 1fr; }
+        .finance-totals { width: 100%; }
         .styling-page-layout { grid-template-columns: 1fr; }
         .styling-settings-grid-foundation,
         .styling-settings-grid-variant { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -4158,6 +4240,16 @@
           <a href="/contacts"{% if request.url.path.startswith("/contacts") or "/contacts/" in request.url.path %} class="is-active"{% endif %}>Kontakte</a>
           <a href="/leads"{% if request.url.path.startswith("/leads") %} class="is-active"{% endif %}>Leads</a>
           <a href="/cases"{% if request.url.path.startswith("/cases") %} class="is-active"{% endif %}>Fälle</a>
+          <details class="app-navigation-group"{% if request.url.path.startswith("/finance") %} open{% endif %}>
+            <summary class="app-navigation-group-summary{% if request.url.path.startswith('/finance') %} is-active{% endif %}">Finance</summary>
+            <div class="app-navigation-group-links">
+              <a href="/finance/articles"{% if request.url.path.startswith("/finance/articles") %} class="is-active"{% endif %}>Artikel</a>
+              <a href="/finance/offers"{% if request.url.path.startswith("/finance/offers") %} class="is-active"{% endif %}>Angebote</a>
+              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Aufträge</span>
+              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Rechnungen</span>
+              <span class="app-navigation-placeholder" title="Wird als Nächstes ergänzt">Periodische Rechnungen</span>
+            </div>
+          </details>
           <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>
           <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
           <a href="/backups"{% if request.url.path.startswith("/backups") %} class="is-active"{% endif %}>Backups</a>

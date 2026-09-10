@@ -28,6 +28,8 @@ from app.models.hub_case import HubCase
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_email import HubLeadEmail
 from app.models.hub_lead_note import HubLeadNote
+from app.models.hub_finance_article import HubFinanceArticle
+from app.models.hub_finance_offer import HubFinanceOffer, HubFinanceOfferLine
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
@@ -144,6 +146,18 @@ def _ensure_phase_one_schema() -> None:
     if "hub_lead_notes" not in table_names:
         HubLeadNote.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_lead_notes table.")
+
+    if "hub_finance_articles" not in table_names:
+        HubFinanceArticle.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_finance_articles table.")
+
+    if "hub_finance_offers" not in table_names:
+        HubFinanceOffer.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_finance_offers table.")
+
+    if "hub_finance_offer_lines" not in table_names:
+        HubFinanceOfferLine.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_finance_offer_lines table.")
 
     if "zoho_books_connections" not in table_names:
         ZohoBooksConnection.__table__.create(bind=engine, checkfirst=True)

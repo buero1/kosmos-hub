@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/finance_field_control.html" import finance_field_control %}
+{% block title %}Artikel neu anlegen · Finance · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% call module_detail_header("/finance/articles", "Zurück zu Artikel", "Finance", "Artikel neu anlegen", has_actions=true) %}<a class="button button-secondary button-variant-1" href="/finance/articles">Abbrechen</a><button class="button button-variant-1" type="submit" form="finance-article-create-form">Artikel anlegen</button>{% endcall %}
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Artikel</p><h3>Alle Felder</h3><p class="subtle">Der Artikel wird ausschließlich im Hub gespeichert.</p></div></div><form id="finance-article-create-form" method="post" action="/finance/articles" class="communication-form customer-field-editor contact-create-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="customer-field-editor-grid">{% for field in fields %}{{ finance_field_control(field, submitted_values.get("article_field__" ~ field.key, "")) }}{% endfor %}</div></form></article>
+  </section>
+{% endblock %}

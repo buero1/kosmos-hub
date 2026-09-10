@@ -1,0 +1,31 @@
+{% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article") %}
+  <label class="customer-field-control">
+    <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+    {% if field.read_only %}
+      <input type="text" value="{{ value or 'Wird automatisch vergeben' }}" readonly>
+    {% elif field.key == "customer" %}
+      <select name="customer_id" data-finance-customer{% if field.required %} required{% endif %}>
+        <option value="">Kunden auswählen</option>
+        {% for customer in customers %}<option value="{{ customer.id }}"{% if customer.id == selected_customer_id %} selected{% endif %}>{{ customer.name }}</option>{% endfor %}
+      </select>
+    {% elif field.key == "contact" %}
+      <select name="contact_id" data-finance-contact>
+        <option value="">Keinen Ansprechpartner verknüpfen</option>
+        {% for contact in contacts %}<option value="{{ contact.id }}" data-customer-id="{{ contact.customer_id }}"{% if contact.id == selected_contact_id %} selected{% endif %}>{{ contact.name }} · {{ contact.customer_name }}</option>{% endfor %}
+      </select>
+    {% elif field.display_type == "Auswahlliste" %}
+      <select name="{% if field.key in ('customer', 'contact') %}{{ field.key }}_id{% else %}{{ field_prefix }}_field__{{ field.key }}{% endif %}"{% if field.required %} required{% endif %}>
+        <option value="">Auswählen</option>
+        {% for option_value, option_label in field.options %}<option value="{{ option_value }}"{% if value == option_value %} selected{% endif %}>{{ option_label }}</option>{% endfor %}
+      </select>
+    {% elif field.display_type == "Waehrung" %}
+      <input type="number" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}" min="0" step="0.01" inputmode="decimal"{% if field.required %} required{% endif %}>
+    {% elif field.display_type == "Datum" %}
+      <input type="date" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+    {% elif field.display_type == "Mehrzeilen" %}
+      <textarea name="{{ field_prefix }}_field__{{ field.key }}" rows="5">{{ value }}</textarea>
+    {% else %}
+      <input type="text" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+    {% endif %}
+  </label>
+{% endmacro %}

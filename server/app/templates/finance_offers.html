@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Angebote · Finance · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}<p class="notice-success">Das Angebot wurde im Hub angelegt.</p>{% endif %}
+    {% if deleted %}<p class="notice-success">Das Angebot wurde im Hub gelöscht.</p>{% endif %}
+    <div class="section-heading"><div><p class="eyebrow">Finance</p><h2>Angebote</h2></div><div class="communication-heading-actions"><a class="button button-variant-1" href="/finance/offers/new">Angebot neu anlegen</a></div></div>
+    <article class="card customer-detail-panel"><div class="table-scroll"><table class="finance-directory-table"><thead><tr><th>Angebotsnummer</th><th>Status</th><th>Kunde</th><th>Angebotsdatum</th><th>Gesamt</th></tr></thead><tbody>{% for entry in entries %}<tr><td><a href="/finance/offers/{{ entry.offer.id }}">{{ entry.offer_number }}</a></td><td>{{ entry.status }}</td><td>{% if entry.offer.customer %}<a href="/customers/{{ entry.offer.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td><td>{{ entry.offer_date }}</td><td>{{ entry.total_gross }}</td></tr>{% else %}<tr><td colspan="5">Noch keine Angebote vorhanden.</td></tr>{% endfor %}</tbody></table></div></article>
+  </section>
+{% endblock %}
