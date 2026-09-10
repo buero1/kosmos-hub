@@ -47,7 +47,8 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     expected_prompt = 'data-email-ai-prompt aria-label="KI-E-Mail-Überarbeitung"'
     assert expected_prompt in main_composer
     assert expected_prompt in global_composer
-    assert "Markierten Text überarbeiten ..." in main_composer
+    assert "E-Mail oder markierten Text überarbeiten ..." in main_composer
+    assert "E-Mail oder markierten Text überarbeiten ..." in global_composer
     assert 'data-email-ai-accept aria-label="Änderung akzeptieren" title="Änderung akzeptieren"' in main_composer
     assert 'data-email-ai-reject aria-label="Änderung verwerfen" title="Änderung verwerfen"' in global_composer
     assert 'class="email-editor-ai-prompt-action-icon"' in main_composer
@@ -83,6 +84,11 @@ def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     assert "#dff3e5" in base_template
     assert "var includesBlock" in base_template
     assert "var previewFragment = selected.range.cloneContents();" in base_template
+    assert "function wholeEmailSelection(content)" in base_template
+    assert "range.selectNodeContents(body);" in base_template
+    assert "readSelection(content) || selectionByContent.get(content) || wholeEmailSelection(content)" in base_template
+    assert "selected.isWholeEmail" in base_template
+    assert "Die E-Mail enthält noch keinen Text, den die KI überarbeiten kann." in base_template
     assert "ohne Tabellen oder ganze Absätze" not in base_template
 
 

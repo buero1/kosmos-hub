@@ -4250,10 +4250,22 @@
           return { range: range.cloneRange(), html: wrapper.innerHTML };
         }
 
+        function wholeEmailSelection(content) {
+          var body = editorBody(content);
+          if (!body || !body.textContent || !body.textContent.replace(/\u00a0/g, " ").trim()) return null;
+          var range = body.ownerDocument.createRange();
+          range.selectNodeContents(body);
+          return { range: range, html: body.innerHTML, isWholeEmail: true };
+        }
+
         function captureSelection(content) {
           if (pendingByContent.has(content) || busyByContent.has(content)) return;
           var selected = readSelection(content);
-          if (selected) selectionByContent.set(content, selected);
+          if (selected) {
+            selectionByContent.set(content, selected);
+          } else {
+            selectionByContent.delete(content);
+          }
         }
 
         function bindSelectionTracking(content, attempt) {
@@ -4277,7 +4289,7 @@
             throw new Error("Die Markierung ist nicht mehr verfügbar. Bitte markiere den Text erneut.");
           }
           var previewFragment = selected.range.cloneContents();
-          var includesBlock = Boolean(previewFragment.querySelector("table, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6"));
+          var includesBlock = Boolean(selected.isWholeEmail) || Boolean(previewFragment.querySelector("table, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6"));
           var original = body.ownerDocument.createElement(includesBlock ? "div" : "del");
           original.dataset.emailAiOriginal = "true";
           original.style.cssText = "color: #718078; opacity: 0.66; text-decoration: line-through;" + (includesBlock ? " display: block;" : "");
@@ -4322,9 +4334,9 @@
           var controls = promptControls(prompt);
           if (!content || !controls.input || !controls.submit || busyByContent.has(content) || pendingByContent.has(content)) return;
           var instruction = controls.input.value.trim();
-          var selected = selectionByContent.get(content) || readSelection(content);
+          var selected = readSelection(content) || selectionByContent.get(content) || wholeEmailSelection(content);
           if (!selected) {
-            setFeedback(prompt, "Bitte markiere zuerst einen Textausschnitt in der E-Mail.", true);
+            setFeedback(prompt, "Die E-Mail enthält noch keinen Text, den die KI überarbeiten kann.", true);
             return;
           }
           if (instruction.length < 3) {
