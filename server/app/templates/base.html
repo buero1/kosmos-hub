@@ -4203,7 +4203,6 @@
           var range = selection.getRangeAt(0);
           if (!isInsideBody(range.startContainer, body) || !isInsideBody(range.endContainer, body)) return null;
           var fragment = range.cloneContents();
-          if (fragment.querySelector("table, img, video, iframe, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6")) return null;
           var wrapper = body.ownerDocument.createElement("div");
           wrapper.appendChild(fragment);
           if (!wrapper.textContent || !wrapper.textContent.trim()) return null;
@@ -4235,18 +4234,21 @@
           if (!body || !isInsideBody(selected.range.startContainer, body) || !isInsideBody(selected.range.endContainer, body)) {
             throw new Error("Die Markierung ist nicht mehr verfügbar. Bitte markiere den Text erneut.");
           }
-          var original = body.ownerDocument.createElement("del");
+          var includesBlock = Boolean(fragment.querySelector("table, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6"));
+          var original = body.ownerDocument.createElement(includesBlock ? "div" : "del");
           original.dataset.emailAiOriginal = "true";
-          original.style.cssText = "color: #718078; opacity: 0.66; text-decoration: line-through;";
+          original.style.cssText = "color: #718078; opacity: 0.66; text-decoration: line-through;" + (includesBlock ? " display: block;" : "");
           original.appendChild(selected.range.extractContents());
-          var separator = body.ownerDocument.createElement("br");
-          separator.dataset.emailAiSeparator = "true";
-          var replacement = body.ownerDocument.createElement("ins");
+          var separator = includesBlock ? null : body.ownerDocument.createElement("br");
+          if (separator) separator.dataset.emailAiSeparator = "true";
+          var replacement = body.ownerDocument.createElement(includesBlock ? "div" : "ins");
           replacement.dataset.emailAiReplacement = "true";
-          replacement.style.cssText = "display: inline; background: #dff3e5; color: #1f6e47; text-decoration: none; box-decoration-break: clone; -webkit-box-decoration-break: clone;";
+          replacement.style.cssText = "display: " + (includesBlock ? "block" : "inline") + "; background: #dff3e5; color: #1f6e47; text-decoration: none; box-decoration-break: clone; -webkit-box-decoration-break: clone;";
           replacement.innerHTML = replacementHtml;
           var insertion = body.ownerDocument.createDocumentFragment();
-          insertion.append(original, separator, replacement);
+          insertion.append(original);
+          if (separator) insertion.append(separator);
+          insertion.append(replacement);
           selected.range.insertNode(insertion);
           var selection = editorFrame(content).contentWindow.getSelection();
           if (selection) selection.removeAllRanges();
@@ -4279,7 +4281,7 @@
           var instruction = controls.input.value.trim();
           var selected = selectionByContent.get(content) || readSelection(content);
           if (!selected) {
-            setFeedback(prompt, "Bitte markiere zuerst einen Textausschnitt ohne Tabellen oder ganze Absätze.", true);
+            setFeedback(prompt, "Bitte markiere zuerst einen Textausschnitt in der E-Mail.", true);
             return;
           }
           if (instruction.length < 3) {
