@@ -164,6 +164,40 @@ def test_books_requires_an_explicit_choice_when_no_default_organization_exists(m
         assert service.get_status().ready_for_import is True
 
 
+def test_books_reuses_a_valid_access_token_for_multiple_api_reads(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("e" * 32)
+        user = _user()
+        db.add(user)
+        db.flush()
+        db.add(_crm_connection(cipher=cipher, user=user))
+        db.commit()
+        service = ZohoBooksService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        connection = service.prepare_authorization(actor=user)
+        connection.encrypted_refresh_token = cipher.encrypt("books-refresh-token")
+        refresh_calls: list[bool] = []
+
+        def fake_request_json(_url, *, method, form=None, **_kwargs):
+            if method == "POST" and form["grant_type"] == "refresh_token":
+                refresh_calls.append(True)
+                return {
+                    "access_token": "books-access-token",
+                    "api_domain": "https://www.zohoapis.eu",
+                    "expires_in": 3600,
+                }
+            return {"organizations": []}
+
+        monkeypatch.setattr(service, "_request_json", fake_request_json)
+
+        service._api_get(connection, "/books/v3/organizations")
+        service._api_get(connection, "/books/v3/organizations")
+
+        assert refresh_calls == [True]
+
+
 def test_books_translates_shared_zoho_request_errors(monkeypatch):
     def raise_crm_error(*_args, **_kwargs):
         raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.")

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
+import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlsplit
 
 from sqlalchemy import select
@@ -34,6 +36,12 @@ ZOHO_BOOKS_SCOPES = ",".join(_ZOHO_BOOKS_SCOPE_VALUES)
 
 class ZohoBooksError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class _CachedAccessToken:
+    value: str
+    expires_at: datetime
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,9 @@ class ZohoBooksConnectionStatus:
 
 class ZohoBooksService:
     """Stores a dedicated Books token while reusing the configured OAuth client."""
+
+    _access_token_cache: dict[str, _CachedAccessToken] = {}
+    _access_token_cache_lock = threading.RLock()
 
     def __init__(self, *, db: Session, cipher: SecretCipher, public_base_url: str):
         self.db = db
@@ -246,6 +257,13 @@ class ZohoBooksService:
         )
 
     def _refresh_access_token(self, connection: ZohoBooksConnection) -> str:
+        cache_key = self._access_token_cache_key(connection)
+        now = datetime.now(UTC)
+        with self._access_token_cache_lock:
+            cached = self._access_token_cache.get(cache_key)
+            if cached is not None and cached.expires_at > now:
+                return cached.value
+
         refresh_token = self._decrypt(connection.encrypted_refresh_token or "", "Zoho Books refresh token")
         data_center = self._data_center(connection.data_center)
         response = self._request_json(
@@ -262,7 +280,19 @@ class ZohoBooksService:
         if not isinstance(access_token, str) or not access_token:
             raise ZohoBooksError("Zoho konnte den Books-Zugriff nicht erneuern. Verbinde Zoho Books erneut.")
         connection.api_domain = self._safe_api_domain(response.get("api_domain"), data_center)
+        expires_in = response.get("expires_in")
+        lifetime_seconds = expires_in if isinstance(expires_in, int) and expires_in > 0 else 3600
+        # Reuse the valid one-hour token and refresh it one minute before expiry.
+        expires_at = now + timedelta(seconds=max(lifetime_seconds - 60, 60))
+        with self._access_token_cache_lock:
+            self._access_token_cache[cache_key] = _CachedAccessToken(access_token, expires_at)
         return access_token
+
+    @staticmethod
+    def _access_token_cache_key(connection: ZohoBooksConnection) -> str:
+        refresh_token = connection.encrypted_refresh_token or ""
+        token_digest = hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+        return f"{connection.id or 'new'}:{token_digest}"
 
     def _require_connection(self) -> ZohoBooksConnection:
         connection = self.get_connection()
