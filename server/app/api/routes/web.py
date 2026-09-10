@@ -64,6 +64,8 @@ from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, 
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, HubCaseError, HubCaseService
+from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
+from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadError, HubLeadService
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
@@ -362,6 +364,173 @@ def contacts_page(
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+@router.get("/leads", response_class=HTMLResponse)
+def leads_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    created: bool = False,
+    deleted: bool = False,
+):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(
+        request,
+        "leads.html",
+        {
+            "entries": HubLeadService(db=db, cipher=get_secret_cipher()).list_leads(),
+            "created": created,
+            "deleted": deleted,
+        },
+    )
+
+
+@router.get("/leads/new", response_class=HTMLResponse)
+def new_lead_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "lead_create.html", _lead_create_context(request, db))
+
+
+@router.post("/leads")
+async def create_lead_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = _lead_submitted_values(form)
+    try:
+        lead = HubLeadService(db=db, cipher=get_secret_cipher()).create_lead(submitted_values=submitted_values)
+    except HubLeadError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "lead_create.html",
+            _lead_create_context(request, db, submitted_values=submitted_values, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-hub-lead",
+        result="ok",
+        detail=f"Created Hub Lead {lead.id}; lead data is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/leads/{lead.id}", status_code=303)
+
+
+@router.get("/leads/{lead_id}", response_class=HTMLResponse)
+def lead_detail_page(
+    lead_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    fields: str = "",
+    fields_message: str = "",
+    layout: str = "",
+    layout_message: str = "",
+):
+    _require_hub_admin(request)
+    detail = HubLeadService(db=db, cipher=get_secret_cipher()).get_detail(lead_id=lead_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    return templates.TemplateResponse(
+        request,
+        "lead_detail.html",
+        {
+            "detail": detail,
+            "fields_state": fields if fields in {"success", "error"} else "",
+            "fields_message": fields_message[:500],
+            "layout_state": layout if layout in {"success", "error"} else "",
+            "layout_message": layout_message[:500],
+            "csrf_token": get_csrf_token(request),
+        },
+    )
+
+
+@router.post("/leads/{lead_id}/fields")
+async def update_lead_fields(lead_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        lead = HubLeadService(db=db, cipher=get_secret_cipher()).update_lead(
+            lead_id=lead_id,
+            submitted_values=_lead_submitted_values(form),
+        )
+    except HubLeadError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/leads/{lead_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-lead-fields",
+        result="ok",
+        detail=f"Updated Hub Lead {lead.id}; lead data is not retained in the audit log.",
+    )
+    db.commit()
+    query = urlencode({"fields": "success", "fields_message": "Lead-Daten wurden im Hub gespeichert."})
+    return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-fields", status_code=303)
+
+
+@router.post("/leads/{lead_id}/layout")
+async def update_lead_field_layout(lead_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    service = HubLeadService(db=db, cipher=get_secret_cipher())
+    if service.get_detail(lead_id=lead_id) is None:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+    try:
+        ModuleLayoutService(db=db).configure(
+            actor=user,
+            layout_key=LEAD_FIELDS_LAYOUT_KEY,
+            item_order_json=str(form.get("order_json") or ""),
+            allowed_keys=tuple(field.key for field in HUB_LEAD_FIELDS),
+        )
+    except ModuleLayoutError as exc:
+        db.rollback()
+        query = urlencode({"layout": "error", "layout_message": str(exc)})
+        return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-fields", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-lead-fields-layout",
+        result="ok",
+        detail="Updated the global lead field layout.",
+    )
+    db.commit()
+    query = urlencode({"layout": "success", "layout_message": "Das globale Leadfelder-Layout wurde gespeichert."})
+    return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-fields", status_code=303)
+
+
+@router.post("/leads/{lead_id}/delete")
+async def delete_lead_from_hub(lead_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        lead = HubLeadService(db=db, cipher=get_secret_cipher()).delete_lead(lead_id=lead_id)
+    except HubLeadError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/leads/{lead_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-lead",
+        result="ok",
+        detail=f"Deleted Hub Lead {lead.id}; no Zoho record was changed.",
+    )
+    db.commit()
+    return RedirectResponse(url="/leads?deleted=true", status_code=303)
 
 
 @router.get("/cases", response_class=HTMLResponse)
@@ -5440,6 +5609,42 @@ def _case_create_context(
         "error": error,
         "csrf_token": get_csrf_token(request),
     }
+
+
+def _lead_create_context(
+    request: Request,
+    db: Session,
+    *,
+    submitted_values: dict[str, object] | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    values = HubLeadService(db=db, cipher=get_secret_cipher()).new_form_values()
+    values.update(submitted_values or {})
+    return {
+        "fields": HUB_LEAD_FIELDS,
+        "subforms": HUB_LEAD_SUBFORMS,
+        "submitted_values": values,
+        "error": error,
+        "csrf_token": get_csrf_token(request),
+    }
+
+
+def _lead_submitted_values(form: object) -> dict[str, object]:
+    """Preserve multi-select values from the browser's repeated form keys."""
+    values: dict[str, object] = {}
+    multi_select_names = {
+        f"lead_field__{field.key}"
+        for field in HUB_LEAD_FIELDS
+        if field.display_type == "Mehrfachauswahl"
+    }
+    for key, value in form.multi_items():
+        if key == "csrf_token":
+            continue
+        if key in multi_select_names:
+            values.setdefault(key, []).append(value)
+        else:
+            values[key] = value
+    return values
 
 
 def _mailbox_linked_case(db: Session, message: object):

@@ -25,6 +25,7 @@ from app.models.customer_activity_reminder_notification import CustomerActivityR
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_case import HubCase
+from app.models.hub_lead import HubLead
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
@@ -128,6 +129,10 @@ def _ensure_phase_one_schema() -> None:
             with engine.begin() as connection:
                 connection.execute(text("CREATE UNIQUE INDEX ix_hub_cases_zoho_id ON hub_cases (zoho_id)"))
             logger.info("Added hub_cases.zoho_id index.")
+
+    if "hub_leads" not in table_names:
+        HubLead.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_leads table.")
 
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)

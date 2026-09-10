@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Leads · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% if created %}<p class="notice-success">Der Lead wurde im Hub angelegt.</p>{% endif %}
+    {% if deleted %}<p class="notice-success">Der Lead wurde im Hub gelöscht.</p>{% endif %}
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Hub-Daten</p>
+        <h2>Leads</h2>
+      </div>
+      <div class="communication-heading-actions">
+        <a class="button button-variant-1" href="/leads/new">Lead neu anlegen</a>
+      </div>
+    </div>
+    <article class="card customer-detail-panel">
+      <div class="table-scroll">
+        <table class="customer-contacts-table contacts-directory-table lead-directory-table">
+          <thead><tr><th>Name</th><th>Firma</th><th>E-Mail</th><th>Lead-Status</th><th>Lead-Quelle</th><th>Erstellt</th></tr></thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr><td><a href="/leads/{{ entry.lead.id }}">{{ entry.name }}</a></td><td>{{ entry.company }}</td><td>{{ entry.email }}</td><td>{{ entry.status }}</td><td>{{ entry.source }}</td><td>{{ entry.created_time }}</td></tr>
+            {% else %}
+              <tr><td colspan="6">Noch keine Leads vorhanden. Der spätere Import füllt diese Liste aus Zoho.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+{% endblock %}

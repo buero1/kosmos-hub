@@ -1,0 +1,41 @@
+{% macro lead_field_control(field, name, value="") %}
+  {% if not field.read_only %}
+    <label class="customer-field-control">
+      <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+      {% if field.display_type == "Auswahlliste" %}
+        <select name="{{ name }}"{% if field.required %} required{% endif %}>
+          <option value="">Auswählen</option>
+          {% for option_value, option_label in field.options %}
+            <option value="{{ option_value }}"{% if value == option_value %} selected{% endif %}>{% if option_value == "-None-" %}Keine Auswahl{% else %}{{ option_label }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      {% elif field.display_type == "Mehrfachauswahl" %}
+        {% set selected_values = value if value is iterable and value is not string else () %}
+        <fieldset class="lead-multiselect-control">
+          <legend class="visually-hidden">{{ field.label }}</legend>
+          {% for option_value, option_label in field.options %}
+            <label><input type="checkbox" name="{{ name }}" value="{{ option_value }}"{% if option_value in selected_values %} checked{% endif %}> {{ option_label }}</label>
+          {% endfor %}
+        </fieldset>
+      {% elif field.display_type == "Boolesch" %}
+        <label class="lead-boolean-control"><input type="checkbox" name="{{ name }}" value="true"{% if value in (true, "true", "True", "1") %} checked{% endif %}> Ja</label>
+      {% elif field.display_type == "Datum" %}
+        <input type="date" name="{{ name }}" value="{{ value }}">
+      {% elif field.display_type == "DatumZeit" %}
+        <input type="datetime-local" name="{{ name }}" value="{{ value }}">
+      {% elif field.display_type == "Mehrzeilen" %}
+        <textarea name="{{ name }}" rows="5">{{ value }}</textarea>
+      {% elif field.display_type == "Ganzzahl" %}
+        <input type="number" name="{{ name }}" value="{{ value }}" step="1" inputmode="numeric">
+      {% elif field.display_type == "E-Mail" %}
+        <input type="email" name="{{ name }}" value="{{ value }}" autocomplete="email">
+      {% elif field.display_type == "Telefon" %}
+        <input type="tel" name="{{ name }}" value="{{ value }}" autocomplete="tel">
+      {% elif field.display_type == "URL" %}
+        <input type="url" name="{{ name }}" value="{{ value }}" inputmode="url">
+      {% else %}
+        <input type="text" name="{{ name }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+      {% endif %}
+    </label>
+  {% endif %}
+{% endmacro %}

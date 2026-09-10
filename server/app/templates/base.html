@@ -4121,6 +4121,7 @@
           <a href="/customers"{% if request.url.path.startswith("/customers") and "/contacts/" not in request.url.path %} class="is-active"{% endif %}>Customers</a>
           <a href="/calendar"{% if request.url.path.startswith("/calendar") %} class="is-active"{% endif %}>Kalender</a>
           <a href="/contacts"{% if request.url.path.startswith("/contacts") or "/contacts/" in request.url.path %} class="is-active"{% endif %}>Kontakte</a>
+          <a href="/leads"{% if request.url.path.startswith("/leads") %} class="is-active"{% endif %}>Leads</a>
           <a href="/cases"{% if request.url.path.startswith("/cases") %} class="is-active"{% endif %}>Fälle</a>
           <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>
           <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
@@ -6307,6 +6308,14 @@
         document.querySelectorAll("[data-case-delete-dialog]").forEach(function (dialog) {
           var opener = document.querySelector("[data-case-delete-open]");
           var cancel = dialog.querySelector("[data-case-delete-cancel]");
+          if (!opener || !cancel || typeof dialog.showModal !== "function") return;
+          opener.addEventListener("click", function () { dialog.showModal(); });
+          cancel.addEventListener("click", function () { dialog.close(); });
+        });
+
+        document.querySelectorAll("[data-lead-delete-dialog]").forEach(function (dialog) {
+          var opener = document.querySelector("[data-lead-delete-open]");
+          var cancel = dialog.querySelector("[data-lead-delete-cancel]");
           if (!opener || !cancel || typeof dialog.showModal !== "function") return;
           opener.addEventListener("click", function () { dialog.showModal(); });
           cancel.addEventListener("click", function () { dialog.close(); });

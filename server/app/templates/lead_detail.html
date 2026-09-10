@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% from "partials/lead_field_control.html" import lead_field_control %}
+{% block title %}{{ detail.name }} · Leads · kosmos-hub{% endblock %}
+{% block content %}
+  <style>
+    .lead-subform-panel { margin-top: 1rem; }
+    .lead-subform-table { min-width: 58rem; }
+    .lead-subform-table th, .lead-subform-table td { vertical-align: top; overflow-wrap: anywhere; }
+    .lead-subform-editor-card { margin-top: 1rem; }
+    .lead-subform-editor-card .customer-subform-row { margin-top: 0.8rem; }
+    .lead-multiselect-control { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.35rem 0.75rem; margin: 0; padding: 0; border: 0; }
+    .lead-multiselect-control label, .lead-boolean-control { font-weight: 400; }
+  </style>
+  <section>
+    {% call module_detail_header("/leads", "Zurück zu Leads", "Hub-Lead", detail.name, status=detail.status, has_actions=true) %}
+      <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
+      <div class="customer-edit-heading-actions" data-customer-edit-actions hidden>
+        <button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button>
+        <button class="button button-variant-1" type="submit" form="lead-fields-form">Speichern</button>
+      </div>
+      <div class="customer-edit-heading-actions" data-layout-edit-actions="lead-fields" hidden>
+        <button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="lead-fields">Abbrechen</button>
+        <button class="button button-variant-1" type="submit" form="lead-fields-layout-form">Speichern</button>
+      </div>
+      <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
+        <summary class="detail-actions-menu-trigger" aria-label="Weitere Leadactionen">&#8942;</summary>
+        <div class="detail-actions-menu-popover">
+          <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-lead-delete-open>Lead löschen</button>
+          <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="lead-fields">Layout bearbeiten</button>
+        </div>
+      </details>
+    {% endcall %}
+
+    {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
+    {% if layout_state and layout_message %}<p class="notice-{{ layout_state }}">{{ layout_message }}</p>{% endif %}
+    <div class="customer-detail-layout">
+      <div class="customer-detail-main-column" data-layout-editor="lead-fields">
+        <section data-expandable-section>
+          <div data-expandable-content class="is-expanded">
+            <div data-customer-fields-readonly>
+              <article id="lead-fields" class="card customer-detail-panel">
+                <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Alle Felder</h3><p class="subtle">Stammdaten des Leads im Hub.</p></div></div>
+                <dl class="customer-fields-grid">
+                  {% for field in detail.fields %}<div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+                </dl>
+              </article>
+              {% for subform in detail.subforms %}
+                <article class="card customer-detail-panel lead-subform-panel">
+                  <div class="customer-detail-panel-heading"><div><p class="eyebrow">Repeater</p><h3>{{ subform.label }}</h3><p class="subtle">Verlauf der Lead-Ergebnisse.</p></div></div>
+                  <div class="table-scroll">
+                    <table class="lead-subform-table">
+                      <thead><tr>{% for field in subform.fields %}<th>{{ field.label }}</th>{% endfor %}</tr></thead>
+                      <tbody>
+                        {% for row in subform.rows %}<tr>{% for field in row.fields %}<td>{{ field.value or "-" }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ subform.fields | length }}">Noch keine Einträge vorhanden.</td></tr>{% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
+            <article class="card customer-detail-panel">
+              <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Feldreihenfolge</h3><p class="subtle">Die Reihenfolge gilt für alle Leads.</p></div></div>
+              <dl class="customer-fields-grid" data-layout-sortable>
+                {% for field in detail.fields %}<div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+              </dl>
+            </article>
+          </div>
+          <form id="lead-fields-layout-form" method="post" action="/leads/{{ detail.lead.id }}/layout" data-layout-form hidden>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="order_json" value="" data-layout-order-input>
+          </form>
+          <form id="lead-fields-form" method="post" action="/leads/{{ detail.lead.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <article class="card customer-detail-panel">
+              <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Alle Felder</h3><p class="subtle">Änderungen werden ausschließlich im Hub gespeichert.</p></div></div>
+              <div class="customer-field-editor-grid">
+                {% for field in detail.fields %}{{ lead_field_control(field, "lead_field__" ~ field.key, field.form_value) }}{% endfor %}
+              </div>
+            </article>
+            {% for subform in detail.subforms %}
+              <article class="card customer-detail-panel lead-subform-editor-card">
+                <div class="customer-detail-panel-heading"><div><p class="eyebrow">Repeater</p><h3>{{ subform.label }}</h3><p class="subtle">Bestehende Zeilen bearbeiten oder einen neuen Eintrag ergänzen.</p></div></div>
+                {% for row in subform.rows %}
+                  {% set row_index = loop.index0 %}
+                  <fieldset class="customer-subform-row">
+                    <legend>Eintrag {{ loop.index }}</legend>
+                    <div class="customer-field-editor-grid">
+                      {% for field in row.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key, field.form_value) }}{% endfor %}
+                    </div>
+                    <label class="customer-subform-delete"><input type="checkbox" name="lead_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
+                  </fieldset>
+                {% endfor %}
+                <fieldset class="customer-subform-row">
+                  <legend>Neuer Eintrag</legend>
+                  <div class="customer-field-editor-grid">
+                    {% for field in subform.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__new__" ~ field.key, field.form_value) }}{% endfor %}
+                  </div>
+                </fieldset>
+              </article>
+            {% endfor %}
+          </form>
+        </section>
+      </div>
+      <aside class="customer-detail-side-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading"><div><p class="eyebrow">Hub-Daten</p><h3>Verknüpfung</h3></div></div>
+          <dl class="customer-fields-grid">
+            <div><dt>Quelle</dt><dd>{{ "Zoho-Import" if detail.lead.zoho_id else "Hub" }}</dd></div>
+            <div><dt>Zoho Lead-ID</dt><dd>{{ detail.lead.zoho_id or "-" }}</dd></div>
+            {% if detail.lead.zoho_id %}<div><dt>Letzte Änderung in Zoho</dt><dd>{{ (detail.lead.zoho_modified_at or "-") | berlin_time }}</dd></div><div><dt>Importiert am</dt><dd>{{ (detail.lead.zoho_imported_at or "-") | berlin_time }}</dd></div>{% endif %}
+          </dl>
+        </article>
+      </aside>
+    </div>
+    <dialog class="update-confirmation-dialog" data-lead-delete-dialog aria-labelledby="lead-delete-heading">
+      <form method="post" action="/leads/{{ detail.lead.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <h3 id="lead-delete-heading">Lead im Hub löschen?</h3>
+        <p>Der Lead wird nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
+        <div class="dialog-actions"><button class="button button-secondary" type="button" data-lead-delete-cancel>Abbrechen</button><button class="button button-danger" type="submit">Lead löschen</button></div>
+      </form>
+    </dialog>
+  </section>
+{% endblock %}
