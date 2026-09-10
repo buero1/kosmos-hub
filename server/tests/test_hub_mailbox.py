@@ -39,7 +39,7 @@ def test_email_composers_show_twenty_message_lines():
     assert "min-height: 264px !important;" in base_template
 
 
-def test_email_composers_include_the_staged_ai_prompt():
+def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     main_composer = Path("app/templates/emails.html").read_text(encoding="utf-8")
     global_composer = Path("app/templates/partials/global_mailbox_composer.html").read_text(encoding="utf-8")
     base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
@@ -47,10 +47,15 @@ def test_email_composers_include_the_staged_ai_prompt():
     expected_prompt = 'data-email-ai-prompt aria-label="KI-E-Mail-Überarbeitung"'
     assert expected_prompt in main_composer
     assert expected_prompt in global_composer
-    assert "E-Mail überarbeiten oder Änderung anfordern ..." in main_composer
+    assert "Markierten Text überarbeiten ..." in main_composer
+    assert 'data-email-ai-accept>Akzeptieren' in main_composer
+    assert 'data-email-ai-reject>Verwerfen' in global_composer
     assert "data-email-ai-prompt-submit" in global_composer
     assert ".email-editor-ai-prompt {" in base_template
-    assert ".email-editor-ai-shell .email-rich-editor .jodit-container { padding-bottom: 5.2rem; }" in base_template
+    assert "/emails/ai/rewrite" in base_template
+    assert "data-email-ai-original" in base_template
+    assert "is-email-ai-locked" in base_template
+    assert "#dff3e5" in base_template
 
 
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():

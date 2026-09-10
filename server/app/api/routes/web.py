@@ -39,6 +39,7 @@ from app.services.customer_communications import (
     CustomerCommunicationService,
 )
 from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
+from app.services.email_ai_rewrite import EmailAiRewriteError, EmailAiRewriteService
 from app.services.customer_activities import (
     CALL_DIRECTION_OPTIONS,
     CALL_DURATION_OPTIONS,
@@ -1972,6 +1973,38 @@ def mailbox_compose_options(
         ],
         "sender_error": sender_error,
     }
+
+
+@router.post("/emails/ai/rewrite", response_class=JSONResponse)
+def rewrite_selected_mailbox_email_text(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    instruction: Annotated[str, Form()] = "",
+    selected_html: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    """Prepare one reviewable rewrite for a text selection in an unsent email."""
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        proposal = EmailAiRewriteService(db=db, cipher=get_secret_cipher()).rewrite(
+            instruction=instruction,
+            selected_html=selected_html,
+        )
+    except EmailAiRewriteError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-email-editor",
+        action="prepare-email-ai-rewrite",
+        result="success",
+        detail="Prepared one reviewable AI rewrite for a selected email fragment; content is omitted from the audit log.",
+    )
+    db.commit()
+    return {"replacement_html": proposal.replacement_html}
 
 
 @router.post("/emails/compose/images", response_class=JSONResponse)

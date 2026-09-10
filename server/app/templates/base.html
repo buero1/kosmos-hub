@@ -3201,7 +3201,7 @@
         right: 50%;
         bottom: 1rem;
         display: grid;
-        grid-template-columns: 1.1rem minmax(0, 1fr) 2rem;
+        grid-template-columns: 1.1rem minmax(0, 1fr) auto 2rem;
         align-items: center;
         gap: 0.55rem;
         width: min(calc(100% - 2rem), 33rem);
@@ -3247,6 +3247,24 @@
       }
       .email-editor-ai-prompt-submit:disabled { cursor: not-allowed; opacity: 1; }
       .email-editor-ai-prompt-submit svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+      .email-editor-ai-prompt-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
+      .email-editor-ai-prompt-action { min-height: 2rem; margin: 0; padding: 0.25rem 0.55rem; font-size: 0.75rem; white-space: nowrap; }
+      .email-editor-ai-prompt-accept { background: #dff3e5; border-color: #83b894; color: #1f6e47; }
+      .email-editor-ai-prompt-feedback {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + 0.45rem);
+        max-width: min(100%, 25rem);
+        padding: 0.35rem 0.55rem;
+        border: 1px solid #dfc989;
+        border-radius: 7px;
+        background: #fffaf0;
+        color: #715623;
+        font-size: 0.78rem;
+        line-height: 1.3;
+      }
+      .email-editor-ai-prompt-feedback.is-error { border-color: #d9a0a0; background: #fff5f5; color: #9a3434; }
+      .email-editor-ai-shell.is-email-ai-locked .email-rich-editor { pointer-events: none; }
       /* Zoho layouts use tables for visual containers; keep their email-native styling intact. */
       .email-rich-editor .jodit-wysiwyg table {
         width: auto;
@@ -4063,6 +4081,296 @@
     <link rel="stylesheet" href="/static/jodit-editor.css?v=1">
     <script src="/static/jodit-editor.js?v=11"></script>
     <script>
+      (function () {
+        var selectionByContent = new WeakMap();
+        var pendingByContent = new WeakMap();
+        var busyByContent = new WeakMap();
+        var lockByContent = new WeakMap();
+        var editorApi = window.KosmosEmailEditors;
+        var originalGetHTML = editorApi && editorApi.getHTML;
+
+        function editorFrame(content) {
+          var shell = content && content.closest(".email-editor-ai-shell");
+          return shell && shell.querySelector(".jodit-wysiwyg_iframe");
+        }
+
+        function editorBody(content) {
+          var frame = editorFrame(content);
+          try {
+            return frame && frame.contentDocument && frame.contentDocument.body;
+          } catch (_error) {
+            return null;
+          }
+        }
+
+        function isInsideBody(node, body) {
+          var element = node && (node.nodeType === 1 ? node : node.parentElement);
+          return Boolean(element && body && (element === body || body.contains(element)));
+        }
+
+        function unwrap(node) {
+          if (!node || !node.parentNode) return;
+          while (node.firstChild) node.parentNode.insertBefore(node.firstChild, node);
+          node.remove();
+        }
+
+        function serializableHTML(content) {
+          var body = editorBody(content);
+          if (!body) return null;
+          var copy = body.cloneNode(true);
+          copy.querySelectorAll("[data-email-ai-replacement], [data-email-ai-separator]").forEach(function (node) {
+            node.remove();
+          });
+          copy.querySelectorAll("[data-email-ai-original]").forEach(unwrap);
+          return copy.innerHTML;
+        }
+
+        if (editorApi && originalGetHTML && !editorApi.emailAiSerializableHtmlInstalled) {
+          editorApi.getHTML = function (content) {
+            var html = serializableHTML(content);
+            return html === null ? originalGetHTML.call(editorApi, content) : html;
+          };
+          editorApi.emailAiSerializableHtmlInstalled = true;
+        }
+
+        function notifyEditorChange(content) {
+          var body = editorBody(content);
+          if (body) body.dispatchEvent(new Event("input", { bubbles: true }));
+          if (content) content.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        function setEditorLocked(content, locked) {
+          var shell = content && content.closest(".email-editor-ai-shell");
+          var body = editorBody(content);
+          var frame = editorFrame(content);
+          if (locked) {
+            if (lockByContent.has(content)) return;
+            lockByContent.set(content, {
+              bodyContentEditable: body && body.getAttribute("contenteditable"),
+              frameTabIndex: frame && frame.getAttribute("tabindex")
+            });
+            if (shell) shell.classList.add("is-email-ai-locked");
+            if (body) body.setAttribute("contenteditable", "false");
+            if (frame) frame.setAttribute("tabindex", "-1");
+            return;
+          }
+          var previous = lockByContent.get(content);
+          if (!previous) return;
+          if (shell) shell.classList.remove("is-email-ai-locked");
+          if (body) {
+            if (previous.bodyContentEditable === null) body.removeAttribute("contenteditable");
+            else body.setAttribute("contenteditable", previous.bodyContentEditable);
+          }
+          if (frame) {
+            if (previous.frameTabIndex === null) frame.removeAttribute("tabindex");
+            else frame.setAttribute("tabindex", previous.frameTabIndex);
+          }
+          lockByContent.delete(content);
+        }
+
+        function promptControls(prompt) {
+          return {
+            input: prompt.querySelector("[data-email-ai-prompt-input]"),
+            submit: prompt.querySelector("[data-email-ai-prompt-submit]"),
+            actions: prompt.querySelector("[data-email-ai-prompt-actions]"),
+            accept: prompt.querySelector("[data-email-ai-accept]"),
+            reject: prompt.querySelector("[data-email-ai-reject]"),
+            feedback: prompt.querySelector("[data-email-ai-prompt-feedback]")
+          };
+        }
+
+        function setFeedback(prompt, message, isError) {
+          var feedback = promptControls(prompt).feedback;
+          if (!feedback) return;
+          feedback.textContent = message || "";
+          feedback.hidden = !message;
+          feedback.classList.toggle("is-error", Boolean(message && isError));
+        }
+
+        function setPromptPending(prompt, pending) {
+          var controls = promptControls(prompt);
+          if (controls.input) controls.input.disabled = pending;
+          if (controls.submit) controls.submit.disabled = pending;
+          if (controls.actions) controls.actions.hidden = !pending;
+        }
+
+        function readSelection(content) {
+          var frame = editorFrame(content);
+          var body = editorBody(content);
+          if (!frame || !body || !frame.contentWindow) return null;
+          var selection = frame.contentWindow.getSelection();
+          if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
+          var range = selection.getRangeAt(0);
+          if (!isInsideBody(range.startContainer, body) || !isInsideBody(range.endContainer, body)) return null;
+          var fragment = range.cloneContents();
+          if (fragment.querySelector("table, img, video, iframe, ul, ol, li, p, div, h1, h2, h3, h4, h5, h6")) return null;
+          var wrapper = body.ownerDocument.createElement("div");
+          wrapper.appendChild(fragment);
+          if (!wrapper.textContent || !wrapper.textContent.trim()) return null;
+          return { range: range.cloneRange(), html: wrapper.innerHTML };
+        }
+
+        function captureSelection(content) {
+          if (pendingByContent.has(content) || busyByContent.has(content)) return;
+          var selected = readSelection(content);
+          if (selected) selectionByContent.set(content, selected);
+        }
+
+        function bindSelectionTracking(content, attempt) {
+          var body = editorBody(content);
+          if (!body) {
+            if (attempt < 30) window.setTimeout(function () { bindSelectionTracking(content, attempt + 1); }, 100);
+            return;
+          }
+          if (body.dataset.emailAiSelectionTracking === "true") return;
+          body.dataset.emailAiSelectionTracking = "true";
+          var record = function () { captureSelection(content); };
+          body.addEventListener("mouseup", record);
+          body.addEventListener("keyup", record);
+          body.ownerDocument.addEventListener("selectionchange", record);
+        }
+
+        function suggestionState(content, selected, replacementHtml) {
+          var body = editorBody(content);
+          if (!body || !isInsideBody(selected.range.startContainer, body) || !isInsideBody(selected.range.endContainer, body)) {
+            throw new Error("Die Markierung ist nicht mehr verfügbar. Bitte markiere den Text erneut.");
+          }
+          var original = body.ownerDocument.createElement("del");
+          original.dataset.emailAiOriginal = "true";
+          original.style.cssText = "color: #718078; opacity: 0.66; text-decoration: line-through;";
+          original.appendChild(selected.range.extractContents());
+          var separator = body.ownerDocument.createElement("br");
+          separator.dataset.emailAiSeparator = "true";
+          var replacement = body.ownerDocument.createElement("ins");
+          replacement.dataset.emailAiReplacement = "true";
+          replacement.style.cssText = "display: inline; background: #dff3e5; color: #1f6e47; text-decoration: none; box-decoration-break: clone; -webkit-box-decoration-break: clone;";
+          replacement.innerHTML = replacementHtml;
+          var insertion = body.ownerDocument.createDocumentFragment();
+          insertion.append(original, separator, replacement);
+          selected.range.insertNode(insertion);
+          var selection = editorFrame(content).contentWindow.getSelection();
+          if (selection) selection.removeAllRanges();
+          return { original: original, separator: separator, replacement: replacement };
+        }
+
+        function resolveSuggestion(content, accepted) {
+          var state = pendingByContent.get(content);
+          if (!state) return;
+          if (accepted) {
+            if (state.original) state.original.remove();
+            if (state.separator) state.separator.remove();
+            unwrap(state.replacement);
+          } else {
+            if (state.replacement) state.replacement.remove();
+            if (state.separator) state.separator.remove();
+            unwrap(state.original);
+          }
+          pendingByContent.delete(content);
+          setEditorLocked(content, false);
+          notifyEditorChange(content);
+        }
+
+        function requestRewrite(prompt) {
+          var shell = prompt.closest(".email-editor-ai-shell");
+          var content = shell && shell.querySelector("[data-email-compose-content]");
+          var form = prompt.closest("form");
+          var controls = promptControls(prompt);
+          if (!content || !controls.input || !controls.submit || busyByContent.has(content) || pendingByContent.has(content)) return;
+          var instruction = controls.input.value.trim();
+          var selected = selectionByContent.get(content) || readSelection(content);
+          if (!selected) {
+            setFeedback(prompt, "Bitte markiere zuerst einen Textausschnitt ohne Tabellen oder ganze Absätze.", true);
+            return;
+          }
+          if (instruction.length < 3) {
+            setFeedback(prompt, "Bitte gib eine Anweisung mit mindestens drei Zeichen ein.", true);
+            controls.input.focus();
+            return;
+          }
+          var csrf = form && form.querySelector('input[name="csrf_token"]');
+          if (!csrf || !csrf.value) {
+            setFeedback(prompt, "Die Sicherheitsprüfung ist nicht verfügbar. Bitte lade die Seite neu.", true);
+            return;
+          }
+          busyByContent.set(content, true);
+          setEditorLocked(content, true);
+          controls.input.disabled = true;
+          controls.submit.disabled = true;
+          setFeedback(prompt, "KI erstellt einen Änderungsvorschlag ...", false);
+          var data = new URLSearchParams({
+            csrf_token: csrf.value,
+            instruction: instruction,
+            selected_html: selected.html
+          });
+          window.fetch("/emails/ai/rewrite", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+            body: data.toString()
+          }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || "Die KI-Überarbeitung konnte nicht erstellt werden.");
+              return payload;
+            });
+          }).then(function (payload) {
+            if (!payload.replacement_html) throw new Error("Die KI hat keinen lesbaren Änderungsvorschlag geliefert.");
+            pendingByContent.set(content, suggestionState(content, selected, payload.replacement_html));
+            selectionByContent.delete(content);
+            controls.input.value = "";
+            setPromptPending(prompt, true);
+            setFeedback(prompt, "", false);
+            notifyEditorChange(content);
+          }).catch(function (error) {
+            setEditorLocked(content, false);
+            controls.input.disabled = false;
+            controls.submit.disabled = false;
+            setFeedback(prompt, error && error.message ? error.message : "Die KI-Überarbeitung konnte nicht erstellt werden.", true);
+          }).finally(function () {
+            busyByContent.delete(content);
+          });
+        }
+
+        function installPrompt(prompt) {
+          var shell = prompt.closest(".email-editor-ai-shell");
+          var content = shell && shell.querySelector("[data-email-compose-content]");
+          var controls = promptControls(prompt);
+          if (!content || !controls.input || !controls.submit) return;
+          bindSelectionTracking(content, 0);
+          controls.submit.addEventListener("click", function () { requestRewrite(prompt); });
+          controls.input.addEventListener("keydown", function (event) {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              requestRewrite(prompt);
+            }
+          });
+          if (controls.accept) {
+            controls.accept.addEventListener("click", function () {
+              resolveSuggestion(content, true);
+              setPromptPending(prompt, false);
+              setFeedback(prompt, "Änderung übernommen.", false);
+              controls.input.focus();
+            });
+          }
+          if (controls.reject) {
+            controls.reject.addEventListener("click", function () {
+              resolveSuggestion(content, false);
+              setPromptPending(prompt, false);
+              setFeedback(prompt, "Änderung verworfen.", false);
+              controls.input.focus();
+            });
+          }
+        }
+
+        document.querySelectorAll("[data-email-ai-prompt]").forEach(installPrompt);
+        document.addEventListener("submit", function (event) {
+          var content = event.target.querySelector && event.target.querySelector("[data-email-compose-content]");
+          if (!content || (!pendingByContent.has(content) && !busyByContent.has(content))) return;
+          event.preventDefault();
+          var prompt = content.closest(".email-editor-ai-shell").querySelector("[data-email-ai-prompt]");
+          if (prompt) setFeedback(prompt, "Bitte den KI-Vorschlag zuerst akzeptieren oder verwerfen.", true);
+        }, true);
+      })();
+
       (function () {
         var adminIconPaths = [
           "M4 21h16", "M6 21V4a1 1 0 0 1 1-1h8l3 3v15", "M14 3v4h4", "M11 12h8", "m16 8 4 4-4 4"
