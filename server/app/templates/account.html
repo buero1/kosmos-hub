@@ -10,6 +10,7 @@
         <a href="#account-desktop-notifier">Windows Erinnerungen</a>
         <a href="#account-task-reminders">E-Mail-Erinnerungen</a>
         <a href="#account-workflows">Workflows</a>
+        {% if user.role == "admin" %}<a href="#account-users">Benutzer</a>{% endif %}
         {% if user.role == "admin" %}<a href="#account-mailbox">E-Mail-Postfächer</a>{% endif %}
         <a href="#account-openai">OpenAI</a>
         <a href="#account-provider-licenses">Provider licenses</a>
@@ -37,6 +38,9 @@
     {% endif %}
     {% if request.query_params.get("task_reminder_email") == "saved" %}
       <p class="notice-success" data-account-notice-section="account-task-reminders">Die persönliche Adresse für Aufgaben-Erinnerungen wurde gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("user") == "created" %}
+      <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde angelegt.</p>
     {% endif %}
     {% if request.query_params.get("mailbox") == "connected" %}
       <p class="notice-success" data-account-notice-section="account-mailbox">Das Mittwald-Postfach wurde per IMAP und SMTP erfolgreich getestet und verschlüsselt gespeichert. Der Abruf und Versand über Mittwald sind noch nicht aktiviert.</p>
@@ -301,6 +305,53 @@
         </label>
       {% endfor %}
     </section>
+    {% if user.role == "admin" %}
+    <section id="account-users" class="account-panel account-panel-wide account-section" data-account-section>
+      <div>
+        <p class="eyebrow">Hub-Zugang</p>
+        <h3>Benutzer</h3>
+        <p class="subtle">Lege Zugänge für weitere Personen an. Administratoren können den Hub vollständig verwalten; Mitarbeiter erhalten die aktuell eingeschränkten Rechte.</p>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Benutzername</th><th>Rolle</th><th>Status</th><th>Letzter Login</th><th>Erstellt</th></tr></thead>
+          <tbody>
+            {% for account_user in hub_users %}
+              <tr>
+                <td><strong>{{ account_user.username }}</strong>{% if account_user.id == user.id %}<br><span class="subtle">Aktueller Benutzer</span>{% endif %}</td>
+                <td>{{ "Administrator" if account_user.role == "admin" else "Mitarbeiter" }}</td>
+                <td><span class="pill">{% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}</span></td>
+                <td>{% if account_user.last_login_at %}{{ account_user.last_login_at | berlin_time }}{% else %}Noch nie{% endif %}</td>
+                <td>{{ account_user.created_at | berlin_time }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <form method="post" action="/account/users" class="account-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>Benutzername</span>
+          <input type="text" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" placeholder="vorname.nachname" required>
+        </label>
+        <label>
+          <span>Rolle</span>
+          <select name="role">
+            {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == "viewer" %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Passwort</span>
+          <input type="password" name="password" autocomplete="new-password" minlength="12" required>
+        </label>
+        <label>
+          <span>Passwort bestätigen</span>
+          <input type="password" name="password_confirmation" autocomplete="new-password" minlength="12" required>
+        </label>
+        <button class="button button-secondary" type="submit">Benutzer anlegen</button>
+      </form>
+    </section>
+    {% endif %}
     {% if user.role == "admin" %}
     <section id="account-mailbox" class="account-panel account-section" data-account-section>
       <div>
@@ -939,6 +990,7 @@
       const savedActionSection = () => {
         const parameters = new URLSearchParams(window.location.search);
         if (parameters.has("fleet_refresh")) return "account-refresh-settings";
+        if (parameters.has("user")) return "account-users";
         if (parameters.has("mcp_token")) return "account-mcp";
         if (parameters.has("openai")) return "account-openai";
         if (parameters.has("provider_license") || parameters.has("crocoblock")) return "account-provider-licenses";

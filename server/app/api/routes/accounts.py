@@ -17,7 +17,7 @@ from app.services.audit import write_audit_log
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
-from app.services.hub_accounts import HubAccountService
+from app.services.hub_accounts import HUB_USER_ROLES, HubAccountService
 from app.services.hub_mailbox_accounts import HubMailboxAccountError, HubMailboxAccountService
 from app.services.hub_workflows import HubWorkflowService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
@@ -170,6 +170,47 @@ def change_password(
     request.session.clear()
     request.session.update({"user_id": user.id, "session_version": user.session_version})
     return RedirectResponse(url="/account?password=changed", status_code=303)
+
+
+@router.post("/users")
+def create_hub_user(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    username: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    password_confirmation: Annotated[str, Form()] = "",
+    role: Annotated[str, Form()] = "viewer",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    service = _account_service(db)
+    try:
+        user = service.create_user(
+            username=username,
+            password=password,
+            password_confirmation=password_confirmation,
+            role=role,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, actor, service, error=str(exc), error_section="account-users"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=actor.username,
+        source="hub-account",
+        action="create-hub-user",
+        result="success",
+        detail=f"Created Hub user {user.username} with role {user.role}.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?user=created#account-users", status_code=303)
 
 
 @router.post("/task-reminder-email")
@@ -1418,6 +1459,8 @@ def _account_context(
     zoho_service = _zoho_service(service.db)
     return {
         "user": user,
+        "hub_users": service.list_users() if user.role == "admin" else (),
+        "hub_user_roles": HUB_USER_ROLES,
         "csrf_token": get_csrf_token(request),
         "mcp_tokens": service.list_mcp_access_tokens(user=user),
         "desktop_devices": service.list_desktop_devices(user=user),

@@ -21,6 +21,7 @@ _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _MCP_TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{2,79}$")
 _MCP_TOKEN_PREFIX = "khmcp_"
 _DESKTOP_DEVICE_TOKEN_PREFIX = "khdsk_"
+HUB_USER_ROLES = ("admin", "viewer")
 
 
 class HubAccountService:
@@ -30,6 +31,37 @@ class HubAccountService:
 
     def get_user(self, user_id: int) -> HubUser | None:
         return self.db.get(HubUser, user_id)
+
+    def list_users(self) -> list[HubUser]:
+        return list(self.db.scalars(select(HubUser).order_by(HubUser.created_at.asc(), HubUser.id.asc())))
+
+    def create_user(
+        self,
+        *,
+        username: str,
+        password: str,
+        password_confirmation: str,
+        role: str,
+    ) -> HubUser:
+        if password != password_confirmation:
+            raise ValueError("Die Passwortbestätigung stimmt nicht überein.")
+        self.validate_password(password)
+        normalized_username = self.normalize_username(username)
+        normalized_role = role.strip().casefold()
+        if normalized_role not in HUB_USER_ROLES:
+            raise ValueError("Bitte eine gültige Benutzerrolle auswählen.")
+        if self.db.scalar(select(HubUser.id).where(HubUser.username == normalized_username)) is not None:
+            raise ValueError("Dieser Benutzername ist bereits vergeben.")
+
+        user = HubUser(
+            username=normalized_username,
+            password_hash=hash_password(password),
+            role=normalized_role,
+            is_active=True,
+        )
+        self.db.add(user)
+        self.db.flush()
+        return user
 
     def authenticate(self, username: str, password: str) -> HubUser | None:
         user = self.db.scalar(select(HubUser).where(HubUser.username == self.normalize_username(username)))
