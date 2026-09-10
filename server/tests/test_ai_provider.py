@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.hub_user import HubUser
-from app.services.ai_provider import AiProviderConfigService
+from app.services.ai_provider import DEFAULT_OPENAI_MODEL, AiProviderConfigService
 from app.services.hub_accounts import hash_password
 
 
@@ -22,6 +22,7 @@ def test_openai_key_is_encrypted_and_can_be_removed():
         db.commit()
 
         assert config.encrypted_api_key != "sk-test-abcdefghijklmnopqrstuvwxyz"
+        assert config.model == DEFAULT_OPENAI_MODEL == "gpt-5.6-sol"
         stored_config, api_key = service.get_enabled_openai_api_key()
         assert stored_config.id == config.id
         assert api_key == "sk-test-abcdefghijklmnopqrstuvwxyz"

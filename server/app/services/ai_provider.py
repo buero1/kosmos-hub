@@ -8,7 +8,7 @@ from app.models.ai_provider_config import AiProviderConfig
 from app.models.hub_user import HubUser
 
 OPENAI_PROVIDER = "openai"
-DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_MODEL = "gpt-5.6-sol"
 
 
 class AiProviderConfigError(ValueError):
