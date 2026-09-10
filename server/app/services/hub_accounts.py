@@ -44,6 +44,9 @@ class HubAccountService:
     def list_users(self) -> list[HubUser]:
         return list(self.db.scalars(select(HubUser).order_by(HubUser.created_at.asc(), HubUser.id.asc())))
 
+    def admin_count(self) -> int:
+        return self._admin_count()
+
     def create_user(
         self,
         *,

@@ -326,25 +326,30 @@
                 <td class="account-user-actions-cell">
                   <details class="account-user-actions">
                     <summary>Bearbeiten</summary>
-                    <form method="post" action="/account/users/{{ account_user.id }}" class="account-user-edit-form">
+                    <form id="account-user-edit-{{ account_user.id }}" method="post" action="/account/users/{{ account_user.id }}" class="account-user-edit-form">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <label><span>Benutzername</span><input type="text" name="username" value="{{ account_user.username }}" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" required></label>
                       <label>
                         <span>Rolle</span>
                         <select name="role">
-                          {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+                          {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role != "admin" %} disabled{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
                         </select>
                       </label>
                       <label><span>Neues Passwort <small>(optional)</small></span><input type="password" name="password" autocomplete="new-password" minlength="12"></label>
                       <label><span>Passwort bestätigen</span><input type="password" name="password_confirmation" autocomplete="new-password" minlength="12"></label>
-                      <div class="account-user-action-buttons">
-                        <button class="button button-secondary" type="submit">Speichern</button>
-                      </div>
                     </form>
-                    <form method="post" action="/account/users/{{ account_user.id }}/delete" onsubmit="return window.confirm('Benutzer {{ account_user.username }} wirklich löschen?');">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                      <button class="button button-danger" type="submit">Löschen</button>
-                    </form>
+                    <div class="account-user-action-buttons">
+                      <button class="button button-secondary" type="button" data-account-user-edit-cancel>Abbrechen</button>
+                      {% if account_user.role == "admin" and hub_admin_count == 1 %}
+                        <span class="subtle">Letzter Administrator</span>
+                      {% else %}
+                        <form method="post" action="/account/users/{{ account_user.id }}/delete" onsubmit="return window.confirm('Benutzer {{ account_user.username }} wirklich löschen?');">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                          <button class="button button-danger" type="submit">Löschen</button>
+                        </form>
+                      {% endif %}
+                      <button class="button" type="submit" form="account-user-edit-{{ account_user.id }}">Speichern</button>
+                    </div>
                   </details>
                 </td>
               </tr>
@@ -1008,6 +1013,12 @@
           workflowDescriptions.forEach((description) => {
             description.hidden = description.id !== targetId;
           });
+        });
+      });
+      page.querySelectorAll("[data-account-user-edit-cancel]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const disclosure = button.closest("details.account-user-actions");
+          if (disclosure) disclosure.open = false;
         });
       });
       window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));

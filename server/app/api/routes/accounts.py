@@ -1546,6 +1546,7 @@ def _account_context(
     return {
         "user": user,
         "hub_users": service.list_users() if user.role == "admin" else (),
+        "hub_admin_count": service.admin_count() if user.role == "admin" else 0,
         "hub_user_roles": HUB_USER_ROLES,
         "csrf_token": get_csrf_token(request),
         "mcp_tokens": service.list_mcp_access_tokens(user=user),
