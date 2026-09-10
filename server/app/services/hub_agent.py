@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from html import escape, unescape
+from html.parser import HTMLParser
 from typing import Any
 from urllib import error, request
 from zoneinfo import ZoneInfo
@@ -29,6 +30,7 @@ from app.services.ai_provider import AiProviderConfigError, AiProviderConfigServ
 from app.services.customer_activities import CustomerActivityError, CustomerActivityService
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.customer_directory import CustomerDirectoryService
+from app.services.email_composer_settings import EmailComposerSettingsService
 from app.services.hub_cases import HubCaseError, HubCaseService
 from app.services.hub_mailbox import HubMailboxService
 from app.services.hub_mailbox_transport import DEFAULT_HUB_MAILBOX_SENDER_EMAIL
@@ -68,6 +70,70 @@ _CUSTOMER_ACTION_TYPES = frozenset(
     }
 )
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+_AGENT_REPLY_INLINE_TAGS = frozenset({"a", "b", "em", "i", "s", "strong", "sub", "sup", "u"})
+_AGENT_REPLY_BLOCK_TAGS = frozenset({"div", "h1", "h2", "h3", "h4", "h5", "h6", "p", "pre"})
+_AGENT_REPLY_CLOSING_SALUTATION_PATTERN = re.compile(
+    r"(?:<br>\s*)?(?:mit\s+freundlichen|freundliche|viele|beste|herzliche|liebe)\s+gr(?:ü|ue)ße?\.?\s*$",
+    flags=re.IGNORECASE,
+)
+
+
+class _AgentReplyHtmlNormalizer(HTMLParser):
+    """Convert the agent's safe HTML into the Hub's text-and-break email format."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.open_inline_tags: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized = tag.casefold()
+        if normalized == "br":
+            self.parts.append("<br>")
+            return
+        if normalized == "li":
+            if self.parts and not self.parts[-1].endswith("<br>"):
+                self.parts.append("<br>")
+            self.parts.append("• ")
+            return
+        if normalized not in _AGENT_REPLY_INLINE_TAGS:
+            return
+        if normalized == "a":
+            href = next((value for name, value in attrs if name.casefold() == "href" and value), "")
+            if not href:
+                return
+            self.parts.append(f'<a href="{escape(href, quote=True)}">')
+        else:
+            self.parts.append(f"<{normalized}>")
+        self.open_inline_tags.append(normalized)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.casefold()
+        if normalized == "li":
+            self.parts.append("<br>")
+            return
+        if normalized in _AGENT_REPLY_BLOCK_TAGS:
+            self.parts.append("<br><br>")
+            return
+        if normalized not in self.open_inline_tags:
+            return
+        while self.open_inline_tags:
+            opened = self.open_inline_tags.pop()
+            self.parts.append(f"</{opened}>")
+            if opened == normalized:
+                return
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(escape(data))
+
+    def content(self) -> str:
+        while self.open_inline_tags:
+            self.parts.append(f"</{self.open_inline_tags.pop()}>")
+        normalized = "".join(self.parts).strip()
+        normalized = re.sub(r"(?:\s*<br>\s*){3,}", "<br><br>", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"(?:\s*<br>\s*)+$", "", normalized, flags=re.IGNORECASE)
+        normalized = _AGENT_REPLY_CLOSING_SALUTATION_PATTERN.sub("", normalized).strip()
+        return re.sub(r"(?:\s*<br>\s*)+$", "", normalized, flags=re.IGNORECASE)
 
 
 class HubAgentError(ValueError):
@@ -1103,7 +1169,7 @@ class HubAgentService:
             "tools": [self._proposal_tool_definition()],
             "instructions": (
                 "Du bist der Hub-Agent von Kosmos und antwortest ausschließlich auf Deutsch. "
-                "Erstelle einen konkreten, aber noch nicht ausgeführten Arbeitsplan. "
+                "Erstelle einen konkreten Arbeitsplan. "
                 "Du darfst ausschließlich die im Werkzeug angegebenen Aktionstypen vorschlagen. "
                 "Versende niemals eine E-Mail und behaupte nie, dass etwas bereits umgesetzt wurde. "
                 "Nutze nur Tatsachen aus der Nutzeranweisung oder dem ausdrücklich bereitgestellten Hub-Kontext. Erfinde keine Namen, E-Mail-Adressen, Termine, Kunden oder Inhalte. "
@@ -1113,8 +1179,8 @@ class HubAgentService:
                 "Ein Kontakt braucht mindestens Anrede und Nachname. Eine Aufgabe braucht einen exakten Kunden-Namen, ein Datum im Format YYYY-MM-DD und eine Uhrzeit HH:MM. "
                 "Ein E-Mail-Entwurf braucht Empfängeradresse, Betreff und sicheren HTML-Inhalt mit einfachen p- und br-Tags. "
                 "Wenn genau ein E-Mail-Kontext vorliegt und der Nutzer um eine Antwort bittet, verwende ausschließlich die Aktion create_email_reply_draft. "
-                "Formuliere dafür ohne Rückfragen sofort einen vollständigen, sachlichen Antworttext als sicheres HTML mit einfachen p- und br-Tags im Feld email_html. "
-                "Leite die Anrede aus der E-Mail ab, wenn sie eindeutig ist; andernfalls nutze „Guten Tag“. Ergänze weder Signatur noch Zitat, weil der vorhandene Hub-Antworteditor beides selbst einfügt. "
+                "Formuliere dafür ohne Rückfragen sofort einen vollständigen, sachlichen Antworttext als sicheres HTML mit Text und br-Tags im Feld email_html; verwende <br><br> für einen Absatz. "
+                "Leite die Anrede aus der E-Mail ab, wenn sie eindeutig ist; andernfalls nutze „Guten Tag“. Ergänze weder Grußformel noch Signatur noch Zitat, weil der vorhandene Hub-Antworteditor Signatur und Zitat selbst einfügt. "
                 "Fordere für diese Aktion weder Empfängeradresse noch Betreff noch eine Erlaubnis zum Entwurf an und verwende dafür niemals create_email_draft. "
                 "Wenn die gewünschte Aussage nicht vollständig bestimmt ist, formuliere eine zurückhaltende Antwort ohne erfundene Zusagen. "
                 "Zum Ändern, Abschließen oder Löschen einer Aufgabe oder eines Anrufs ist der exakte Kunden- und Aktionsname erforderlich. "
@@ -1123,7 +1189,7 @@ class HubAgentService:
                 "Für die Verknüpfung mit einem vorhandenen Fall ist die exakte Fall-Nummer erforderlich. "
                 "Heute ist "
                 f"{datetime.now(UTC).astimezone(ZoneInfo('Europe/Berlin')).date().isoformat()}. Interpretiere relative Datumsangaben daran und nenne die aufgelösten Daten. "
-                "Die Aktion wird anschließend einzeln vom Nutzer bestätigt."
+                "Alle Aktionen außer create_email_reply_draft werden anschließend einzeln vom Nutzer bestätigt."
             ),
             "input": [
                 {
@@ -1515,15 +1581,14 @@ class HubAgentService:
     def _create_email_reply_draft(self, values: dict[str, Any]) -> dict[str, str]:
         """Create an unsent reply draft on top of the manual reply context."""
         email_key = self._required_text(values.get("email_key"), "E-Mail-Kontext")
-        reply_html = self._required_text(values.get("email_html"), "Antworttext")
-        if "<" not in reply_html or ">" not in reply_html:
-            reply_html = f"<p>{escape(reply_html)}</p>"
+        reply_html = self._normalized_agent_reply_html(
+            self._required_text(values.get("email_html"), "Antworttext")
+        )
         mailbox = HubMailboxService(
             db=self.db,
             cipher=self.cipher,
             public_base_url=get_settings().public_base_url,
         )
-        reply_html = mailbox.communications._sanitized_email_content(reply_html)
         if email_key.startswith("linked-"):
             try:
                 customer_text, email_text = email_key.removeprefix("linked-").split("-", 1)
@@ -1579,6 +1644,18 @@ class HubAgentService:
             "label": "Antwortentwurf im E-Mail-Editor öffnen",
             "href": f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1",
         }
+
+    def _normalized_agent_reply_html(self, value: str) -> str:
+        """Apply the Hub's reply markup and typography without trusting agent styles."""
+        sanitized = CustomerCommunicationService._sanitized_email_content(value)
+        content = _AgentReplyHtmlNormalizer()
+        content.feed(sanitized)
+        content.close()
+        normalized = content.content()
+        if not self._text(_HTML_TAG_PATTERN.sub("", normalized)):
+            raise HubAgentError("Der Antwortentwurf enthält keinen lesbaren Antworttext.")
+        settings = EmailComposerSettingsService(db=self.db).get_runtime_settings()
+        return f'<span style="{escape(settings.font_style, quote=True)}">{normalized}</span>'
 
     def _create_case_from_email(self, values: dict[str, Any], *, actor: str) -> dict[str, str]:
         source_key = self._required_text(values.get("email_key"), "E-Mail-Kontext")

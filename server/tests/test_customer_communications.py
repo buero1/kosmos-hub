@@ -720,7 +720,7 @@ def test_customer_communications_replies_to_the_original_zoho_message():
         assert "Anna Example" in reply.content
         assert "Originale Nachricht" in reply.content
         assert "<strong>Am " in reply.content
-        assert reply.content.startswith(f"<p><br><br></p>{signature}<p><br><br></p><p><strong>Am ")
+        assert reply.content.startswith(f"<br>{signature}<p><br><br></p><p><strong>Am ")
         assert "<blockquote" in reply.content
         assert reply.reply_all_cc_emails == ("office@example.de", "team@example.de")
 

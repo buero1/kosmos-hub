@@ -1359,7 +1359,7 @@ class CustomerCommunicationService:
         signature_html = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
         signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
         content = (
-            "<p><br><br></p>"
+            "<br>"
             f"{signature_section}"
             f"<p><strong>Am {escape(original_time.isoformat())} schrieb {escape(original_sender)}:</strong></p>"
             "<p><br></p>"

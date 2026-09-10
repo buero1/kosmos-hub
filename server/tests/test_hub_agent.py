@@ -540,6 +540,29 @@ def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
         raise AssertionError("Reply actions must not be proposed without a selected email.")
 
 
+def test_hub_agent_normalizes_reply_html_to_hub_typography_and_breaks():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        service = HubAgentService(db=db, cipher=cipher)
+        normalized = service._normalized_agent_reply_html(
+            '<p style="font-family: Arial; font-size: 18px">Guten Tag <strong>Frau Beispiel</strong>,</p>'
+            '<div style="line-height: 2">vielen Dank für Ihre Nachricht.</div>'
+            "<p>Viele Grüße</p>"
+        )
+
+        assert normalized == (
+            '<span style="font-family: Verdana, Geneva, sans-serif; font-size: 12px; line-height: 1.1">'
+            "Guten Tag <strong>Frau Beispiel</strong>,<br><br>vielen Dank für Ihre Nachricht.</span>"
+        )
+        assert "<p" not in normalized
+        assert "<div" not in normalized
+        assert "Arial" not in normalized
+        assert "Viele Grüße" not in normalized
+
+
 def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_drafts(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -618,7 +641,7 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
                 recipient_name="Max Mustermann",
                 recipient_email="max@example.test",
                 subject="Re: Änderungswunsch",
-                content="<p><br><br></p><p><strong>Am heute schrieb Max Mustermann:</strong></p><blockquote>Bitte die Startseite ändern.</blockquote>",
+                content="<br><p><strong>Am heute schrieb Max Mustermann:</strong></p><blockquote>Bitte die Startseite ändern.</blockquote>",
             ),
         )
         reply_action = _add_action(
@@ -633,7 +656,10 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
         assert reply.status == "completed"
         assert reply.result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1"
         assert draft_payload["recipient_key"] == "contact-1"
-        assert draft_payload["content"].startswith("<p>Guten Tag,</p>")
+        assert draft_payload["content"].startswith(
+            '<span style="font-family: Verdana, Geneva, sans-serif; font-size: 12px; line-height: 1.1">'
+            "Guten Tag,<br><br>Vielen Dank"
+        )
         assert "Bitte die Startseite ändern." in draft_payload["content"]
 
 
@@ -710,7 +736,10 @@ def test_hub_agent_creates_a_reply_draft_immediately_without_an_execute_click(mo
         draft_payload = json.loads(cipher.decrypt(draft.encrypted_payload_json))
         assert draft_payload["recipient_email"] == "frau@example.test"
         assert draft_payload["subject"] == "Re: Rückfrage zur Website"
-        assert draft_payload["content"].startswith("<p>Guten Tag Frau Beispiel,</p>")
+        assert draft_payload["content"].startswith(
+            '<span style="font-family: Verdana, Geneva, sans-serif; font-size: 12px; line-height: 1.1">'
+            "Guten Tag Frau Beispiel,<br><br>vielen Dank"
+        )
         assert "Am 2026-09-10T09:00:00 schrieb" in draft_payload["content"]
 
 

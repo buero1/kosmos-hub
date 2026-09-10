@@ -585,7 +585,7 @@ class HubMailboxService:
             signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
             quoted_content = self.communications._sanitized_email_content(original_content) if original_content else ""
             content = (
-                "<p><br><br></p>"
+                "<br>"
                 f"{signature_section}"
                 f"<p><strong>Am {escape(email.received_at.isoformat())} schrieb {escape(original_sender)}:</strong></p>"
                 "<p><br></p>"
