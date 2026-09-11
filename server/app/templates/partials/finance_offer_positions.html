@@ -13,13 +13,8 @@
         {% for row in line_rows %}
           <tr data-finance-position-row>
             <td class="finance-position-details">
-              <select name="offer_line__{{ loop.index0 }}__article_id" data-finance-line-article>
-                <option value="">Freitextposition</option>
-                {% for article in articles %}
-                  <option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"{% if row.article_id|string == article.article.id|string %} selected{% endif %}>{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>
-                {% endfor %}
-              </select>
-              <input type="text" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Bezeichnung" data-finance-line-field="name">
+              <input type="hidden" name="offer_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-line-article-id>
+              <input type="search" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search>
               <input type="hidden" name="offer_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-line-field="sku">
               <textarea name="offer_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description">{{ row.description }}</textarea>
             </td>
@@ -42,14 +37,12 @@
       <div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-total="total">0,00 EUR</dd></div>
     </dl>
   </div>
+  <datalist id="finance-offer-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
   <template data-finance-position-template>
     <tr data-finance-position-row>
       <td class="finance-position-details">
-        <select name="offer_line__INDEX__article_id" data-finance-line-article>
-          <option value="">Freitextposition</option>
-          {% for article in articles %}<option value="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}">{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}</option>{% endfor %}
-        </select>
-        <input type="text" name="offer_line__INDEX__name" placeholder="Bezeichnung" data-finance-line-field="name">
+        <input type="hidden" name="offer_line__INDEX__article_id" data-finance-line-article-id>
+        <input type="search" name="offer_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search>
         <input type="hidden" name="offer_line__INDEX__sku" data-finance-line-field="sku">
         <textarea name="offer_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"></textarea>
       </td>
@@ -91,18 +84,22 @@
       editor.querySelector('[data-finance-total="tax"]').textContent = formatMoney(sums.tax, currency);
       editor.querySelector('[data-finance-total="total"]').textContent = formatMoney(sums.net + sums.tax, currency);
     }
+    function selectArticle(row, option) {
+      var search = row.querySelector('[data-finance-article-search]');
+      row.querySelector('[data-finance-line-article-id]').value = option.dataset.articleId;
+      search.value = option.dataset.name;
+      [['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price']].forEach(function (pair) {
+        var field = row.querySelector('[data-finance-line-field="' + pair[0] + '"]');
+        if (field) { field.value = option.dataset[pair[1]] || ''; }
+      });
+      var tax = row.querySelector('[data-finance-line-field="tax_rate"]');
+      if (tax) { tax.value = option.dataset.tax || '19'; }
+    }
     function bindRow(editor, row) {
       row.addEventListener('input', function () { updateTotals(editor); });
-      row.addEventListener('change', function (event) {
-        if (event.target.matches('[data-finance-line-article]')) {
-          var option = event.target.options[event.target.selectedIndex];
-          [['name', 'name'], ['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price']].forEach(function (pair) {
-            var field = row.querySelector('[data-finance-line-field="' + pair[0] + '"]');
-            if (field && option.dataset[pair[1]]) { field.value = option.dataset[pair[1]]; }
-          });
-          var tax = row.querySelector('[data-finance-line-field="tax_rate"]');
-          if (tax && option.dataset.tax) { tax.value = option.dataset.tax.replace(' %', ''); }
-        }
+      row.querySelector('[data-finance-article-search]').addEventListener('input', function (event) {
+        var option = Array.prototype.find.call(document.getElementById('finance-offer-article-suggestions').options, function (candidate) { return candidate.value === event.target.value; });
+        if (option) { selectArticle(row, option); } else { row.querySelector('[data-finance-line-article-id]').value = ''; row.querySelector('[data-finance-line-field="sku"]').value = ''; }
         updateTotals(editor);
       });
       row.querySelector('[data-finance-position-remove]').addEventListener('click', function () { row.remove(); updateTotals(editor); });
