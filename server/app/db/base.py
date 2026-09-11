@@ -50,6 +50,10 @@ from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.models.zoho_connection import ZohoConnection
 from app.models.zoho_books_connection import ZohoBooksConnection
 from app.models.zoho_books_invoice_import import ZohoBooksInvoiceImport, ZohoBooksInvoiceImportItem
+from app.models.zoho_books_recurring_invoice_import import (
+    ZohoBooksRecurringInvoiceImport,
+    ZohoBooksRecurringInvoiceImportItem,
+)
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.base import Base
 
@@ -111,6 +115,8 @@ __all__ = [
     "ZohoBooksConnection",
     "ZohoBooksInvoiceImport",
     "ZohoBooksInvoiceImportItem",
+    "ZohoBooksRecurringInvoiceImport",
+    "ZohoBooksRecurringInvoiceImportItem",
     "HubFinanceInvoicePdf",
     "ZohoEmailWorkflowDelivery",
     "ZohoEmailWorkflowWebhook",

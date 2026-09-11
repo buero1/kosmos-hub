@@ -294,6 +294,70 @@ class ZohoBooksService:
             raise ZohoBooksError("Zoho Books hat keine gültigen Rechnungsdaten zurückgegeben.")
         return invoice
 
+    def list_all_recurring_invoice_ids(self) -> tuple[str, ...]:
+        """Return every accessible recurring invoice ID for a resumable full import."""
+        connection = self._require_import_connection()
+        result: list[str] = []
+        seen: set[str] = set()
+        per_page = 200
+        for page in range(1, 10_001):
+            query = urlencode(
+                {
+                    "organization_id": connection.organization_id or "",
+                    "page": str(page),
+                    "per_page": str(per_page),
+                    "sort_column": "created_time",
+                    "sort_order": "D",
+                }
+            )
+            response = self._api_get(connection, f"/books/v3/recurringinvoices?{query}")
+            rows = response.get("recurring_invoices")
+            if not isinstance(rows, list):
+                raise ZohoBooksError("Zoho Books hat keine gültige Liste periodischer Rechnungen zurückgegeben.")
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                recurring_invoice_id = str(row.get("recurring_invoice_id") or "").strip()
+                if recurring_invoice_id and recurring_invoice_id not in seen:
+                    seen.add(recurring_invoice_id)
+                    result.append(recurring_invoice_id)
+
+            page_context = response.get("page_context")
+            has_more = (
+                str(page_context.get("has_more_page", "")).strip().casefold() in {"true", "1", "yes"}
+                if isinstance(page_context, dict)
+                else len(rows) >= per_page
+            )
+            if not has_more:
+                return tuple(result)
+        raise ZohoBooksError(
+            "Zoho Books liefert ungewöhnlich viele Seiten periodischer Rechnungen. Der Import wurde nicht gestartet."
+        )
+
+    def get_recurring_invoice(self, *, recurring_invoice_id: str) -> dict[str, object]:
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(recurring_invoice_id, "Periodische Rechnung")
+        query = urlencode({"organization_id": connection.organization_id or ""})
+        response = self._api_get(
+            connection,
+            f"/books/v3/recurringinvoices/{normalized_id}?{query}",
+        )
+        recurring_invoice = response.get("recurring_invoice")
+        if not isinstance(recurring_invoice, dict):
+            raise ZohoBooksError("Zoho Books hat keine gültigen Daten der periodischen Rechnung zurückgegeben.")
+        return recurring_invoice
+
+    def get_books_contact(self, *, contact_id: str) -> dict[str, object]:
+        """Resolve a Books customer to its linked CRM account and contact IDs."""
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(contact_id, "Zoho-Books-Kunde")
+        query = urlencode({"organization_id": connection.organization_id or ""})
+        response = self._api_get(connection, f"/books/v3/contacts/{normalized_id}?{query}")
+        contact = response.get("contact")
+        if not isinstance(contact, dict):
+            raise ZohoBooksError("Zoho Books hat keine gültigen Kundendaten zurückgegeben.")
+        return contact
+
     def download_invoice_pdf(self, *, invoice_id: str) -> ZohoBinaryDownload:
         """Fetch the PDF Books currently provides, including a ZUGFeRD PDF when configured there."""
         connection = self._require_import_connection()

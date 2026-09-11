@@ -4,7 +4,7 @@ from app.services.hub_finance_field_catalog import HubFinanceField
 
 
 _CURRENCIES = (("EUR", "EUR"), ("CHF", "CHF"), ("USD", "USD"))
-_PAYMENT_TERMS = (("due_on_receipt", "Sofort fällig"), ("14_days", "14 Tage"), ("30_days", "30 Tage"))
+_PAYMENT_TERMS = (("due_on_receipt", "Sofort fällig"), ("7_days", "7 Tage"), ("14_days", "14 Tage"), ("30_days", "30 Tage"))
 
 
 ORDER_FIELDS = (

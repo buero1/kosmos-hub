@@ -25,6 +25,7 @@ from app.services.provider_credentials import ProviderCredentialError, ProviderC
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
 from app.services.zoho_books import ZohoBooksError, ZohoBooksService
 from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
+from app.services.zoho_books_recurring_invoice_import import ZohoBooksRecurringInvoiceImportService
 from app.services.finance_invoice_pdf_storage import FinanceInvoicePdfStorageError
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.email_composer_settings import (
@@ -42,6 +43,7 @@ from app.services.maintenance_worker import (
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_books_invoice_import,
+    schedule_pending_zoho_books_recurring_invoice_import,
     schedule_pending_zoho_email_workflow_deliveries,
     schedule_pending_hub_mailbox_imap_import,
 )
@@ -1235,6 +1237,102 @@ def zoho_books_invoice_import_status(
     )
 
 
+@router.post("/zoho-books/recurring-invoices/import")
+def import_all_zoho_books_recurring_invoices(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoBooksRecurringInvoiceImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+        ).start_all(requested_by=user.username)
+    except (ValueError, ZohoBooksError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(
+                request,
+                user,
+                _account_service(db),
+                error=str(exc),
+                error_section="account-zoho-books",
+            ),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-books",
+        action="import-all-zoho-books-recurring-invoices",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho Books recurring invoice import {status.id} "
+            f"{'started' if started else 'was already active'} for {status.total_invoices} profile(s)."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_books_recurring_invoice_import()
+    state = "recurring-invoice-import-started" if started else "recurring-invoice-import-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
+@router.post("/zoho-books/recurring-invoices/import/cancel")
+def cancel_zoho_books_recurring_invoice_import(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    status, requested = ZohoBooksRecurringInvoiceImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+    ).cancel()
+    if requested and status is not None:
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho-books",
+            action="cancel-zoho-books-recurring-invoice-import",
+            result="requested",
+            detail=f"Cancellation requested for Zoho Books recurring invoice import {status.id}.",
+        )
+        db.commit()
+    state = "recurring-invoice-import-cancel-requested" if requested else "recurring-invoice-import-not-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
+@router.get("/zoho-books/recurring-invoices/import/status")
+def zoho_books_recurring_invoice_import_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_admin_user(request)
+    status = ZohoBooksRecurringInvoiceImportService(db=db, cipher=get_secret_cipher()).status()
+    if status is None:
+        return JSONResponse({"active": False, "status": None})
+    return JSONResponse(
+        {
+            "active": status.status in {"pending", "running"},
+            "status": status.status,
+            "processed_invoices": status.processed_invoices,
+            "total_invoices": status.total_invoices,
+            "imported_invoices": status.imported_invoices,
+            "updated_invoices": status.updated_invoices,
+            "failed_invoices": status.failed_invoices,
+            "consecutive_failures": status.consecutive_failures,
+            "cancel_requested": status.cancel_requested,
+            "last_error": status.last_error,
+        }
+    )
+
+
 @router.post("/zoho/mapping")
 def refresh_zoho_mapping(
     request: Request,
@@ -1886,6 +1984,10 @@ def _account_context(
         "zoho_data_centers": ZOHO_DATA_CENTERS.values(),
         "zoho_books_status": zoho_books_service.get_status(),
         "zoho_books_invoice_import": ZohoBooksInvoiceImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+        ).status(),
+        "zoho_books_recurring_invoice_import": ZohoBooksRecurringInvoiceImportService(
             db=service.db,
             cipher=get_secret_cipher(),
         ).status(),

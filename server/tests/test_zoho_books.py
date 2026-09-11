@@ -273,6 +273,52 @@ def test_books_reads_all_invoice_ids_across_pages_without_duplicates(monkeypatch
         assert "per_page=200" in captured_paths[0]
 
 
+def test_books_reads_all_recurring_invoice_ids_and_resolves_their_customer(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("h" * 32)
+        user = _user()
+        db.add(user)
+        db.flush()
+        db.add(_crm_connection(cipher=cipher, user=user))
+        db.commit()
+        service = ZohoBooksService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        connection = service.prepare_authorization(actor=user)
+        connection.encrypted_refresh_token = cipher.encrypt("books-refresh-token")
+        connection.organization_id = "books-org-1"
+        captured_paths: list[str] = []
+
+        def fake_api_get(_connection, path):
+            captured_paths.append(path)
+            if path.startswith("/books/v3/recurringinvoices?"):
+                if "page=1" in path:
+                    return {
+                        "recurring_invoices": [
+                            {"recurring_invoice_id": "7002"},
+                            {"recurring_invoice_id": "7001"},
+                        ],
+                        "page_context": {"has_more_page": True},
+                    }
+                return {
+                    "recurring_invoices": [{"recurring_invoice_id": "7001"}],
+                    "page_context": {"has_more_page": False},
+                }
+            if path.startswith("/books/v3/recurringinvoices/7001?"):
+                return {"recurring_invoice": {"recurring_invoice_id": "7001"}}
+            return {"contact": {"contact_id": "8001", "zcrm_account_id": "crm-1"}}
+
+        monkeypatch.setattr(service, "_api_get", fake_api_get)
+
+        assert service.list_all_recurring_invoice_ids() == ("7002", "7001")
+        assert service.get_recurring_invoice(recurring_invoice_id="7001")["recurring_invoice_id"] == "7001"
+        assert service.get_books_contact(contact_id="8001")["zcrm_account_id"] == "crm-1"
+        assert "sort_column=created_time" in captured_paths[0]
+        assert "page=2" in captured_paths[1]
+        assert "/books/v3/contacts/8001?" in captured_paths[-1]
+
+
 def test_books_translates_shared_zoho_request_errors(monkeypatch):
     def raise_crm_error(*_args, **_kwargs):
         raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.")

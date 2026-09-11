@@ -145,6 +145,15 @@
     {% if request.query_params.get("zoho_books") == "invoice-import-cancel-requested" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Der Abbruch wurde vorgemerkt. Die gerade verarbeitete Rechnung wird noch sauber abgeschlossen.</p>
     {% endif %}
+    {% if request.query_params.get("zoho_books") == "recurring-invoice-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Gesamtimport der periodischen Rechnungen wurde im Hintergrund gestartet.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "recurring-invoice-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Import periodischer Rechnungen läuft bereits im Hintergrund weiter.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "recurring-invoice-import-cancel-requested" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Abbruch wurde vorgemerkt. Die gerade verarbeitete periodische Rechnung wird noch sauber abgeschlossen.</p>
+    {% endif %}
     {% if request.query_params.get("zoho_books") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Verbindung wurde entfernt. Zoho CRM bleibt unverändert verbunden.</p>
     {% endif %}
@@ -391,7 +400,7 @@
           </div>
         </details>
         {% if zoho_books_status.ready_for_import %}
-          <details class="account-details zoho-area" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}open{% endif %}>
+          <details class="account-details zoho-area" {% if (zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"]) or (zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"]) %}open{% endif %}>
             <summary>Datenimport</summary>
             <div class="zoho-area-content">
               <div class="zoho-import-row">
@@ -415,6 +424,29 @@
                   </form>
                   {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}
                     <form method="post" action="/account/zoho-books/invoices/import/cancel">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-danger" type="submit">Import abbrechen</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="zoho-import-row">
+                <div>
+                  <h4>Periodische Rechnungen</h4>
+                  <p class="subtle">Der Hub übernimmt alle periodischen Rechnungen mit Rhythmus, Terminen, Zahlungsdaten und Positionen. Bereits vorhandene Datensätze werden anhand ihrer Zoho-ID aktualisiert.</p>
+                  {% if zoho_books_recurring_invoice_import %}
+                    <p class="zoho-import-status" data-zoho-books-recurring-invoice-import-status><strong>{{ zoho_books_recurring_invoice_import.processed_invoices }} von {{ zoho_books_recurring_invoice_import.total_invoices }} periodischen Rechnungen</strong> · {{ zoho_books_recurring_invoice_import.imported_invoices }} neu · {{ zoho_books_recurring_invoice_import.updated_invoices }} aktualisiert · {{ zoho_books_recurring_invoice_import.failed_invoices }} fehlgeschlagen{% if zoho_books_recurring_invoice_import.consecutive_failures %} · {{ zoho_books_recurring_invoice_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_books_recurring_invoice_import.status == "stopped" %}automatisch angehalten{% elif zoho_books_recurring_invoice_import.status == "cancelled" %}abgebrochen{% elif zoho_books_recurring_invoice_import.status == "completed" %}abgeschlossen{% else %}{{ zoho_books_recurring_invoice_import.status }}{% endif %}{% if zoho_books_recurring_invoice_import.cancel_requested %} · Abbruch vorgemerkt{% endif %}{% if zoho_books_recurring_invoice_import.completed_at %} · beendet {{ zoho_books_recurring_invoice_import.completed_at | berlin_time }}{% endif %}{% if zoho_books_recurring_invoice_import.last_error %} · letzte Meldung: {{ zoho_books_recurring_invoice_import.last_error }}{% endif %}</p>
+                  {% else %}
+                    <p class="zoho-import-status">Noch kein Import periodischer Rechnungen ausgeführt.</p>
+                  {% endif %}
+                </div>
+                <div class="zoho-import-actions">
+                  <form method="post" action="/account/zoho-books/recurring-invoices/import">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="button button-variant-1" type="submit" {% if zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"] %}disabled{% endif %}>Alle periodischen Rechnungen importieren</button>
+                  </form>
+                  {% if zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"] %}
+                    <form method="post" action="/account/zoho-books/recurring-invoices/import/cancel">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <button class="button button-danger" type="submit">Import abbrechen</button>
                     </form>
@@ -458,6 +490,46 @@
             window.fetch('/account/zoho-books/invoices/import/status', { credentials: 'same-origin' })
               .then(function (response) {
                 if (!response.ok) throw new Error('Import status response failed.');
+                return response.json();
+              })
+              .then(function (status) {
+                if (!status.status) return;
+                renderStatus(status);
+                if (!status.active) {
+                  window.setTimeout(function () { window.location.reload(); }, 750);
+                  return;
+                }
+                window.setTimeout(refreshStatus, 3000);
+              })
+              .catch(function () { window.setTimeout(refreshStatus, 6000); });
+          }
+
+          window.setTimeout(refreshStatus, 3000);
+        }());
+      </script>
+    {% endif %}
+    {% if zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"] %}
+      <script>
+        (function () {
+          var statusLine = document.querySelector('[data-zoho-books-recurring-invoice-import-status]');
+          if (!statusLine) return;
+
+          function renderStatus(status) {
+            statusLine.replaceChildren();
+            var progress = document.createElement('strong');
+            progress.textContent = status.processed_invoices + ' von ' + status.total_invoices + ' periodischen Rechnungen';
+            statusLine.append(progress);
+            statusLine.append(' · ' + status.imported_invoices + ' neu · ' + status.updated_invoices + ' aktualisiert · ' + status.failed_invoices + ' fehlgeschlagen');
+            if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+            statusLine.append(' · Status: ' + (status.status === 'stopped' ? 'automatisch angehalten' : (status.status === 'cancelled' ? 'abgebrochen' : (status.status === 'completed' ? 'abgeschlossen' : status.status))));
+            if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
+            if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
+          }
+
+          function refreshStatus() {
+            window.fetch('/account/zoho-books/recurring-invoices/import/status', { credentials: 'same-origin' })
+              .then(function (response) {
+                if (!response.ok) throw new Error('Recurring invoice import status response failed.');
                 return response.json();
               })
               .then(function (status) {

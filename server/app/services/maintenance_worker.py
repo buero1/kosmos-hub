@@ -20,6 +20,7 @@ from app.services.zoho_email_attachment_import import ZohoEmailAttachmentImportS
 from app.services.zoho_email_history_import import ZohoEmailHistoryImportService
 from app.services.zoho_note_history_import import ZohoNoteHistoryImportService
 from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
+from app.services.zoho_books_recurring_invoice_import import ZohoBooksRecurringInvoiceImportService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.hub_mailbox_health import HubMailboxHealthService
 from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
@@ -37,6 +38,7 @@ _zoho_email_attachment_import_poll_lock = Lock()
 _zoho_email_history_import_poll_lock = Lock()
 _zoho_note_history_import_poll_lock = Lock()
 _zoho_books_invoice_import_poll_lock = Lock()
+_zoho_books_recurring_invoice_import_poll_lock = Lock()
 _hub_mailbox_imap_import_poll_lock = Lock()
 _hub_mailbox_imap_sync_poll_lock = Lock()
 _hub_mailbox_imap_inbox_sync_lock = Lock()
@@ -481,6 +483,43 @@ def schedule_pending_zoho_books_invoice_import() -> None:
     Thread(
         target=process_pending_zoho_books_invoice_import,
         name="kosmos-zoho-books-invoice-import-worker",
+        daemon=True,
+    ).start()
+
+
+def process_pending_zoho_books_recurring_invoice_import() -> dict[str, int]:
+    """Import one recurring invoice at a time without delaying interactive Hub work."""
+    summary = {"checked": 0, "succeeded": 0, "failed": 0}
+    if not _zoho_books_recurring_invoice_import_poll_lock.acquire(blocking=False):
+        return summary
+
+    try:
+        while True:
+            try:
+                with SessionLocal() as db:
+                    outcome = ZohoBooksRecurringInvoiceImportService(
+                        db=db,
+                        cipher=get_secret_cipher(),
+                    ).process_next_invoice()
+            except Exception:
+                logger.exception("Zoho Books recurring invoice import worker failed unexpectedly.")
+                summary["failed"] += 1
+                return summary
+
+            if outcome is None or outcome in {"completed", "cancelled", "stopped"}:
+                return summary
+            summary["checked"] += 1
+            summary["succeeded" if outcome == "succeeded" else "failed"] += 1
+            sleep(0.5)
+    finally:
+        _zoho_books_recurring_invoice_import_poll_lock.release()
+
+
+def schedule_pending_zoho_books_recurring_invoice_import() -> None:
+    """Resume an active Books recurring invoice import after startup or a user request."""
+    Thread(
+        target=process_pending_zoho_books_recurring_invoice_import,
+        name="kosmos-zoho-books-recurring-invoice-import-worker",
         daemon=True,
     ).start()
 
