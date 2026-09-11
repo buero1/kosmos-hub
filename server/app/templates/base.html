@@ -2234,6 +2234,8 @@
       .finance-directory-table { min-width: 760px; }
       .finance-offer-form { display: grid; gap: 1rem; }
       .finance-positions-panel { overflow: visible; }
+      .finance-positions-panel[data-customer-edit-position-editor][hidden],
+      .finance-positions-panel[data-customer-edit-position-readonly][hidden] { display: none !important; }
       .finance-positions-table { min-width: 940px; }
       .finance-positions-table th { color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; }
       .finance-positions-table th:first-child { width: 43%; }
