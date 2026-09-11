@@ -43,7 +43,7 @@ ORDER_FIELDS_LAYOUT_KEY = "finance-order-fields"
 INVOICE_FIELDS_LAYOUT_KEY = "finance-invoice-fields"
 RECURRING_INVOICE_FIELDS_LAYOUT_KEY = "finance-recurring-invoice-fields"
 _CENT = Decimal("0.01")
-_QUANTITY_STEP = Decimal("0.001")
+_QUANTITY_STEP = Decimal("0.01")
 
 
 class HubFinanceDocumentError(ValueError):

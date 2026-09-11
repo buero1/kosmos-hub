@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from starlette.requests import Request
 from starlette.templating import Jinja2Templates
@@ -157,9 +158,20 @@ def _unread_email_count_for_db(db) -> int:
     return linked_count + local_linked_count + unassigned_count
 
 
+def format_finance_decimal(value: object, places: int = 2) -> str:
+    """Render editable Finance decimals in the German notation used by the Hub."""
+    try:
+        decimal_value = Decimal(str(value or "").strip().replace(" ", "").replace(",", "."))
+        step = Decimal("1").scaleb(-max(0, int(places)))
+        return format(decimal_value.quantize(step, rounding=ROUND_HALF_UP), "f").replace(".", ",")
+    except (InvalidOperation, ValueError):
+        return str(value or "").replace(".", ",")
+
+
 def create_templates(*, directory: str) -> Jinja2Templates:
     templates = Jinja2Templates(directory=directory, context_processors=[_shared_template_context])
     templates.env.filters["berlin_time"] = format_berlin_time
     templates.env.filters["berlin_time_short"] = format_berlin_time_short
+    templates.env.filters["finance_decimal"] = format_finance_decimal
     templates.env.globals["bridge_supports_admin_launch"] = SiteAdminLaunchService.bridge_supports_launch
     return templates

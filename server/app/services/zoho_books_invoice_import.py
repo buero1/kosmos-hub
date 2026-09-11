@@ -27,7 +27,7 @@ from app.services.zoho_crm import ZohoBinaryDownload
 
 _ACTIVE_STATUSES = ("pending", "running")
 _CENT = Decimal("0.01")
-_QUANTITY_STEP = Decimal("0.001")
+_QUANTITY_STEP = Decimal("0.01")
 _ZUGFERD_MARKERS = (b"zugferd", b"factur-x", b"crossindustryinvoice")
 
 

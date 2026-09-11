@@ -23,7 +23,7 @@ from app.services.module_layouts import ModuleLayoutService
 ARTICLE_FIELDS_LAYOUT_KEY = "finance-article-fields"
 OFFER_FIELDS_LAYOUT_KEY = "finance-offer-fields"
 _CENT = Decimal("0.01")
-_QUANTITY_STEP = Decimal("0.001")
+_QUANTITY_STEP = Decimal("0.01")
 
 
 class HubFinanceError(ValueError):
@@ -341,8 +341,7 @@ class HubFinanceService:
     @staticmethod
     def format_quantity(value: Decimal) -> str:
         normalized = value.quantize(_QUANTITY_STEP, rounding=ROUND_HALF_UP)
-        text = format(normalized, "f").rstrip("0").rstrip(".")
-        return text.replace(".", ",") or "0"
+        return format(normalized, "f").replace(".", ",")
 
     def _offer_entry(self, offer: HubFinanceOffer) -> FinanceOfferEntry:
         values = self._values(offer.encrypted_fields_json)

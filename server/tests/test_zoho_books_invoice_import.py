@@ -119,6 +119,7 @@ def test_recent_books_invoice_import_is_idempotent_and_stores_the_available_pdf(
         assert service.get_invoice_pdf(invoice_id=invoice.id).content == b"%PDF-1.7\nZUGFeRD invoice"
         detail = HubFinanceDocumentService(db=db, cipher=cipher).get_detail(module=INVOICE_MODULE, document_id=invoice.id)
         assert detail is not None
+        assert detail.lines[0].quantity == "1.00"
         assert detail.invoice_pdf is not None
         assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "29,75 EUR"
 

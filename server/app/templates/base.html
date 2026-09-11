@@ -6640,6 +6640,8 @@
           var editActions = document.querySelectorAll("[data-customer-edit-actions]");
           var actionMenus = document.querySelectorAll("[data-customer-actions-menu]");
           var cancels = document.querySelectorAll("[data-customer-edit-cancel]");
+          var positionEditors = editor.id ? document.querySelectorAll('[data-customer-edit-position-editor][data-customer-edit-form="' + editor.id + '"]') : [];
+          var readonlyPositionPanels = editor.id ? document.querySelectorAll('[data-customer-edit-position-readonly][data-customer-edit-form="' + editor.id + '"]') : [];
           if (!section || !content || !readonly || !openers.length || !cancels.length) { return; }
 
           function setEditing(editing) {
@@ -6650,6 +6652,8 @@
             openers.forEach(function (opener) { opener.hidden = editing; });
             editActions.forEach(function (actions) { actions.hidden = !editing; });
             actionMenus.forEach(function (menu) { menu.hidden = editing; });
+            positionEditors.forEach(function (panel) { panel.hidden = !editing; });
+            readonlyPositionPanels.forEach(function (panel) { panel.hidden = editing; });
             if (toggle) { toggle.hidden = true; }
             if (editing) {
               var firstControl = editor.querySelector("input:not([type=hidden]), select, textarea");

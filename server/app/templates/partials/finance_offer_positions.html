@@ -1,4 +1,4 @@
-<article class="card customer-detail-panel finance-positions-panel" data-finance-position-editor>
+<article class="card customer-detail-panel finance-positions-panel" data-finance-position-editor{% if finance_positions_form_id %} data-finance-position-form="{{ finance_positions_form_id }}" data-customer-edit-position-editor data-customer-edit-form="{{ finance_positions_form_id }}" hidden{% endif %}>
   <div class="customer-detail-panel-heading">
     <div>
       <p class="eyebrow">Repeater</p>
@@ -13,14 +13,14 @@
         {% for row in line_rows %}
           <tr data-finance-position-row>
             <td class="finance-position-details">
-              <input type="hidden" name="offer_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-line-article-id>
-              <input type="search" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search>
-              <input type="hidden" name="offer_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-line-field="sku">
-              <textarea name="offer_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description">{{ row.description }}</textarea>
+              <input type="hidden" name="offer_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <input type="search" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <input type="hidden" name="offer_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <textarea name="offer_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>{{ row.description }}</textarea>
             </td>
-            <td><input type="number" name="offer_line__{{ loop.index0 }}__quantity" value="{{ row.quantity }}" min="0.001" step="0.001" inputmode="decimal" data-finance-line-field="quantity"><input type="text" name="offer_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-line-field="unit"></td>
-            <td><input type="number" name="offer_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price }}" min="0" step="0.01" inputmode="decimal" data-finance-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="offer_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent }}" min="0" max="100" step="0.01" inputmode="decimal" data-finance-line-field="discount_percent"></label></td>
-            <td><select name="offer_line__{{ loop.index0 }}__tax_rate" data-finance-line-field="tax_rate"><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
+            <td><input type="text" name="offer_line__{{ loop.index0 }}__quantity" value="{{ row.quantity | finance_decimal }}" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="offer_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+            <td><input type="text" name="offer_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price | finance_decimal }}" inputmode="decimal" data-finance-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="offer_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent | finance_decimal }}" inputmode="decimal" data-finance-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
+            <td><select name="offer_line__{{ loop.index0 }}__tax_rate" data-finance-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
             <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
             <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
           </tr>
@@ -37,18 +37,18 @@
       <div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-total="total">0,00 EUR</dd></div>
     </dl>
   </div>
-  <datalist id="finance-offer-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
+  <datalist id="finance-offer-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form | finance_decimal }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
   <template data-finance-position-template>
     <tr data-finance-position-row>
       <td class="finance-position-details">
-        <input type="hidden" name="offer_line__INDEX__article_id" data-finance-line-article-id>
-        <input type="search" name="offer_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search>
-        <input type="hidden" name="offer_line__INDEX__sku" data-finance-line-field="sku">
-        <textarea name="offer_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"></textarea>
+        <input type="hidden" name="offer_line__INDEX__article_id" data-finance-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+        <input type="search" name="offer_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+        <input type="hidden" name="offer_line__INDEX__sku" data-finance-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+        <textarea name="offer_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></textarea>
       </td>
-      <td><input type="number" name="offer_line__INDEX__quantity" value="1" min="0.001" step="0.001" inputmode="decimal" data-finance-line-field="quantity"><input type="text" name="offer_line__INDEX__unit" placeholder="Einheit" data-finance-line-field="unit"></td>
-      <td><input type="number" name="offer_line__INDEX__unit_price" min="0" step="0.01" inputmode="decimal" data-finance-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="offer_line__INDEX__discount_percent" value="0" min="0" max="100" step="0.01" inputmode="decimal" data-finance-line-field="discount_percent"></label></td>
-      <td><select name="offer_line__INDEX__tax_rate" data-finance-line-field="tax_rate"><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td>
+      <td><input type="text" name="offer_line__INDEX__quantity" value="1,00" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="offer_line__INDEX__unit" placeholder="Einheit" data-finance-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+      <td><input type="text" name="offer_line__INDEX__unit_price" inputmode="decimal" data-finance-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="offer_line__INDEX__discount_percent" value="0,00" inputmode="decimal" data-finance-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
+      <td><select name="offer_line__INDEX__tax_rate" data-finance-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td>
       <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
       <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
     </tr>
@@ -57,12 +57,20 @@
 <script>
   (function () {
     function parseNumber(value) { return Number(String(value || '').replace(',', '.')) || 0; }
+    function editorForm(editor) { return editor.closest('form') || document.getElementById(editor.getAttribute('data-finance-position-form')); }
     function editorCurrency(editor) {
-      var select = editor.closest('form').querySelector('select[name="offer_field__currency"]');
+      var form = editorForm(editor);
+      var select = form && form.querySelector('select[name="offer_field__currency"]');
       return select && select.value ? select.value : 'EUR';
     }
     function formatMoney(value, currency) {
       return new Intl.NumberFormat('de-DE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(value);
+    }
+    function decimalText(value) {
+      var raw = String(value || '').trim();
+      if (!raw) { return ''; }
+      var parsed = Number(raw.replace(',', '.'));
+      return Number.isFinite(parsed) ? new Intl.NumberFormat('de-DE', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed) : raw;
     }
     function updateRow(editor, row) {
       var quantity = parseNumber(row.querySelector('[data-finance-line-field="quantity"]').value);
@@ -97,6 +105,9 @@
     }
     function bindRow(editor, row) {
       row.addEventListener('input', function () { updateTotals(editor); });
+      row.querySelectorAll('[data-finance-line-field="quantity"], [data-finance-line-field="unit_price"], [data-finance-line-field="discount_percent"]').forEach(function (field) {
+        field.addEventListener('blur', function () { field.value = decimalText(field.value); updateTotals(editor); });
+      });
       row.querySelector('[data-finance-article-search]').addEventListener('input', function (event) {
         var option = Array.prototype.find.call(document.getElementById('finance-offer-article-suggestions').options, function (candidate) { return candidate.value === event.target.value; });
         if (option) { selectArticle(row, option); } else { row.querySelector('[data-finance-line-article-id]').value = ''; row.querySelector('[data-finance-line-field="sku"]').value = ''; }
@@ -115,7 +126,8 @@
         var row = fragment.querySelector('[data-finance-position-row]');
         rows.appendChild(fragment); bindRow(editor, row); nextIndex += 1; updateTotals(editor);
       });
-      var form = editor.closest('form');
+      var form = editorForm(editor);
+      if (!form) { return; }
       var currency = form.querySelector('select[name="offer_field__currency"]');
       if (currency) { currency.addEventListener('change', function () { updateTotals(editor); }); }
       var customer = form.querySelector('[data-finance-customer]');

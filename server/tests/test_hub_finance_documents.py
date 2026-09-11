@@ -67,7 +67,7 @@ def _document_values(*, module: str, article_id: int) -> dict[str, str]:
         "document_line__0__name": "Jahresbeitrag Homepage",
         "document_line__0__sku": "JH-1",
         "document_line__0__description": "Jährliche Betreuung.",
-        "document_line__0__quantity": "2",
+        "document_line__0__quantity": "2,00",
         "document_line__0__unit": "Jahr",
         "document_line__0__unit_price": "120",
         "document_line__0__discount_percent": "10",
@@ -135,6 +135,7 @@ def test_orders_and_invoices_keep_positions_and_document_links_locally():
         assert detail.link_label == order.order_number
         assert detail.billing_address == "Beispiel GmbH\nMusterstraße 1\n80331 München"
         assert detail.lines[0].amount_net == Decimal("216.00")
+        assert detail.lines[0].quantity == "2.00"
         assert detail.totals.total_gross == Decimal("257.04")
         assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "257,04 EUR"
 

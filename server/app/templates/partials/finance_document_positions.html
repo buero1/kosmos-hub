@@ -1,4 +1,4 @@
-<article class="card customer-detail-panel finance-positions-panel" data-finance-document-position-editor>
+<article class="card customer-detail-panel finance-positions-panel" data-finance-document-position-editor{% if finance_positions_form_id %} data-finance-document-position-form="{{ finance_positions_form_id }}" data-customer-edit-position-editor data-customer-edit-form="{{ finance_positions_form_id }}" hidden{% endif %}>
   <div class="customer-detail-panel-heading"><div><p class="eyebrow">Repeater</p><h3>Positionen</h3><p class="subtle">Artikel, Menge, Tarif, USt. und Betrag werden zeilenweise geführt.</p></div></div>
   <div class="table-scroll">
     <table class="finance-positions-table">
@@ -7,14 +7,14 @@
         {% for row in line_rows %}
           <tr data-finance-document-position-row>
             <td class="finance-position-details">
-              <input type="hidden" name="document_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-document-line-article-id>
-              <input type="search" name="document_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-document-article-suggestions" data-finance-document-line-field="name" data-finance-document-article-search>
-              <input type="hidden" name="document_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-document-line-field="sku">
-              <textarea name="document_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description">{{ row.description }}</textarea>
+              <input type="hidden" name="document_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-document-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <input type="search" name="document_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-document-article-suggestions" data-finance-document-line-field="name" data-finance-document-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <input type="hidden" name="document_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-document-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <textarea name="document_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>{{ row.description }}</textarea>
             </td>
-            <td><input type="number" name="document_line__{{ loop.index0 }}__quantity" value="{{ row.quantity }}" min="0.001" step="0.001" inputmode="decimal" data-finance-document-line-field="quantity"><input type="text" name="document_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-document-line-field="unit"></td>
-            <td><input type="number" name="document_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price }}" min="0" step="0.01" inputmode="decimal" data-finance-document-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="document_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent }}" min="0" max="100" step="0.01" inputmode="decimal" data-finance-document-line-field="discount_percent"></label></td>
-            <td><select name="document_line__{{ loop.index0 }}__tax_rate" data-finance-document-line-field="tax_rate"><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
+            <td><input type="text" name="document_line__{{ loop.index0 }}__quantity" value="{{ row.quantity | finance_decimal }}" inputmode="decimal" data-finance-document-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="document_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-document-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+            <td><input type="text" name="document_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price | finance_decimal }}" inputmode="decimal" data-finance-document-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="document_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent | finance_decimal }}" inputmode="decimal" data-finance-document-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
+            <td><select name="document_line__{{ loop.index0 }}__tax_rate" data-finance-document-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
             <td class="finance-position-amount" data-finance-document-line-amount>0,00 EUR</td><td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-document-position-remove>&times;</button></td>
           </tr>
         {% endfor %}
@@ -22,22 +22,29 @@
     </table>
   </div>
   <div class="finance-positions-footer"><button class="button button-secondary button-variant-2" type="button" data-finance-document-position-add>Neue Position hinzufügen</button><dl class="finance-totals" data-finance-document-totals><div><dt>Zwischensumme</dt><dd data-finance-document-total="subtotal">0,00 EUR</dd></div><div><dt>Rabatt</dt><dd data-finance-document-total="discount">0,00 EUR</dd></div><div><dt>USt.</dt><dd data-finance-document-total="tax">0,00 EUR</dd></div><div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-document-total="total">0,00 EUR</dd></div></dl></div>
-  <datalist id="finance-document-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
+  <datalist id="finance-document-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form | finance_decimal }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
   <template data-finance-document-position-template>
     <tr data-finance-document-position-row>
-      <td class="finance-position-details"><input type="hidden" name="document_line__INDEX__article_id" data-finance-document-line-article-id><input type="search" name="document_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-document-article-suggestions" data-finance-document-line-field="name" data-finance-document-article-search><input type="hidden" name="document_line__INDEX__sku" data-finance-document-line-field="sku"><textarea name="document_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description"></textarea></td>
-      <td><input type="number" name="document_line__INDEX__quantity" value="1" min="0.001" step="0.001" inputmode="decimal" data-finance-document-line-field="quantity"><input type="text" name="document_line__INDEX__unit" placeholder="Einheit" data-finance-document-line-field="unit"></td>
-      <td><input type="number" name="document_line__INDEX__unit_price" min="0" step="0.01" inputmode="decimal" data-finance-document-line-field="unit_price"><label class="finance-position-discount">Rabatt %<input type="number" name="document_line__INDEX__discount_percent" value="0" min="0" max="100" step="0.01" inputmode="decimal" data-finance-document-line-field="discount_percent"></label></td>
-      <td><select name="document_line__INDEX__tax_rate" data-finance-document-line-field="tax_rate"><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td><td class="finance-position-amount" data-finance-document-line-amount>0,00 EUR</td><td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-document-position-remove>&times;</button></td>
+      <td class="finance-position-details"><input type="hidden" name="document_line__INDEX__article_id" data-finance-document-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="search" name="document_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-document-article-suggestions" data-finance-document-line-field="name" data-finance-document-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="hidden" name="document_line__INDEX__sku" data-finance-document-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><textarea name="document_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-document-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></textarea></td>
+      <td><input type="text" name="document_line__INDEX__quantity" value="1,00" inputmode="decimal" data-finance-document-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="document_line__INDEX__unit" placeholder="Einheit" data-finance-document-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+      <td><input type="text" name="document_line__INDEX__unit_price" inputmode="decimal" data-finance-document-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="document_line__INDEX__discount_percent" value="0,00" inputmode="decimal" data-finance-document-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
+      <td><select name="document_line__INDEX__tax_rate" data-finance-document-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td><td class="finance-position-amount" data-finance-document-line-amount>0,00 EUR</td><td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-document-position-remove>&times;</button></td>
     </tr>
   </template>
 </article>
 <script>
   (function () {
     function number(value) { return Number(String(value || '').replace(',', '.')) || 0; }
+    function decimalText(value) {
+      var raw = String(value || '').trim();
+      if (!raw) { return ''; }
+      var parsed = Number(raw.replace(',', '.'));
+      return Number.isFinite(parsed) ? new Intl.NumberFormat('de-DE', { useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed) : raw;
+    }
     function money(value, currency) { return new Intl.NumberFormat('de-DE', { style: 'currency', currency: currency, minimumFractionDigits: 2 }).format(value); }
     document.querySelectorAll('[data-finance-document-position-editor]').forEach(function (editor) {
-      var form = editor.closest('form');
+      var form = editor.closest('form') || document.getElementById(editor.getAttribute('data-finance-document-position-form'));
+      if (!form) { return; }
       var rows = editor.querySelector('[data-finance-document-position-rows]');
       var template = editor.querySelector('[data-finance-document-position-template]');
       var currency = function () { var field = form.querySelector('select[name="document_field__currency"]'); return field && field.value ? field.value : 'EUR'; };
@@ -66,6 +73,9 @@
       }
       function bind(row) {
         row.addEventListener('input', update);
+        row.querySelectorAll('[data-finance-document-line-field="quantity"], [data-finance-document-line-field="unit_price"], [data-finance-document-line-field="discount_percent"]').forEach(function (field) {
+          field.addEventListener('blur', function () { field.value = decimalText(field.value); update(); });
+        });
         row.querySelector('[data-finance-document-article-search]').addEventListener('input', function (event) {
           var option = Array.prototype.find.call(document.getElementById('finance-document-article-suggestions').options, function (candidate) { return candidate.value === event.target.value; });
           if (option) { selectArticle(row, option); } else { row.querySelector('[data-finance-document-line-article-id]').value = ''; row.querySelector('[data-finance-document-line-field="sku"]').value = ''; }
