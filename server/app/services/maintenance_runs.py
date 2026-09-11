@@ -2053,7 +2053,9 @@ class MaintenanceRunService:
                         message = f"{message} Post-update reconciliation did not succeed: {reconciliation_detail}"
                     self._fail_plugin_update_run(run, message)
                     return "failed"
-                payload = reconciled_result
+                # Reconciliation already returns the inner Bridge result. Preserve the normal
+                # response envelope so the common verification below evaluates that evidence.
+                payload = {"result": reconciled_result}
 
         result = self._result_from_payload(payload)
         result_error = self._direct_update_result_error(details, result)
@@ -2568,7 +2570,7 @@ class MaintenanceRunService:
                         exc,
                     )
                     if reconciled_result is not None:
-                        return "updated", reconciled_result
+                        return "updated", {"result": reconciled_result}
                     message = f"{details['update_name']} update request failed: {exc.message}"
                     if reconciliation_detail:
                         message = f"{message} Post-update reconciliation did not succeed: {reconciliation_detail}"

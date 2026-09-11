@@ -279,6 +279,43 @@ def test_final_bridge_preflight_is_enabled_only_after_the_bridge_release_is_inst
     assert MaintenanceRunService._bridge_enforces_final_update_preflight(SimpleNamespace(bridge_version="0.3.59")) is True
 
 
+def test_final_bridge_update_uses_the_standard_result_envelope_after_reconciliation():
+    details = {
+        "update_name": "W3 Total Cache",
+        "update_kind": "plugin",
+        "update_identifier": "w3-total-cache/w3-total-cache.php",
+        "current_version": "2.8.8",
+        "target_version": "2.10.6",
+        "expected_active": True,
+    }
+    reconciled_result = {
+        "updated": True,
+        "plugin_file": details["update_identifier"],
+        "previous_version": details["current_version"],
+        "installed_version": details["target_version"],
+        "active": True,
+        "reconciled_after_update_error": True,
+    }
+    service = object.__new__(MaintenanceRunService)
+    service._execute_direct_update = lambda *_args: (_ for _ in ()).throw(
+        SiteMcpProxyError("ABILITY_CALLBACK_EXCEPTION", "The update callback failed.", status_code=500)
+    )
+    service._bridge_update_preflight_resolution = lambda *_args: None
+    service._reconcile_plugin_after_failed_update_request = lambda *_args: (reconciled_result, "")
+    service._fail_plugin_update_run = lambda *_args: (_ for _ in ()).throw(AssertionError())
+
+    outcome, payload = service._execute_direct_update_with_final_bridge_preflight(
+        SimpleNamespace(site_id=42),
+        details,
+        None,
+        None,
+    )
+
+    assert outcome == "updated"
+    assert payload == {"result": reconciled_result}
+    assert MaintenanceRunService._result_from_payload(payload) == reconciled_result
+
+
 def test_plugin_update_error_reconciles_a_client_error_after_wordpress_confirms_target_and_activation():
     run = SimpleNamespace(site_id=42, result_json={})
     details = {
