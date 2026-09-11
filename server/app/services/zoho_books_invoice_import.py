@@ -36,6 +36,8 @@ class _BooksInvoiceReader(Protocol):
 
     def list_recent_invoice_ids(self, *, limit: int) -> tuple[str, ...]: ...
 
+    def list_all_invoice_ids(self) -> tuple[str, ...]: ...
+
     def get_invoice(self, *, invoice_id: str) -> dict[str, object]: ...
 
     def download_invoice_pdf(self, *, invoice_id: str) -> ZohoBinaryDownload: ...
@@ -94,24 +96,67 @@ class ZohoBooksInvoiceImportService:
     def start(self, *, requested_by: str, limit: int = 100) -> tuple[ZohoBooksInvoiceImportStatus, bool]:
         if limit != 100:
             raise ValueError("Der erste Rechnungsimport umfasst genau die 100 jüngsten Rechnungen.")
+        active, organization_id = self._prepare_start()
+        if active is not None:
+            return active, False
+        source_ids = self.books.list_recent_invoice_ids(limit=limit)
+        if not source_ids:
+            raise ZohoBooksError("Zoho Books enthält keine Rechnungen für den Import.")
+        return self._create_run(
+            requested_by=requested_by,
+            organization_id=organization_id,
+            source_ids=source_ids,
+            requested_limit=limit,
+        )
+
+    def start_remaining(self, *, requested_by: str) -> tuple[ZohoBooksInvoiceImportStatus, bool]:
+        """Queue every Books invoice that does not yet have a Hub snapshot."""
+        active, organization_id = self._prepare_start()
+        if active is not None:
+            return active, False
+        imported_ids = set(
+            self.db.scalars(
+                select(HubFinanceInvoice.zoho_books_id).where(HubFinanceInvoice.zoho_books_id.is_not(None))
+            ).all()
+        )
+        source_ids = tuple(
+            invoice_id
+            for invoice_id in self.books.list_all_invoice_ids()
+            if invoice_id not in imported_ids
+        )
+        if not source_ids:
+            raise ZohoBooksError("Alle in Zoho Books verfügbaren Rechnungen sind bereits im Hub importiert.")
+        return self._create_run(
+            requested_by=requested_by,
+            organization_id=organization_id,
+            source_ids=source_ids,
+            requested_limit=len(source_ids),
+        )
+
+    def _prepare_start(self) -> tuple[ZohoBooksInvoiceImportStatus | None, str]:
         active = self._active_import()
         if active is not None:
-            return self._status(active), False
-
+            return self._status(active), ""
         self.pdf_storage.ensure_ready()
         status = self.books.get_status()
         organization_id = str(getattr(status, "organization_id", "") or "").strip()
         if not organization_id:
             raise ZohoBooksError("Wähle zuerst die Zoho-Books-Organisation für den Import aus.")
-        source_ids = self.books.list_recent_invoice_ids(limit=limit)
-        if not source_ids:
-            raise ZohoBooksError("Zoho Books enthält keine Rechnungen für den Import.")
+        return None, organization_id
 
+    def _create_run(
+        self,
+        *,
+        requested_by: str,
+        organization_id: str,
+        source_ids: tuple[str, ...],
+        requested_limit: int,
+    ) -> tuple[ZohoBooksInvoiceImportStatus, bool]:
         run = ZohoBooksInvoiceImport(
             requested_by=requested_by[:128],
             organization_id=organization_id,
             status="pending",
-            requested_limit=limit,
+            requested_limit=requested_limit,
             total_invoices=len(source_ids),
         )
         self.db.add(run)

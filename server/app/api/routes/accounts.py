@@ -1146,6 +1146,68 @@ def import_recent_zoho_books_invoices(
     return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
 
 
+@router.post("/zoho-books/invoices/import/remaining")
+def import_remaining_zoho_books_invoices(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoBooksInvoiceImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+        ).start_remaining(requested_by=user.username)
+    except (FinanceInvoicePdfStorageError, ValueError, ZohoBooksError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc), error_section="account-zoho-books"),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho-books",
+        action="import-remaining-zoho-books-invoices",
+        result="started" if started else "already-running",
+        detail=(
+            f"Zoho Books invoice import {status.id} {'started' if started else 'was already active'} "
+            f"for {status.total_invoices} remaining invoice(s)."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_books_invoice_import()
+    state = "invoice-remaining-import-started" if started else "invoice-import-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
+@router.post("/zoho-books/invoices/import/cancel")
+def cancel_zoho_books_invoice_import(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    status, requested = ZohoBooksInvoiceImportService(db=db, cipher=get_secret_cipher()).cancel()
+    if requested and status is not None:
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho-books",
+            action="cancel-zoho-books-invoice-import",
+            result="requested",
+            detail=f"Cancellation requested for Zoho Books invoice import {status.id}.",
+        )
+        db.commit()
+    state = "invoice-import-cancel-requested" if requested else "invoice-import-not-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
 @router.get("/zoho-books/invoices/import/status")
 def zoho_books_invoice_import_status(
     request: Request,

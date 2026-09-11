@@ -139,6 +139,12 @@
     {% if request.query_params.get("zoho_books") == "invoice-import-running" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Der Rechnungsimport läuft bereits im Hintergrund weiter.</p>
     {% endif %}
+    {% if request.query_params.get("zoho_books") == "invoice-remaining-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Hintergrundimport aller noch nicht importierten Rechnungen wurde gestartet. Bereits im Hub vorhandene Rechnungen werden übersprungen.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "invoice-import-cancel-requested" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Abbruch wurde vorgemerkt. Die gerade verarbeitete Rechnung wird noch sauber abgeschlossen.</p>
+    {% endif %}
     {% if request.query_params.get("zoho_books") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Verbindung wurde entfernt. Zoho CRM bleibt unverändert verbunden.</p>
     {% endif %}
@@ -390,18 +396,30 @@
             <div class="zoho-area-content">
               <div class="zoho-import-row">
                 <div>
-                  <h4>100 jüngste Rechnungen</h4>
-                  <p class="subtle">Importiert die neuesten 100 Zoho-Books-Rechnungen mit Kopf, Positionen und dem von Zoho bereitgestellten Rechnungs-PDF. Der Hub speichert jede Position als Preis-Momentaufnahme; in Zoho Books wird nichts geändert.</p>
+                  <h4>Rechnungen</h4>
+                  <p class="subtle">Der Hub übernimmt Rechnungen mit Kopf, Positionen und dem von Zoho bereitgestellten Rechnungs-PDF. Bereits importierte Rechnungen bleiben unverändert und werden beim Restimport übersprungen.</p>
                   {% if zoho_books_invoice_import %}
-                    <p class="zoho-import-status" data-zoho-books-invoice-import-status><strong>{{ zoho_books_invoice_import.processed_invoices }} von {{ zoho_books_invoice_import.total_invoices }} Rechnungen</strong> · {{ zoho_books_invoice_import.imported_invoices }} neu · {{ zoho_books_invoice_import.updated_invoices }} aktualisiert · {{ zoho_books_invoice_import.stored_pdfs }} PDFs gesichert · {{ zoho_books_invoice_import.unavailable_pdfs }} PDFs nicht verfügbar · {{ zoho_books_invoice_import.failed_invoices }} fehlgeschlagen · Status: {% if zoho_books_invoice_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_books_invoice_import.status }}{% endif %}{% if zoho_books_invoice_import.completed_at %} · beendet {{ zoho_books_invoice_import.completed_at | berlin_time }}{% endif %}{% if zoho_books_invoice_import.last_error %} · letzte Meldung: {{ zoho_books_invoice_import.last_error }}{% endif %}</p>
+                    <p class="zoho-import-status" data-zoho-books-invoice-import-status><strong>{{ zoho_books_invoice_import.processed_invoices }} von {{ zoho_books_invoice_import.total_invoices }} Rechnungen</strong> · {{ zoho_books_invoice_import.imported_invoices }} neu · {{ zoho_books_invoice_import.updated_invoices }} aktualisiert · {{ zoho_books_invoice_import.stored_pdfs }} PDFs gesichert · {{ zoho_books_invoice_import.unavailable_pdfs }} PDFs nicht verfügbar · {{ zoho_books_invoice_import.failed_invoices }} fehlgeschlagen{% if zoho_books_invoice_import.consecutive_failures %} · {{ zoho_books_invoice_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_books_invoice_import.status == "stopped" %}automatisch angehalten{% elif zoho_books_invoice_import.status == "cancelled" %}abgebrochen{% else %}{{ zoho_books_invoice_import.status }}{% endif %}{% if zoho_books_invoice_import.cancel_requested %} · Abbruch vorgemerkt{% endif %}{% if zoho_books_invoice_import.completed_at %} · beendet {{ zoho_books_invoice_import.completed_at | berlin_time }}{% endif %}{% if zoho_books_invoice_import.last_error %} · letzte Meldung: {{ zoho_books_invoice_import.last_error }}{% endif %}</p>
                   {% else %}
                     <p class="zoho-import-status">Noch kein Rechnungsimport ausgeführt.</p>
                   {% endif %}
                 </div>
-                <form method="post" action="/account/zoho-books/invoices/import">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <button class="button button-secondary" type="submit" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}disabled{% endif %}>100 jüngste Rechnungen importieren</button>
-                </form>
+                <div class="zoho-import-actions">
+                  <form method="post" action="/account/zoho-books/invoices/import">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="button button-secondary" type="submit" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}disabled{% endif %}>100 jüngste importieren</button>
+                  </form>
+                  <form method="post" action="/account/zoho-books/invoices/import/remaining">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="button button-variant-1" type="submit" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}disabled{% endif %}>Restliche Rechnungen importieren</button>
+                  </form>
+                  {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}
+                    <form method="post" action="/account/zoho-books/invoices/import/cancel">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-danger" type="submit">Import abbrechen</button>
+                    </form>
+                  {% endif %}
+                </div>
               </div>
             </div>
           </details>
@@ -429,7 +447,10 @@
             var progress = document.createElement('strong');
             progress.textContent = status.processed_invoices + ' von ' + status.total_invoices + ' Rechnungen';
             statusLine.append(progress);
-            statusLine.append(' · ' + status.imported_invoices + ' neu · ' + status.updated_invoices + ' aktualisiert · ' + status.stored_pdfs + ' PDFs gesichert · ' + status.unavailable_pdfs + ' PDFs nicht verfügbar · ' + status.failed_invoices + ' fehlgeschlagen · Status: ' + (status.status === 'stopped' ? 'automatisch angehalten' : status.status));
+              statusLine.append(' · ' + status.imported_invoices + ' neu · ' + status.updated_invoices + ' aktualisiert · ' + status.stored_pdfs + ' PDFs gesichert · ' + status.unavailable_pdfs + ' PDFs nicht verfügbar · ' + status.failed_invoices + ' fehlgeschlagen');
+              if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+              statusLine.append(' · Status: ' + (status.status === 'stopped' ? 'automatisch angehalten' : (status.status === 'cancelled' ? 'abgebrochen' : status.status)));
+              if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
             if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
           }
 

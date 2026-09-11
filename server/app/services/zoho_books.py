@@ -242,29 +242,47 @@ class ZohoBooksService:
         if limit < 1 or limit > 200:
             raise ZohoBooksError("Der Rechnungsimport muss zwischen 1 und 200 Belegen umfassen.")
         connection = self._require_import_connection()
-        query = urlencode(
-            {
-                "organization_id": connection.organization_id or "",
-                "page": "1",
-                "per_page": str(limit),
-                "sort_column": "date",
-                "sort_order": "D",
-            }
-        )
-        response = self._api_get(connection, f"/books/v3/invoices?{query}")
-        rows = response.get("invoices")
-        if not isinstance(rows, list):
-            raise ZohoBooksError("Zoho Books hat keine gültige Rechnungsliste zurückgegeben.")
+        return self._list_invoice_ids(connection=connection, per_page=limit, maximum_pages=1)
+
+    def list_all_invoice_ids(self) -> tuple[str, ...]:
+        """Return every accessible Books invoice ID, newest first, for a resumable bulk import."""
+        connection = self._require_import_connection()
+        return self._list_invoice_ids(connection=connection, per_page=200, maximum_pages=10_000)
+
+    def _list_invoice_ids(self, *, connection, per_page: int, maximum_pages: int) -> tuple[str, ...]:
         result: list[str] = []
         seen: set[str] = set()
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            invoice_id = str(row.get("invoice_id") or "").strip()
-            if invoice_id and invoice_id not in seen:
-                seen.add(invoice_id)
-                result.append(invoice_id)
-        return tuple(result)
+        for page in range(1, maximum_pages + 1):
+            query = urlencode(
+                {
+                    "organization_id": connection.organization_id or "",
+                    "page": str(page),
+                    "per_page": str(per_page),
+                    "sort_column": "date",
+                    "sort_order": "D",
+                }
+            )
+            response = self._api_get(connection, f"/books/v3/invoices?{query}")
+            rows = response.get("invoices")
+            if not isinstance(rows, list):
+                raise ZohoBooksError("Zoho Books hat keine gültige Rechnungsliste zurückgegeben.")
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                invoice_id = str(row.get("invoice_id") or "").strip()
+                if invoice_id and invoice_id not in seen:
+                    seen.add(invoice_id)
+                    result.append(invoice_id)
+
+            page_context = response.get("page_context")
+            has_more = (
+                str(page_context.get("has_more_page", "")).strip().casefold() in {"true", "1", "yes"}
+                if isinstance(page_context, dict)
+                else len(rows) >= per_page
+            )
+            if not has_more:
+                return tuple(result)
+        raise ZohoBooksError("Zoho Books liefert ungewöhnlich viele Rechnungsseiten. Der Import wurde nicht gestartet.")
 
     def get_invoice(self, *, invoice_id: str) -> dict[str, object]:
         connection = self._require_import_connection()

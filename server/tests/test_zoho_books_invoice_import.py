@@ -11,6 +11,7 @@ from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_documents import HubFinanceInvoice
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.services.hub_finance_documents import INVOICE_MODULE, HubFinanceDocumentService
+from app.services.zoho_books import ZohoBooksError
 from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
 from app.services.zoho_crm import ZohoBinaryDownload
 
@@ -57,6 +58,10 @@ class FakeBooksInvoiceReader:
         assert limit == 100
         return ("9001",)
 
+    @staticmethod
+    def list_all_invoice_ids():
+        return ("9001", "9002")
+
     def get_invoice(self, *, invoice_id: str):
         assert invoice_id == "9001"
         return self.invoice
@@ -86,6 +91,28 @@ class FakePdfStorage:
 
     def remove(self, storage_key: str):
         self.files.pop(storage_key, None)
+
+
+class FailingBooksInvoiceReader:
+    @staticmethod
+    def get_status():
+        return SimpleNamespace(organization_id="books-org-1")
+
+    @staticmethod
+    def list_recent_invoice_ids(*, limit: int):
+        return ("failure-1",)
+
+    @staticmethod
+    def list_all_invoice_ids():
+        return ("failure-1", "failure-2", "failure-3", "failure-4")
+
+    @staticmethod
+    def get_invoice(*, invoice_id: str):
+        raise ZohoBooksError(f"Books test failure for {invoice_id}")
+
+    @staticmethod
+    def download_invoice_pdf(*, invoice_id: str):
+        raise AssertionError("No PDF should be downloaded after a failed invoice request.")
 
 
 def test_recent_books_invoice_import_is_idempotent_and_stores_the_available_pdf():
@@ -141,3 +168,57 @@ def test_recent_books_invoice_import_is_idempotent_and_stores_the_available_pdf(
         assert service.process_next_invoice() == "completed"
         assert db.scalars(select(HubFinanceInvoice).where(HubFinanceInvoice.zoho_books_id == "9001")).all() == [invoice]
         assert service.status().updated_invoices == 1
+
+
+def test_remaining_invoice_import_skips_existing_records_and_can_be_cancelled():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        existing = HubFinanceInvoice(zoho_books_id="9001", encrypted_fields_json=cipher.encrypt("{}"))
+        db.add(existing)
+        db.commit()
+        service = ZohoBooksInvoiceImportService(
+            db=db,
+            cipher=cipher,
+            books_service=FakeBooksInvoiceReader(),
+            pdf_storage=FakePdfStorage(),
+        )
+
+        status, started = service.start_remaining(requested_by="books-admin")
+        db.commit()
+        assert started is True
+        assert status.total_invoices == 1
+        assert status.requested_limit == 1
+
+        cancelled, requested = service.cancel()
+        db.commit()
+        assert requested is True
+        assert cancelled is not None and cancelled.cancel_requested is True
+        assert service.process_next_invoice() == "cancelled"
+        assert service.status().status == "cancelled"
+
+
+def test_remaining_invoice_import_stops_after_three_consecutive_failures():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = ZohoBooksInvoiceImportService(
+            db=db,
+            cipher=SecretCipher("a" * 32),
+            books_service=FailingBooksInvoiceReader(),
+            pdf_storage=FakePdfStorage(),
+        )
+        status, started = service.start_remaining(requested_by="books-admin")
+        db.commit()
+        assert started is True
+        assert status.total_invoices == 4
+        assert [service.process_next_invoice() for _ in range(3)] == ["failed", "failed", "stopped"]
+        result = service.status()
+        assert result is not None
+        assert result.status == "stopped"
+        assert result.processed_invoices == 3
+        assert result.failed_invoices == 3
+        assert result.consecutive_failures == 3

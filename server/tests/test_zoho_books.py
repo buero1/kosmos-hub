@@ -236,6 +236,43 @@ def test_books_reads_recent_invoice_ids_and_the_available_invoice_pdf(monkeypatc
         assert "accept=pdf" in captured_paths[-1]
 
 
+def test_books_reads_all_invoice_ids_across_pages_without_duplicates(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("g" * 32)
+        user = _user()
+        db.add(user)
+        db.flush()
+        db.add(_crm_connection(cipher=cipher, user=user))
+        db.commit()
+        service = ZohoBooksService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        connection = service.prepare_authorization(actor=user)
+        connection.encrypted_refresh_token = cipher.encrypt("books-refresh-token")
+        connection.organization_id = "books-org-1"
+        captured_paths: list[str] = []
+
+        def fake_api_get(_connection, path):
+            captured_paths.append(path)
+            if "page=1" in path:
+                return {
+                    "invoices": [{"invoice_id": "9003"}, {"invoice_id": "9002"}],
+                    "page_context": {"has_more_page": True},
+                }
+            return {
+                "invoices": [{"invoice_id": "9002"}, {"invoice_id": "9001"}],
+                "page_context": {"has_more_page": False},
+            }
+
+        monkeypatch.setattr(service, "_api_get", fake_api_get)
+
+        assert service.list_all_invoice_ids() == ("9003", "9002", "9001")
+        assert "page=1" in captured_paths[0]
+        assert "page=2" in captured_paths[1]
+        assert "per_page=200" in captured_paths[0]
+
+
 def test_books_translates_shared_zoho_request_errors(monkeypatch):
     def raise_crm_error(*_args, **_kwargs):
         raise ZohoCrmError("Zoho CRM is currently unreachable. Try again shortly.")
