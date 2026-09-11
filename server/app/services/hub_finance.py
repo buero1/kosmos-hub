@@ -501,6 +501,11 @@ class HubFinanceService:
 
     def _line_view(self, line: HubFinanceOfferLine) -> FinanceOfferLineView:
         values = self._values(line.encrypted_fields_json)
+        name, description = self._free_text_values(
+            article_id=line.article_id,
+            name=self._text(values.get("name")),
+            description=self._text(values.get("description")),
+        )
         quantity = self._quantity(values.get("quantity"))
         unit_price = self._money(values.get("unit_price"))
         discount = self._percentage(values.get("discount_percent"))
@@ -512,9 +517,9 @@ class HubFinanceService:
         return FinanceOfferLineView(
             id=line.id,
             article_id=line.article_id,
-            name=self._text(values.get("name")),
+            name=name,
             sku=self._text(values.get("sku")),
-            description=self._text(values.get("description")),
+            description=description,
             quantity=self._text(values.get("quantity")),
             unit=self._text(values.get("unit")),
             unit_price=self._text(values.get("unit_price")),
@@ -524,6 +529,12 @@ class HubFinanceService:
             tax_amount=tax,
             amount_gross=net + tax,
         )
+
+    @staticmethod
+    def _free_text_values(*, article_id: int | None, name: str, description: str) -> tuple[str, str]:
+        if article_id is None and name.strip().casefold() in {"freitextposition", "freitext position"} and description.strip():
+            return description, ""
+        return name, description
 
     @staticmethod
     def _totals(lines: tuple[FinanceOfferLineView, ...]) -> FinanceOfferTotals:

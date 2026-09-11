@@ -290,10 +290,15 @@ class ZohoBooksInvoiceImportService:
             if not isinstance(raw_line, dict):
                 continue
             article, article_values = self._matching_article(raw_line)
+            name, description = self._free_text_values(
+                article=article,
+                name=self._text(raw_line.get("name")),
+                description=self._text(raw_line.get("description")),
+            )
             values = {
-                "name": self._text(raw_line.get("name")) or "Freitextposition",
+                "name": name,
                 "sku": self._text(raw_line.get("sku")) or article_values.get("sku", ""),
-                "description": self._text(raw_line.get("description")),
+                "description": description,
                 "quantity": self._decimal_text(raw_line.get("quantity"), default="1", places=_QUANTITY_STEP),
                 "unit": self._text(raw_line.get("unit")),
                 "unit_price": self._decimal_text(raw_line.get("rate"), default="0", places=_CENT),
@@ -305,6 +310,13 @@ class ZohoBooksInvoiceImportService:
                 position_index=index,
                 encrypted_fields_json=self._encrypt(values),
             ))
+
+    @staticmethod
+    def _free_text_values(*, article: HubFinanceArticle | None, name: str, description: str) -> tuple[str, str]:
+        """Put Books free text into the position name instead of retaining a generic placeholder."""
+        if article is None and name.strip().casefold() in {"freitextposition", "freitext position"} and description.strip():
+            return description, ""
+        return name, description
 
     def _matching_customer(self, payload: dict[str, object]) -> Customer | None:
         for key in ("zcrm_account_id", "crm_account_id", "customer_id"):

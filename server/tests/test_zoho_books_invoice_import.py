@@ -38,6 +38,13 @@ class FakeBooksInvoiceReader:
                 "rate": "25",
                 "discount": "0",
                 "tax_percentage": 19,
+            }, {
+                "name": "Freitextposition",
+                "description": "Erweiterung Speicherplatz E-Mails auf 15 GB",
+                "quantity": 1,
+                "rate": "0",
+                "discount": "0",
+                "tax_percentage": 19,
             }],
         }
 
@@ -120,6 +127,9 @@ def test_recent_books_invoice_import_is_idempotent_and_stores_the_available_pdf(
         detail = HubFinanceDocumentService(db=db, cipher=cipher).get_detail(module=INVOICE_MODULE, document_id=invoice.id)
         assert detail is not None
         assert detail.lines[0].quantity == "1.00"
+        assert detail.lines[1].article_id is None
+        assert detail.lines[1].name == "Erweiterung Speicherplatz E-Mails auf 15 GB"
+        assert detail.lines[1].description == ""
         assert detail.invoice_pdf is not None
         assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "29,75 EUR"
 
