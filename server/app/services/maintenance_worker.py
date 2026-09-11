@@ -23,6 +23,9 @@ from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.hub_mailbox_health import HubMailboxHealthService
 from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
+from app.services.site_inventory import SiteInventoryService
+from app.services.site_mcp_proxy import SiteMcpProxyError
+from app.services.site_updates import SiteUpdateService
 
 
 _direct_update_poll_lock = Lock()
@@ -477,6 +480,31 @@ def schedule_pending_zoho_books_invoice_import() -> None:
     Thread(
         target=process_pending_zoho_books_invoice_import,
         name="kosmos-zoho-books-invoice-import-worker",
+        daemon=True,
+    ).start()
+
+
+def process_registered_site_refresh(site_id: int) -> None:
+    """Collect initial inventory and update data after a new Bridge connects."""
+    with SessionLocal() as db:
+        cipher = get_secret_cipher()
+        try:
+            SiteInventoryService(db=db, cipher=cipher).refresh_site_state(site_id)
+        except SiteMcpProxyError as exc:
+            logger.info("Initial inventory refresh for site %s could not complete: %s", site_id, exc.message)
+            return
+        try:
+            SiteUpdateService(db=db, cipher=cipher).refresh_site_updates(site_id)
+        except SiteMcpProxyError as exc:
+            logger.info("Initial update refresh for site %s could not complete: %s", site_id, exc.message)
+
+
+def schedule_registered_site_refresh(site_id: int) -> None:
+    """Do not delay the signed WordPress registration while the Hub reads site data."""
+    Thread(
+        target=process_registered_site_refresh,
+        args=(site_id,),
+        name=f"kosmos-registered-site-refresh-{site_id}",
         daemon=True,
     ).start()
 

@@ -17,6 +17,9 @@ from app.services.audit import write_audit_log
 
 
 class SiteRegistrationService:
+    CREATED_MESSAGE = "Site created."
+    ADOPTED_MESSAGE = "Pre-provisioned Zoho site connected."
+
     def __init__(self, *, db: Session, settings: Settings, cipher: SecretCipher):
         self.db = db
         self.settings = settings
@@ -109,12 +112,20 @@ class SiteRegistrationService:
         self.db.refresh(site)
 
         if created:
-            message = "Site created."
+            message = self.CREATED_MESSAGE
         elif adopted_preprovisioned_site:
-            message = "Pre-provisioned Zoho site connected."
+            message = self.ADOPTED_MESSAGE
         else:
             message = "Site updated."
         return RegistrationResponse(site_id=site.id, site_uuid=site.uuid, status=site.status, message=message)
+
+    @classmethod
+    def needs_initial_refresh(cls, response: RegistrationResponse) -> bool:
+        """Only newly connected sites need their first inventory and update snapshot."""
+        return response.status == SiteStatus.verified.value and response.message in {
+            cls.CREATED_MESSAGE,
+            cls.ADOPTED_MESSAGE,
+        }
 
     def _validate_headers(
         self,

@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.schemas.registration import RegistrationHeaders, RegistrationRequest, RegistrationResponse
 from app.services.site_registration import SiteRegistrationService
 from app.services.plugin_installation_packages import PluginInstallationPackageService
+from app.services.maintenance_worker import schedule_registered_site_refresh
 
 router = APIRouter(prefix="/api/v1", tags=["registrations"])
 
@@ -31,7 +32,10 @@ async def register_site(
 
     headers = RegistrationHeaders.from_request(request.headers)
     service = SiteRegistrationService(db=db, settings=settings, cipher=cipher)
-    return service.register(payload=payload, headers=headers, raw_body=raw_body)
+    response = service.register(payload=payload, headers=headers, raw_body=raw_body)
+    if service.needs_initial_refresh(response):
+        schedule_registered_site_refresh(response.site_id)
+    return response
 
 
 @router.get("/plugin-packages/{package_id}/download")

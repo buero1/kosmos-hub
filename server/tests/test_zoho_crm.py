@@ -16,7 +16,7 @@ from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
-from app.schemas.registration import RegistrationHeaders, RegistrationRequest
+from app.schemas.registration import RegistrationHeaders, RegistrationRequest, RegistrationResponse
 from app.services.hub_accounts import hash_password
 from app.services.site_registration import SiteRegistrationService
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
@@ -616,7 +616,8 @@ def test_bridge_registration_adopts_one_preprovisioned_zoho_site():
         )
         settings = Settings(app_secret_key="x" * 32, database_url="sqlite://")
 
-        result = SiteRegistrationService(db=db, settings=settings, cipher=cipher).register(
+        service = SiteRegistrationService(db=db, settings=settings, cipher=cipher)
+        result = service.register(
             payload=payload,
             headers=headers,
             raw_body=raw_body,
@@ -627,11 +628,23 @@ def test_bridge_registration_adopts_one_preprovisioned_zoho_site():
         adopted = sites[0]
         assert result.site_id == preprovisioned.id
         assert result.message == "Pre-provisioned Zoho site connected."
+        assert service.needs_initial_refresh(result) is True
         assert adopted.uuid == bridge_uuid
         assert adopted.domain == "www.example-customer.de"
         assert adopted.status == SiteStatus.verified.value
         assert adopted.customer_id == customer.id
         assert adopted.connections[0].endpoint == "https://www.example-customer.de/wp-json/kosmos-bridge/v1"
+
+
+def test_bridge_heartbeat_does_not_request_another_initial_refresh():
+    response = RegistrationResponse(
+        site_id=1,
+        site_uuid=str(uuid.uuid4()),
+        status=SiteStatus.verified.value,
+        message="Site updated.",
+    )
+
+    assert SiteRegistrationService.needs_initial_refresh(response) is False
 
 
 def test_zoho_request_surfaces_an_http_error_before_handling_empty_responses(monkeypatch):
