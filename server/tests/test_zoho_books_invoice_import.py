@@ -10,6 +10,7 @@ from app.models.customer import Customer
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_documents import HubFinanceInvoice
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
+from app.models.zoho_books_invoice_import import ZohoBooksInvoiceImport
 from app.services.hub_finance_documents import INVOICE_MODULE, HubFinanceDocumentService
 from app.services.zoho_books import ZohoBooksError
 from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
@@ -198,6 +199,36 @@ def test_remaining_invoice_import_skips_existing_records_and_can_be_cancelled():
         assert cancelled is not None and cancelled.cancel_requested is True
         assert service.process_next_invoice() == "cancelled"
         assert service.status().status == "cancelled"
+
+
+def test_import_status_prefers_the_active_run_over_a_newer_completed_run():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = ZohoBooksInvoiceImportService(
+            db=db,
+            cipher=SecretCipher("a" * 32),
+            books_service=FakeBooksInvoiceReader(),
+            pdf_storage=FakePdfStorage(),
+        )
+        active_status, started = service.start(requested_by="books-admin")
+        assert started is True
+        db.add(
+            ZohoBooksInvoiceImport(
+                requested_by="books-admin",
+                organization_id="books-org-1",
+                status="completed",
+                requested_limit=1,
+                total_invoices=1,
+            )
+        )
+        db.commit()
+
+        status = service.status()
+        assert status is not None
+        assert status.id == active_status.id
+        assert status.status == "pending"
 
 
 def test_remaining_invoice_import_stops_after_three_consecutive_failures():

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import re
+from threading import Lock
 from typing import Protocol
 
 from sqlalchemy import select
@@ -29,6 +30,7 @@ _ACTIVE_STATUSES = ("pending", "running")
 _CENT = Decimal("0.01")
 _QUANTITY_STEP = Decimal("0.01")
 _ZUGFERD_MARKERS = (b"zugferd", b"factur-x", b"crossindustryinvoice")
+_import_start_lock = Lock()
 
 
 class _BooksInvoiceReader(Protocol):
@@ -90,48 +92,53 @@ class ZohoBooksInvoiceImportService:
         self.pdf_storage = pdf_storage or FinanceInvoicePdfStorage(cipher=cipher)
 
     def status(self) -> ZohoBooksInvoiceImportStatus | None:
-        run = self.db.scalar(select(ZohoBooksInvoiceImport).order_by(ZohoBooksInvoiceImport.id.desc()).limit(1))
+        # A concurrent click can briefly create a newer pending run. Always show the run that is actually working.
+        run = self._active_import()
+        if run is None:
+            run = self.db.scalar(select(ZohoBooksInvoiceImport).order_by(ZohoBooksInvoiceImport.id.desc()).limit(1))
         return self._status(run) if run is not None else None
 
     def start(self, *, requested_by: str, limit: int = 100) -> tuple[ZohoBooksInvoiceImportStatus, bool]:
         if limit != 100:
             raise ValueError("Der erste Rechnungsimport umfasst genau die 100 jüngsten Rechnungen.")
-        active, organization_id = self._prepare_start()
-        if active is not None:
-            return active, False
-        source_ids = self.books.list_recent_invoice_ids(limit=limit)
-        if not source_ids:
-            raise ZohoBooksError("Zoho Books enthält keine Rechnungen für den Import.")
-        return self._create_run(
-            requested_by=requested_by,
-            organization_id=organization_id,
-            source_ids=source_ids,
-            requested_limit=limit,
-        )
+        with _import_start_lock:
+            active, organization_id = self._prepare_start()
+            if active is not None:
+                return active, False
+            source_ids = self.books.list_recent_invoice_ids(limit=limit)
+            if not source_ids:
+                raise ZohoBooksError("Zoho Books enthält keine Rechnungen für den Import.")
+            return self._create_run(
+                requested_by=requested_by,
+                organization_id=organization_id,
+                source_ids=source_ids,
+                requested_limit=limit,
+            )
 
     def start_remaining(self, *, requested_by: str) -> tuple[ZohoBooksInvoiceImportStatus, bool]:
         """Queue every Books invoice that does not yet have a Hub snapshot."""
-        active, organization_id = self._prepare_start()
-        if active is not None:
-            return active, False
-        imported_ids = set(
-            self.db.scalars(
-                select(HubFinanceInvoice.zoho_books_id).where(HubFinanceInvoice.zoho_books_id.is_not(None))
-            ).all()
-        )
-        source_ids = tuple(
-            invoice_id
-            for invoice_id in self.books.list_all_invoice_ids()
-            if invoice_id not in imported_ids
-        )
-        if not source_ids:
-            raise ZohoBooksError("Alle in Zoho Books verfügbaren Rechnungen sind bereits im Hub importiert.")
-        return self._create_run(
-            requested_by=requested_by,
-            organization_id=organization_id,
-            source_ids=source_ids,
-            requested_limit=len(source_ids),
-        )
+        with _import_start_lock:
+            active, organization_id = self._prepare_start()
+            if active is not None:
+                return active, False
+            imported_ids = set(
+                self.db.scalars(
+                    select(HubFinanceInvoice.zoho_books_id).where(HubFinanceInvoice.zoho_books_id.is_not(None))
+                ).all()
+            )
+            source_ids = tuple(
+                invoice_id
+                for invoice_id in self.books.list_all_invoice_ids()
+                if invoice_id not in imported_ids
+            )
+            if not source_ids:
+                raise ZohoBooksError("Alle in Zoho Books verfügbaren Rechnungen sind bereits im Hub importiert.")
+            return self._create_run(
+                requested_by=requested_by,
+                organization_id=organization_id,
+                source_ids=source_ids,
+                requested_limit=len(source_ids),
+            )
 
     def _prepare_start(self) -> tuple[ZohoBooksInvoiceImportStatus | None, str]:
         active = self._active_import()
