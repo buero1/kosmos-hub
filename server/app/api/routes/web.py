@@ -1355,6 +1355,25 @@ def finance_document_detail_page(
     )
 
 
+@router.get("/finance/invoices/{invoice_id}/pdf")
+def finance_invoice_pdf_preview(invoice_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    try:
+        pdf, content = service.load_invoice_pdf(invoice_id=invoice_id)
+    except HubFinanceDocumentError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type=pdf.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(pdf.filename, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.post("/finance/{module_key}/{document_id}/fields")
 async def update_finance_document_fields(module_key: str, document_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     form = await request.form()

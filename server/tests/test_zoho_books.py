@@ -11,7 +11,7 @@ from app.models.hub_user import HubUser
 from app.models.zoho_connection import ZohoConnection
 from app.services.hub_accounts import hash_password
 from app.services.zoho_books import ZOHO_BOOKS_SCOPES, ZohoBooksError, ZohoBooksService
-from app.services.zoho_crm import ZohoCrmError
+from app.services.zoho_crm import ZohoBinaryDownload, ZohoCrmError
 
 
 def test_books_connect_persists_the_pending_connection_before_redirecting_to_zoho(monkeypatch):
@@ -196,6 +196,44 @@ def test_books_reuses_a_valid_access_token_for_multiple_api_reads(monkeypatch):
         service._api_get(connection, "/books/v3/organizations")
 
         assert refresh_calls == [True]
+
+
+def test_books_reads_recent_invoice_ids_and_the_available_invoice_pdf(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("f" * 32)
+        user = _user()
+        db.add(user)
+        db.flush()
+        db.add(_crm_connection(cipher=cipher, user=user))
+        db.commit()
+        service = ZohoBooksService(db=db, cipher=cipher, public_base_url="https://hub.example")
+        connection = service.prepare_authorization(actor=user)
+        connection.encrypted_refresh_token = cipher.encrypt("books-refresh-token")
+        connection.organization_id = "books-org-1"
+        captured_paths: list[str] = []
+
+        def fake_api_get(_connection, path):
+            captured_paths.append(path)
+            if path.startswith("/books/v3/invoices?"):
+                return {"invoices": [{"invoice_id": "9001"}, {"invoice_id": "9002"}]}
+            return {"invoice": {"invoice_id": "9001", "invoice_number": "RE-1"}}
+
+        monkeypatch.setattr(service, "_api_get", fake_api_get)
+        monkeypatch.setattr(
+            service,
+            "_api_get_binary",
+            lambda _connection, path: (captured_paths.append(path) or ZohoBinaryDownload(b"%PDF-1.7", "application/pdf")),
+        )
+
+        assert service.list_recent_invoice_ids(limit=100) == ("9001", "9002")
+        assert service.get_invoice(invoice_id="9001")["invoice_number"] == "RE-1"
+        assert service.download_invoice_pdf(invoice_id="9001").content == b"%PDF-1.7"
+        assert "organization_id=books-org-1" in captured_paths[0]
+        assert "sort_column=date" in captured_paths[0]
+        assert "accept=pdf" in captured_paths[-1]
 
 
 def test_books_translates_shared_zoho_request_errors(monkeypatch):

@@ -61,6 +61,8 @@ from app.models.zoho_email_attachment_import import ZohoEmailAttachmentImport, Z
 from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.models.zoho_books_connection import ZohoBooksConnection
+from app.models.zoho_books_invoice_import import ZohoBooksInvoiceImport, ZohoBooksInvoiceImportItem
+from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.services.hub_accounts import HubAccountService
 from app.services.hub_workflows import HubWorkflowService
 from app.services.email_ai_prompt_presets import EmailAiPromptPresetService
@@ -80,6 +82,7 @@ from app.services.maintenance_worker import (
     schedule_hub_mailbox_imap_sync_polling,
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
+    schedule_pending_zoho_books_invoice_import,
     schedule_pending_zoho_email_workflow_deliveries,
 )
 from app.services.task_email_reminder_worker import TaskEmailReminderWorker
@@ -182,6 +185,15 @@ def _ensure_phase_one_schema() -> None:
     if "zoho_books_connections" not in table_names:
         ZohoBooksConnection.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created zoho_books_connections table.")
+
+    for zoho_books_import_model in (
+        ZohoBooksInvoiceImport,
+        ZohoBooksInvoiceImportItem,
+        HubFinanceInvoicePdf,
+    ):
+        if zoho_books_import_model.__tablename__ not in table_names:
+            zoho_books_import_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", zoho_books_import_model.__tablename__)
 
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)
@@ -714,6 +726,7 @@ async def lifespan(_: FastAPI):
         schedule_hub_mailbox_imap_sync_polling()
         schedule_pending_zoho_email_history_import()
         schedule_pending_zoho_note_history_import()
+        schedule_pending_zoho_books_invoice_import()
         schedule_pending_zoho_email_workflow_deliveries()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:

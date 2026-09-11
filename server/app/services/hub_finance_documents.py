@@ -24,6 +24,8 @@ from app.models.hub_finance_documents import (
     HubFinanceRecurringInvoiceLine,
 )
 from app.models.hub_finance_offer import HubFinanceOffer
+from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
+from app.services.finance_invoice_pdf_storage import FinanceInvoicePdfStorage, FinanceInvoicePdfStorageError
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.hub_finance import (
     FinanceArticleEntry,
@@ -165,6 +167,14 @@ class FinanceDocumentDetail:
     lines: tuple[FinanceOfferLineView, ...]
     totals: FinanceOfferTotals
     billing_address: str = ""
+    invoice_pdf: "FinanceInvoicePdfView | None" = None
+
+
+@dataclass(frozen=True)
+class FinanceInvoicePdfView:
+    filename: str
+    byte_size: int
+    is_zugferd: bool
 
 
 class HubFinanceDocumentService:
@@ -240,6 +250,7 @@ class HubFinanceDocumentService:
         if module.is_invoice:
             enriched_values["remaining_amount"] = self._decimal_string(self._remaining_amount(values=values, totals=totals))
         fields = self._field_values(module=module, values=enriched_values)
+        invoice_pdf = self._invoice_pdf_view(document.id) if module.is_invoice else None
         return FinanceDocumentDetail(
             document=document,
             module=module,
@@ -251,6 +262,7 @@ class HubFinanceDocumentService:
             lines=lines,
             totals=totals,
             billing_address=self._text(values.get("billing_address")) if module.is_invoice else "",
+            invoice_pdf=invoice_pdf,
         )
 
     def new_form_values(self, *, module: FinanceDocumentModule) -> dict[str, str]:
@@ -336,6 +348,11 @@ class HubFinanceDocumentService:
         document = self.db.get(module.model, document_id)
         if document is None:
             raise HubFinanceDocumentError(f"{module.singular} wurde nicht gefunden.")
+        if module.is_invoice:
+            pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == document.id))
+            if pdf is not None:
+                FinanceInvoicePdfStorage(cipher=self.cipher).remove(pdf.storage_key)
+                self.db.delete(pdf)
         self.db.delete(document)
         self.db.flush()
         return document
@@ -560,9 +577,28 @@ class HubFinanceDocumentService:
         )
 
     def _remaining_amount(self, *, values: dict[str, str], totals: FinanceOfferTotals) -> Decimal:
+        imported_balance = values.get("remaining_amount")
+        if imported_balance:
+            return self._money(imported_balance)
         if values.get("status") in {"paid", "cancelled"}:
             return Decimal("0")
         return totals.total_gross
+
+    def _invoice_pdf_view(self, invoice_id: int) -> FinanceInvoicePdfView | None:
+        pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == invoice_id))
+        if pdf is None:
+            return None
+        return FinanceInvoicePdfView(filename=pdf.filename, byte_size=pdf.byte_size, is_zugferd=pdf.is_zugferd)
+
+    def load_invoice_pdf(self, *, invoice_id: int):
+        pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == invoice_id))
+        if pdf is None:
+            raise HubFinanceDocumentError("Für diese Rechnung ist noch keine PDF-Vorschau vorhanden.")
+        try:
+            content = FinanceInvoicePdfStorage(cipher=self.cipher).load(pdf.storage_key)
+        except FinanceInvoicePdfStorageError as exc:
+            raise HubFinanceDocumentError(str(exc)) from exc
+        return pdf, content
 
     def _billing_address(self, customer: Customer) -> str:
         detail = CustomerDirectoryService(db=self.db, cipher=self.cipher).get_detail(customer_id=customer.id)

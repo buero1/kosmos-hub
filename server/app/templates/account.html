@@ -133,6 +133,12 @@
     {% if request.query_params.get("zoho_books") == "organizations-refreshed" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Die verfügbaren Zoho-Books-Organisationen wurden aktualisiert.</p>
     {% endif %}
+    {% if request.query_params.get("zoho_books") == "invoice-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Hintergrundimport der 100 jüngsten Rechnungen wurde gestartet. Rechnungsdaten und vorhandene PDF-Belege werden nur lesend aus Zoho Books übernommen.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "invoice-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Rechnungsimport läuft bereits im Hintergrund weiter.</p>
+    {% endif %}
     {% if request.query_params.get("zoho_books") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Verbindung wurde entfernt. Zoho CRM bleibt unverändert verbunden.</p>
     {% endif %}
@@ -379,10 +385,24 @@
           </div>
         </details>
         {% if zoho_books_status.ready_for_import %}
-          <details class="account-details zoho-area">
-            <summary>Bereit für Datenimport</summary>
+          <details class="account-details zoho-area" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}open{% endif %}>
+            <summary>Datenimport</summary>
             <div class="zoho-area-content">
-              <p class="subtle">Die Verbindung ist eingerichtet. Im nächsten Schritt können wir die Felddefinitionen, Artikel sowie die gewünschten Beleg- und Kontakthistorien lesend in eigene Hub-Module importieren. Dieser Schritt schreibt nichts nach Zoho Books zurück.</p>
+              <div class="zoho-import-row">
+                <div>
+                  <h4>100 jüngste Rechnungen</h4>
+                  <p class="subtle">Importiert die neuesten 100 Zoho-Books-Rechnungen mit Kopf, Positionen und dem von Zoho bereitgestellten Rechnungs-PDF. Der Hub speichert jede Position als Preis-Momentaufnahme; in Zoho Books wird nichts geändert.</p>
+                  {% if zoho_books_invoice_import %}
+                    <p class="zoho-import-status" data-zoho-books-invoice-import-status><strong>{{ zoho_books_invoice_import.processed_invoices }} von {{ zoho_books_invoice_import.total_invoices }} Rechnungen</strong> · {{ zoho_books_invoice_import.imported_invoices }} neu · {{ zoho_books_invoice_import.updated_invoices }} aktualisiert · {{ zoho_books_invoice_import.stored_pdfs }} PDFs gesichert · {{ zoho_books_invoice_import.unavailable_pdfs }} PDFs nicht verfügbar · {{ zoho_books_invoice_import.failed_invoices }} fehlgeschlagen · Status: {% if zoho_books_invoice_import.status == "stopped" %}automatisch angehalten{% else %}{{ zoho_books_invoice_import.status }}{% endif %}{% if zoho_books_invoice_import.completed_at %} · beendet {{ zoho_books_invoice_import.completed_at | berlin_time }}{% endif %}{% if zoho_books_invoice_import.last_error %} · letzte Meldung: {{ zoho_books_invoice_import.last_error }}{% endif %}</p>
+                  {% else %}
+                    <p class="zoho-import-status">Noch kein Rechnungsimport ausgeführt.</p>
+                  {% endif %}
+                </div>
+                <form method="post" action="/account/zoho-books/invoices/import">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button class="button button-secondary" type="submit" {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}disabled{% endif %}>100 jüngste Rechnungen importieren</button>
+                </form>
+              </div>
             </div>
           </details>
         {% endif %}
@@ -398,6 +418,43 @@
         </details>
       {% endif %}
     </section>
+    {% if zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"] %}
+      <script>
+        (function () {
+          var statusLine = document.querySelector('[data-zoho-books-invoice-import-status]');
+          if (!statusLine) return;
+
+          function renderStatus(status) {
+            statusLine.replaceChildren();
+            var progress = document.createElement('strong');
+            progress.textContent = status.processed_invoices + ' von ' + status.total_invoices + ' Rechnungen';
+            statusLine.append(progress);
+            statusLine.append(' · ' + status.imported_invoices + ' neu · ' + status.updated_invoices + ' aktualisiert · ' + status.stored_pdfs + ' PDFs gesichert · ' + status.unavailable_pdfs + ' PDFs nicht verfügbar · ' + status.failed_invoices + ' fehlgeschlagen · Status: ' + (status.status === 'stopped' ? 'automatisch angehalten' : status.status));
+            if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
+          }
+
+          function refreshStatus() {
+            window.fetch('/account/zoho-books/invoices/import/status', { credentials: 'same-origin' })
+              .then(function (response) {
+                if (!response.ok) throw new Error('Import status response failed.');
+                return response.json();
+              })
+              .then(function (status) {
+                if (!status.status) return;
+                renderStatus(status);
+                if (!status.active) {
+                  window.setTimeout(function () { window.location.reload(); }, 750);
+                  return;
+                }
+                window.setTimeout(refreshStatus, 3000);
+              })
+              .catch(function () { window.setTimeout(refreshStatus, 6000); });
+          }
+
+          window.setTimeout(refreshStatus, 3000);
+        }());
+      </script>
+    {% endif %}
     {% if user.role == "admin" %}
     <section id="account-users" class="account-panel account-panel-wide account-section" data-account-section>
       <div>

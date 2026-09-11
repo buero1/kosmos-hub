@@ -17,7 +17,7 @@ from app.core.security import SecretCipher
 from app.models.hub_user import HubUser
 from app.models.zoho_books_connection import ZohoBooksConnection
 from app.models.zoho_connection import ZohoConnection
-from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService, ZohoDataCenter
+from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoBinaryDownload, ZohoCrmError, ZohoCrmService, ZohoDataCenter
 
 # All requested permissions are read-only. The selected scopes cover the first
 # import milestones: organization settings/custom fields, items, customer data,
@@ -237,6 +237,55 @@ class ZohoBooksService:
             raise ZohoBooksError("Es ist keine Zoho-Books-Verbindung gespeichert.")
         self.db.delete(connection)
 
+    def list_recent_invoice_ids(self, *, limit: int) -> tuple[str, ...]:
+        """Return a bounded, newest-first snapshot for a later background import."""
+        if limit < 1 or limit > 200:
+            raise ZohoBooksError("Der Rechnungsimport muss zwischen 1 und 200 Belegen umfassen.")
+        connection = self._require_import_connection()
+        query = urlencode(
+            {
+                "organization_id": connection.organization_id or "",
+                "page": "1",
+                "per_page": str(limit),
+                "sort_column": "date",
+                "sort_order": "D",
+            }
+        )
+        response = self._api_get(connection, f"/books/v3/invoices?{query}")
+        rows = response.get("invoices")
+        if not isinstance(rows, list):
+            raise ZohoBooksError("Zoho Books hat keine gültige Rechnungsliste zurückgegeben.")
+        result: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            invoice_id = str(row.get("invoice_id") or "").strip()
+            if invoice_id and invoice_id not in seen:
+                seen.add(invoice_id)
+                result.append(invoice_id)
+        return tuple(result)
+
+    def get_invoice(self, *, invoice_id: str) -> dict[str, object]:
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(invoice_id, "Rechnung")
+        query = urlencode({"organization_id": connection.organization_id or ""})
+        response = self._api_get(connection, f"/books/v3/invoices/{normalized_id}?{query}")
+        invoice = response.get("invoice")
+        if not isinstance(invoice, dict):
+            raise ZohoBooksError("Zoho Books hat keine gültigen Rechnungsdaten zurückgegeben.")
+        return invoice
+
+    def download_invoice_pdf(self, *, invoice_id: str) -> ZohoBinaryDownload:
+        """Fetch the PDF Books currently provides, including a ZUGFeRD PDF when configured there."""
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(invoice_id, "Rechnung")
+        query = urlencode({"organization_id": connection.organization_id or "", "accept": "pdf"})
+        download = self._api_get_binary(connection, f"/books/v3/invoices/{normalized_id}?{query}")
+        if download.content_type != "application/pdf" or not download.content.startswith(b"%PDF-"):
+            raise ZohoBooksError("Zoho Books hat für diese Rechnung keine PDF-Datei zurückgegeben.")
+        return download
+
     def record_error(self, message: str) -> None:
         connection = self.get_connection()
         if connection is not None:
@@ -255,6 +304,18 @@ class ZohoBooksService:
             method="GET",
             headers={"Authorization": f"Zoho-oauthtoken {access_token}"},
         )
+
+    def _api_get_binary(self, connection: ZohoBooksConnection, path: str) -> ZohoBinaryDownload:
+        access_token = self._refresh_access_token(connection)
+        data_center = self._data_center(connection.data_center)
+        api_domain = connection.api_domain or data_center.api_domain
+        try:
+            return ZohoCrmService._request_binary(
+                f"{api_domain}{path}",
+                headers={"Authorization": f"Zoho-oauthtoken {access_token}", "Accept": "application/pdf"},
+            )
+        except ZohoCrmError as exc:
+            raise ZohoBooksError(str(exc).replace("Zoho CRM", "Zoho Books")) from exc
 
     def _refresh_access_token(self, connection: ZohoBooksConnection) -> str:
         cache_key = self._access_token_cache_key(connection)
@@ -304,6 +365,12 @@ class ZohoBooksService:
         connection = self._require_connection()
         if connection.encrypted_refresh_token is None:
             raise ZohoBooksError("Verbinde Zoho Books, bevor Organisationen gelesen werden können.")
+        return connection
+
+    def _require_import_connection(self) -> ZohoBooksConnection:
+        connection = self._require_connected_connection()
+        if not connection.organization_id:
+            raise ZohoBooksError("Wähle zuerst die Zoho-Books-Organisation für den Import aus.")
         return connection
 
     def _get_crm_connection(self) -> ZohoConnection | None:
@@ -373,6 +440,13 @@ class ZohoBooksService:
         if parsed.scheme == "https" and value.rstrip("/") == data_center.api_domain:
             return data_center.api_domain
         return data_center.api_domain
+
+    @staticmethod
+    def _numeric_identifier(value: str, label: str) -> str:
+        normalized = value.strip()
+        if not normalized.isdigit() or len(normalized) > 255:
+            raise ZohoBooksError(f"Die Zoho-Books-ID für {label} ist ungültig.")
+        return normalized
 
     @staticmethod
     def _as_bool(value: object) -> bool:

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     maintenance_runs_initial_delay_seconds: int = Field(default=15, ge=0, le=300)
     email_attachment_storage_dir: str = "data/email-attachments"
     email_attachment_import_min_free_bytes: int = Field(default=5 * 1024 * 1024 * 1024, ge=0)
+    finance_invoice_pdf_storage_dir: str = "data/finance-invoice-pdfs"
+    finance_invoice_pdf_import_min_free_bytes: int = Field(default=1024 * 1024 * 1024, ge=0)
 
     @property
     def auto_verify_domain_list(self) -> list[str]:
