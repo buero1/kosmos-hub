@@ -155,7 +155,24 @@ class SiteMcpProxyService:
 
         try:
             with request.urlopen(req, timeout=timeout_seconds) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
+                response_body = response.read()
+                try:
+                    parsed = json.loads(response_body.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    response_status = int(getattr(response, "status", 200) or 200)
+                    message = "Site returned an invalid response instead of the expected Bridge JSON."
+                    self._record_error(
+                        site,
+                        action,
+                        f"{message} HTTP {response_status}; response length: {len(response_body)} bytes.",
+                        request_id,
+                    )
+                    raise SiteMcpProxyError(
+                        "REMOTE_INVALID_RESPONSE",
+                        message,
+                        status_code=response_status,
+                        details={"response_length": len(response_body)},
+                    ) from exc
         except error.HTTPError as exc:
             parsed = self._read_error_body(exc)
             self._record_error(site, action, parsed.get("message", str(exc)), request_id)
