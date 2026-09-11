@@ -85,6 +85,7 @@ class MaintenanceRunService:
     THEME_UPDATE_ABILITY = "kosmos-bridge/update-theme"
     WORDPRESS_CORE_UPDATE_ABILITY = "kosmos-bridge/update-wordpress-core"
     SITE_HEALTH_ABILITY = "kosmos-bridge/check-site-health"
+    RECENT_ERROR_DIAGNOSTICS_ABILITY = "kosmos-bridge/get-recent-error-diagnostics"
     START_BACKUP_TIMEOUT_SECONDS = 20
     DELETE_BACKUP_TIMEOUT_SECONDS = 180
     REMOTE_DELETION_VERIFICATION_TIMEOUT_SECONDS = 60
@@ -92,6 +93,9 @@ class MaintenanceRunService:
     POST_UPDATE_HEALTH_MAX_ATTEMPTS = 3
     POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS = 10
     POST_UPDATE_HEALTH_STALE_RECOVERY_AFTER = timedelta(minutes=2)
+    POST_UPDATE_DIAGNOSTICS_MAX_ATTEMPTS = 12
+    POST_UPDATE_DIAGNOSTICS_RETRY_DELAY = timedelta(seconds=30)
+    POST_UPDATE_DIAGNOSTICS_RECOVERY_WINDOW = timedelta(minutes=30)
     POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS = 5
     POST_UPDATE_FRAMEWORK_PLUGIN_IDENTIFIERS = frozenset(
         {
@@ -227,7 +231,11 @@ class MaintenanceRunService:
             )
             health_error, health_detail, health_result = self._run_direct_update_postflight_health(run, health_step)
             if health_error:
-                run.result_json = {**(run.result_json or {}), "post_update_health": health_result}
+                run.result_json = {
+                    **(run.result_json or {}),
+                    "post_update_health": health_result,
+                    "post_update_diagnostics": self._capture_post_update_diagnostics(run),
+                }
                 self._fail_plugin_update_run(
                     run,
                     f"{details['update_name']} was updated and verified, but {health_error}. No automatic rollback was performed.",
@@ -247,6 +255,41 @@ class MaintenanceRunService:
             )
             outcomes["succeeded"] += 1
         return outcomes
+
+    def recover_pending_post_update_diagnostics(self, *, limit: int = 25) -> int:
+        """Retry a bounded error-log read after a site recovers from a failed health check."""
+        if limit < 1:
+            return 0
+
+        now = datetime.now(UTC)
+        earliest_completion = now - self.POST_UPDATE_DIAGNOSTICS_RECOVERY_WINDOW
+        statement = (
+            select(MaintenanceRun)
+            .options(selectinload(MaintenanceRun.site))
+            .where(
+                MaintenanceRun.kind.in_((self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND)),
+                MaintenanceRun.status == MaintenanceRunStatus.failed.value,
+                MaintenanceRun.completed_at.is_not(None),
+            )
+            .order_by(MaintenanceRun.completed_at.desc(), MaintenanceRun.id.desc())
+        )
+        recovered = 0
+        for run in self.db.scalars(statement):
+            if recovered >= limit or self._as_utc(run.completed_at) < earliest_completion:
+                continue
+            result = dict(run.result_json or {})
+            if not isinstance(result.get("post_update_health"), dict):
+                continue
+            diagnostics = result.get("post_update_diagnostics")
+            diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+            if diagnostics.get("state") == "captured" or not self._post_update_diagnostics_retry_due(diagnostics, now):
+                continue
+
+            result["post_update_diagnostics"] = self._capture_post_update_diagnostics(run, previous=diagnostics)
+            run.result_json = result
+            self.db.commit()
+            recovered += 1
+        return recovered
 
     def reconcile_admin_ajax_access_denied_batch(self, batch_id: str) -> int:
         """Repair confirmed updates that an access policy misclassified as failed."""
@@ -1881,6 +1924,7 @@ class MaintenanceRunService:
             run.result_json = {
                 **(run.result_json or {}),
                 "post_update_health": health_result,
+                "post_update_diagnostics": self._capture_post_update_diagnostics(run),
             }
             self._fail_plugin_update_run(
                 run,
@@ -2094,6 +2138,11 @@ class MaintenanceRunService:
         self._start_plugin_update_step(run, health_step, "Checking the public homepage and WordPress REST API.")
         health_error, health_detail, health_result = self._run_direct_update_postflight_health(run, health_step)
         if health_error:
+            run.result_json = {
+                **(run.result_json or {}),
+                "post_update_health": health_result,
+                "post_update_diagnostics": self._capture_post_update_diagnostics(run),
+            }
             self._fail_plugin_update_run(
                 run,
                 f"{details['plugin_name']} was installed and verified, but {health_error}. No automatic rollback was performed.",
@@ -2185,6 +2234,94 @@ class MaintenanceRunService:
             ),
             last_result,
         )
+
+    def _capture_post_update_diagnostics(
+        self,
+        run: MaintenanceRun,
+        *,
+        previous: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Read only the Bridge-owned, bounded diagnostic result for one failed update."""
+        previous = previous if isinstance(previous, dict) else {}
+        attempted_at = datetime.now(UTC)
+        attempt_count = self._non_negative_int(previous.get("attempt_count")) + 1
+        base = {
+            "attempt_count": attempt_count,
+            "last_attempt_at": attempted_at.isoformat(),
+        }
+        try:
+            payload = self.proxy.execute_ability(
+                run.site_id,
+                self.RECENT_ERROR_DIAGNOSTICS_ABILITY,
+                None,
+                timeout_seconds=30,
+            )
+        except SiteMcpProxyError as exc:
+            return {
+                **base,
+                "state": "pending",
+                "last_error": self._limited_diagnostic_text(exc.message, 500),
+            }
+
+        result = self._result_from_payload(payload)
+        entries = self._post_update_diagnostic_entries(result.get("entries"))
+        return {
+            **base,
+            "state": "captured",
+            "retrieved_at": attempted_at.isoformat(),
+            "available": result.get("available") is True,
+            "debug_log_available": result.get("debug_log_available") is True,
+            "entries": entries,
+            "message": self._limited_diagnostic_text(
+                result.get("message"),
+                500,
+                fallback="The Bridge did not return a diagnostic message.",
+            ),
+        }
+
+    def _post_update_diagnostics_retry_due(self, diagnostics: dict[str, Any], now: datetime) -> bool:
+        if self._non_negative_int(diagnostics.get("attempt_count")) >= self.POST_UPDATE_DIAGNOSTICS_MAX_ATTEMPTS:
+            return False
+        previous_attempt = self._diagnostic_timestamp(diagnostics.get("last_attempt_at"))
+        return previous_attempt is None or now - previous_attempt >= self.POST_UPDATE_DIAGNOSTICS_RETRY_DELAY
+
+    @staticmethod
+    def _diagnostic_timestamp(value: object) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return MaintenanceRunService._as_utc(parsed)
+
+    @classmethod
+    def _post_update_diagnostic_entries(cls, value: object) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        entries: list[dict[str, Any]] = []
+        for entry in value[:24]:
+            if not isinstance(entry, dict):
+                continue
+            message = cls._limited_diagnostic_text(entry.get("message"), 1200)
+            if not message:
+                continue
+            entries.append(
+                {
+                    "reported_at": cls._limited_diagnostic_text(entry.get("reported_at"), 64),
+                    "source": cls._limited_diagnostic_text(entry.get("source"), 64, fallback="Bridge"),
+                    "level": cls._limited_diagnostic_text(entry.get("level"), 64, fallback="fatal error"),
+                    "message": message,
+                    "file": cls._limited_diagnostic_text(entry.get("file"), 500),
+                    "line": cls._non_negative_int(entry.get("line")),
+                }
+            )
+        return entries
+
+    @staticmethod
+    def _limited_diagnostic_text(value: object, limit: int, *, fallback: str = "") -> str:
+        text = value.strip() if isinstance(value, str) else ""
+        return (text[:limit] if text else fallback[:limit])
 
     @classmethod
     def _bridge_enforces_final_update_preflight(cls, site: Site) -> bool:

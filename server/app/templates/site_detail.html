@@ -1,6 +1,34 @@
 {% extends "base.html" %}
 {% block title %}{{ site.domain }} · kosmos-hub{% endblock %}
 {% block content %}
+  {% macro post_update_diagnostics(diagnostic) -%}
+    {% if diagnostic %}
+      <section class="maintenance-error-diagnostics" aria-label="Fehlerdiagnose nach dem Update">
+        <h4>Fehlerdiagnose</h4>
+        {% if diagnostic.state == "pending" %}
+          <p class="subtle">Die Website war beim ersten Abruf noch nicht erreichbar. Der Hub versucht die geschuetzte Fehlerdiagnose noch automatisch erneut.</p>
+        {% elif diagnostic.entries %}
+          <p class="subtle">{{ diagnostic.message or "Bereinigte Fehlerdetails aus der Bridge." }}</p>
+          <ol class="maintenance-error-diagnostics-list">
+            {% for entry in diagnostic.entries %}
+              <li>
+                <p>
+                  <strong>{{ "WordPress debug.log" if entry.source == "wp-debug-log" else "Bridge-Fehlerprotokoll" }}</strong>
+                  {% if entry.reported_at %}<span>{{ entry.reported_at }}</span>{% endif %}
+                </p>
+                <p class="maintenance-error-diagnostics-message">{{ entry.message }}</p>
+                {% if entry.file %}
+                  <p class="subtle">{{ entry.file }}{% if entry.line %}:{{ entry.line }}{% endif %}</p>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="subtle">{{ diagnostic.message or "Die Bridge konnte keine passenden PHP-Fehlerdetails finden." }}</p>
+        {% endif %}
+      </section>
+    {% endif %}
+  {%- endmacro %}
   {% set maintenance_runs = maintenance_run_history | map(attribute="runs") | sum(start=[]) %}
   {% set running_maintenance_runs = maintenance_runs | selectattr("status", "equalto", "running") | list %}
   {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "in", ["updraftplus-backup", "updraftplus-backup-delete"]) | list %}
@@ -592,6 +620,7 @@
                         <dd>{{ run.error_message or run.result_json.stage_message or "Abgeschlossen" }}</dd>
                       </div>
                     </dl>
+                    {{ post_update_diagnostics(run.result_json.post_update_diagnostics) }}
                     {% if child_runs %}
                       <section class="maintenance-history-child-updates" aria-label="Teilupdates des vollständigen Laufs">
                         <h3>Teilupdates <span>{{ child_runs | length }}</span></h3>
@@ -616,7 +645,10 @@
                                   </td>
                                   <td><span class="pill pill-{{ child_run.status }}">{{ child_run.status }}</span></td>
                                   <td>{{ child_run.started_at | berlin_time }}</td>
-                                  <td>{{ child_run.error_message or child_run.result_json.stage_message or "Abgeschlossen" }}</td>
+                                  <td>
+                                    <p>{{ child_run.error_message or child_run.result_json.stage_message or "Abgeschlossen" }}</p>
+                                    {{ post_update_diagnostics(child_run.result_json.post_update_diagnostics) }}
+                                  </td>
                                 </tr>
                               {% endfor %}
                             </tbody>

@@ -3930,6 +3930,45 @@
         margin: 0.22rem 0 0;
       }
       .maintenance-history-entry-result { grid-column: 1 / -1; }
+      .maintenance-error-diagnostics {
+        margin-top: 0.9rem;
+        padding: 0.75rem;
+        border: 1px solid rgba(174, 101, 70, 0.36);
+        border-radius: 10px;
+        background: rgba(255, 242, 235, 0.72);
+      }
+      .maintenance-error-diagnostics h4 {
+        margin: 0;
+        color: #93472e;
+        font-size: 0.85rem;
+      }
+      .maintenance-error-diagnostics > p {
+        margin: 0.35rem 0 0;
+      }
+      .maintenance-error-diagnostics-list {
+        display: grid;
+        gap: 0.55rem;
+        margin: 0.65rem 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .maintenance-error-diagnostics-list li {
+        padding: 0.55rem 0.6rem;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.58);
+      }
+      .maintenance-error-diagnostics-list p { margin: 0; }
+      .maintenance-error-diagnostics-list strong { font-size: 0.78rem; }
+      .maintenance-error-diagnostics-list strong + span {
+        margin-left: 0.45rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .maintenance-error-diagnostics-message {
+        margin-top: 0.3rem !important;
+        overflow-wrap: anywhere;
+        font: 0.75rem/1.45 "IBM Plex Mono", monospace;
+      }
       .maintenance-history-child-updates {
         margin-top: 1rem;
         padding-top: 0.9rem;

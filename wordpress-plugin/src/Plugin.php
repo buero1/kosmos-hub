@@ -3,6 +3,7 @@ namespace KosmosBridge;
 
 use KosmosBridge\Abilities\Registry as AbilityRegistry;
 use KosmosBridge\Admin\StatusPage;
+use KosmosBridge\Diagnostics\FatalDiagnostics;
 use KosmosBridge\Registration\Registrar;
 use KosmosBridge\Registration\SecretStore;
 use KosmosBridge\Rest\DebugController;
@@ -29,6 +30,7 @@ class Plugin {
 	public static function boot( $plugin_file ) {
 		register_activation_hook( $plugin_file, array( self::class, 'activate' ) );
 		register_deactivation_hook( $plugin_file, array( self::class, 'deactivate' ) );
+		FatalDiagnostics::register_shutdown_handler();
 
 		add_action( 'plugins_loaded', array( self::class, 'ensure_identity' ) );
 		add_action( 'plugins_loaded', array( PluginUpdater::class, 'boot' ) );

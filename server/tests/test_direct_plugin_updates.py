@@ -1678,6 +1678,110 @@ def test_direct_update_health_check_retries_a_transient_bridge_error():
     assert len(progress) == 1
 
 
+def test_post_update_diagnostics_are_bounded_before_they_are_stored():
+    class Proxy:
+        def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+            assert site_id == 17
+            assert ability_name == MaintenanceRunService.RECENT_ERROR_DIAGNOSTICS_ABILITY
+            assert ability_input is None
+            assert timeout_seconds == 30
+            return {
+                "result": {
+                    "available": True,
+                    "debug_log_available": True,
+                    "message": "A bounded diagnostic result is available.",
+                    "entries": [
+                        {
+                            "reported_at": "2026-09-11T14:09:03+00:00",
+                            "source": "wp-debug-log",
+                            "level": "fatal error",
+                            "message": "x" * 1300,
+                            "file": "WP_PLUGIN_DIR/example/example.php",
+                            "line": 42,
+                            "unexpected": "must not be stored",
+                        }
+                    ],
+                }
+            }
+
+    service = object.__new__(MaintenanceRunService)
+    service.proxy = Proxy()
+
+    diagnostics = service._capture_post_update_diagnostics(SimpleNamespace(site_id=17))
+
+    assert diagnostics["state"] == "captured"
+    assert diagnostics["debug_log_available"] is True
+    assert len(diagnostics["entries"]) == 1
+    assert diagnostics["entries"][0] == {
+        "reported_at": "2026-09-11T14:09:03+00:00",
+        "source": "wp-debug-log",
+        "level": "fatal error",
+        "message": "x" * 1200,
+        "file": "WP_PLUGIN_DIR/example/example.php",
+        "line": 42,
+    }
+
+
+def test_pending_post_update_diagnostics_are_retried_after_a_site_recovers(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime.now(UTC)
+
+    def execute_ability(self, site_id, ability_name, ability_input, *, timeout_seconds=20):
+        assert site_id > 0
+        assert ability_name == MaintenanceRunService.RECENT_ERROR_DIAGNOSTICS_ABILITY
+        return {
+            "result": {
+                "available": True,
+                "debug_log_available": False,
+                "entries": [],
+                "message": "No matching PHP error was captured.",
+            }
+        }
+
+    monkeypatch.setattr(SiteMcpProxyService, "execute_ability", execute_ability)
+
+    with Session(engine) as db:
+        site = Site(
+            uuid="35654321-1234-1234-1234-123456789012",
+            domain="diagnostics-retry.example",
+            home_url="https://diagnostics-retry.example",
+            site_url="https://diagnostics-retry.example",
+            status=SiteStatus.verified.value,
+        )
+        run = MaintenanceRun(
+            site=site,
+            kind=MaintenanceRunService.PLUGIN_UPDATE_KIND,
+            status=MaintenanceRunStatus.failed.value,
+            requested_by="operator",
+            started_at=now - timedelta(minutes=2),
+            completed_at=now - timedelta(minutes=1),
+            last_checked_at=now - timedelta(minutes=1),
+            result_json={
+                "stage": "failed",
+                "post_update_health": {},
+                "post_update_diagnostics": {
+                    "state": "pending",
+                    "attempt_count": 1,
+                    "last_attempt_at": (now - timedelta(minutes=1)).isoformat(),
+                    "last_error": "The site was starting.",
+                },
+            },
+        )
+        db.add(run)
+        db.commit()
+
+        service = MaintenanceRunService(db=db, cipher=None)
+        assert service.recover_pending_post_update_diagnostics() == 1
+
+        db.refresh(run)
+        diagnostics = run.result_json["post_update_diagnostics"]
+        assert diagnostics["state"] == "captured"
+        assert diagnostics["attempt_count"] == 2
+        assert diagnostics["entries"] == []
+        assert diagnostics["message"] == "No matching PHP error was captured."
+
+
 def test_fleet_refresh_result_uses_the_runtime_settings_snapshot():
     result = FleetRefreshService._initial_result(
         FleetRefreshService.MODE_NORMAL,

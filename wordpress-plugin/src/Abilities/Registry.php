@@ -189,6 +189,19 @@ class Registry {
 		);
 
 		wp_register_ability(
+			'kosmos-bridge/get-recent-error-diagnostics',
+			array(
+				'label'               => __( 'Get Recent Error Diagnostics', 'kosmos-bridge' ),
+				'description'         => __( 'Returns a bounded, sanitized view of recent fatal PHP errors captured by the Bridge and the WordPress debug log when it is readable. It cannot read arbitrary files.', 'kosmos-bridge' ),
+				'category'            => 'kosmos-bridge',
+				'output_schema'       => self::recent_error_diagnostics_output_schema(),
+				'execute_callback'    => array( self::class, 'execute_get_recent_error_diagnostics' ),
+				'permission_callback' => array( self::class, 'allow_readonly_access' ),
+				'meta'                => self::readonly_meta(),
+			)
+		);
+
+		wp_register_ability(
 			'kosmos-bridge/update-plugin',
 			array(
 				'label'               => __( 'Update Plugin', 'kosmos-bridge' ),
@@ -1012,6 +1025,15 @@ class Registry {
 			'admin_ajax_healthy' => $admin_ajax['healthy'],
 			'message'            => self::site_health_message( $home, $rest, $admin_ajax ),
 		);
+	}
+
+	/**
+	 * Return only the Bridge-owned, bounded fatal-error diagnostic view.
+	 *
+	 * @return array
+	 */
+	public static function execute_get_recent_error_diagnostics() {
+		return \KosmosBridge\Diagnostics\FatalDiagnostics::recent_diagnostics();
 	}
 
 	/**
@@ -2584,6 +2606,15 @@ class Registry {
 				'meta'          => self::readonly_meta(),
 			),
 			array(
+				'name'          => 'kosmos-bridge/get-recent-error-diagnostics',
+				'label'         => __( 'Get Recent Error Diagnostics', 'kosmos-bridge' ),
+				'description'   => __( 'Returns a bounded, sanitized view of recent fatal PHP errors captured by the Bridge and the WordPress debug log when it is readable. It cannot read arbitrary files.', 'kosmos-bridge' ),
+				'category'      => 'kosmos-bridge',
+				'input_schema'  => array(),
+				'output_schema' => self::recent_error_diagnostics_output_schema(),
+				'meta'          => self::readonly_meta(),
+			),
+			array(
 				'name'          => 'kosmos-bridge/update-plugin',
 				'label'         => __( 'Update Plugin', 'kosmos-bridge' ),
 				'description'   => __( 'Updates one installed plugin after an exact version and activation-state preflight, preserving whether it is active or inactive.', 'kosmos-bridge' ),
@@ -2780,6 +2811,8 @@ class Registry {
 				return self::execute_list_updraftplus_backups();
 			case 'kosmos-bridge/check-site-health':
 				return self::execute_check_site_health();
+			case 'kosmos-bridge/get-recent-error-diagnostics':
+				return self::execute_get_recent_error_diagnostics();
 			case 'kosmos-bridge/list-wp-users':
 				return self::execute_list_wp_users();
 		}
@@ -3293,6 +3326,36 @@ class Registry {
 				'message'            => array( 'type' => 'string' ),
 			),
 			'required'   => array( 'home_url', 'rest_url', 'admin_ajax_url', 'home_status', 'rest_status', 'admin_ajax_status', 'home_healthy', 'rest_healthy', 'admin_ajax_healthy', 'message' ),
+		);
+	}
+
+	/**
+	 * @return array
+	 */
+	private static function recent_error_diagnostics_output_schema() {
+		return array(
+			'type'       => 'object',
+			'properties' => array(
+				'available'           => array( 'type' => 'boolean' ),
+				'debug_log_available' => array( 'type' => 'boolean' ),
+				'entries'             => array(
+					'type'  => 'array',
+					'items' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'reported_at' => array( 'type' => 'string' ),
+							'source'      => array( 'type' => 'string' ),
+							'level'       => array( 'type' => 'string' ),
+							'message'     => array( 'type' => 'string' ),
+							'file'        => array( 'type' => 'string' ),
+							'line'        => array( 'type' => 'integer' ),
+						),
+						'required'   => array( 'reported_at', 'source', 'level', 'message', 'file', 'line' ),
+					),
+				),
+				'message'             => array( 'type' => 'string' ),
+			),
+			'required'   => array( 'available', 'debug_log_available', 'entries', 'message' ),
 		);
 	}
 
