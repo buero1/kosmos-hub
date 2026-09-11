@@ -71,6 +71,7 @@ class MaintenanceRunService:
     DIRECT_UPDATE_FAILURE_STREAK_LIMIT = 5
     LARGE_DIRECT_PLUGIN_BATCH_THRESHOLD = 100
     COMPLETE_SITE_UPDATE_MAX_WAVES = 3
+    COMPLETE_SITE_UPDATE_NORMAL_UPDATES_PER_HEALTH_CHECK = 3
     FINAL_BRIDGE_PREFLIGHT_MIN_VERSION = "0.3.59"
     FINAL_BRIDGE_PREFLIGHT_RETRY_LIMIT = 2
     START_BACKUP_ABILITY = "kosmos-bridge/start-updraftplus-backup"
@@ -93,7 +94,7 @@ class MaintenanceRunService:
     POST_UPDATE_HEALTH_MAX_ATTEMPTS = 3
     POST_UPDATE_HEALTH_RETRY_DELAY_SECONDS = 10
     POST_UPDATE_HEALTH_STALE_RECOVERY_AFTER = timedelta(minutes=2)
-    POST_UPDATE_DIAGNOSTICS_MAX_ATTEMPTS = 12
+    POST_UPDATE_DIAGNOSTICS_MAX_ATTEMPTS = 3
     POST_UPDATE_DIAGNOSTICS_RETRY_DELAY = timedelta(seconds=30)
     POST_UPDATE_DIAGNOSTICS_RECOVERY_WINDOW = timedelta(minutes=30)
     POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS = 5
@@ -267,7 +268,13 @@ class MaintenanceRunService:
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.site))
             .where(
-                MaintenanceRun.kind.in_((self.PLUGIN_UPDATE_KIND, self.PLUGIN_INSTALLATION_KIND)),
+                MaintenanceRun.kind.in_(
+                    (
+                        self.PLUGIN_UPDATE_KIND,
+                        self.PLUGIN_INSTALLATION_KIND,
+                        self.COMPLETE_SITE_UPDATE_KIND,
+                    )
+                ),
                 MaintenanceRun.status == MaintenanceRunStatus.failed.value,
                 MaintenanceRun.completed_at.is_not(None),
             )
@@ -1271,6 +1278,8 @@ class MaintenanceRunService:
         start_wave = max(1, int(state.get("wave", 0) or 0))
         failure_streak = 0
         for wave in range(start_wave, self.COMPLETE_SITE_UPDATE_MAX_WAVES + 1):
+            pending_health_entries: list[UpdateWorkbenchEntry] = []
+            health_check_number = 1
             if self._complete_site_update_cancellation_requested(run):
                 return self._finish_complete_site_update(
                     run,
@@ -1408,6 +1417,48 @@ class MaintenanceRunService:
                     else:
                         failure_streak = 0
 
+                    if outcome == "succeeded":
+                        pending_health_entries.append(entry)
+                        if self._complete_site_update_health_boundary_reached(pending_health_entries):
+                            health_failure = self._run_complete_site_update_wave_health(
+                                run,
+                                phase=phase,
+                                wave=wave,
+                                check_number=health_check_number,
+                                entries=pending_health_entries,
+                            )
+                            if health_failure is not None:
+                                return self._finish_complete_site_update(
+                                    run,
+                                    status=MaintenanceRunStatus.failed.value,
+                                    stage="post-update-health-failed",
+                                    message=self._complete_site_update_wave_health_failure_message(
+                                        pending_health_entries,
+                                        health_failure,
+                                    ),
+                                )
+                            pending_health_entries = []
+                            health_check_number += 1
+
+            if pending_health_entries:
+                health_failure = self._run_complete_site_update_wave_health(
+                    run,
+                    phase="verification",
+                    wave=wave,
+                    check_number=health_check_number,
+                    entries=pending_health_entries,
+                )
+                if health_failure is not None:
+                    return self._finish_complete_site_update(
+                        run,
+                        status=MaintenanceRunStatus.failed.value,
+                        stage="post-update-health-failed",
+                        message=self._complete_site_update_wave_health_failure_message(
+                            pending_health_entries,
+                            health_failure,
+                        ),
+                    )
+
             final_entries, refresh_error = self._fresh_complete_site_update_entries(run, phase="verification", wave=wave)
             if refresh_error:
                 return self._finish_complete_site_update(
@@ -1524,6 +1575,8 @@ class MaintenanceRunService:
                 "current_version": entry.current_version,
                 "target_version": entry.target_version,
                 "expected_active": entry.is_active,
+                # Full website updates validate each version immediately and health-check a small shared wave.
+                "defer_postflight_health": True,
                 # The workflow owns this run synchronously; the direct-update worker must not pick it up.
                 "stage": "workflow-processing",
                 "stage_message": "Running as part of the complete website update workflow.",
@@ -1624,6 +1677,112 @@ class MaintenanceRunService:
             "plugin": "Plugins",
             "verification": "Final verification",
         }.get(phase, "Workflow")
+
+    @classmethod
+    def _complete_site_update_health_boundary_reached(cls, entries: list[UpdateWorkbenchEntry]) -> bool:
+        """Check frameworks immediately and otherwise after a deliberately small update wave."""
+        return len(entries) >= cls.COMPLETE_SITE_UPDATE_NORMAL_UPDATES_PER_HEALTH_CHECK or any(
+            cls._requires_post_update_framework_stabilization(cls._complete_site_update_entry_health_details(entry))
+            for entry in entries
+        )
+
+    @staticmethod
+    def _complete_site_update_entry_health_details(entry: UpdateWorkbenchEntry) -> dict[str, Any]:
+        return {
+            "update_kind": entry.kind,
+            "update_identifier": entry.identifier,
+            "expected_active": getattr(entry, "is_active", False) is True,
+        }
+
+    def _run_complete_site_update_wave_health(
+        self,
+        run: MaintenanceRun,
+        *,
+        phase: str,
+        wave: int,
+        check_number: int,
+        entries: list[UpdateWorkbenchEntry],
+    ) -> str | None:
+        step_key = f"wave-{wave}-health-{check_number}"
+        health_step = self._find_step(run, step_key)
+        names = ", ".join(entry.name for entry in entries)
+        needs_stabilization = any(
+            self._requires_post_update_framework_stabilization(self._complete_site_update_entry_health_details(entry))
+            for entry in entries
+        )
+        if needs_stabilization:
+            seconds = self.POST_UPDATE_FRAMEWORK_STABILIZATION_SECONDS
+            self._start_complete_site_update_step(
+                run,
+                step_key,
+                f"Allowing the framework update wave ({names}) {seconds} seconds to finish cleanup.",
+            )
+            time.sleep(seconds)
+
+        self._start_complete_site_update_step(
+            run,
+            step_key,
+            f"Checking the homepage, WordPress REST API, and admin AJAX after the update wave: {names}.",
+        )
+        health_error, health_detail, health_result = self._run_direct_update_postflight_health(run, health_step)
+        event_updates = [self._complete_site_update_entry_summary(entry) for entry in entries]
+        if health_error:
+            failure_kind = self._post_update_health_failure_kind(health_result) or "unverified"
+            run.result_json = {
+                **(run.result_json or {}),
+                "post_update_health": health_result,
+                "post_update_diagnostics": self._capture_post_update_diagnostics(run),
+                "failed_update_wave": {
+                    "wave": wave,
+                    "health_check": check_number,
+                    "updates": event_updates,
+                },
+            }
+            self._complete_complete_site_update_step(
+                run,
+                step_key,
+                MaintenanceRunStepStatus.failed.value,
+                health_detail,
+                result=health_result,
+            )
+            self._append_complete_site_update_event(
+                run,
+                phase=phase,
+                wave=wave,
+                status="health-failed",
+                detail=health_detail,
+                updates=event_updates,
+            )
+            return failure_kind
+
+        self._complete_complete_site_update_step(
+            run,
+            step_key,
+            MaintenanceRunStepStatus.succeeded.value,
+            health_detail,
+            result=health_result,
+        )
+        self._append_complete_site_update_event(
+            run,
+            phase=phase,
+            wave=wave,
+            status="health-succeeded",
+            detail=health_detail,
+            updates=event_updates,
+        )
+        return None
+
+    def _complete_site_update_wave_health_failure_message(
+        self,
+        entries: list[UpdateWorkbenchEntry],
+        failure_kind: str,
+    ) -> str:
+        names = ", ".join(entry.name for entry in entries)
+        return (
+            f"Stopped after the update wave ({names}) because its post-update "
+            f"{self._post_update_health_failure_label(failure_kind)} check did not pass. "
+            "No further updates were started for this website. The cause is limited to this update wave."
+        )
 
     def _complete_site_update_cancellation_requested(self, run: MaintenanceRun) -> bool:
         # A cancellation is written by a separate request/session while this worker is running.
@@ -1910,6 +2069,14 @@ class MaintenanceRunService:
         )
 
         health_step = self._find_step(run, "postflight-health")
+        if (run.result_json or {}).get("defer_postflight_health") is True:
+            return self._complete_confirmed_direct_update_without_postflight_health(
+                run,
+                details,
+                result,
+                health_step,
+            )
+
         self._wait_for_post_update_framework_stabilization(run, details, health_step)
         self._start_plugin_update_step(
             run,
@@ -1995,6 +2162,54 @@ class MaintenanceRunService:
             update_kind=details["update_kind"],
             identifier=details["update_identifier"],
         )
+
+    def _complete_confirmed_direct_update_without_postflight_health(
+        self,
+        run: MaintenanceRun,
+        details: dict[str, Any],
+        update_result: dict[str, Any],
+        health_step: MaintenanceRunStep | None,
+    ) -> str:
+        """Finish a workflow child after version confirmation; its parent owns the shared health check."""
+        completed_at = datetime.now(UTC)
+        if health_step is not None:
+            health_step.status = MaintenanceRunStepStatus.skipped.value
+            health_step.completed_at = completed_at
+            health_step.detail = "A shared health check will run after this small complete-update wave."
+            health_step.result_json = {"deferred_to_workflow": True}
+        self._record_confirmed_direct_update(run, details, update_result)
+
+        stage_message = (
+            f"{details['update_name']} was updated and Bridge-verified. "
+            "The complete website workflow will health-check this small update wave."
+        )
+        run.status = MaintenanceRunStatus.succeeded.value
+        run.completed_at = completed_at
+        run.last_checked_at = completed_at
+        run.error_message = None
+        run.result_json = {
+            **(run.result_json or {}),
+            "stage": "completed",
+            "stage_message": stage_message,
+            "installed_version": details["target_version"],
+            "postflight_health_deferred_to_workflow": True,
+        }
+        write_audit_log(
+            self.db,
+            site=run.site,
+            actor="kosmos-hub",
+            source="hub-worker",
+            action="complete-direct-update-run",
+            result="succeeded",
+            detail=(
+                f"Direct update run {run.id} updated {details['update_name']} "
+                f"{details['current_version']} -> {details['target_version']} and deferred "
+                "the health check to its complete-update workflow wave."
+            ),
+            request_id=self._plugin_update_batch_id(run),
+        )
+        self.db.commit()
+        return "succeeded"
 
     def _complete_confirmed_direct_update_run(
         self,

@@ -630,6 +630,7 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
             current_version=current,
             target_version=target,
             update_available=True,
+            is_active=True,
         )
 
     phase_entries = {
@@ -657,6 +658,7 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
 
         fresh_phases = []
         child_runs = []
+        health_checks = []
 
         def fresh_entries(_run, *, phase, wave):
             fresh_phases.append((phase, wave))
@@ -671,10 +673,15 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
             child.result_json = {"stage_message": "Updated and verified."}
             return "succeeded"
 
+        def check_wave(_run, *, phase, wave, check_number, entries):
+            health_checks.append((phase, wave, check_number, [entry.name for entry in entries]))
+            return None
+
         monkeypatch.setattr(service, "_fresh_complete_site_update_entries", fresh_entries)
         monkeypatch.setattr(service, "_complete_site_update_entries_by_readiness", lambda entries: (entries, []))
         monkeypatch.setattr(service, "_create_complete_site_update_child_run", create_child)
         monkeypatch.setattr(service, "_poll_plugin_update", complete_child)
+        monkeypatch.setattr(service, "_run_complete_site_update_wave_health", check_wave)
 
         assert service.poll_complete_site_update_run(run.id) == "succeeded"
 
@@ -687,6 +694,10 @@ def test_complete_site_update_runs_fresh_wordpress_theme_plugin_phases_until_sta
             ("wordpress", 1, "WordPress core"),
             ("theme", 1, "Hello Elementor"),
             ("plugin", 1, "Elementor"),
+        ]
+        assert health_checks == [
+            ("wordpress", 1, 1, ["WordPress core"]),
+            ("plugin", 1, 2, ["Hello Elementor", "Elementor"]),
         ]
         assert completed.result_json["successful_updates"] == 3
         assert any(event["status"] == "processing" for event in completed.result_json["events"])
@@ -765,6 +776,22 @@ def test_complete_site_update_stops_one_site_after_an_admin_ajax_health_failure(
         assert completed.result_json["stage"] == "post-update-health-failed"
         assert "admin AJAX" in completed.result_json["stage_message"]
         assert child_runs == ["JetEngine"]
+
+
+def test_complete_site_update_health_boundary_groups_three_normal_updates_and_isolates_frameworks():
+    def entry(identifier, *, is_active=True):
+        return SimpleNamespace(
+            kind="plugin",
+            identifier=identifier,
+            is_active=is_active,
+        )
+
+    normal_entries = [entry(f"example-{index}/example.php") for index in range(1, 4)]
+    framework_entry = entry("elementor/elementor.php")
+
+    assert MaintenanceRunService._complete_site_update_health_boundary_reached(normal_entries[:2]) is False
+    assert MaintenanceRunService._complete_site_update_health_boundary_reached(normal_entries) is True
+    assert MaintenanceRunService._complete_site_update_health_boundary_reached([framework_entry]) is True
 
 
 def test_live_plugin_preflight_marks_a_newer_installed_version_as_already_updated():
@@ -1720,6 +1747,11 @@ def test_post_update_diagnostics_are_bounded_before_they_are_stored():
         "file": "WP_PLUGIN_DIR/example/example.php",
         "line": 42,
     }
+    assert MaintenanceRunService.POST_UPDATE_DIAGNOSTICS_MAX_ATTEMPTS == 3
+    assert service._post_update_diagnostics_retry_due(
+        {"attempt_count": 3, "last_attempt_at": datetime.now(UTC).isoformat()},
+        datetime.now(UTC),
+    ) is False
 
 
 def test_pending_post_update_diagnostics_are_retried_after_a_site_recovers(monkeypatch):
