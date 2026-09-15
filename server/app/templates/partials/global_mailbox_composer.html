@@ -28,18 +28,20 @@
           <div id="global-email-recipient-results" class="email-recipient-search-results" data-global-mailbox-compose-recipient-results role="listbox" hidden></div>
         </label>
       </div>
-      <label class="email-recipient-search" data-global-mailbox-compose-cc-field hidden>CC
-        <input name="cc_emails" type="text" autocomplete="off" placeholder="Weitere Empfänger, durch Komma getrennt" data-email-compose-cc aria-autocomplete="list" aria-controls="global-email-cc-results">
-        <div id="global-email-cc-results" class="email-recipient-search-results" data-global-mailbox-compose-cc-results role="listbox" hidden></div>
-      </label>
-      <label class="email-template-search">E-Mail-Vorlage
-        <div class="email-template-search-control">
-          <input type="search" autocomplete="off" placeholder="Vorlage suchen" data-global-mailbox-template-search aria-autocomplete="list" aria-controls="global-email-template-results">
-          <button class="button button-secondary email-template-search-open" type="button" data-global-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen">↑</button>
-        </div>
-        <div id="global-email-template-results" class="email-template-search-results" data-global-mailbox-template-search-results role="listbox" hidden></div>
-        <select data-email-compose-template hidden><option value="">Keine Vorlage verwenden</option></select>
-      </label>
+      <div class="email-compose-recipient-fields">
+        <label class="email-recipient-search" data-global-mailbox-compose-cc-field hidden>CC
+          <input name="cc_emails" type="text" autocomplete="off" placeholder="Weitere Empfänger, durch Komma getrennt" data-email-compose-cc aria-autocomplete="list" aria-controls="global-email-cc-results">
+          <div id="global-email-cc-results" class="email-recipient-search-results" data-global-mailbox-compose-cc-results role="listbox" hidden></div>
+        </label>
+        <label class="email-template-search">E-Mail-Vorlage
+          <div class="email-template-search-control">
+            <input type="search" autocomplete="off" placeholder="Vorlage suchen" data-global-mailbox-template-search aria-autocomplete="list" aria-controls="global-email-template-results">
+            <button class="button button-secondary email-template-search-open" type="button" data-global-mailbox-template-library-open aria-label="Vorlagenbibliothek öffnen" title="Vorlagenbibliothek öffnen">↑</button>
+          </div>
+          <div id="global-email-template-results" class="email-template-search-results" data-global-mailbox-template-search-results role="listbox" hidden></div>
+          <select data-email-compose-template hidden><option value="">Keine Vorlage verwenden</option></select>
+        </label>
+      </div>
       <p class="subtle email-compose-template-status" data-email-compose-template-status>Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
       <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
       <label>Nachricht
