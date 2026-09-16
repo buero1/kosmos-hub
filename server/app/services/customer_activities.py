@@ -1,14 +1,18 @@
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
+import math
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.security import get_secret_cipher
 from app.models.customer import Customer
+from app.models.hub_lead import HubLead
 from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder, CustomerTaskActivity
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.services.task_email_reminders import TaskEmailReminderError, TaskEmailReminderService
+from app.services.hub_leads import HubLeadService
 
 
 CALL_STATUS_OPTIONS = (
@@ -63,6 +67,9 @@ class CustomerCallActivityView:
     duration_minutes: int
     reminders: tuple["CustomerCallReminderView", ...]
     description: str | None
+    duration_seconds: int | None
+    recording_url: str | None
+    transcript_url: str | None
 
 
 @dataclass(frozen=True)
@@ -129,6 +136,8 @@ class CustomerCalendarActivityView:
     status: str
     customer_id: int | None
     customer_name: str
+    lead_id: int | None
+    lead_name: str
     direction: str | None
     start_date: str
     start_time: str
@@ -147,23 +156,31 @@ class CustomerActivityService:
     def __init__(self, *, db: Session):
         self.db = db
 
-    def list_calls(self, *, customer_id: int) -> tuple[CustomerCallActivityView, ...]:
-        calls = self.db.scalars(
-            select(CustomerCallActivity)
-            .options(selectinload(CustomerCallActivity.reminders))
-            .where(CustomerCallActivity.customer_id == customer_id)
-            .where(CustomerCallActivity.status == "planned")
-            .order_by(CustomerCallActivity.starts_at.asc(), CustomerCallActivity.id.asc())
-        ).all()
+    def list_calls(
+        self,
+        *,
+        customer_id: int | None = None,
+        lead_id: int | None = None,
+        include_completed: bool = False,
+    ) -> tuple[CustomerCallActivityView, ...]:
+        owner_filter = self._owner_filter(CustomerCallActivity, customer_id=customer_id, lead_id=lead_id)
+        query = select(CustomerCallActivity).options(selectinload(CustomerCallActivity.reminders)).where(owner_filter)
+        query = query.where(
+            CustomerCallActivity.status.in_(("planned", "completed"))
+            if include_completed
+            else CustomerCallActivity.status == "planned"
+        ).order_by(CustomerCallActivity.starts_at.desc(), CustomerCallActivity.id.desc())
+        calls = self.db.scalars(query).all()
         return tuple(
             self._call_view(call)
             for call in calls
         )
 
-    def list_tasks(self, *, customer_id: int) -> tuple[CustomerTaskActivityView, ...]:
+    def list_tasks(self, *, customer_id: int | None = None, lead_id: int | None = None) -> tuple[CustomerTaskActivityView, ...]:
+        owner_filter = self._owner_filter(CustomerTaskActivity, customer_id=customer_id, lead_id=lead_id)
         tasks = self.db.scalars(
             select(CustomerTaskActivity)
-            .where(CustomerTaskActivity.customer_id == customer_id)
+            .where(owner_filter)
             .where(CustomerTaskActivity.status == "planned")
             .order_by(CustomerTaskActivity.due_at.asc(), CustomerTaskActivity.id.asc())
         ).all()
@@ -198,12 +215,13 @@ class CustomerActivityService:
             )
         return tuple(views)
 
-    def list_meetings(self, *, customer_id: int) -> tuple[CustomerMeetingActivityView, ...]:
+    def list_meetings(self, *, customer_id: int | None = None, lead_id: int | None = None) -> tuple[CustomerMeetingActivityView, ...]:
+        owner_filter = self._owner_filter(CustomerMeetingActivity, customer_id=customer_id, lead_id=lead_id)
         self.complete_elapsed_meetings()
         meetings = self.db.scalars(
             select(CustomerMeetingActivity)
             .options(selectinload(CustomerMeetingActivity.reminders))
-            .where(CustomerMeetingActivity.customer_id == customer_id)
+            .where(owner_filter)
             .order_by(CustomerMeetingActivity.starts_at.asc(), CustomerMeetingActivity.id.asc())
         ).all()
         views: list[CustomerMeetingActivityView] = []
@@ -240,6 +258,7 @@ class CustomerActivityService:
         starts_at = datetime.combine(week_start, time.min, tzinfo=berlin).astimezone(UTC).replace(tzinfo=None)
         ends_at = datetime.combine(week_end, time.min, tzinfo=berlin).astimezone(UTC).replace(tzinfo=None)
         customer_names: dict[int, str] = {}
+        lead_names: dict[int, str] = {}
 
         def customer_name(customer_id: int | None) -> str:
             if customer_id is None:
@@ -249,6 +268,16 @@ class CustomerActivityService:
                 customer = self.db.get(Customer, customer_id)
                 name = customer.name if customer is not None else "Unbekannter Kunde"
                 customer_names[customer_id] = name
+            return name
+
+        def lead_name(lead_id: int | None) -> str:
+            if lead_id is None:
+                return ""
+            name = lead_names.get(lead_id)
+            if name is None:
+                lead = HubLeadService(db=self.db, cipher=get_secret_cipher()).get_detail(lead_id=lead_id)
+                name = lead.name if lead is not None else f"Lead {lead_id}"
+                lead_names[lead_id] = name
             return name
 
         calls = self.db.scalars(
@@ -282,6 +311,8 @@ class CustomerActivityService:
                     status=call.status,
                     customer_id=call.customer_id,
                     customer_name=customer_name(call.customer_id),
+                    lead_id=call.lead_id,
+                    lead_name=lead_name(call.lead_id),
                     direction=call.direction,
                     starts_at=call.starts_at,
                     ends_at=call.ends_at,
@@ -300,6 +331,8 @@ class CustomerActivityService:
                     status=meeting.status,
                     customer_id=meeting.customer_id,
                     customer_name=customer_name(meeting.customer_id),
+                    lead_id=meeting.lead_id,
+                    lead_name=lead_name(meeting.lead_id),
                     direction=None,
                     starts_at=meeting.starts_at,
                     ends_at=meeting.ends_at,
@@ -327,7 +360,10 @@ class CustomerActivityService:
         reminder_channels: list[str],
         reminder_minutes_before: list[str],
         description: str,
+        lead_id: int | None = None,
     ) -> CustomerCallActivity:
+        if lead_id is not None and (customer_id is not None or self.db.get(HubLead, lead_id) is None):
+            raise CustomerActivityError("Der Lead wurde nicht gefunden oder die Verknüpfung ist ungültig.")
         customer = self._customer_or_error(customer_id) if customer_id is not None else None
         values = self._validated_call_values(
             name=name,
@@ -344,6 +380,7 @@ class CustomerActivityService:
         primary_reminder = parsed_reminders[0] if parsed_reminders else None
         call = CustomerCallActivity(
             customer_id=customer.id if customer is not None else None,
+            lead_id=lead_id,
             name=values.name,
             status=values.status,
             direction=values.direction,
@@ -357,6 +394,67 @@ class CustomerActivityService:
             reminders=self._reminder_models(parsed_reminders),
         )
         self.db.add(call)
+        self.db.flush()
+        return call
+
+    def upsert_external_call(
+        self,
+        *,
+        lead_id: int,
+        source_system: str,
+        source_external_id: str,
+        actor: str,
+        name: str,
+        status: str,
+        direction: str,
+        starts_at: datetime,
+        duration_seconds: int,
+        description: str = "",
+        recording_url: str = "",
+        transcript_url: str = "",
+    ) -> CustomerCallActivity:
+        if self.db.get(HubLead, lead_id) is None:
+            raise CustomerActivityError("Der Lead wurde nicht gefunden.")
+        normalized_source = source_system.strip()[:96]
+        normalized_external_id = source_external_id.strip()[:255]
+        normalized_name = name.strip()[:255]
+        if not normalized_source or not normalized_external_id or not normalized_name:
+            raise CustomerActivityError("Externe Quelle, Anruf-ID und Name dürfen nicht leer sein.")
+        if status not in dict(CALL_STATUS_OPTIONS) or direction not in dict(CALL_DIRECTION_OPTIONS):
+            raise CustomerActivityError("Anrufstatus oder Richtung ist ungültig.")
+        normalized_start = starts_at.astimezone(UTC).replace(tzinfo=None) if starts_at.tzinfo is not None else starts_at
+        normalized_duration = max(0, min(int(duration_seconds or 0), 24 * 60 * 60))
+        stored_duration_minutes = max(1, math.ceil(normalized_duration / 60))
+        call = self.db.scalar(
+            select(CustomerCallActivity).where(
+                CustomerCallActivity.source_system == normalized_source,
+                CustomerCallActivity.source_external_id == normalized_external_id,
+            )
+        )
+        if call is None:
+            call = CustomerCallActivity(
+                customer_id=None,
+                lead_id=lead_id,
+                source_system=normalized_source,
+                source_external_id=normalized_external_id,
+            )
+            self.db.add(call)
+        elif call.lead_id != lead_id:
+            raise CustomerActivityError("Die externe Anruf-ID gehört bereits zu einem anderen Lead.")
+        call.name = normalized_name
+        call.status = status
+        call.direction = direction
+        call.starts_at = normalized_start
+        call.ends_at = normalized_start + timedelta(seconds=normalized_duration)
+        call.duration_seconds = normalized_duration
+        call.duration_minutes = stored_duration_minutes
+        call.reminder_channel = "none"
+        call.reminder_minutes_before = None
+        call.description = description.strip()[:20_000] or None
+        call.created_by_username = actor.strip()[:64] or "integration:callapp"
+        call.recording_url = recording_url.strip()[:4000] or None
+        call.transcript_url = transcript_url.strip()[:4000] or None
+        call.reminders = []
         self.db.flush()
         return call
 
@@ -461,7 +559,7 @@ class CustomerActivityService:
     def schedule_task(
         self,
         *,
-        customer_id: int,
+        customer_id: int | None,
         actor: str,
         name: str,
         status: str,
@@ -470,8 +568,13 @@ class CustomerActivityService:
         reminder_channel: str,
         reminder_minutes_before: str,
         description: str,
+        lead_id: int | None = None,
     ) -> CustomerTaskActivity:
-        customer = self._customer_or_error(customer_id)
+        if (customer_id is None) == (lead_id is None):
+            raise CustomerActivityError("Bitte Kunde oder Lead verknüpfen.")
+        customer = self._customer_or_error(customer_id) if customer_id is not None else None
+        if lead_id is not None and self.db.get(HubLead, lead_id) is None:
+            raise CustomerActivityError("Der Lead wurde nicht gefunden.")
         values = self._validated_task_values(
             name=name,
             status=status,
@@ -481,7 +584,7 @@ class CustomerActivityService:
             reminder_minutes_before=reminder_minutes_before,
             description=description,
         )
-        task = CustomerTaskActivity(customer_id=customer.id, created_by_username=actor, **values)
+        task = CustomerTaskActivity(customer_id=customer.id if customer else None, lead_id=lead_id, created_by_username=actor, **values)
         self.db.add(task)
         self.db.flush()
         self._sync_task_email_reminder(task)
@@ -554,7 +657,10 @@ class CustomerActivityService:
         reminder_channels: list[str],
         reminder_minutes_before: list[str],
         description: str,
+        lead_id: int | None = None,
     ) -> CustomerMeetingActivity:
+        if lead_id is not None and (customer_id is not None or self.db.get(HubLead, lead_id) is None):
+            raise CustomerActivityError("Der Lead wurde nicht gefunden oder die Verknüpfung ist ungültig.")
         customer = self._customer_or_error(customer_id) if customer_id is not None else None
         values = self._validated_meeting_values(
             name=name,
@@ -567,6 +673,7 @@ class CustomerActivityService:
         reminders = self._parse_reminders(reminder_channels, reminder_minutes_before)
         meeting = CustomerMeetingActivity(
             customer_id=customer.id if customer is not None else None,
+            lead_id=lead_id,
             created_by_username=actor,
             reminders=self._meeting_reminder_models(reminders),
             **values,
@@ -684,6 +791,9 @@ class CustomerActivityService:
             duration_minutes=call.duration_minutes,
             reminders=reminders,
             description=call.description,
+            duration_seconds=call.duration_seconds,
+            recording_url=call.recording_url,
+            transcript_url=call.transcript_url,
         )
 
     @staticmethod
@@ -695,6 +805,8 @@ class CustomerActivityService:
         status: str,
         customer_id: int | None,
         customer_name: str,
+        lead_id: int | None,
+        lead_name: str,
         direction: str | None,
         starts_at: datetime,
         ends_at: datetime,
@@ -710,6 +822,8 @@ class CustomerActivityService:
             status=status,
             customer_id=customer_id,
             customer_name=customer_name,
+            lead_id=lead_id,
+            lead_name=lead_name,
             direction=direction,
             start_date=berlin_start.strftime("%Y-%m-%d"),
             start_time=berlin_start.strftime("%H:%M"),
@@ -775,6 +889,12 @@ class CustomerActivityService:
         if customer is None:
             raise CustomerActivityError("Der Kunde wurde nicht gefunden.")
         return customer
+
+    @staticmethod
+    def _owner_filter(model, *, customer_id: int | None, lead_id: int | None):
+        if (customer_id is None) == (lead_id is None):
+            raise CustomerActivityError("Bitte genau einen Kunden oder Lead auswählen.")
+        return model.customer_id == customer_id if customer_id is not None else model.lead_id == lead_id
 
     def _call_or_error(self, *, customer_id: int, call_id: int) -> CustomerCallActivity:
         call = self.db.scalar(

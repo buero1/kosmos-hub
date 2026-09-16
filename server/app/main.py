@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, select, text
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.background import BackgroundTask, BackgroundTasks
 
-from app.api.routes import accounts, agent, assistant, desktop_notifications, health, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
+from app.api.routes import accounts, agent, assistant, desktop_notifications, health, integrations, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
@@ -24,6 +25,7 @@ from app.models.customer_activity import CustomerCallActivity, CustomerCallRemin
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_desktop_device import HubDesktopDevice
+from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_case import HubCase
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_email import HubLeadEmail
@@ -31,6 +33,8 @@ from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer, HubFinanceOfferLine
 from app.models.hub_finance_documents import (
+    HubFinanceDunning,
+    HubFinanceDunningLine,
     HubFinanceInvoice,
     HubFinanceInvoiceLine,
     HubFinanceOrder,
@@ -41,12 +45,14 @@ from app.models.hub_finance_documents import (
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxEmail
+from app.models.hub_spam_sender import HubSpamSender
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.email_compose_image import EmailComposeImage
 from app.models.email_composer_settings import EmailComposerSettings
 from app.models.email_ai_prompt_preset import EmailAiPromptPreset
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.models.hub_mailbox_email import HubMailboxAttachment
 from app.models.site_user_snapshot import SiteUserSnapshot
 from app.models.styling_settings import StylingSettings
@@ -62,13 +68,36 @@ from app.models.zoho_email_history_import import ZohoEmailHistoryImport
 from app.models.zoho_note_history_import import ZohoNoteHistoryImport
 from app.models.zoho_books_connection import ZohoBooksConnection
 from app.models.zoho_books_invoice_import import ZohoBooksInvoiceImport, ZohoBooksInvoiceImportItem
+from app.models.zoho_books_order_import import ZohoBooksOrderImport, ZohoBooksOrderImportItem
 from app.models.zoho_books_recurring_invoice_import import (
     ZohoBooksRecurringInvoiceImport,
     ZohoBooksRecurringInvoiceImportItem,
 )
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
+from app.models.hub_finance_order_pdf import HubFinanceOrderPdf
+from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
+from app.models.hub_finance_position_preset import HubFinancePositionPreset
+from app.models.hub_legal_terms import HubLegalTerms, HubLegalTermsRevision
+from app.models.hub_pdf_template import HubPdfTemplate, HubPdfTemplateRevision
 from app.services.hub_accounts import HubAccountService
+from app.services.hub_activity import (
+    begin_activity_request,
+    current_activity_request,
+    end_activity_request,
+    record_http_activity,
+)
 from app.services.hub_workflows import HubWorkflowService
+from app.services.hub_pdf_templates import HubPdfTemplateService
+from app.services.hub_finance_pdf_generation import (
+    process_queued_finance_pdf_generations,
+    recover_and_process_finance_pdf_generations,
+)
+from app.services.hub_recurring_invoice_generation import (
+    backfill_recurring_invoice_cursors,
+    create_due_recurring_invoices,
+)
+from app.services.hub_invoice_email_batches import resume_queued_invoice_email_batches
+from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch, HubInvoiceEmailBatchItem
 from app.services.email_ai_prompt_presets import EmailAiPromptPresetService
 from app.services.fleet_refresh import FleetRefreshService
 from app.services.maintenance_runs import MaintenanceRunService
@@ -87,12 +116,33 @@ from app.services.maintenance_worker import (
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_books_invoice_import,
+    schedule_pending_zoho_books_order_import,
     schedule_pending_zoho_books_recurring_invoice_import,
     schedule_pending_zoho_email_workflow_deliveries,
 )
 from app.services.task_email_reminder_worker import TaskEmailReminderWorker
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_http_activity(actor: str, path: str, method: str, status_code: int, route_path: str | None) -> None:
+    try:
+        with SessionLocal() as db:
+            record_http_activity(
+                db, actor=actor, path=path, method=method, status_code=status_code, route_path=route_path
+            )
+    except Exception:
+        logger.exception("Could not save Hub activity event")
+
+
+def _should_record_http_activity(request: Request) -> bool:
+    if request.url.path.startswith("/static/"):
+        return False
+    if request.method not in {"GET", "HEAD"}:
+        return True
+    if "text/html" in request.headers.get("accept", ""):
+        return True
+    return "/download" in request.url.path or "/pdf" in request.url.path
 
 
 def _ensure_phase_one_schema() -> None:
@@ -154,6 +204,18 @@ def _ensure_phase_one_schema() -> None:
     if "hub_leads" not in table_names:
         HubLead.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_leads table.")
+    else:
+        lead_columns = {column["name"] for column in inspector.get_columns("hub_leads")}
+        with engine.begin() as connection:
+            if "source_system" not in lead_columns:
+                connection.execute(text("ALTER TABLE hub_leads ADD COLUMN source_system VARCHAR(96) NULL"))
+            if "source_external_id" not in lead_columns:
+                connection.execute(text("ALTER TABLE hub_leads ADD COLUMN source_external_id VARCHAR(255) NULL"))
+        inspector = inspect(engine)
+        lead_indexes = {index["name"] for index in inspector.get_indexes("hub_leads")}
+        if "uq_hub_leads_source_external" not in lead_indexes:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE UNIQUE INDEX uq_hub_leads_source_external ON hub_leads (source_system, source_external_id)"))
 
     if "hub_lead_emails" not in table_names:
         HubLeadEmail.__table__.create(bind=engine, checkfirst=True)
@@ -162,6 +224,42 @@ def _ensure_phase_one_schema() -> None:
     if "hub_lead_notes" not in table_names:
         HubLeadNote.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_lead_notes table.")
+    else:
+        note_columns = {column["name"] for column in inspector.get_columns("hub_lead_notes")}
+        with engine.begin() as connection:
+            if "source_system" not in note_columns:
+                connection.execute(text("ALTER TABLE hub_lead_notes ADD COLUMN source_system VARCHAR(96) NULL"))
+            if "source_external_id" not in note_columns:
+                connection.execute(text("ALTER TABLE hub_lead_notes ADD COLUMN source_external_id VARCHAR(255) NULL"))
+        inspector = inspect(engine)
+        note_indexes = {index["name"] for index in inspector.get_indexes("hub_lead_notes")}
+        if "uq_hub_lead_notes_source_external" not in note_indexes:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE UNIQUE INDEX uq_hub_lead_notes_source_external ON hub_lead_notes (lead_id, source_system, source_external_id)"))
+
+    if "hub_integration_tokens" not in table_names:
+        HubIntegrationToken.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_integration_tokens table.")
+
+    if "customer_call_activities" in table_names:
+        call_columns = {column["name"] for column in inspector.get_columns("customer_call_activities")}
+        call_additions = {
+            "source_system": "VARCHAR(96) NULL",
+            "source_external_id": "VARCHAR(255) NULL",
+            "duration_seconds": "INT NULL",
+            "recording_url": "TEXT NULL",
+            "transcript_url": "TEXT NULL",
+        }
+        missing_call_columns = [(name, definition) for name, definition in call_additions.items() if name not in call_columns]
+        if missing_call_columns:
+            with engine.begin() as connection:
+                for name, definition in missing_call_columns:
+                    connection.execute(text(f"ALTER TABLE customer_call_activities ADD COLUMN {name} {definition}"))
+        inspector = inspect(engine)
+        call_indexes = {index["name"] for index in inspector.get_indexes("customer_call_activities")}
+        if "uq_customer_call_activities_source_external" not in call_indexes:
+            with engine.begin() as connection:
+                connection.execute(text("CREATE UNIQUE INDEX uq_customer_call_activities_source_external ON customer_call_activities (source_system, source_external_id)"))
 
     if "hub_finance_articles" not in table_names:
         HubFinanceArticle.__table__.create(bind=engine, checkfirst=True)
@@ -180,12 +278,19 @@ def _ensure_phase_one_schema() -> None:
         HubFinanceOrderLine,
         HubFinanceInvoice,
         HubFinanceInvoiceLine,
+        HubFinanceDunning,
+        HubFinanceDunningLine,
         HubFinanceRecurringInvoice,
         HubFinanceRecurringInvoiceLine,
     ):
         if finance_model.__tablename__ not in table_names:
             finance_model.__table__.create(bind=engine, checkfirst=True)
             logger.info("Created %s table.", finance_model.__tablename__)
+
+    for email_batch_model in (HubInvoiceEmailBatch, HubInvoiceEmailBatchItem):
+        if email_batch_model.__tablename__ not in table_names:
+            email_batch_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", email_batch_model.__tablename__)
 
     if "zoho_books_connections" not in table_names:
         ZohoBooksConnection.__table__.create(bind=engine, checkfirst=True)
@@ -194,13 +299,157 @@ def _ensure_phase_one_schema() -> None:
     for zoho_books_import_model in (
         ZohoBooksInvoiceImport,
         ZohoBooksInvoiceImportItem,
+        ZohoBooksOrderImport,
+        ZohoBooksOrderImportItem,
         ZohoBooksRecurringInvoiceImport,
         ZohoBooksRecurringInvoiceImportItem,
         HubFinanceInvoicePdf,
+        HubFinanceOrderPdf,
     ):
         if zoho_books_import_model.__tablename__ not in table_names:
             zoho_books_import_model.__table__.create(bind=engine, checkfirst=True)
             logger.info("Created %s table.", zoho_books_import_model.__tablename__)
+
+    for legal_terms_model in (HubLegalTerms, HubLegalTermsRevision):
+        if legal_terms_model.__tablename__ not in table_names:
+            legal_terms_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", legal_terms_model.__tablename__)
+
+    for pdf_template_model in (HubPdfTemplate, HubPdfTemplateRevision):
+        if pdf_template_model.__tablename__ not in table_names:
+            pdf_template_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", pdf_template_model.__tablename__)
+
+    if "hub_pdf_templates" in table_names:
+        template_columns = {column["name"] for column in inspect(engine).get_columns("hub_pdf_templates")}
+        if "legal_terms_id" not in template_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_pdf_templates "
+                        "ADD COLUMN legal_terms_id INT NULL AFTER content_json, "
+                        "ADD INDEX ix_hub_pdf_templates_legal_terms_id (legal_terms_id), "
+                        "ADD CONSTRAINT fk_hub_pdf_templates_legal_terms_id_hub_legal_terms "
+                        "FOREIGN KEY (legal_terms_id) REFERENCES hub_legal_terms (id) ON DELETE SET NULL"
+                    )
+                )
+            logger.info("Added hub_pdf_templates.legal_terms_id column, index and foreign key.")
+
+    if "hub_pdf_template_revisions" in table_names:
+        revision_columns = {
+            column["name"] for column in inspect(engine).get_columns("hub_pdf_template_revisions")
+        }
+        if "legal_terms_revision_id" not in revision_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_pdf_template_revisions "
+                        "ADD COLUMN legal_terms_revision_id INT NULL AFTER content_json, "
+                        "ADD INDEX ix_hub_pdf_template_revisions_legal_terms_revision_id "
+                        "(legal_terms_revision_id), "
+                        "ADD CONSTRAINT fk_hub_pdf_template_revisions_legal_terms_revision_id "
+                        "FOREIGN KEY (legal_terms_revision_id) REFERENCES hub_legal_terms_revisions (id) "
+                        "ON DELETE SET NULL"
+                    )
+                )
+            logger.info("Added hub_pdf_template_revisions.legal_terms_revision_id column, index and foreign key.")
+
+    finance_template_columns = (
+        ("hub_finance_offers", "contact_id"),
+        ("hub_finance_orders", "offer_id"),
+        ("hub_finance_invoices", "order_id"),
+        ("hub_finance_recurring_invoices", "contact_id"),
+    )
+    for table_name, after_column in finance_template_columns:
+        if table_name not in table_names:
+            continue
+        columns = {column["name"] for column in inspect(engine).get_columns(table_name)}
+        if "pdf_template_id" in columns:
+            continue
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table_name} "
+                    f"ADD COLUMN pdf_template_id INT NULL AFTER {after_column}, "
+                    f"ADD INDEX ix_{table_name}_pdf_template_id (pdf_template_id), "
+                    f"ADD CONSTRAINT fk_{table_name.removeprefix('hub_finance_')}_pdf_template "
+                    "FOREIGN KEY (pdf_template_id) REFERENCES hub_pdf_templates (id) ON DELETE SET NULL"
+                )
+            )
+        logger.info("Added %s.pdf_template_id column, index and foreign key.", table_name)
+
+    if "hub_finance_recurring_invoices" in table_names:
+        recurring_columns = {column["name"] for column in inspect(engine).get_columns("hub_finance_recurring_invoices")}
+        if "hub_next_run_on" not in recurring_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_finance_recurring_invoices "
+                    "ADD COLUMN hub_next_run_on DATE NULL, "
+                    "ADD INDEX ix_hub_finance_recurring_invoices_hub_next_run_on (hub_next_run_on)"
+                ))
+            logger.info("Added Hub recurring invoice schedule cursor.")
+
+    if "hub_finance_invoices" in table_names:
+        invoice_columns = {column["name"] for column in inspect(engine).get_columns("hub_finance_invoices")}
+        if "recurring_invoice_id" not in invoice_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_finance_invoices "
+                    "ADD COLUMN recurring_invoice_id INT NULL, "
+                    "ADD COLUMN recurring_scheduled_on DATE NULL, "
+                    "ADD INDEX ix_hub_finance_invoices_recurring_invoice_id (recurring_invoice_id), "
+                    "ADD CONSTRAINT uq_hub_finance_invoices_recurring_occurrence "
+                    "UNIQUE (recurring_invoice_id, recurring_scheduled_on), "
+                    "ADD CONSTRAINT fk_hub_finance_invoices_recurring_invoice "
+                    "FOREIGN KEY (recurring_invoice_id) REFERENCES hub_finance_recurring_invoices (id) ON DELETE SET NULL"
+                ))
+            logger.info("Added recurring invoice origin and uniqueness constraint to invoices.")
+
+    if HubFinanceGeneratedPdf.__tablename__ not in table_names:
+        HubFinanceGeneratedPdf.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created %s table.", HubFinanceGeneratedPdf.__tablename__)
+    else:
+        pdf_columns = {column["name"] for column in inspect(engine).get_columns(HubFinanceGeneratedPdf.__tablename__)}
+        if "attempt_count" not in pdf_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_finance_generated_pdfs "
+                    "ADD COLUMN attempt_count INT NOT NULL DEFAULT 0, "
+                    "ADD COLUMN next_retry_at DATETIME NULL"
+                ))
+            logger.info("Added retry state to generated Finance PDFs.")
+
+    if HubFinancePositionPreset.__tablename__ not in table_names:
+        HubFinancePositionPreset.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created %s table.", HubFinancePositionPreset.__tablename__)
+
+    if "hub_finance_orders" in table_names:
+        order_columns = {column["name"] for column in inspector.get_columns("hub_finance_orders")}
+        if "zoho_crm_id" not in order_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_finance_orders ADD COLUMN zoho_crm_id VARCHAR(255) NULL"))
+                connection.execute(text("CREATE UNIQUE INDEX ix_hub_finance_orders_zoho_crm_id ON hub_finance_orders (zoho_crm_id)"))
+            logger.info("Added hub_finance_orders.zoho_crm_id column and index.")
+
+    if "zoho_books_order_import_items" in table_names:
+        order_item_columns = {
+            column["name"] for column in inspector.get_columns("zoho_books_order_import_items")
+        }
+        if "zoho_books_customer_id" not in order_item_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE zoho_books_order_import_items "
+                        "ADD COLUMN zoho_books_customer_id VARCHAR(255) NULL"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_zoho_books_order_import_items_zoho_books_customer_id "
+                        "ON zoho_books_order_import_items (zoho_books_customer_id)"
+                    )
+                )
+            logger.info("Added Books customer identity to combined order import items.")
 
     if "hub_workflows" not in table_names:
         HubWorkflow.__table__.create(bind=engine, checkfirst=True)
@@ -409,12 +658,23 @@ def _ensure_phase_one_schema() -> None:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE hub_users ADD COLUMN reminder_email VARCHAR(320) NULL"))
             logger.info("Added hub_users.reminder_email column.")
+        if "mailbox_alert_email" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_users ADD COLUMN mailbox_alert_email VARCHAR(320) NULL"))
+            logger.info("Added hub_users.mailbox_alert_email column.")
 
     if "hub_mailbox_emails" not in table_names:
         HubMailboxEmail.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_mailbox_emails table.")
     else:
-        columns = {column["name"] for column in inspector.get_columns("hub_mailbox_emails")}
+        columns = {column["name"]: column for column in inspector.get_columns("hub_mailbox_emails")}
+        payload_column = columns.get("encrypted_payload_json")
+        if payload_column is not None and "MEDIUMTEXT" not in str(payload_column["type"]).upper():
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE hub_mailbox_emails MODIFY COLUMN encrypted_payload_json MEDIUMTEXT NOT NULL")
+                )
+            logger.info("Expanded hub_mailbox_emails.encrypted_payload_json to MEDIUMTEXT.")
         if "mailbox_state" not in columns:
             with engine.begin() as connection:
                 connection.execute(
@@ -434,6 +694,10 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added hub_mailbox_emails mailbox-state folder index.")
+
+    if "hub_spam_senders" not in table_names:
+        HubSpamSender.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_spam_senders table.")
 
     if "styling_settings" not in table_names:
         StylingSettings.__table__.create(bind=engine, checkfirst=True)
@@ -529,6 +793,10 @@ def _ensure_phase_one_schema() -> None:
                 "Added hub_mailbox_imap_sync_states columns: %s",
                 ", ".join(name for name, _ in missing),
             )
+
+    if "hub_mailbox_imap_sync_failures" not in table_names:
+        HubMailboxImapSyncFailure.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_mailbox_imap_sync_failures table.")
 
     if "customer_task_email_reminders" not in table_names:
         CustomerTaskEmailReminder.__table__.create(bind=engine, checkfirst=True)
@@ -712,6 +980,41 @@ async def _maintenance_run_poll_loop(initial_delay_seconds: int, interval_second
         await asyncio.sleep(interval_seconds)
 
 
+async def _finance_pdf_worker_loop() -> None:
+    try:
+        recovered = await asyncio.to_thread(recover_and_process_finance_pdf_generations)
+    except Exception:
+        logger.exception("Finance PDF recovery failed unexpectedly.")
+    else:
+        if recovered:
+            logger.info("Processed %s queued or interrupted Finance PDF job(s).", recovered)
+    while True:
+        await asyncio.sleep(60)
+        try:
+            processed = await asyncio.to_thread(process_queued_finance_pdf_generations)
+            if processed:
+                logger.info("Processed %s queued Finance PDF job(s).", processed)
+        except Exception:
+            logger.exception("Finance PDF queue polling failed unexpectedly.")
+
+
+async def _recurring_invoice_poll_loop(interval_seconds: int) -> None:
+    while True:
+        try:
+            backfilled = await asyncio.to_thread(backfill_recurring_invoice_cursors)
+            if backfilled:
+                logger.info("Initialized %s recurring invoice schedule cursor(s).", backfilled)
+            result = await asyncio.to_thread(create_due_recurring_invoices, limit=100)
+            if result.created_ids or result.failed_ids or result.existing_count:
+                logger.info(
+                    "Recurring invoice generation: %s created, %s failed, %s already existed.",
+                    len(result.created_ids), len(result.failed_ids), result.existing_count,
+                )
+        except Exception:
+            logger.exception("Recurring invoice polling failed unexpectedly.")
+        await asyncio.sleep(interval_seconds)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
@@ -722,8 +1025,10 @@ async def lifespan(_: FastAPI):
         with SessionLocal() as db:
             HubWorkflowService(db=db).ensure_default_workflows()
             EmailAiPromptPresetService(db=db).ensure_default_presets()
+            HubPdfTemplateService(db=db).ensure_default_templates()
             db.commit()
         _backfill_customer_zoho_email_headers()
+        invoice_mail_recovery_task = asyncio.create_task(asyncio.to_thread(resume_queued_invoice_email_batches))
         schedule_elapsed_customer_meetings()
         schedule_pending_user_deletions()
         schedule_pending_zoho_email_content_import()
@@ -734,12 +1039,19 @@ async def lifespan(_: FastAPI):
         schedule_pending_zoho_email_history_import()
         schedule_pending_zoho_note_history_import()
         schedule_pending_zoho_books_invoice_import()
+        schedule_pending_zoho_books_order_import()
         schedule_pending_zoho_books_recurring_invoice_import()
         schedule_pending_zoho_email_workflow_deliveries()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:
             logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)
         await stack.enter_async_context(hub_mcp.session_manager.run())
+        pdf_recovery_task = asyncio.create_task(_finance_pdf_worker_loop())
+        recurring_invoice_task = None
+        if settings.recurring_invoice_generation_enabled:
+            recurring_invoice_task = asyncio.create_task(
+                _recurring_invoice_poll_loop(settings.recurring_invoice_poll_interval_seconds)
+            )
         fleet_worker_task = asyncio.create_task(
             _fleet_refresh_worker_loop(
                 settings.fleet_refresh_worker_initial_delay_seconds,
@@ -767,6 +1079,16 @@ async def lifespan(_: FastAPI):
         try:
             yield
         finally:
+            invoice_mail_recovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await invoice_mail_recovery_task
+            pdf_recovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await pdf_recovery_task
+            if recurring_invoice_task is not None:
+                recurring_invoice_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await recurring_invoice_task
             if refresh_task is not None:
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -813,6 +1135,17 @@ def create_app() -> FastAPI:
                     headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
                 )
             request.state.hub_user = user
+        elif _is_integration_api_path(request.url.path):
+            authenticated = _authenticated_integration(request)
+            if authenticated is None:
+                return PlainTextResponse(
+                    "Integration bearer token required.",
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+                )
+            user, integration_token = authenticated
+            request.state.hub_user = user
+            request.state.integration_token = integration_token
         elif not _is_public_hub_path(request.url.path):
             user = _authenticated_hub_user(request)
             if user is None:
@@ -824,9 +1157,46 @@ def create_app() -> FastAPI:
                 return PlainTextResponse("Authentication required.", status_code=401, headers={"Cache-Control": "no-store"})
             request.state.hub_user = user
 
+        activity_token = None
+        user = getattr(request.state, "hub_user", None)
+        actor = getattr(request.state, "mcp_actor", None) or (user.username if user is not None else None)
+        if actor:
+            activity_token = begin_activity_request(actor, request.url.path, request.method)
         try:
             response = await call_next(request)
+            context = current_activity_request()
+            if context is not None and not context.recorded and _should_record_http_activity(request):
+                route = request.scope.get("route")
+                route_path = getattr(route, "path", None)
+                task = BackgroundTask(
+                    _persist_http_activity,
+                    context.actor,
+                    request.url.path,
+                    request.method,
+                    response.status_code,
+                    route_path,
+                )
+                if response.background is None:
+                    response.background = task
+                elif isinstance(response.background, BackgroundTasks):
+                    response.background.add_task(
+                        _persist_http_activity,
+                        context.actor,
+                        request.url.path,
+                        request.method,
+                        response.status_code,
+                        route_path,
+                    )
+                else:
+                    response.background = BackgroundTasks([response.background, task])
+        except Exception:
+            context = current_activity_request()
+            if context is not None and not context.recorded:
+                _persist_http_activity(context.actor, request.url.path, request.method, 500, None)
+            raise
         finally:
+            if activity_token is not None:
+                end_activity_request(activity_token)
             if mcp_context_token is not None:
                 reset_mcp_actor(mcp_context_token)
         if (
@@ -848,6 +1218,7 @@ def create_app() -> FastAPI:
     app.include_router(registrations.router)
     app.include_router(accounts.router)
     app.include_router(desktop_notifications.router)
+    app.include_router(integrations.router)
     app.include_router(accounts.bootstrap_router)
     app.include_router(assistant.router)
     app.include_router(agent.router)
@@ -884,6 +1255,10 @@ def _is_mcp_path(path: str) -> bool:
 
 def _is_desktop_api_path(path: str) -> bool:
     return path == "/api/v1/desktop" or path.startswith("/api/v1/desktop/")
+
+
+def _is_integration_api_path(path: str) -> bool:
+    return path == "/api/v1/integrations/callapp" or path.startswith("/api/v1/integrations/callapp/")
 
 
 def _authenticated_mcp_actor(request: Request) -> str | None:
@@ -928,6 +1303,22 @@ def _authenticated_desktop_user(request: Request):
         user, _device = authenticated
         db.expunge(user)
         return user
+
+
+def _authenticated_integration(request: Request):
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    with SessionLocal() as db:
+        service = HubAccountService(db=db, app_secret_key=get_settings().app_secret_key)
+        authenticated = service.authenticate_integration_token(token)
+        if authenticated is None:
+            return None
+        user, integration_token = authenticated
+        db.expunge(user)
+        db.expunge(integration_token)
+        return user, integration_token
 
 
 def _prefers_html(request: Request) -> bool:

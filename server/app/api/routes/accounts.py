@@ -3,9 +3,11 @@ from datetime import date
 from pathlib import Path
 from secrets import compare_digest
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -14,17 +16,29 @@ from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
 from app.db.session import get_db
 from app.services.audit import write_audit_log
+from app.services.hub_activity import MODULE_LABELS, list_activity_events
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HUB_USER_ROLES, HubAccountService
 from app.services.hub_mailbox_accounts import HubMailboxAccountError, HubMailboxAccountService
+from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
+from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.hub_workflows import HubWorkflowService
+from app.services.hub_legal_terms import HubLegalTermsError, HubLegalTermsService
+from app.services.hub_pdf_templates import (
+    PDF_LINE_SOURCES,
+    PDF_TEMPLATE_TYPES,
+    HubPdfTemplateError,
+    HubPdfTemplateService,
+)
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError, HubMailboxImapImportService
 from app.services.provider_credentials import ProviderCredentialError, ProviderCredentialService
 from app.services.zoho_crm import ZOHO_DATA_CENTERS, ZohoCrmError, ZohoCrmService
 from app.services.zoho_books import ZohoBooksError, ZohoBooksService
 from app.services.zoho_books_invoice_import import ZohoBooksInvoiceImportService
+from app.services.zoho_books_order_import import ZohoBooksOrderImportService
 from app.services.zoho_books_recurring_invoice_import import ZohoBooksRecurringInvoiceImportService
 from app.services.finance_invoice_pdf_storage import FinanceInvoicePdfStorageError
 from app.services.customer_communications import CustomerCommunicationService
@@ -43,6 +57,7 @@ from app.services.maintenance_worker import (
     schedule_pending_zoho_email_history_import,
     schedule_pending_zoho_note_history_import,
     schedule_pending_zoho_books_invoice_import,
+    schedule_pending_zoho_books_order_import,
     schedule_pending_zoho_books_recurring_invoice_import,
     schedule_pending_zoho_email_workflow_deliveries,
     schedule_pending_hub_mailbox_imap_import,
@@ -89,12 +104,17 @@ def login(
         )
     request.session.clear()
     request.session.update({"user_id": user.id, "session_version": user.session_version})
+    write_audit_log(db, site=None, actor=user.username, source="hub-account", action="login", result="success")
+    db.commit()
     return RedirectResponse(url=_safe_next(next) or "/", status_code=303)
 
 
 @router.post("/logout")
-def logout(request: Request, csrf_token: Annotated[str, Form()] = ""):
+def logout(request: Request, db: Annotated[Session, Depends(get_db)], csrf_token: Annotated[str, Form()] = ""):
     require_csrf(request, csrf_token)
+    user = _require_current_user(request)
+    write_audit_log(db, site=None, actor=user.username, source="hub-account", action="logout", result="success")
+    db.commit()
     request.session.clear()
     return RedirectResponse(url="/account/login", status_code=303)
 
@@ -140,6 +160,326 @@ def account_page(request: Request, db: Annotated[Session, Depends(get_db)]):
     service = _account_service(db)
     user = _require_persisted_current_user(request, service)
     return templates.TemplateResponse(request, "account.html", _account_context(request, user, service))
+
+
+@router.post("/legal-terms")
+def create_legal_terms(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubLegalTermsService(db=db)
+    try:
+        legal_terms = service.create(actor=user, name=name)
+    except HubLegalTermsError as exc:
+        db.rollback()
+        return _legal_terms_error_response(request, user, db, str(exc))
+    _audit_legal_terms(db, actor=user.username, action="create", legal_terms=legal_terms)
+    db.commit()
+    return _legal_terms_redirect(legal_terms.id, "created")
+
+
+@router.post("/legal-terms/{legal_terms_id}")
+def update_legal_terms(
+    legal_terms_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    content_html: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubLegalTermsService(db=db)
+    try:
+        legal_terms = service.update(
+            actor=user,
+            legal_terms_id=legal_terms_id,
+            name=name,
+            content_html=content_html,
+        )
+    except HubLegalTermsError as exc:
+        db.rollback()
+        return _legal_terms_error_response(
+            request,
+            user,
+            db,
+            str(exc),
+            selected_legal_terms_id=legal_terms_id,
+        )
+    _audit_legal_terms(db, actor=user.username, action="update", legal_terms=legal_terms)
+    db.commit()
+    return _legal_terms_redirect(legal_terms.id, "saved")
+
+
+@router.post("/legal-terms/{legal_terms_id}/duplicate")
+def duplicate_legal_terms(
+    legal_terms_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubLegalTermsService(db=db)
+    try:
+        legal_terms = service.duplicate(actor=user, legal_terms_id=legal_terms_id)
+    except HubLegalTermsError as exc:
+        db.rollback()
+        return _legal_terms_error_response(
+            request,
+            user,
+            db,
+            str(exc),
+            selected_legal_terms_id=legal_terms_id,
+        )
+    _audit_legal_terms(db, actor=user.username, action="duplicate", legal_terms=legal_terms)
+    db.commit()
+    return _legal_terms_redirect(legal_terms.id, "duplicated")
+
+
+@router.post("/legal-terms/{legal_terms_id}/delete")
+def delete_legal_terms(
+    legal_terms_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubLegalTermsService(db=db)
+    legal_terms = service.get(legal_terms_id)
+    try:
+        service.delete(actor=user, legal_terms_id=legal_terms_id)
+    except HubLegalTermsError as exc:
+        db.rollback()
+        return _legal_terms_error_response(
+            request,
+            user,
+            db,
+            str(exc),
+            selected_legal_terms_id=legal_terms_id,
+        )
+    if legal_terms is not None:
+        _audit_legal_terms(db, actor=user.username, action="delete", legal_terms=legal_terms)
+    db.commit()
+    return _legal_terms_redirect(None, "deleted")
+
+
+@router.post("/pdf-templates")
+def create_pdf_template(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    document_type: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.create(actor=user, document_type=document_type, name=name)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_type=document_type)
+    _audit_pdf_template(db, actor=user.username, action="create", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "created")
+
+
+@router.post("/pdf-templates/{template_id}/rename")
+def rename_pdf_template(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.rename(actor=user, template_id=template_id, name=name)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action="rename", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "saved")
+
+
+@router.post("/pdf-templates/{template_id}/blocks/{block_key}")
+def update_pdf_template_block(
+    template_id: int,
+    block_key: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    content_html: Annotated[str, Form()] = "",
+    is_visible: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.update_block(
+            actor=user,
+            template_id=template_id,
+            block_key=block_key,
+            content_html=content_html,
+            is_visible=is_visible == "true",
+        )
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action=f"update-block:{block_key}", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "saved")
+
+
+@router.post("/pdf-templates/{template_id}/legal-terms")
+def update_pdf_template_legal_terms(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    legal_terms_id: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    selected_legal_terms_id = None
+    if legal_terms_id.strip():
+        if not legal_terms_id.isdigit() or int(legal_terms_id) <= 0:
+            return _pdf_template_error_response(
+                request,
+                user,
+                db,
+                "Die ausgewählte AGB ist ungültig.",
+                selected_template_id=template_id,
+            )
+        selected_legal_terms_id = int(legal_terms_id)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.set_legal_terms(
+            actor=user,
+            template_id=template_id,
+            legal_terms_id=selected_legal_terms_id,
+        )
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action="set-legal-terms", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "saved")
+
+
+@router.post("/pdf-templates/{template_id}/positions")
+async def update_pdf_template_positions(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token", "")))
+    user = _require_admin_user(request)
+    keys = [str(value) for value in form.getlist("column_key")]
+    labels = [str(value) for value in form.getlist("column_label")]
+    sources = [str(value) for value in form.getlist("column_source")]
+    widths = [str(value) for value in form.getlist("column_width")]
+    alignments = [str(value) for value in form.getlist("column_alignment")]
+    enabled = {str(value) for value in form.getlist("column_enabled")}
+    columns = [
+        {
+            "key": key,
+            "label": label,
+            "source_key": source,
+            "width": width,
+            "alignment": alignment,
+            "is_enabled": key in enabled,
+        }
+        for key, label, source, width, alignment in zip(
+            keys,
+            labels,
+            sources,
+            widths,
+            alignments,
+            strict=False,
+        )
+    ]
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.update_positions(actor=user, template_id=template_id, columns=columns)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action="update-positions", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "saved")
+
+
+@router.post("/pdf-templates/{template_id}/duplicate")
+def duplicate_pdf_template(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.duplicate(actor=user, template_id=template_id)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action="duplicate", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "duplicated")
+
+
+@router.post("/pdf-templates/{template_id}/default")
+def set_default_pdf_template(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    try:
+        template = service.set_default(actor=user, template_id=template_id)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    _audit_pdf_template(db, actor=user.username, action="set-default", template=template)
+    db.commit()
+    return _pdf_template_redirect(template.id, template.document_type, "default-set")
+
+
+@router.post("/pdf-templates/{template_id}/delete")
+def delete_pdf_template(
+    template_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    service = HubPdfTemplateService(db=db)
+    template = service.get(template_id)
+    try:
+        document_type = service.delete(actor=user, template_id=template_id)
+    except HubPdfTemplateError as exc:
+        db.rollback()
+        return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
+    if template is not None:
+        _audit_pdf_template(db, actor=user.username, action="delete", template=template)
+    db.commit()
+    return _pdf_template_redirect(None, document_type, "deleted")
 
 
 @router.post("/password")
@@ -217,7 +557,7 @@ def create_hub_user(
         detail=f"Created Hub user {user.username} with role {user.role}.",
     )
     db.commit()
-    return RedirectResponse(url="/account?user=created#account-users", status_code=303)
+    return RedirectResponse(url=f"/account?{urlencode({'user': 'created', 'user_id': user.id})}#account-users", status_code=303)
 
 
 @router.post("/users/{user_id}")
@@ -229,6 +569,7 @@ def update_hub_user(
     role: Annotated[str, Form()] = "viewer",
     password: Annotated[str, Form()] = "",
     password_confirmation: Annotated[str, Form()] = "",
+    reminder_email: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -241,6 +582,7 @@ def update_hub_user(
             role=role,
             password=password,
             password_confirmation=password_confirmation,
+            reminder_email=reminder_email,
         )
     except ValueError as exc:
         db.rollback()
@@ -263,7 +605,7 @@ def update_hub_user(
     if user.id == actor.id:
         request.session.clear()
         request.session.update({"user_id": user.id, "session_version": user.session_version})
-    return RedirectResponse(url="/account?user=updated#account-users", status_code=303)
+    return RedirectResponse(url=f"/account?{urlencode({'user': 'updated', 'user_id': user.id})}#account-users", status_code=303)
 
 
 @router.post("/users/{user_id}/delete")
@@ -318,10 +660,11 @@ def configure_task_reminder_email(
     try:
         service.configure_reminder_email(user=user, reminder_email=reminder_email)
     except ValueError as exc:
+        error_section = "account-users" if user.role == "admin" else "account-security"
         return templates.TemplateResponse(
             request,
             "account.html",
-            _account_context(request, user, service, error=str(exc), error_section="account-task-reminders"),
+            _account_context(request, user, service, error=str(exc), error_section=error_section),
             status_code=400,
         )
     write_audit_log(
@@ -334,7 +677,8 @@ def configure_task_reminder_email(
         detail="Updated the personal recipient address for task email reminders.",
     )
     db.commit()
-    return RedirectResponse(url="/account?task_reminder_email=saved#account-task-reminders", status_code=303)
+    destination = "account-users" if user.role == "admin" else "account-security"
+    return RedirectResponse(url=f"/account?task_reminder_email=saved#{destination}", status_code=303)
 
 
 @router.post("/mailboxes/mittwald")
@@ -378,6 +722,97 @@ def configure_mittwald_mailbox(
     )
     db.commit()
     return RedirectResponse(url="/account?mailbox=connected#account-mailbox", status_code=303)
+
+
+@router.post("/mailboxes/alerts")
+def configure_mailbox_alert_email(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    mailbox_alert_email: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    service = _account_service(db)
+    user = _require_persisted_current_user(request, service)
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    try:
+        address = HubMailboxAccountService._email_address(mailbox_alert_email)
+        monitored = {
+            status.email_address.casefold()
+            for status in HubMailboxAccountService(db=db, cipher=get_secret_cipher()).list_statuses()
+        }
+        if address in monitored:
+            raise ValueError("Die Warnadresse muss außerhalb der überwachten Postfächer liegen.")
+    except (HubMailboxAccountError, ValueError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc), error_section="account-mailbox"),
+            status_code=400,
+        )
+    user.mailbox_alert_email = address
+    for state in db.scalars(select(HubMailboxImapSyncState).where(HubMailboxImapSyncState.folder == "INBOX")):
+        if state.last_error or state.consecutive_failures:
+            state.alerted_at = None
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-mailbox",
+        action="configure-mailbox-alert-email", result="success",
+        detail="Updated independent mailbox health alert recipient.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?mailbox=alert-saved#account-mailbox", status_code=303)
+
+
+@router.post("/mailboxes/failed/{failure_id}/retry")
+def retry_failed_mailbox_message(
+    failure_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    sync = HubMailboxImapSyncService(
+        db=db, cipher=get_secret_cipher(), public_base_url=get_settings().public_base_url,
+    )
+    try:
+        succeeded = sync.retry_failed_message(failure_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-mailbox",
+        action="retry-failed-imap-message", result="success" if succeeded else "error",
+        detail=f"Retried failed IMAP message {failure_id}.",
+    )
+    db.commit()
+    result = "retry-success" if succeeded else "retry-failed"
+    return RedirectResponse(url=f"/account?mailbox={result}#account-mailbox", status_code=303)
+
+
+@router.post("/mailboxes/spam-senders/{sender_id}/unblock")
+def unblock_spam_sender(
+    sender_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    address = HubSpamSenderService(db=db).unblock_id(sender_id)
+    if address is None:
+        raise HTTPException(status_code=404, detail="Die Absendersperre wurde nicht gefunden.")
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-mailbox",
+        action="unblock-spam-sender",
+        result="success",
+        detail=f"Removed spam sender rule for {address}.",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?spam_sender=unblocked#account-mailbox", status_code=303)
 
 
 @router.post("/mailboxes/import")
@@ -573,6 +1008,88 @@ def revoke_mcp_token(
     )
     db.commit()
     return RedirectResponse(url="/account?mcp_token=revoked", status_code=303)
+
+
+@router.post("/integration-tokens")
+def create_integration_token(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+    try:
+        token, raw_token = service.create_integration_token(user=user, name=name)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="create-integration-token",
+        result="success",
+        detail=f"Created CallApp integration token {token.id} ({token.name}).",
+    )
+    db.commit()
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(
+            request,
+            user,
+            service,
+            new_integration_token=raw_token,
+            new_integration_token_name=token.name,
+        ),
+    )
+
+
+@router.post("/integration-tokens/{token_id}/revoke")
+def revoke_integration_token(
+    token_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    current_user = _require_current_user(request)
+    service = _account_service(db)
+    user = service.get_user(current_user.id)
+    if user is None:
+        request.session.clear()
+        return RedirectResponse(url="/account/login", status_code=303)
+    try:
+        token = service.revoke_integration_token(user=user, token_id=token_id)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(request, user, service, error=str(exc)),
+            status_code=404,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-account",
+        action="revoke-integration-token",
+        result="success",
+        detail=f"Revoked CallApp integration token {token.id} ({token.name}).",
+    )
+    db.commit()
+    return RedirectResponse(url="/account?integration_token=revoked#account-mcp", status_code=303)
 
 
 @router.post("/desktop-devices")
@@ -1230,6 +1747,105 @@ def zoho_books_invoice_import_status(
             "stored_pdfs": status.stored_pdfs,
             "unavailable_pdfs": status.unavailable_pdfs,
             "failed_invoices": status.failed_invoices,
+            "consecutive_failures": status.consecutive_failures,
+            "cancel_requested": status.cancel_requested,
+            "last_error": status.last_error,
+        }
+    )
+
+
+@router.post("/zoho-books/orders/import")
+def import_all_zoho_orders(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        status, started = ZohoBooksOrderImportService(
+            db=db,
+            cipher=get_secret_cipher(),
+        ).start_all(requested_by=user.username)
+    except (ValueError, ZohoBooksError, ZohoCrmError) as exc:
+        return templates.TemplateResponse(
+            request,
+            "account.html",
+            _account_context(
+                request,
+                user,
+                _account_service(db),
+                error=str(exc),
+                error_section="account-zoho-books",
+            ),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="zoho",
+        action="import-all-zoho-orders",
+        result="started" if started else "already-running",
+        detail=(
+            f"Combined Zoho order import {status.id} "
+            f"{'started' if started else 'was already active'} for {status.total_orders} order(s)."
+        ),
+    )
+    db.commit()
+    schedule_pending_zoho_books_order_import()
+    state = "order-import-started" if started else "order-import-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
+@router.post("/zoho-books/orders/import/cancel")
+def cancel_zoho_order_import(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    status, requested = ZohoBooksOrderImportService(
+        db=db,
+        cipher=get_secret_cipher(),
+    ).cancel()
+    if requested and status is not None:
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="zoho",
+            action="cancel-zoho-order-import",
+            result="requested",
+            detail=f"Cancellation requested for combined Zoho order import {status.id}.",
+        )
+        db.commit()
+    state = "order-import-cancel-requested" if requested else "order-import-not-running"
+    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+
+
+@router.get("/zoho-books/orders/import/status")
+def zoho_order_import_status(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_admin_user(request)
+    status = ZohoBooksOrderImportService(db=db, cipher=get_secret_cipher()).status()
+    if status is None:
+        return JSONResponse({"active": False, "status": None})
+    return JSONResponse(
+        {
+            "active": status.status in {"pending", "running"},
+            "status": status.status,
+            "processed_orders": status.processed_orders,
+            "total_orders": status.total_orders,
+            "imported_orders": status.imported_orders,
+            "updated_orders": status.updated_orders,
+            "crm_matched_orders": status.crm_matched_orders,
+            "crm_unmatched_orders": status.crm_unmatched_orders,
+            "crm_ambiguous_orders": status.crm_ambiguous_orders,
+            "failed_orders": status.failed_orders,
             "consecutive_failures": status.consecutive_failures,
             "cancel_requested": status.cancel_requested,
             "last_error": status.last_error,
@@ -1920,24 +2536,58 @@ def _account_context(
     error_section: str | None = None,
     new_mcp_token: str | None = None,
     new_mcp_token_name: str | None = None,
+    new_integration_token: str | None = None,
+    new_integration_token_name: str | None = None,
     new_desktop_device_token: str | None = None,
     new_desktop_device_name: str | None = None,
     new_zoho_email_workflow_webhook_url: str | None = None,
+    selected_legal_terms_id: int | None = None,
+    selected_pdf_template_id: int | None = None,
+    selected_pdf_template_type: str | None = None,
 ) -> dict:
+    protocol = list_activity_events(service.db, request.query_params) if user.role == "admin" else None
+    if protocol is not None:
+        filters = {key: value for key, value in request.query_params.items() if key.startswith("protocol_") and key != "protocol_page"}
+        protocol["previous_url"] = (
+            f"/account?{urlencode({**filters, 'protocol_page': protocol['page'] - 1})}#account-protocol"
+            if protocol["page"] > 1 else None
+        )
+        protocol["next_url"] = (
+            f"/account?{urlencode({**filters, 'protocol_page': protocol['page'] + 1})}#account-protocol"
+            if protocol["has_next"] else None
+        )
     zoho_service = _zoho_service(service.db)
     zoho_books_service = _zoho_books_service(service.db)
+    legal_terms_context = _legal_terms_context(
+        request,
+        user,
+        HubLegalTermsService(db=service.db),
+        selected_legal_terms_id=selected_legal_terms_id,
+    )
+    pdf_template_context = _pdf_template_context(
+        request,
+        user,
+        HubPdfTemplateService(db=service.db),
+        selected_template_id=selected_pdf_template_id,
+        selected_type=selected_pdf_template_type,
+    )
     return {
         "user": user,
         "hub_users": service.list_users() if user.role == "admin" else (),
         "hub_admin_count": service.admin_count() if user.role == "admin" else 0,
         "hub_user_roles": HUB_USER_ROLES,
+        "protocol": protocol,
+        "protocol_module_labels": protocol["modules"] if protocol is not None else MODULE_LABELS,
         "csrf_token": get_csrf_token(request),
         "mcp_tokens": service.list_mcp_access_tokens(user=user),
+        "integration_tokens": service.list_integration_tokens(user=user),
         "desktop_devices": service.list_desktop_devices(user=user),
         "error": error,
         "error_section": error_section or _account_section_for_path(request.url.path),
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
+        "new_integration_token": new_integration_token,
+        "new_integration_token_name": new_integration_token_name,
         "new_desktop_device_token": new_desktop_device_token,
         "new_desktop_device_name": new_desktop_device_name,
         "zoho_email_workflow_webhook": _zoho_email_workflow_webhook_service(service.db).status(),
@@ -1969,6 +2619,10 @@ def _account_context(
             db=service.db,
             cipher=get_secret_cipher(),
         ).list_statuses(),
+        "mittwald_mailbox_sync_failures": HubMailboxImapSyncService(
+            db=service.db, cipher=get_secret_cipher(), public_base_url=get_settings().public_base_url,
+        ).list_failed_messages(),
+        "spam_senders": HubSpamSenderService(db=service.db).list_senders() if user.role == "admin" else (),
         "mittwald_mailbox_import": HubMailboxImapImportService(
             db=service.db,
             cipher=get_secret_cipher(),
@@ -1987,10 +2641,16 @@ def _account_context(
             db=service.db,
             cipher=get_secret_cipher(),
         ).status(),
+        "zoho_books_order_import": ZohoBooksOrderImportService(
+            db=service.db,
+            cipher=get_secret_cipher(),
+        ).status(),
         "zoho_books_recurring_invoice_import": ZohoBooksRecurringInvoiceImportService(
             db=service.db,
             cipher=get_secret_cipher(),
         ).status(),
+        **legal_terms_context,
+        **pdf_template_context,
     }
 
 
@@ -2027,6 +2687,10 @@ def _safe_next(value: str) -> str:
 
 
 def _account_section_for_path(path: str) -> str:
+    if path.startswith("/account/legal-terms"):
+        return "account-legal-terms"
+    if path.startswith("/account/pdf-templates"):
+        return "account-pdf-templates"
     if path.startswith("/account/mail-composer-settings"):
         return "account-mailbox"
     if path.startswith("/account/mail-signature"):
@@ -2036,6 +2700,8 @@ def _account_section_for_path(path: str) -> str:
     if path.startswith("/account/desktop-devices"):
         return "account-desktop-notifier"
     if path.startswith("/account/mcp-tokens"):
+        return "account-mcp"
+    if path.startswith("/account/integration-tokens"):
         return "account-mcp"
     if path.startswith("/account/openai"):
         return "account-openai"
@@ -2048,6 +2714,159 @@ def _account_section_for_path(path: str) -> str:
     if path.startswith("/account/zoho"):
         return "account-zoho"
     return "account-security"
+
+
+def _legal_terms_context(
+    request: Request,
+    user,
+    service: HubLegalTermsService,
+    *,
+    selected_legal_terms_id: int | None = None,
+) -> dict[str, object]:
+    if user.role != "admin":
+        return {"legal_terms": (), "selected_legal_terms": None}
+    legal_terms = service.list_terms()
+    query_id = request.query_params.get("legal_terms", "")
+    if selected_legal_terms_id is None and query_id.isdigit():
+        selected_legal_terms_id = int(query_id)
+    selected = service.get(selected_legal_terms_id) if selected_legal_terms_id is not None else None
+    if selected is None:
+        selected = legal_terms[0]
+    return {"legal_terms": legal_terms, "selected_legal_terms": selected}
+
+
+def _pdf_template_context(
+    request: Request,
+    user,
+    service: HubPdfTemplateService,
+    *,
+    selected_template_id: int | None = None,
+    selected_type: str | None = None,
+) -> dict[str, object]:
+    if user.role != "admin":
+        return {
+            "pdf_template_types": (),
+            "pdf_templates_by_type": {},
+            "selected_pdf_template": None,
+            "selected_pdf_template_type": "offers",
+            "pdf_line_sources": (),
+        }
+    templates_by_type = {
+        definition.key: service.list_templates(document_type=definition.key)
+        for definition in PDF_TEMPLATE_TYPES
+    }
+    query_template_id = request.query_params.get("pdf_template", "")
+    if selected_template_id is None and query_template_id.isdigit():
+        selected_template_id = int(query_template_id)
+    query_type = request.query_params.get("pdf_template_type", "")
+    active_type = selected_type or query_type
+    if active_type not in templates_by_type:
+        active_type = "offers"
+    selected = service.get(selected_template_id) if selected_template_id is not None else None
+    if selected is not None:
+        active_type = selected.document_type
+    else:
+        selected = next(
+            (template for template in templates_by_type[active_type] if template.is_default),
+            templates_by_type[active_type][0],
+        )
+    return {
+        "pdf_template_types": PDF_TEMPLATE_TYPES,
+        "pdf_templates_by_type": templates_by_type,
+        "selected_pdf_template": service.editor_view(selected),
+        "selected_pdf_template_type": active_type,
+        "pdf_line_sources": PDF_LINE_SOURCES,
+        "legal_terms": HubLegalTermsService(db=service.db).list_terms(),
+    }
+
+
+def _legal_terms_redirect(legal_terms_id: int | None, state: str) -> RedirectResponse:
+    parameters = [f"legal_terms_state={state}"]
+    if legal_terms_id is not None:
+        parameters.append(f"legal_terms={legal_terms_id}")
+    return RedirectResponse(url=f"/account?{'&'.join(parameters)}#account-legal-terms", status_code=303)
+
+
+def _legal_terms_error_response(
+    request: Request,
+    user,
+    db: Session,
+    message: str,
+    *,
+    selected_legal_terms_id: int | None = None,
+):
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(
+            request,
+            user,
+            _account_service(db),
+            error=message,
+            error_section="account-legal-terms",
+            selected_legal_terms_id=selected_legal_terms_id,
+        ),
+        status_code=400,
+    )
+
+
+def _pdf_template_redirect(template_id: int | None, document_type: str, state: str) -> RedirectResponse:
+    parameters = [f"pdf_template_type={document_type}", f"pdf_template_state={state}"]
+    if template_id is not None:
+        parameters.append(f"pdf_template={template_id}")
+    return RedirectResponse(url=f"/account?{'&'.join(parameters)}#account-pdf-templates", status_code=303)
+
+
+def _pdf_template_error_response(
+    request: Request,
+    user,
+    db: Session,
+    message: str,
+    *,
+    selected_template_id: int | None = None,
+    selected_type: str | None = None,
+):
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(
+            request,
+            user,
+            _account_service(db),
+            error=message,
+            error_section="account-pdf-templates",
+            selected_pdf_template_id=selected_template_id,
+            selected_pdf_template_type=selected_type,
+        ),
+        status_code=400,
+    )
+
+
+def _audit_pdf_template(db: Session, *, actor: str, action: str, template) -> None:
+    write_audit_log(
+        db,
+        site=None,
+        actor=actor,
+        source="hub-pdf-template",
+        action=action,
+        result="success",
+        detail=(
+            f"PDF template {template.id} ({template.document_type}, version {template.version}) "
+            f"was changed: {template.name}."
+        ),
+    )
+
+
+def _audit_legal_terms(db: Session, *, actor: str, action: str, legal_terms) -> None:
+    write_audit_log(
+        db,
+        site=None,
+        actor=actor,
+        source="hub-legal-terms",
+        action=action,
+        result="success",
+        detail=f"AGB {legal_terms.id} (Version {legal_terms.version}) wurde geändert: {legal_terms.name}.",
+    )
 
 
 def _is_direct_local_request(request: Request) -> bool:

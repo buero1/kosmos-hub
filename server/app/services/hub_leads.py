@@ -117,6 +117,52 @@ class HubLeadService:
         self.db.flush()
         return lead
 
+    def upsert_external_lead(
+        self,
+        *,
+        source_system: str,
+        source_external_id: str,
+        field_values: dict[str, object],
+    ) -> tuple[HubLead, bool]:
+        """Create or partially update one Lead identified by an external system."""
+        normalized_source = source_system.strip()[:96]
+        normalized_external_id = source_external_id.strip()[:255]
+        if not normalized_source or not normalized_external_id:
+            raise HubLeadError("Externe Quelle und Lead-ID dürfen nicht leer sein.")
+        lead = self.db.scalar(
+            select(HubLead).where(
+                HubLead.source_system == normalized_source,
+                HubLead.source_external_id == normalized_external_id,
+            )
+        )
+        created = lead is None
+        if lead is None:
+            profile: dict[str, object] = {"schema_version": 1, "source": normalized_source, "fields": {}, "subforms": {}}
+            lead = HubLead(
+                source_system=normalized_source,
+                source_external_id=normalized_external_id,
+                encrypted_profile_json=self._encrypt(profile),
+            )
+            self.db.add(lead)
+        else:
+            profile = self._profile(lead)
+        existing = self._fields(profile)
+        by_key = {definition.key: definition for definition in HUB_LEAD_FIELDS}
+        unknown = sorted(set(field_values) - set(by_key))
+        if unknown:
+            raise HubLeadError(f"Unbekannte Lead-Felder: {', '.join(unknown)}")
+        updated = dict(existing)
+        for key, raw_value in field_values.items():
+            definition = by_key[key]
+            if definition.read_only:
+                continue
+            updated[key] = self._normalize_value(definition, raw_value, existing.get(key))
+        profile["fields"] = updated
+        profile.setdefault("subforms", {})
+        lead.encrypted_profile_json = self._encrypt(profile)
+        self.db.flush()
+        return lead, created
+
     def update_lead(self, *, lead_id: int, submitted_values: dict[str, object]) -> HubLead:
         lead = self.db.get(HubLead, lead_id)
         if lead is None:

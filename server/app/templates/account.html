@@ -8,9 +8,11 @@
         <a href="#account-security" aria-current="page">Security</a>
         <a href="#account-mcp">MCP access</a>
         <a href="#account-desktop-notifier">Windows Erinnerungen</a>
-        <a href="#account-task-reminders">E-Mail-Erinnerungen</a>
         <a href="#account-workflows">Workflows</a>
+        {% if user.role == "admin" %}<a href="#account-legal-terms">AGBs</a>{% endif %}
+        {% if user.role == "admin" %}<a href="#account-pdf-templates">PDF-Vorlagen</a>{% endif %}
         {% if user.role == "admin" %}<a href="#account-users">Benutzer</a>{% endif %}
+        {% if user.role == "admin" %}<a href="#account-protocol">Protokoll</a>{% endif %}
         {% if user.role == "admin" %}<a href="#account-mailbox">E-Mail-Postfächer</a>{% endif %}
         <a href="#account-openai">OpenAI</a>
         <a href="#account-provider-licenses">Provider licenses</a>
@@ -38,19 +40,37 @@
       <p class="notice-success" data-account-notice-section="account-desktop-notifier">Das Windows-Erinnerungsgerät wurde getrennt.</p>
     {% endif %}
     {% if request.query_params.get("task_reminder_email") == "saved" %}
-      <p class="notice-success" data-account-notice-section="account-task-reminders">Die persönliche Adresse für Aufgaben-Erinnerungen wurde gespeichert.</p>
+      <p class="notice-success" data-account-notice-section="{{ 'account-users' if user.role == 'admin' else 'account-security' }}">Die persönliche Adresse für Aufgaben-Erinnerungen wurde gespeichert.</p>
     {% endif %}
     {% if request.query_params.get("user") == "created" %}
       <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde angelegt.</p>
     {% endif %}
+    {% if request.query_params.get("user") == "updated" %}
+      <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("user") == "deleted" %}
+      <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde gelöscht.</p>
+    {% endif %}
     {% if request.query_params.get("mailbox") == "connected" %}
       <p class="notice-success" data-account-notice-section="account-mailbox">Das Mittwald-Postfach wurde per IMAP und SMTP erfolgreich getestet und verschlüsselt gespeichert. Der Abruf und Versand über Mittwald sind noch nicht aktiviert.</p>
+    {% endif %}
+    {% if request.query_params.get("mailbox") == "alert-saved" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die unabhängige Warnadresse wurde gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("mailbox") == "retry-success" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die Nachricht wurde erneut importiert.</p>
+    {% endif %}
+    {% if request.query_params.get("mailbox") == "retry-failed" %}
+      <p class="notice notice-error" data-account-notice-section="account-mailbox">Der erneute Import ist fehlgeschlagen. Die Nachricht bleibt unten mit ihrer UID zur weiteren Prüfung sichtbar.</p>
+    {% endif %}
+    {% if request.query_params.get("spam_sender") == "unblocked" %}
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die Absendersperre wurde aufgehoben. Bereits gespeicherte Spam-Nachrichten bleiben im Spam-Ordner.</p>
     {% endif %}
     {% if request.query_params.get("email_composer") == "saved" %}
       <p class="notice-success" data-account-notice-section="account-mailbox">Die Standardformatierung für neue E-Mails wurde gespeichert.</p>
     {% endif %}
     {% if request.query_params.get("email_signature") == "saved" %}
-      <p class="notice-success" data-account-notice-section="account-mailbox">Die E-Mail-Signatur wurde gespeichert und steht in Vorlagen als <code>${userSignature}</code> bereit.</p>
+      <p class="notice-success" data-account-notice-section="account-mailbox">Die E-Mail-Signatur wurde gespeichert und steht in Vorlagen als <code>${Company.EmailSignature}</code> bereit.</p>
     {% endif %}
     {% if request.query_params.get("mailbox") == "import-started" %}
       <p class="notice-success" data-account-notice-section="account-mailbox">Der Mittwald-Erstimport wurde im Hintergrund gestartet. Er liest nur Posteingang und Gesendet und verändert im Postfach nichts.</p>
@@ -154,6 +174,15 @@
     {% if request.query_params.get("zoho_books") == "recurring-invoice-import-cancel-requested" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Der Abbruch wurde vorgemerkt. Die gerade verarbeitete periodische Rechnung wird noch sauber abgeschlossen.</p>
     {% endif %}
+    {% if request.query_params.get("zoho_books") == "order-import-started" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der kombinierte Hintergrundimport aller Aufträge aus Zoho Books und Zoho CRM wurde gestartet.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "order-import-running" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der kombinierte Auftragsimport läuft bereits im Hintergrund weiter.</p>
+    {% endif %}
+    {% if request.query_params.get("zoho_books") == "order-import-cancel-requested" %}
+      <p class="notice-success" data-account-notice-section="account-zoho-books">Der Abbruch wurde vorgemerkt. Der gerade verarbeitete Auftrag wird noch sauber abgeschlossen.</p>
+    {% endif %}
     {% if request.query_params.get("zoho_books") == "removed" %}
       <p class="notice-success" data-account-notice-section="account-zoho-books">Die Zoho-Books-Verbindung wurde entfernt. Zoho CRM bleibt unverändert verbunden.</p>
     {% endif %}
@@ -225,25 +254,50 @@
           </tbody>
         </table>
       </div>
-      {% if mittwald_mailbox_accounts %}
-      <div class="account-panel-inset">
-        <h4>Automatischer E-Mail-Abruf</h4>
-        <p class="subtle">Der Hub übernimmt neue INBOX-Nachrichten sofort per IMAP IDLE und gleicht sie zusätzlich jede Minute ab. INBOX.Sent wird jede Minute geprüft. Zoho-Webhooks werden dafür nicht benötigt.</p>
+      <div>
+        <p class="eyebrow">Systemverbindungen</p>
+        <h3>CallApp-Zugänge</h3>
+        <p class="subtle">Jede CallApp-Installation erhält einen eigenen widerrufbaren Zugang. Der Schlüssel wird nur unmittelbar nach dem Erstellen angezeigt.</p>
       </div>
-      <div class="account-panel-inset">
-        <h4>Einmaliger Erstimport</h4>
-        <p class="subtle">Es werden nur Nachrichten aus <strong>INBOX</strong> und <strong>INBOX.Sent</strong> ab dem gewählten Datum gelesen. Bereits aus Zoho vorhandene Nachrichten mit derselben Message-ID werden übersprungen; Mittwald wird dabei nicht verändert.</p>
-        <form method="post" action="/account/mailboxes/import" class="account-inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <label><span>Importieren seit</span><input type="date" name="since_date" value="2026-09-05" required></label>
-          <button class="button" type="submit">E-Mails seit diesem Datum importieren</button>
-        </form>
-        {% if mittwald_mailbox_import %}
-          <p class="subtle">Letzter Import: <strong>{{ mittwald_mailbox_import.status }}</strong> · {{ mittwald_mailbox_import.processed_messages }} von {{ mittwald_mailbox_import.total_messages }} verarbeitet · {{ mittwald_mailbox_import.imported_messages }} übernommen · {{ mittwald_mailbox_import.skipped_messages }} bereits vorhanden · {{ mittwald_mailbox_import.stored_attachments }} Anhänge gesichert.</p>
-          {% if mittwald_mailbox_import.last_error %}<p class="notice-warning">{{ mittwald_mailbox_import.last_error }}</p>{% endif %}
-        {% endif %}
-      </div>
+      {% if new_integration_token %}
+        <p class="notice-success">Zugang für <strong>{{ new_integration_token_name }}</strong> erstellt. Jetzt in CallApp unter Integrationen → Kosmos Hub einfügen.</p>
+        <code class="token-value">{{ new_integration_token }}</code>
       {% endif %}
+      <form method="post" action="/account/integration-tokens">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>
+          <span>Name der Verbindung</span>
+          <input type="text" name="name" placeholder="CallApp Produktion" minlength="3" maxlength="80" required>
+        </label>
+        <button class="button button-secondary" type="submit">CallApp-Zugang erstellen</button>
+      </form>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Name</th><th>Schlüssel</th><th>Erstellt</th><th>Zuletzt verwendet</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for token in integration_tokens %}
+              <tr>
+                <td>{{ token.name }}</td>
+                <td><code>{{ token.token_prefix }}...</code></td>
+                <td>{{ token.created_at | berlin_time }}</td>
+                <td>{% if token.last_used_at %}{{ token.last_used_at | berlin_time }}{% else %}Nie{% endif %}</td>
+                <td>
+                  {% if token.revoked_at %}
+                    <span class="pill pill-missing">Widerrufen</span>
+                  {% else %}
+                    <form method="post" action="/account/integration-tokens/{{ token.id }}/revoke">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-secondary" type="submit">Widerrufen</button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">Noch kein CallApp-Zugang erstellt.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
     <section id="account-desktop-notifier" class="account-panel account-section" data-account-section>
       <div>
@@ -293,21 +347,6 @@
         </table>
       </div>
     </section>
-    <section id="account-task-reminders" class="account-panel account-section" data-account-section>
-      <div>
-        <p class="eyebrow">Aufgaben</p>
-        <h3>E-Mail-Erinnerungen</h3>
-        <p class="subtle">Aufgaben mit Erinnerung „E-Mail“ werden an diese persönliche Adresse gesendet. Der Versand erfolgt über das eingerichtete Mittwald-Postfach <code>info@kosmos-medien.de</code>.</p>
-      </div>
-      <form method="post" action="/account/task-reminder-email" class="account-inline-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>
-          <span>Meine Erinnerungsadresse</span>
-          <input type="email" name="reminder_email" value="{{ user.reminder_email or '' }}" autocomplete="email" placeholder="name@ihre-domain.de" required>
-        </label>
-        <button class="button button-secondary" type="submit">Adresse speichern</button>
-      </form>
-    </section>
     <section id="account-workflows" class="account-panel account-panel-wide account-section" data-account-section>
       <div>
         <p class="eyebrow">Automatisierung</p>
@@ -345,6 +384,10 @@
         </label>
       {% endfor %}
     </section>
+    {% if user.role == "admin" %}
+      {% include "partials/account_legal_terms.html" %}
+      {% include "partials/account_pdf_templates.html" %}
+    {% endif %}
     <section id="account-zoho-books" class="account-panel account-panel-wide account-section" data-account-section>
       <div class="zoho-heading-copy">
         <p class="eyebrow">Buchhaltungsintegration</p>
@@ -400,9 +443,32 @@
           </div>
         </details>
         {% if zoho_books_status.ready_for_import %}
-          <details class="account-details zoho-area" {% if (zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"]) or (zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"]) %}open{% endif %}>
+          <details class="account-details zoho-area" {% if (zoho_books_invoice_import and zoho_books_invoice_import.status in ["pending", "running"]) or (zoho_books_order_import and zoho_books_order_import.status in ["pending", "running"]) or (zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"]) %}open{% endif %}>
             <summary>Datenimport</summary>
             <div class="zoho-area-content">
+              <div class="zoho-import-row">
+                <div>
+                  <h4>Aufträge</h4>
+                  <p class="subtle">Der Hub übernimmt Auftragsnummer und Positionen aus Zoho Books. Über die gemeinsame CRM-Account-ID werden die ausgewählten Vertragsfelder aus dem CRM-Modul Aufträge ergänzt. Mehrdeutige Zuordnungen werden nicht automatisch verbunden.</p>
+                  {% if zoho_books_order_import %}
+                    <p class="zoho-import-status" data-zoho-books-order-import-status><strong>{{ zoho_books_order_import.processed_orders }} von {{ zoho_books_order_import.total_orders }} Aufträgen</strong> · {{ zoho_books_order_import.imported_orders }} neu · {{ zoho_books_order_import.updated_orders }} aktualisiert · {{ zoho_books_order_import.crm_matched_orders }} mit CRM verknüpft · {{ zoho_books_order_import.crm_unmatched_orders }} ohne CRM-Treffer · {{ zoho_books_order_import.crm_ambiguous_orders }} mehrdeutig · {{ zoho_books_order_import.failed_orders }} fehlgeschlagen{% if zoho_books_order_import.consecutive_failures %} · {{ zoho_books_order_import.consecutive_failures }} Fehler in Folge{% endif %} · Status: {% if zoho_books_order_import.status == "stopped" %}automatisch angehalten{% elif zoho_books_order_import.status == "cancelled" %}abgebrochen{% elif zoho_books_order_import.status == "completed" %}abgeschlossen{% else %}{{ zoho_books_order_import.status }}{% endif %}{% if zoho_books_order_import.cancel_requested %} · Abbruch vorgemerkt{% endif %}{% if zoho_books_order_import.completed_at %} · beendet {{ zoho_books_order_import.completed_at | berlin_time }}{% endif %}{% if zoho_books_order_import.last_error %} · letzte Meldung: {{ zoho_books_order_import.last_error }}{% endif %}</p>
+                  {% else %}
+                    <p class="zoho-import-status">Noch kein kombinierter Auftragsimport ausgeführt.</p>
+                  {% endif %}
+                </div>
+                <div class="zoho-import-actions">
+                  <form method="post" action="/account/zoho-books/orders/import">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="button button-variant-1" type="submit" {% if zoho_books_order_import and zoho_books_order_import.status in ["pending", "running"] %}disabled{% endif %}>Alle Aufträge importieren</button>
+                  </form>
+                  {% if zoho_books_order_import and zoho_books_order_import.status in ["pending", "running"] %}
+                    <form method="post" action="/account/zoho-books/orders/import/cancel">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-danger" type="submit">Import abbrechen</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
               <div class="zoho-import-row">
                 <div>
                   <h4>Rechnungen</h4>
@@ -508,6 +574,46 @@
         }());
       </script>
     {% endif %}
+    {% if zoho_books_order_import and zoho_books_order_import.status in ["pending", "running"] %}
+      <script>
+        (function () {
+          var statusLine = document.querySelector('[data-zoho-books-order-import-status]');
+          if (!statusLine) return;
+
+          function renderStatus(status) {
+            statusLine.replaceChildren();
+            var progress = document.createElement('strong');
+            progress.textContent = status.processed_orders + ' von ' + status.total_orders + ' Aufträgen';
+            statusLine.append(progress);
+            statusLine.append(' · ' + status.imported_orders + ' neu · ' + status.updated_orders + ' aktualisiert · ' + status.crm_matched_orders + ' mit CRM verknüpft · ' + status.crm_unmatched_orders + ' ohne CRM-Treffer · ' + status.crm_ambiguous_orders + ' mehrdeutig · ' + status.failed_orders + ' fehlgeschlagen');
+            if (status.consecutive_failures) statusLine.append(' · ' + status.consecutive_failures + ' Fehler in Folge');
+            statusLine.append(' · Status: ' + (status.status === 'stopped' ? 'automatisch angehalten' : (status.status === 'cancelled' ? 'abgebrochen' : (status.status === 'completed' ? 'abgeschlossen' : status.status))));
+            if (status.cancel_requested) statusLine.append(' · Abbruch vorgemerkt');
+            if (status.last_error) statusLine.append(' · letzte Meldung: ' + status.last_error);
+          }
+
+          function refreshStatus() {
+            window.fetch('/account/zoho-books/orders/import/status', { credentials: 'same-origin' })
+              .then(function (response) {
+                if (!response.ok) throw new Error('Order import status response failed.');
+                return response.json();
+              })
+              .then(function (status) {
+                if (!status.status) return;
+                renderStatus(status);
+                if (!status.active) {
+                  window.setTimeout(function () { window.location.reload(); }, 750);
+                  return;
+                }
+                window.setTimeout(refreshStatus, 3000);
+              })
+              .catch(function () { window.setTimeout(refreshStatus, 6000); });
+          }
+
+          window.setTimeout(refreshStatus, 3000);
+        }());
+      </script>
+    {% endif %}
     {% if zoho_books_recurring_invoice_import and zoho_books_recurring_invoice_import.status in ["pending", "running"] %}
       <script>
         (function () {
@@ -549,89 +655,153 @@
       </script>
     {% endif %}
     {% if user.role == "admin" %}
-    <section id="account-users" class="account-panel account-panel-wide account-section" data-account-section>
+    <section id="account-users" class="account-section account-section-stack" data-account-section>
+      <article class="account-panel account-panel-wide">
+        <div>
+          <p class="eyebrow">Hub-Zugang</p>
+          <h3>Benutzer anlegen</h3>
+          <p class="subtle">Lege Zugänge für weitere Personen an. Administratoren können den Hub vollständig verwalten; Mitarbeiter erhalten die aktuell eingeschränkten Rechte.</p>
+        </div>
+        <form method="post" action="/account/users" class="account-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>
+            <span>Benutzername</span>
+            <input type="text" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" placeholder="vorname.nachname" required>
+          </label>
+          <label>
+            <span>Rolle</span>
+            <select name="role">
+              {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == "viewer" %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Passwort</span>
+            <input type="password" name="password" autocomplete="new-password" minlength="12" required>
+          </label>
+          <label>
+            <span>Passwort bestätigen</span>
+            <input type="password" name="password_confirmation" autocomplete="new-password" minlength="12" required>
+          </label>
+          <button class="button button-secondary" type="submit">Benutzer anlegen</button>
+        </form>
+      </article>
+      <article class="account-panel account-panel-wide account-users-management">
+        <div>
+          <p class="eyebrow">Benutzerverwaltung</p>
+          <h3>Benutzer verwalten</h3>
+        </div>
+        <div class="account-user-disclosures" data-account-disclosure-group>
+          {% set selected_hub_user_id = request.query_params.get("user_id", "") %}
+          {% for account_user in hub_users %}
+            <details class="account-details zoho-area account-user-area" {% if selected_hub_user_id == account_user.id|string %}open{% endif %}>
+              <summary>
+                <span class="account-user-summary">
+                  <span class="account-user-summary-name">
+                    {{ account_user.username }}
+                    {% if account_user.id == user.id %}<span class="pill">Aktueller Benutzer</span>{% endif %}
+                  </span>
+                  <span class="account-user-summary-meta">
+                    {{ "Administrator" if account_user.role == "admin" else "Mitarbeiter" }}
+                    · {% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}
+                  </span>
+                </span>
+              </summary>
+              <div class="zoho-area-content account-user-area-content">
+                <div class="account-user-facts">
+                  <div><span>Status</span><strong>{% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}</strong></div>
+                  <div><span>Letzter Login</span><strong>{% if account_user.last_login_at %}{{ account_user.last_login_at | berlin_time }}{% else %}Noch nie{% endif %}</strong></div>
+                  <div><span>Erstellt</span><strong>{{ account_user.created_at | berlin_time }}</strong></div>
+                </div>
+                <form id="account-user-edit-{{ account_user.id }}" method="post" action="/account/users/{{ account_user.id }}" class="account-user-edit-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <label><span>Benutzername</span><input type="text" name="username" value="{{ account_user.username }}" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" required></label>
+                  <label>
+                    <span>Rolle</span>
+                    <select name="role">
+                      {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role != "admin" %} disabled{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+                    </select>
+                  </label>
+                  <label class="account-user-reminder-field">
+                    <span>E-Mail-Erinnerungsadresse <small>(optional)</small></span>
+                    <input type="email" name="reminder_email" value="{{ account_user.reminder_email or '' }}" autocomplete="email" placeholder="name@ihre-domain.de">
+                    <small class="subtle">Aufgaben mit Erinnerung „E-Mail“ werden an diese persönliche Adresse gesendet.</small>
+                  </label>
+                  <label><span>Neues Passwort <small>(optional)</small></span><input type="password" name="password" autocomplete="new-password" minlength="12"></label>
+                  <label><span>Passwort bestätigen</span><input type="password" name="password_confirmation" autocomplete="new-password" minlength="12"></label>
+                </form>
+                <div class="account-user-action-buttons">
+                  {% if account_user.role == "admin" and hub_admin_count == 1 %}
+                    <span class="subtle">Letzter Administrator</span>
+                  {% else %}
+                    <form method="post" action="/account/users/{{ account_user.id }}/delete" onsubmit="return window.confirm('Benutzer {{ account_user.username }} wirklich löschen?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-danger" type="submit">Löschen</button>
+                    </form>
+                  {% endif %}
+                  <button class="button button-secondary" type="button" data-account-user-edit-cancel>Abbrechen</button>
+                  <button class="button" type="submit" form="account-user-edit-{{ account_user.id }}">Speichern</button>
+                </div>
+              </div>
+            </details>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+    {% endif %}
+    {% if user.role == "admin" %}
+    <section id="account-protocol" class="account-panel account-panel-wide account-section" data-account-section>
       <div>
-        <p class="eyebrow">Hub-Zugang</p>
-        <h3>Benutzer</h3>
-        <p class="subtle">Lege Zugänge für weitere Personen an. Administratoren können den Hub vollständig verwalten; Mitarbeiter erhalten die aktuell eingeschränkten Rechte.</p>
+        <p class="eyebrow">Hub-Aktivitäten</p>
+        <h3>Protokoll</h3>
+        <p class="subtle">Aktionen, Seitenaufrufe und Hintergrundänderungen. Inhalte und einzelne Tastendrücke werden nicht aufgezeichnet.</p>
       </div>
+      <form method="get" action="/account#account-protocol" class="account-inline-form account-protocol-filters">
+        <label><span>Von</span><input type="date" name="protocol_from" value="{{ protocol.filters['from'] }}"></label>
+        <label><span>Bis</span><input type="date" name="protocol_to" value="{{ protocol.filters['to'] }}"></label>
+        <label><span>Benutzer</span><input type="text" name="protocol_actor" value="{{ protocol.filters.actor }}" list="protocol-actors" placeholder="Alle"></label>
+        <datalist id="protocol-actors"><option value="system">{% for account_user in hub_users %}<option value="{{ account_user.username }}">{% endfor %}</datalist>
+        <label><span>Modul</span><select name="protocol_module"><option value="">Alle</option>{% for key, label in protocol_module_labels.items() %}<option value="{{ key }}"{% if protocol.filters.module == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>Aktion</span><select name="protocol_action"><option value="">Alle</option>{% for key, label in [('create', 'Angelegt'), ('update', 'Geändert'), ('delete', 'Gelöscht'), ('view', 'Angesehen'), ('execute', 'Ausgeführt'), ('bulk', 'Sammelaktion')] %}<option value="{{ key }}"{% if protocol.filters.action == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <button class="button button-secondary" type="submit">Filtern</button>
+      </form>
       <div class="table-scroll">
         <table class="account-users-table">
-          <thead><tr><th>Benutzername</th><th>Rolle</th><th>Status</th><th>Letzter Login</th><th>Erstellt</th><th></th></tr></thead>
+          <thead><tr><th>Zeit</th><th>Benutzer</th><th>Modul</th><th>Aktion</th><th>Ergebnis</th><th>Datensatz</th></tr></thead>
           <tbody>
-            {% for account_user in hub_users %}
+            {% for event, url in protocol.rows %}
               <tr>
-                <td><strong>{{ account_user.username }}</strong>{% if account_user.id == user.id %}<br><span class="subtle">Aktueller Benutzer</span>{% endif %}</td>
-                <td>{{ "Administrator" if account_user.role == "admin" else "Mitarbeiter" }}</td>
-                <td><span class="pill">{% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}</span></td>
-                <td>{% if account_user.last_login_at %}{{ account_user.last_login_at | berlin_time }}{% else %}Noch nie{% endif %}</td>
-                <td>{{ account_user.created_at | berlin_time }}</td>
-                <td class="account-user-actions-cell">
-                  <details class="account-user-actions">
-                    <summary>Bearbeiten</summary>
-                    <form id="account-user-edit-{{ account_user.id }}" method="post" action="/account/users/{{ account_user.id }}" class="account-user-edit-form">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                      <label><span>Benutzername</span><input type="text" name="username" value="{{ account_user.username }}" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" required></label>
-                      <label>
-                        <span>Rolle</span>
-                        <select name="role">
-                          {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role != "admin" %} disabled{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
-                        </select>
-                      </label>
-                      <label><span>Neues Passwort <small>(optional)</small></span><input type="password" name="password" autocomplete="new-password" minlength="12"></label>
-                      <label><span>Passwort bestätigen</span><input type="password" name="password_confirmation" autocomplete="new-password" minlength="12"></label>
-                    </form>
-                    <div class="account-user-action-buttons">
-                      <button class="button button-secondary" type="button" data-account-user-edit-cancel>Abbrechen</button>
-                      {% if account_user.role == "admin" and hub_admin_count == 1 %}
-                        <span class="subtle">Letzter Administrator</span>
-                      {% else %}
-                        <form method="post" action="/account/users/{{ account_user.id }}/delete" onsubmit="return window.confirm('Benutzer {{ account_user.username }} wirklich löschen?');">
-                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                          <button class="button button-danger" type="submit">Löschen</button>
-                        </form>
-                      {% endif %}
-                      <button class="button" type="submit" form="account-user-edit-{{ account_user.id }}">Speichern</button>
-                    </div>
-                  </details>
-                </td>
+                <td>{{ event.timestamp | berlin_time }}</td>
+                <td>{{ event.actor }}</td>
+                <td>{{ protocol_module_labels.get(event.module_key, event.module_key) }}</td>
+                <td><strong>{{ {'create': 'Angelegt', 'update': 'Geändert', 'delete': 'Gelöscht', 'view': 'Angesehen', 'execute': 'Ausgeführt', 'bulk': 'Sammelaktion'}.get(event.category, event.category) }}</strong><br><small class="subtle">{{ 'Hintergrund' if event.origin == 'background' else 'Hub' }} · {{ event.action }}</small>{% if event.changed_fields %}<br><small class="subtle">Felder: {{ event.changed_fields }}</small>{% endif %}</td>
+                <td>{{ 'Erfolgreich' if event.result in ['ok', 'success'] else 'Fehlgeschlagen' if event.result in ['error', 'failed'] else event.result }}</td>
+                <td>{% if url %}<a href="{{ url }}">{{ event.resource_id or 'Öffnen' }}</a>{% elif event.resource_id %}{{ event.resource_id }}{% else %}–{% endif %}</td>
               </tr>
+            {% else %}
+              <tr><td colspan="6">Keine Einträge für diese Auswahl.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-      <form method="post" action="/account/users" class="account-inline-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>
-          <span>Benutzername</span>
-          <input type="text" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" placeholder="vorname.nachname" required>
-        </label>
-        <label>
-          <span>Rolle</span>
-          <select name="role">
-            {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == "viewer" %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
-          </select>
-        </label>
-        <label>
-          <span>Passwort</span>
-          <input type="password" name="password" autocomplete="new-password" minlength="12" required>
-        </label>
-        <label>
-          <span>Passwort bestätigen</span>
-          <input type="password" name="password_confirmation" autocomplete="new-password" minlength="12" required>
-        </label>
-        <button class="button button-secondary" type="submit">Benutzer anlegen</button>
-      </form>
+      <div class="account-inline-form">
+        {% if protocol.previous_url %}<a class="button button-secondary" href="{{ protocol.previous_url }}">Zurück</a>{% endif %}
+        <span>Seite {{ protocol.page }}</span>
+        {% if protocol.next_url %}<a class="button button-secondary" href="{{ protocol.next_url }}">Weiter</a>{% endif %}
+      </div>
     </section>
     {% endif %}
     {% if user.role == "admin" %}
     <section id="account-mailbox" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">E-Mail-Postfächer</p>
-        <h3>Mittwald-Postfach einrichten</h3>
+        <h3>Postfächer und E-Mail-Einstellungen</h3>
         <p class="subtle">Der Hub prüft die Anmeldung bei IMAP und SMTP, speichert die Zugangsdaten verschlüsselt und lässt Zoho bis zur späteren Umstellung unverändert aktiv. Der Posteingang wird sofort über IMAP IDLE und zusätzlich jede Minute abgesichert; Gesendet wird jede Minute abgeglichen.</p>
       </div>
-      <form method="post" action="/account/mailboxes/mittwald">
+      {% set mailbox_state = request.query_params.get("mailbox", "") %}
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if not mittwald_mailbox_accounts or mailbox_state == "connected" %}open{% endif %}>
+        <summary>Postfächer</summary>
+        <div class="zoho-area-content">
+        <form method="post" action="/account/mailboxes/mittwald">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>
           <span>E-Mail-Adresse</span>
@@ -682,9 +852,78 @@
             {% endfor %}
           </tbody>
         </table>
-      </div>
-      <div class="account-panel-inset">
-        <h4>E-Mail-Editor</h4>
+        </div>
+        </div>
+      </details>
+      {% if mittwald_mailbox_accounts %}
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if mailbox_state in ["import-started", "import-running"] %}open{% endif %}>
+        <summary>Synchronisierung</summary>
+        <div class="zoho-area-content">
+          <div>
+            <h4>Automatischer E-Mail-Abruf</h4>
+            <p class="subtle">Der Hub übernimmt neue INBOX-Nachrichten sofort per IMAP IDLE und gleicht sie zusätzlich jede Minute ab. INBOX.Sent wird jede Minute geprüft. Zoho-Webhooks werden dafür nicht benötigt.</p>
+          </div>
+          <div>
+            <h4>Einmaliger Erstimport</h4>
+            <p class="subtle">Es werden nur Nachrichten aus <strong>INBOX</strong> und <strong>INBOX.Sent</strong> ab dem gewählten Datum gelesen. Bereits aus Zoho vorhandene Nachrichten mit derselben Message-ID werden übersprungen; Mittwald wird dabei nicht verändert.</p>
+            <form method="post" action="/account/mailboxes/import" class="account-inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label><span>Importieren seit</span><input type="date" name="since_date" value="2026-09-05" required></label>
+              <button class="button" type="submit">E-Mails seit diesem Datum importieren</button>
+            </form>
+            {% if mittwald_mailbox_import %}
+              <p class="subtle">Letzter Import: <strong>{{ mittwald_mailbox_import.status }}</strong> · {{ mittwald_mailbox_import.processed_messages }} von {{ mittwald_mailbox_import.total_messages }} verarbeitet · {{ mittwald_mailbox_import.imported_messages }} übernommen · {{ mittwald_mailbox_import.skipped_messages }} bereits vorhanden · {{ mittwald_mailbox_import.stored_attachments }} Anhänge gesichert.</p>
+              {% if mittwald_mailbox_import.last_error %}<p class="notice-warning">{{ mittwald_mailbox_import.last_error }}</p>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </details>
+      {% endif %}
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if mailbox_state == "alert-saved" %}open{% endif %}>
+        <summary>Warnungen zum Postfachabruf</summary>
+        <div class="zoho-area-content">
+        <p class="subtle">Bei einem gestörten Posteingang oder einer einzeln fehlgeschlagenen Nachricht sendet der Hub eine Warnung an eine unabhängige Adresse.</p>
+        <form method="post" action="/account/mailboxes/alerts" class="account-inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>
+            <span>Unabhängige Warnadresse</span>
+            <input type="email" name="mailbox_alert_email" value="{{ user.mailbox_alert_email or '' }}" autocomplete="email" required>
+          </label>
+          <button class="button button-secondary" type="submit">Warnadresse speichern</button>
+        </form>
+        </div>
+      </details>
+      {% if mittwald_mailbox_sync_failures %}
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if mailbox_state in ["retry-success", "retry-failed"] %}open{% endif %}>
+        <summary>Fehlgeschlagene Nachrichten</summary>
+        <div class="zoho-area-content">
+        <p class="subtle">Diese Nachrichten wurden nicht stillschweigend verworfen. Der Abruf späterer Nachrichten läuft weiter; jede UID kann erneut importiert werden.</p>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Postfach</th><th>Ordner / UID</th><th>Letzter Fehler</th><th>Aktion</th></tr></thead>
+            <tbody>
+              {% for failure in mittwald_mailbox_sync_failures %}
+                <tr>
+                  <td>{{ failure.mailbox_email }}</td>
+                  <td>{{ failure.folder }} / {{ failure.imap_uid }}</td>
+                  <td>{{ failure.error }}<br><small>{{ failure.last_failed_at | berlin_time }} · {{ failure.attempts }} Versuch(e)</small></td>
+                  <td>
+                    <form method="post" action="/account/mailboxes/failed/{{ failure.id }}/retry">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      <button class="button button-secondary" type="submit">Erneut importieren</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        </div>
+      </details>
+      {% endif %}
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if request.query_params.get("email_composer") == "saved" %}open{% endif %}>
+        <summary>E-Mail-Editor</summary>
+        <div class="zoho-area-content">
         <p class="subtle">Diese Vorgaben gelten im Editor, in Signaturen, in Hub-Vorlagen und beim Versand. Enter erzeugt einen Zeilenumbruch; einzelne, bewusst formatierte Textstellen dürfen die Vorgaben weiterhin überschreiben.</p>
         <form method="post" action="/account/mail-composer-settings" class="account-inline-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -714,10 +953,12 @@
           </label>
           <button class="button button-secondary" type="submit">Standard speichern</button>
         </form>
-      </div>
-      <div class="account-panel-inset">
-        <h4>E-Mail-Signatur</h4>
-        <p class="subtle">Die gemeinsame Hub-Signatur kann Logo, Text, Links und Formatierung enthalten. In einer E-Mail-Vorlage wird sie mit <code>${userSignature}</code> an der gewünschten Stelle eingefügt.</p>
+        </div>
+      </details>
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if request.query_params.get("email_signature") == "saved" %}open{% endif %}>
+        <summary>E-Mail-Signatur</summary>
+        <div class="zoho-area-content">
+        <p class="subtle">Die gemeinsame Hub-Signatur kann Logo, Text, Links und Formatierung enthalten. In einer E-Mail-Vorlage wird sie mit <code>${Company.EmailSignature}</code> an der gewünschten Stelle eingefügt.</p>
         <form method="post" action="/account/mail-signature">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>E-Mail-Signatur
@@ -729,7 +970,35 @@
           <p class="subtle">Für ein Logo in der Werkzeugleiste auf das Bild-Symbol klicken. Das Bild wird lokal im Hub gespeichert und beim Versand eingebettet.</p>
           <button class="button button-secondary" type="submit">Signatur speichern</button>
         </form>
-      </div>
+        </div>
+      </details>
+      <details class="account-details zoho-area account-mailbox-area" data-account-disclosure {% if request.query_params.get("spam_sender") == "unblocked" %}open{% endif %}>
+        <summary>Gesperrte Absender</summary>
+        <div class="zoho-area-content">
+          <p class="subtle">Wird eine eingehende Nachricht als Spam markiert, landet künftige Post von genau dieser Adresse direkt im Hub-Spamordner. Das Löschen einer Nachricht hebt die Sperre nicht auf. Im Spamordner entfernt „Als keine Spam-Nachricht kennzeichnen“ die Sperre ebenfalls.</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>E-Mail-Adresse</th><th>Gesperrt seit</th><th>Aktion</th></tr></thead>
+              <tbody>
+                {% for sender in spam_senders %}
+                  <tr>
+                    <td>{{ sender.email_address }}</td>
+                    <td>{{ sender.created_at | berlin_time }}</td>
+                    <td>
+                      <form method="post" action="/account/mailboxes/spam-senders/{{ sender.id }}/unblock">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="button button-secondary" type="submit">Entsperren</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="3">Keine Absender gesperrt.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
     </section>
     {% endif %}
     <section id="account-openai" class="account-panel account-section" data-account-section>
@@ -1258,12 +1527,282 @@
           });
         });
       });
+      const accountDisclosures = Array.from(page.querySelectorAll(
+        "[data-account-section] > details.account-details, [data-account-disclosure-group] > details.account-details"
+      ));
+      accountDisclosures.forEach((disclosure) => {
+        disclosure.addEventListener("toggle", () => {
+          if (!disclosure.open) return;
+          accountDisclosures.forEach((candidate) => {
+            if (candidate !== disclosure && candidate.parentElement === disclosure.parentElement) {
+              candidate.open = false;
+            }
+          });
+          if (window.KosmosEmailEditors) {
+            disclosure.querySelectorAll("[data-email-compose-content]").forEach((content) => {
+              window.KosmosEmailEditors.refresh(content);
+            });
+          }
+        });
+      });
       page.querySelectorAll("[data-account-user-edit-cancel]").forEach((button) => {
         button.addEventListener("click", () => {
-          const disclosure = button.closest("details.account-user-actions");
+          const disclosure = button.closest("details.account-user-area");
           if (disclosure) disclosure.open = false;
         });
       });
+      const legalTermsForm = page.querySelector("[data-legal-terms-form]");
+      if (legalTermsForm) {
+        legalTermsForm.addEventListener("submit", () => {
+          const content = legalTermsForm.querySelector("[data-email-compose-content]");
+          const value = legalTermsForm.querySelector("[data-email-compose-content-value]");
+          if (!content || !value) return;
+          value.value = window.KosmosEmailEditors
+            ? window.KosmosEmailEditors.getHTML(content)
+            : content.value;
+        });
+      }
+      const pdfTemplateRoot = page.querySelector("[data-pdf-template-root]");
+      if (pdfTemplateRoot) {
+        const dataElement = pdfTemplateRoot.querySelector("[data-pdf-template-editor-data]");
+        const layer = pdfTemplateRoot.querySelector("[data-pdf-template-edit-layer]");
+        const drawer = layer && layer.querySelector("[data-pdf-template-edit-drawer]");
+        const blockForm = layer && layer.querySelector("[data-pdf-template-block-form]");
+        const positionForm = layer && layer.querySelector("[data-pdf-template-position-form]");
+        const editorContent = blockForm && blockForm.querySelector("[data-email-compose-content]");
+        const editorValue = blockForm && blockForm.querySelector("[data-email-compose-content-value]");
+        const editorVisible = blockForm && blockForm.querySelector("[data-pdf-template-block-visible]");
+        const editorTitle = layer && layer.querySelector("[data-pdf-template-edit-title]");
+        const editorHint = layer && layer.querySelector("[data-pdf-template-edit-hint]");
+        let editorData = null;
+        try {
+          editorData = dataElement ? JSON.parse(dataElement.textContent || "{}") : null;
+        } catch (_error) {
+          editorData = null;
+        }
+
+        const openLayer = () => {
+          if (!layer || !drawer) return;
+          layer.hidden = false;
+          drawer.setAttribute("aria-hidden", "false");
+          document.body.classList.add("pdf-template-edit-open");
+          window.requestAnimationFrame(() => {
+            layer.classList.add("is-open");
+            if (editorContent && window.KosmosEmailEditors) {
+              window.KosmosEmailEditors.refresh(editorContent);
+            }
+            drawer.focus();
+          });
+        };
+        const closeLayer = () => {
+          if (!layer || !drawer) return;
+          layer.classList.remove("is-open");
+          drawer.setAttribute("aria-hidden", "true");
+          document.body.classList.remove("pdf-template-edit-open");
+          window.setTimeout(() => {
+            if (!layer.classList.contains("is-open")) layer.hidden = true;
+          }, 230);
+        };
+        const setEditorHtml = (html) => {
+          if (!editorContent || !editorValue) return;
+          editorValue.value = html || "";
+          if (window.KosmosEmailEditors) window.KosmosEmailEditors.setHTML(editorContent, html || "");
+          else editorContent.value = html || "";
+        };
+        const openBlock = (blockKey) => {
+          const block = editorData && editorData.blocks && editorData.blocks[blockKey];
+          if (!block || !blockForm || !positionForm) return;
+          blockForm.hidden = false;
+          positionForm.hidden = true;
+          blockForm.action = `/account/pdf-templates/${editorData.templateId}/blocks/${encodeURIComponent(blockKey)}`;
+          if (editorTitle) editorTitle.textContent = block.label;
+          if (editorHint) editorHint.textContent = block.hint || "";
+          if (editorVisible) editorVisible.checked = Boolean(block.isVisible);
+          setEditorHtml(block.contentHtml || "");
+          openLayer();
+        };
+        const openPositions = () => {
+          if (!blockForm || !positionForm) return;
+          blockForm.hidden = true;
+          positionForm.hidden = false;
+          if (editorTitle) editorTitle.textContent = "Positionstabelle";
+          if (editorHint) editorHint.textContent = "Spalten, Überschriften, Breiten und Datenfelder festlegen";
+          updateColumnSummary();
+          openLayer();
+        };
+
+        pdfTemplateRoot.addEventListener("click", (event) => {
+          const blockButton = event.target.closest("[data-pdf-template-edit-block]");
+          if (blockButton) {
+            openBlock(blockButton.dataset.pdfTemplateEditBlock);
+            return;
+          }
+          if (event.target.closest("[data-pdf-template-open-positions]")) {
+            openPositions();
+            return;
+          }
+          const positionPreview = event.target.closest("[data-pdf-template-edit-positions]");
+          if (positionPreview && !event.target.closest("button")) {
+            openPositions();
+            return;
+          }
+          const previewBlock = event.target.closest("[data-pdf-template-preview-block]");
+          if (previewBlock && !event.target.closest("a, button, input, select, textarea")) {
+            openBlock(previewBlock.dataset.pdfTemplatePreviewBlock);
+          }
+        });
+        if (layer) {
+          layer.querySelectorAll("[data-pdf-template-edit-close]").forEach((button) => {
+            button.addEventListener("click", closeLayer);
+          });
+        }
+        if (blockForm) {
+          blockForm.addEventListener("submit", () => {
+            if (!editorContent || !editorValue) return;
+            editorValue.value = window.KosmosEmailEditors
+              ? window.KosmosEmailEditors.getHTML(editorContent)
+              : editorContent.value;
+          });
+        }
+
+        const previewStage = pdfTemplateRoot.querySelector(".pdf-template-preview-stage");
+        const firstPreviewPage = previewStage && previewStage.querySelector(".pdf-template-a4-page:not(.pdf-template-legal-page)");
+        const legalPreviewPage = previewStage && previewStage.querySelector(".pdf-template-legal-page");
+        const firstPaymentBlock = firstPreviewPage && firstPreviewPage.querySelector("[data-pdf-template-preview-block='payment']");
+        const firstPaymentContent = firstPaymentBlock && firstPaymentBlock.querySelector("[data-pdf-template-block-content='payment']");
+        const originalPaymentHtml = firstPaymentContent ? firstPaymentContent.innerHTML : "";
+        let paymentPaginationFrame = 0;
+
+        const renumberPdfPreviewPages = () => {
+          if (!previewStage) return;
+          previewStage.querySelectorAll(".pdf-template-a4-page").forEach((page, index) => {
+            const number = page.querySelector(".pdf-template-page-number");
+            if (number) number.textContent = String(index + 1);
+            page.setAttribute("aria-label", `Vorschau Seite ${index + 1}`);
+          });
+        };
+        const createPaymentContinuationPage = () => {
+          if (!previewStage || !firstPreviewPage || !firstPaymentBlock) return null;
+          const page = firstPreviewPage.cloneNode(false);
+          page.classList.add("pdf-template-payment-continuation");
+          page.dataset.pdfTemplatePaymentContinuation = "true";
+          const number = firstPreviewPage.querySelector(".pdf-template-page-number")?.cloneNode(true);
+          if (number) page.append(number);
+          const block = firstPaymentBlock.cloneNode(true);
+          block.hidden = false;
+          block.classList.remove("is-template-block-hidden");
+          block.removeAttribute("style");
+          const content = block.querySelector("[data-pdf-template-block-content='payment']");
+          if (content) content.innerHTML = "";
+          page.append(block);
+          const footer = firstPreviewPage.querySelector(".pdf-template-preview-footer")?.cloneNode(true);
+          if (footer) page.append(footer);
+          if (legalPreviewPage) previewStage.insertBefore(page, legalPreviewPage);
+          else previewStage.append(page);
+          return content ? { page, block, content } : null;
+        };
+        const fillPaymentPage = (page, block, content, pendingNodes) => {
+          const footer = page.querySelector(".pdf-template-preview-footer");
+          if (!footer) return;
+          content.innerHTML = "";
+          block.hidden = false;
+          block.style.overflow = "hidden";
+          const availableHeight = Math.max(
+            0,
+            Math.floor(footer.getBoundingClientRect().top - block.getBoundingClientRect().top - 12),
+          );
+          block.style.maxHeight = `${availableHeight}px`;
+          let added = 0;
+          while (pendingNodes.length) {
+            const node = pendingNodes[0];
+            content.append(node);
+            if (block.scrollHeight <= availableHeight + 1) {
+              pendingNodes.shift();
+              added += 1;
+              continue;
+            }
+            content.removeChild(node);
+            break;
+          }
+          if (!added && pendingNodes.length) {
+            content.append(pendingNodes.shift());
+          }
+          if (!content.childNodes.length) block.hidden = true;
+        };
+        const paginatePaymentPreview = () => {
+          if (!previewStage || !firstPreviewPage || !firstPaymentBlock || !firstPaymentContent) return;
+          previewStage.querySelectorAll("[data-pdf-template-payment-continuation]").forEach((page) => page.remove());
+          firstPaymentBlock.hidden = false;
+          firstPaymentBlock.removeAttribute("style");
+          firstPaymentContent.innerHTML = originalPaymentHtml;
+          if (firstPaymentBlock.classList.contains("is-template-block-hidden")) {
+            renumberPdfPreviewPages();
+            return;
+          }
+          const footer = firstPreviewPage.querySelector(".pdf-template-preview-footer");
+          if (!footer || firstPaymentBlock.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top - 12) {
+            renumberPdfPreviewPages();
+            return;
+          }
+          const source = document.createElement("div");
+          source.innerHTML = originalPaymentHtml;
+          const pendingNodes = Array.from(source.childNodes);
+          fillPaymentPage(firstPreviewPage, firstPaymentBlock, firstPaymentContent, pendingNodes);
+          while (pendingNodes.length) {
+            const continuation = createPaymentContinuationPage();
+            if (!continuation) break;
+            fillPaymentPage(continuation.page, continuation.block, continuation.content, pendingNodes);
+          }
+          renumberPdfPreviewPages();
+        };
+        const schedulePaymentPagination = () => {
+          window.cancelAnimationFrame(paymentPaginationFrame);
+          paymentPaginationFrame = window.requestAnimationFrame(paginatePaymentPreview);
+        };
+        schedulePaymentPagination();
+        window.addEventListener("resize", schedulePaymentPagination);
+
+        const columnEditor = positionForm && positionForm.querySelector("[data-pdf-template-column-editor]");
+        const columnCount = positionForm && positionForm.querySelector("[data-pdf-template-column-count]");
+        const widthTotal = positionForm && positionForm.querySelector("[data-pdf-template-width-total]");
+        function updateColumnSummary() {
+          if (!columnEditor) return;
+          const enabledRows = Array.from(columnEditor.querySelectorAll("[data-pdf-template-column-row]")).filter((row) => {
+            const enabled = row.querySelector("[data-pdf-template-column-enabled]");
+            return enabled && enabled.checked;
+          });
+          const total = enabledRows.reduce((sum, row) => {
+            const width = row.querySelector("[data-pdf-template-column-width]");
+            return sum + (Number.parseInt(width && width.value, 10) || 0);
+          }, 0);
+          columnEditor.querySelectorAll("[data-pdf-template-column-width]").forEach((input) => input.setCustomValidity(""));
+          if (total !== 100 && enabledRows.length) {
+            const firstWidth = enabledRows[0].querySelector("[data-pdf-template-column-width]");
+            if (firstWidth) firstWidth.setCustomValidity("Die Breiten der sichtbaren Spalten müssen zusammen 100 % ergeben.");
+          }
+          if (columnCount) columnCount.textContent = String(enabledRows.length);
+          if (widthTotal) {
+            widthTotal.textContent = `${total} %`;
+            widthTotal.classList.toggle("is-invalid", total !== 100);
+          }
+        }
+        if (columnEditor) {
+          columnEditor.addEventListener("input", updateColumnSummary);
+          columnEditor.addEventListener("change", updateColumnSummary);
+          columnEditor.addEventListener("click", (event) => {
+            const up = event.target.closest("[data-pdf-template-column-up]");
+            const down = event.target.closest("[data-pdf-template-column-down]");
+            const row = event.target.closest("[data-pdf-template-column-row]");
+            if (!row || (!up && !down)) return;
+            if (up && row.previousElementSibling) columnEditor.insertBefore(row, row.previousElementSibling);
+            if (down && row.nextElementSibling) columnEditor.insertBefore(row.nextElementSibling, row);
+          });
+          updateColumnSummary();
+        }
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && layer && !layer.hidden) closeLayer();
+        });
+      }
       window.addEventListener("hashchange", () => selectSection(window.location.hash.slice(1)));
       const savedActionSection = () => {
         const parameters = new URLSearchParams(window.location.search);
@@ -1272,6 +1811,8 @@
         if (parameters.has("mcp_token")) return "account-mcp";
         if (parameters.has("openai")) return "account-openai";
         if (parameters.has("provider_license") || parameters.has("crocoblock")) return "account-provider-licenses";
+        if (parameters.has("legal_terms") || parameters.has("legal_terms_state")) return "account-legal-terms";
+        if (parameters.has("pdf_template") || parameters.has("pdf_template_type") || parameters.has("pdf_template_state")) return "account-pdf-templates";
         if (parameters.has("zoho_books")) return "account-zoho-books";
         if (parameters.has("zoho")) return "account-zoho";
         return "";

@@ -1,4 +1,5 @@
 from app.models.audit_log import AuditLog
+from app.models.hub_activity_event import HubActivityEvent
 from app.models.ai_provider_config import AiProviderConfig
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
@@ -11,6 +12,7 @@ from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.fleet_refresh_run import FleetRefreshRun, FleetRefreshSiteResult
 from app.models.fleet_refresh_settings import FleetRefreshSettings
 from app.models.hub_access_token import HubAccessToken
+from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
@@ -21,6 +23,7 @@ from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.models.hub_spam_sender import HubSpamSender
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
@@ -50,15 +53,24 @@ from app.models.update_plan import UpdatePlan, UpdatePlanItem
 from app.models.zoho_connection import ZohoConnection
 from app.models.zoho_books_connection import ZohoBooksConnection
 from app.models.zoho_books_invoice_import import ZohoBooksInvoiceImport, ZohoBooksInvoiceImportItem
+from app.models.zoho_books_order_import import ZohoBooksOrderImport, ZohoBooksOrderImportItem
 from app.models.zoho_books_recurring_invoice_import import (
     ZohoBooksRecurringInvoiceImport,
     ZohoBooksRecurringInvoiceImportItem,
 )
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
+from app.models.hub_finance_order_pdf import HubFinanceOrderPdf
+from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
+from app.models.hub_finance_documents import HubFinanceDunning, HubFinanceDunningLine
+from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch, HubInvoiceEmailBatchItem
+from app.models.hub_finance_position_preset import HubFinancePositionPreset
+from app.models.hub_legal_terms import HubLegalTerms, HubLegalTermsRevision
+from app.models.hub_pdf_template import HubPdfTemplate, HubPdfTemplateRevision
 from app.models.base import Base
 
 __all__ = [
     "AuditLog",
+    "HubActivityEvent",
     "AiProviderConfig",
     "Base",
     "Customer",
@@ -74,6 +86,7 @@ __all__ = [
     "FleetRefreshRun",
     "FleetRefreshSiteResult",
     "HubAccessToken",
+    "HubIntegrationToken",
     "HubAgentAction",
     "HubAgentConversation",
     "HubAgentConversationContext",
@@ -115,9 +128,22 @@ __all__ = [
     "ZohoBooksConnection",
     "ZohoBooksInvoiceImport",
     "ZohoBooksInvoiceImportItem",
+    "ZohoBooksOrderImport",
+    "ZohoBooksOrderImportItem",
     "ZohoBooksRecurringInvoiceImport",
     "ZohoBooksRecurringInvoiceImportItem",
     "HubFinanceInvoicePdf",
+    "HubFinanceGeneratedPdf",
+    "HubFinanceDunning",
+    "HubFinanceDunningLine",
+    "HubInvoiceEmailBatch",
+    "HubInvoiceEmailBatchItem",
+    "HubFinanceOrderPdf",
+    "HubFinancePositionPreset",
+    "HubLegalTerms",
+    "HubLegalTermsRevision",
+    "HubPdfTemplate",
+    "HubPdfTemplateRevision",
     "ZohoEmailWorkflowDelivery",
     "ZohoEmailWorkflowWebhook",
     "ZohoEmailContentImport",

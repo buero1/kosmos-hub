@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -10,10 +10,15 @@ class CustomerCallActivity(TimestampMixin, Base):
     """A call planned for a customer in the Hub."""
 
     __tablename__ = "customer_call_activities"
-    __table_args__ = (Index("ix_customer_call_activities_customer_starts_at", "customer_id", "starts_at"),)
+    __table_args__ = (
+        Index("ix_customer_call_activities_customer_starts_at", "customer_id", "starts_at"),
+        Index("ix_customer_call_activities_lead_starts_at", "lead_id", "starts_at"),
+        UniqueConstraint("source_system", "source_external_id", name="uq_customer_call_activities_source_external"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("hub_leads.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned")
     direction: Mapped[str] = mapped_column(String(32), nullable=False, default="outbound")
@@ -24,6 +29,11 @@ class CustomerCallActivity(TimestampMixin, Base):
     reminder_minutes_before: Mapped[int | None] = mapped_column(Integer(), nullable=True)
     description: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_system: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    recording_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    transcript_url: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     customer = relationship("Customer", back_populates="call_activities")
     reminders = relationship(
@@ -53,10 +63,14 @@ class CustomerTaskActivity(TimestampMixin, Base):
     """A task planned for a customer in the Hub."""
 
     __tablename__ = "customer_task_activities"
-    __table_args__ = (Index("ix_customer_task_activities_customer_due_at", "customer_id", "due_at"),)
+    __table_args__ = (
+        Index("ix_customer_task_activities_customer_due_at", "customer_id", "due_at"),
+        Index("ix_customer_task_activities_lead_due_at", "lead_id", "due_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("hub_leads.id", ondelete="CASCADE"), nullable=True, index=True)
     case_id: Mapped[int | None] = mapped_column(ForeignKey("hub_cases.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned")
@@ -73,10 +87,14 @@ class CustomerMeetingActivity(TimestampMixin, Base):
     """A meeting planned for a customer in the Hub."""
 
     __tablename__ = "customer_meeting_activities"
-    __table_args__ = (Index("ix_customer_meeting_activities_customer_starts_at", "customer_id", "starts_at"),)
+    __table_args__ = (
+        Index("ix_customer_meeting_activities_customer_starts_at", "customer_id", "starts_at"),
+        Index("ix_customer_meeting_activities_lead_starts_at", "lead_id", "starts_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("hub_leads.id", ondelete="CASCADE"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="planned")
     starts_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)

@@ -1,4 +1,5 @@
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+import json
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
@@ -32,7 +33,12 @@ from app.services.maintenance_worker import (
     schedule_pending_user_deletions,
 )
 from app.services.fleet_refresh import FleetRefreshService
-from app.services.customer_directory import CONTACT_FIELDS_LAYOUT_KEY, CUSTOMER_FIELDS_LAYOUT_KEY, CustomerDirectoryService
+from app.services.customer_directory import (
+    CONTACT_FIELDS_LAYOUT_KEY,
+    CUSTOMER_FIELDS_LAYOUT_KEY,
+    HUB_CUSTOMER_FIELD_KEYS,
+    CustomerDirectoryService,
+)
 from app.services.customer_communications import (
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationImageError,
@@ -51,11 +57,17 @@ from app.services.customer_activities import (
     CustomerActivityService,
     suggested_call_start,
 )
+from app.services.lead_activities import LeadActivityService
 from app.services.bavarian_holidays import bavarian_public_holidays
 from app.services.hub_mailbox import HubMailboxService, MAILBOX_FOLDERS
+from app.services.hub_mailbox_health import HubMailboxHealthService
+from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
+from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
 from app.services.hub_mailbox_transport import DEFAULT_HUB_MAILBOX_SENDER_EMAIL
 from app.services.task_email_reminder_worker import TaskEmailReminderWorker
 from app.models.customer import Customer
+from app.models.customer_activity import CustomerCallActivity, CustomerMeetingActivity, CustomerTaskActivity
 from app.services.site_selection import SELECTABLE_CUSTOMER_STATUSES, build_site_selector_context
 from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsError, StylingSettingsService
 from app.services.module_layouts import ModuleLayoutError, ModuleLayoutService
@@ -67,7 +79,8 @@ from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, H
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
 from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadError, HubLeadService
 from app.services.hub_lead_emails import HubLeadEmailService
-from app.services.hub_lead_notes import HubLeadNoteService
+from app.services.hub_lead_notes import HubLeadNoteError, HubLeadNoteService
+from app.services.hub_global_search import HubGlobalSearchService
 from app.services.hub_finance import (
     ARTICLE_FIELDS_LAYOUT_KEY,
     OFFER_FIELDS_LAYOUT_KEY,
@@ -75,7 +88,35 @@ from app.services.hub_finance import (
     HubFinanceService,
 )
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
-from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES, HubFinanceDocumentError, HubFinanceDocumentService
+from app.services.hub_finance_documents import (
+    DUNNING_MODULE,
+    FINANCE_DOCUMENT_MODULES,
+    INVOICE_MODULE,
+    ORDER_MODULE,
+    RECURRING_INVOICE_MODULE,
+    HubFinanceDocumentError,
+    HubFinanceDocumentService,
+)
+from app.services.hub_finance_position_presets import (
+    INVOICE_POSITION_PRESET_LIBRARY,
+    POSITION_PRESET_LIBRARIES,
+    SALES_POSITION_PRESET_LIBRARY,
+    FinancePositionPresetView,
+    HubFinancePositionPresetError,
+    HubFinancePositionPresetService,
+)
+from app.services.hub_finance_pdf_generation import (
+    HubFinancePdfError,
+    HubFinancePdfService,
+    run_finance_pdf_generation,
+)
+from app.services.hub_invoice_email_batches import (
+    HubInvoiceEmailBatchService,
+    InvoiceEmailBatchError,
+    run_invoice_email_batch,
+)
+from app.services.hub_pdf_templates import HubPdfTemplateService
+from app.services.template_placeholders import EMAIL_TEMPLATE_CONTEXTS, email_placeholders
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
 from app.services.zoho_case_import import ZohoCaseImportService
 
@@ -105,6 +146,17 @@ def dashboard(request: Request, db: Annotated[Session, Depends(get_db)]):
             "sites": latest_sites,
         },
     )
+
+
+@router.get("/search/suggestions", response_class=JSONResponse)
+def global_search_suggestions(request: Request, db: Annotated[Session, Depends(get_db)], q: str = ""):
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    groups = HubGlobalSearchService(db=db, cipher=get_secret_cipher()).search(
+        q, include_admin_modules=user.role == "admin"
+    )
+    return JSONResponse({"groups": groups}, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/styling", response_class=HTMLResponse)
@@ -305,12 +357,94 @@ def customers_page(
         {
             "entries": entries,
             "candidate_count": candidate_count,
+            "can_create_customer": can_manage_customer_fields,
             "filters": {"q": q, "status": status, "industry": industry, "email": email},
             "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
             "industry_options": industry_options,
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+def _ordered_layout_fields(db: Session, *, layout_key: str, fields: tuple[object, ...]) -> tuple[object, ...]:
+    fields_by_key = {field.key: field for field in fields}
+    ordered_keys = ModuleLayoutService(db=db).ordered_keys(
+        layout_key=layout_key,
+        default_keys=tuple(fields_by_key),
+    )
+    return tuple(fields_by_key[key] for key in ordered_keys)
+
+
+def _hub_customer_create_field_order(db: Session) -> tuple[str, ...]:
+    layout_keys = (*HUB_CUSTOMER_FIELD_KEYS, "hub_postal_city")
+    ordered_keys = ModuleLayoutService(db=db).ordered_keys(
+        layout_key=CUSTOMER_FIELDS_LAYOUT_KEY,
+        default_keys=layout_keys,
+    )
+    result: list[str] = []
+    allowed_keys = set(HUB_CUSTOMER_FIELD_KEYS)
+    for key in ordered_keys:
+        expanded_keys = ("billing_postal_code", "billing_city") if key == "hub_postal_city" else (key,)
+        for expanded_key in expanded_keys:
+            if expanded_key in allowed_keys and expanded_key not in result:
+                result.append(expanded_key)
+    return tuple(result)
+
+
+def _hub_customer_create_context(
+    request: Request,
+    db: Session,
+    *,
+    values: dict[str, str] | None = None,
+    error: str = "",
+) -> dict[str, object]:
+    return {
+        "csrf_token": get_csrf_token(request),
+        "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
+        "field_order": _hub_customer_create_field_order(db),
+        "values": values or {},
+        "error": error,
+    }
+
+
+@router.get("/customers/new", response_class=HTMLResponse)
+def new_customer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    return templates.TemplateResponse(request, "customer_create.html", _hub_customer_create_context(request, db))
+
+
+@router.post("/customers")
+async def create_customer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    submitted_values = {
+        str(key): value for key, value in form.items()
+        if isinstance(value, str) and str(key).startswith("customer_field__")
+    }
+    try:
+        customer = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).create_hub_customer(
+            submitted_values=submitted_values,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return templates.TemplateResponse(
+            request,
+            "customer_create.html",
+            _hub_customer_create_context(request, db, values=submitted_values, error=str(exc)),
+            status_code=400,
+        )
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-hub-customer",
+        result="ok",
+        detail=f"Created Hub Customer {customer.id}; customer data is not retained in the audit log.",
+    )
+    db.commit()
+    return RedirectResponse(url=f"/customers/{customer.id}", status_code=303)
 
 
 @router.get("/customers/suggestions", response_class=JSONResponse)
@@ -439,11 +573,19 @@ def lead_detail_page(
     fields_message: str = "",
     layout: str = "",
     layout_message: str = "",
+    activity: str = "",
+    activity_message: str = "",
+    note: str = "",
+    note_message: str = "",
 ):
     _require_hub_admin(request)
     detail = HubLeadService(db=db, cipher=get_secret_cipher()).get_detail(lead_id=lead_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Lead not found.")
+    activity_service = CustomerActivityService(db=db)
+    berlin_now = datetime.now(ZoneInfo("Europe/Berlin"))
+    call_start = suggested_call_start(berlin_now).replace(tzinfo=None)
+    task_default_date = _next_task_due_date(berlin_now)
     return templates.TemplateResponse(
         request,
         "lead_detail.html",
@@ -455,9 +597,264 @@ def lead_detail_page(
             "layout_message": layout_message[:500],
             "lead_emails": HubLeadEmailService(db=db, cipher=get_secret_cipher()).list_email_views(lead_id=lead_id),
             "lead_notes": HubLeadNoteService(db=db, cipher=get_secret_cipher()).list_note_views(lead_id=lead_id),
+            "note_state": note if note in {"success", "error"} else "",
+            "note_message": note_message[:500],
+            "activity_calls": activity_service.list_calls(lead_id=lead_id, include_completed=True),
+            "activity_tasks": activity_service.list_tasks(lead_id=lead_id),
+            "activity_meetings": activity_service.list_meetings(lead_id=lead_id),
+            "activity_state": activity if activity in {"success", "error"} else "",
+            "activity_message": activity_message[:500],
+            "call_status_options": CALL_STATUS_OPTIONS,
+            "call_direction_options": CALL_DIRECTION_OPTIONS,
+            "call_duration_options": CALL_DURATION_OPTIONS,
+            "call_time_options": CALL_TIME_OPTIONS,
+            "call_reminder_channel_options": CALL_REMINDER_CHANNEL_OPTIONS,
+            "call_reminder_options": CALL_REMINDER_OPTIONS,
+            "call_defaults": {
+                "start_date": call_start.strftime("%Y-%m-%d"),
+                "start_time": call_start.strftime("%H:%M"),
+                "duration_minutes": 30,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 5,
+            },
+            "task_defaults": {
+                "due_date": task_default_date.isoformat(),
+                "due_time": "09:00",
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 0,
+            },
+            "meeting_defaults": {
+                "start_date": call_start.strftime("%Y-%m-%d"),
+                "start_time": call_start.strftime("%H:%M"),
+                "end_date": (call_start + timedelta(minutes=60)).strftime("%Y-%m-%d"),
+                "end_time": (call_start + timedelta(minutes=60)).strftime("%H:%M"),
+                "duration_minutes": 60,
+                "reminder_channel": "popup",
+                "reminder_minutes_before": 15,
+            },
             "csrf_token": get_csrf_token(request),
         },
     )
+
+
+def _lead_note_redirect(lead_id: int, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"note": state, "note_message": message[:500]})
+    return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-notes", status_code=303)
+
+
+@router.post("/leads/{lead_id}/notes")
+def create_lead_note(
+    lead_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    title: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        note = HubLeadNoteService(db=db, cipher=get_secret_cipher()).create_note(
+            lead_id=lead_id,
+            actor=user.username,
+            title=title,
+            content=content,
+        )
+    except HubLeadNoteError as exc:
+        db.rollback()
+        return _lead_note_redirect(lead_id, "error", str(exc))
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-hub-lead-note",
+        result="ok",
+        detail=f"Created note {note.id} for lead {lead_id}; note content is not retained in the audit log.",
+    )
+    db.commit()
+    return _lead_note_redirect(lead_id, "success", "Notiz wurde im Hub gespeichert.")
+
+
+@router.post("/leads/{lead_id}/notes/{note_id}")
+def update_lead_note(
+    lead_id: int,
+    note_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    title: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        note = HubLeadNoteService(db=db, cipher=get_secret_cipher()).update_note(
+            lead_id=lead_id,
+            note_id=note_id,
+            title=title,
+            content=content,
+        )
+    except HubLeadNoteError as exc:
+        db.rollback()
+        return _lead_note_redirect(lead_id, "error", str(exc))
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="update-hub-lead-note",
+        result="ok",
+        detail=f"Updated note {note.id} for lead {lead_id}; note content is not retained in the audit log.",
+    )
+    db.commit()
+    return _lead_note_redirect(lead_id, "success", "Notiz wurde im Hub aktualisiert.")
+
+
+@router.post("/leads/{lead_id}/notes/{note_id}/delete")
+def delete_lead_note(
+    lead_id: int,
+    note_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        HubLeadNoteService(db=db, cipher=get_secret_cipher()).delete_note(lead_id=lead_id, note_id=note_id)
+    except HubLeadNoteError as exc:
+        db.rollback()
+        return _lead_note_redirect(lead_id, "error", str(exc))
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-hub-lead-note",
+        result="ok",
+        detail=f"Deleted note {note_id} for lead {lead_id}.",
+    )
+    db.commit()
+    return _lead_note_redirect(lead_id, "success", "Notiz wurde gelöscht.")
+
+
+def _lead_activity_redirect(lead_id: int, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"activity": state, "activity_message": message})
+    return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-activities", status_code=303)
+
+
+def _lead_activity_fields(form, kind: str) -> dict[str, object]:
+    shared = {
+        "name": str(form.get("name") or ""),
+        "status": str(form.get("status") or "planned"),
+        "description": str(form.get("description") or ""),
+    }
+    if kind == "tasks":
+        return {
+            **shared,
+            "due_date": str(form.get("due_date") or ""),
+            "due_time": str(form.get("due_time") or ""),
+            "reminder_channel": str(form.get("reminder_channel") or "none"),
+            "reminder_minutes_before": str(form.get("reminder_minutes_before") or "0"),
+        }
+    return {
+        **shared,
+        "start_date": str(form.get("start_date") or ""),
+        "start_time": str(form.get("start_time") or ""),
+        "duration_minutes": str(form.get("duration_minutes") or "30"),
+        "reminder_channels": [str(value) for value in form.getlist("reminder_channels")],
+        "reminder_minutes_before": [str(value) for value in form.getlist("reminder_minutes_before")],
+        **({"direction": str(form.get("direction") or "outbound")} if kind == "calls" else {}),
+    }
+
+
+@router.post("/leads/{lead_id}/activities/{kind}")
+async def create_lead_activity(lead_id: int, kind: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    service = CustomerActivityService(db=db)
+    try:
+        fields = _lead_activity_fields(form, kind)
+        if kind == "calls":
+            activity = service.schedule_call(customer_id=None, lead_id=lead_id, actor=user.username, **fields)
+        elif kind == "tasks":
+            activity = service.schedule_task(customer_id=None, lead_id=lead_id, actor=user.username, **fields)
+        elif kind == "meetings":
+            activity = service.schedule_meeting(customer_id=None, lead_id=lead_id, actor=user.username, **fields)
+        else:
+            raise CustomerActivityError("Die Aktivitätsart ist ungültig.")
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _lead_activity_redirect(lead_id, "error", str(exc))
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"create-lead-{kind}", result="ok", detail=f"Created {kind} activity {activity.id} for lead {lead_id}; description is not retained in the audit log.")
+    db.commit()
+    if kind == "tasks":
+        TaskEmailReminderWorker.notify_schedule_changed()
+    return _lead_activity_redirect(lead_id, "success", "Aktivität wurde angelegt.")
+
+
+@router.post("/leads/{lead_id}/activities/{kind}/{activity_id}")
+async def update_lead_activity(lead_id: int, kind: str, activity_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    service = LeadActivityService(db=db)
+    try:
+        fields = _lead_activity_fields(form, kind)
+        if kind == "calls":
+            activity = service.update_call(lead_id=lead_id, call_id=activity_id, **fields)
+        elif kind == "tasks":
+            activity = service.update_task(lead_id=lead_id, task_id=activity_id, **fields)
+        elif kind == "meetings":
+            activity = service.update_meeting(lead_id=lead_id, meeting_id=activity_id, **fields)
+        else:
+            raise CustomerActivityError("Die Aktivitätsart ist ungültig.")
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _lead_activity_redirect(lead_id, "error", str(exc))
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"update-lead-{kind}", result="ok", detail=f"Updated {kind} activity {activity.id} for lead {lead_id}; description is not retained in the audit log.")
+    db.commit()
+    if kind == "tasks":
+        TaskEmailReminderWorker.notify_schedule_changed()
+    return _lead_activity_redirect(lead_id, "success", "Aktivität wurde gespeichert.")
+
+
+@router.post("/leads/{lead_id}/activities/{kind}/{activity_id}/delete")
+async def delete_lead_activity(lead_id: int, kind: str, activity_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    singular = {"calls": "call", "tasks": "task", "meetings": "meeting"}.get(kind, "")
+    try:
+        LeadActivityService(db=db).delete(lead_id=lead_id, kind=singular, activity_id=activity_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _lead_activity_redirect(lead_id, "error", str(exc))
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"delete-lead-{kind}", result="ok", detail=f"Deleted {kind} activity {activity_id} for lead {lead_id}.")
+    db.commit()
+    if kind == "tasks":
+        TaskEmailReminderWorker.notify_schedule_changed()
+    return _lead_activity_redirect(lead_id, "success", "Aktivität wurde gelöscht.")
+
+
+@router.post("/leads/{lead_id}/activities/{kind}/{activity_id}/complete")
+async def complete_lead_activity(lead_id: int, kind: str, activity_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    singular = {"calls": "call", "tasks": "task"}.get(kind, "")
+    try:
+        LeadActivityService(db=db).complete(lead_id=lead_id, kind=singular, activity_id=activity_id)
+    except CustomerActivityError as exc:
+        db.rollback()
+        return _lead_activity_redirect(lead_id, "error", str(exc))
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"complete-lead-{kind}", result="ok", detail=f"Completed {kind} activity {activity_id} for lead {lead_id}.")
+    db.commit()
+    if kind == "tasks":
+        TaskEmailReminderWorker.notify_schedule_changed()
+    return _lead_activity_redirect(lead_id, "success", "Aktivität wurde abgeschlossen.")
 
 
 @router.post("/leads/{lead_id}/fields")
@@ -622,6 +1019,7 @@ def new_case_page(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     source_email_key: str = "",
+    customer_id: int | None = None,
 ):
     _require_hub_admin(request)
     service = HubCaseService(db=db, cipher=get_secret_cipher())
@@ -640,7 +1038,7 @@ def new_case_page(
         _case_create_context(
             request,
             db,
-            selected_customer_id=source_email.customer_id if source_email is not None else None,
+            selected_customer_id=source_email.customer_id if source_email is not None else customer_id,
             source_email=source_email,
         ),
     )
@@ -1123,24 +1521,42 @@ def finance_offers_page(
 
 
 @router.get("/finance/offers/new", response_class=HTMLResponse)
-def new_finance_offer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+def new_finance_offer_page(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    customer_id: int | None = None,
+):
     _require_hub_admin(request)
-    return templates.TemplateResponse(request, "finance_offer_create.html", _finance_offer_create_context(request, db))
+    return templates.TemplateResponse(
+        request,
+        "finance_offer_create.html",
+        _finance_offer_create_context(request, db, selected_customer_id=customer_id),
+    )
 
 
 @router.post("/finance/offers")
-async def create_finance_offer_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+async def create_finance_offer_page(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
     form = await request.form()
     require_csrf(request, str(form.get("csrf_token") or ""))
     user = _require_hub_admin(request)
     submitted_values = _finance_submitted_values(form, prefix="offer_")
     customer_id = _optional_form_id(form.get("customer_id"))
     contact_id = _optional_form_id(form.get("contact_id"))
+    pdf_template_id = _optional_form_id(form.get("pdf_template_id"))
     try:
         offer = HubFinanceService(db=db, cipher=get_secret_cipher()).create_offer(
             customer_id=customer_id,
             contact_id=contact_id,
             submitted_values=submitted_values,
+            pdf_template_id=pdf_template_id,
+        )
+        generation_token = HubFinancePdfService(db=db, cipher=get_secret_cipher()).queue(
+            document_type="offers",
+            document_id=offer.id,
         )
     except (ValueError, HubFinanceError) as exc:
         db.rollback()
@@ -1152,6 +1568,7 @@ async def create_finance_offer_page(request: Request, db: Annotated[Session, Dep
                 db,
                 selected_customer_id=customer_id,
                 selected_contact_id=contact_id,
+                selected_pdf_template_id=pdf_template_id,
                 submitted_values=submitted_values,
                 error=str(exc),
             ),
@@ -1159,6 +1576,7 @@ async def create_finance_offer_page(request: Request, db: Annotated[Session, Dep
         )
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action="create-finance-offer", result="ok", detail=f"Created Finance Offer {offer.id}; offer data is not retained in the audit log.")
     db.commit()
+    background_tasks.add_task(run_finance_pdf_generation, generation_token)
     return RedirectResponse(url=f"/finance/offers/{offer.id}", status_code=303)
 
 
@@ -1193,7 +1611,12 @@ def finance_offer_detail_page(
 
 
 @router.post("/finance/offers/{offer_id}/fields")
-async def update_finance_offer_fields(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+async def update_finance_offer_fields(
+    offer_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
     form = await request.form()
     require_csrf(request, str(form.get("csrf_token") or ""))
     user = _require_hub_admin(request)
@@ -1203,6 +1626,11 @@ async def update_finance_offer_fields(offer_id: int, request: Request, db: Annot
             customer_id=_optional_form_id(form.get("customer_id")),
             contact_id=_optional_form_id(form.get("contact_id")),
             submitted_values=_finance_submitted_values(form, prefix="offer_"),
+            pdf_template_id=_optional_form_id(form.get("pdf_template_id")),
+        )
+        generation_token = HubFinancePdfService(db=db, cipher=get_secret_cipher()).queue(
+            document_type="offers",
+            document_id=offer.id,
         )
     except (ValueError, HubFinanceError) as exc:
         db.rollback()
@@ -1210,6 +1638,7 @@ async def update_finance_offer_fields(offer_id: int, request: Request, db: Annot
         return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}", status_code=303)
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action="update-finance-offer", result="ok", detail=f"Updated Finance Offer {offer.id}; offer data is not retained in the audit log.")
     db.commit()
+    background_tasks.add_task(run_finance_pdf_generation, generation_token)
     query = urlencode({"fields": "success", "fields_message": "Angebotsdaten wurden im Hub gespeichert."})
     return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}#finance-offer-fields", status_code=303)
 
@@ -1254,6 +1683,117 @@ async def delete_finance_offer(offer_id: int, request: Request, db: Annotated[Se
     return RedirectResponse(url="/finance/offers?deleted=true", status_code=303)
 
 
+@router.post("/finance/position-presets", response_class=JSONResponse)
+async def create_finance_position_preset(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        raw_lines = json.loads(str(form.get("lines_json") or ""))
+        preset = HubFinancePositionPresetService(db=db, cipher=get_secret_cipher()).create(
+            library_key=str(form.get("library_key") or ""),
+            name=str(form.get("name") or ""),
+            lines=raw_lines,
+            actor_username=user.username,
+        )
+    except (json.JSONDecodeError, HubFinancePositionPresetError) as exc:
+        db.rollback()
+        message = str(exc) if isinstance(exc, HubFinancePositionPresetError) else "Die Positionen konnten nicht gelesen werden."
+        return JSONResponse({"error": message}, status_code=400)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="create-finance-position-preset",
+        result="ok",
+        detail=f"Created position preset {preset.id} in {preset.library_key} with {preset.line_count} lines; line data is not retained in the audit log.",
+    )
+    db.commit()
+    return JSONResponse({"preset": _finance_position_preset_json(preset)}, status_code=201)
+
+
+@router.post("/finance/position-presets/{preset_id}/delete", response_class=JSONResponse)
+async def delete_finance_position_preset(preset_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    library_key = str(form.get("library_key") or "")
+    try:
+        preset = HubFinancePositionPresetService(db=db, cipher=get_secret_cipher()).delete(
+            preset_id=preset_id,
+            library_key=library_key,
+        )
+    except HubFinancePositionPresetError as exc:
+        db.rollback()
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="delete-finance-position-preset",
+        result="ok",
+        detail=f"Deleted position preset {preset.id} from {library_key}; line data is not retained in the audit log.",
+    )
+    db.commit()
+    return JSONResponse({"deleted": preset_id})
+
+
+@router.post("/finance/invoices/email-review", response_class=JSONResponse)
+async def review_invoice_emails(request: Request, db: Annotated[Session, Depends(get_db)]):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "Ungültige Anfrage."}, status_code=400)
+    require_csrf(request, str(payload.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        review = HubInvoiceEmailBatchService(db=db, cipher=get_secret_cipher()).review(
+            payload.get("ids"), actor=user.username,
+        )
+    except InvoiceEmailBatchError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse(review, headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/finance/invoices/email-confirm", response_class=JSONResponse)
+async def confirm_invoice_emails(
+    request: Request, background_tasks: BackgroundTasks, db: Annotated[Session, Depends(get_db)],
+):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": "Ungültige Anfrage."}, status_code=400)
+    require_csrf(request, str(payload.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        batch = HubInvoiceEmailBatchService(db=db, cipher=get_secret_cipher()).confirm(
+            token=str(payload.get("review_token") or ""), actor=user.username,
+        )
+    except InvoiceEmailBatchError as exc:
+        db.rollback()
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    write_audit_log(
+        db, site=None, actor=user.username, source="hub-web", action="confirm-invoice-email-batch",
+        result="ok", detail=f"Confirmed invoice email batch {batch.id}; recipients and content are not retained in the audit log.",
+    )
+    db.commit()
+    if batch.status == "queued":
+        background_tasks.add_task(run_invoice_email_batch, batch.id)
+    return JSONResponse({"batch_id": batch.id}, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/finance/invoices/email-batches/{batch_id}", response_class=JSONResponse)
+def invoice_email_batch_status(batch_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    user = _require_hub_admin(request)
+    try:
+        status = HubInvoiceEmailBatchService(db=db, cipher=get_secret_cipher()).status(
+            batch_id=batch_id, actor=user.username,
+        )
+    except InvoiceEmailBatchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(status, headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/finance/{module_key}", response_class=HTMLResponse)
 def finance_documents_page(
     module_key: str,
@@ -1261,29 +1801,61 @@ def finance_documents_page(
     db: Annotated[Session, Depends(get_db)],
     created: bool = False,
     deleted: bool = False,
+    page: int = 1,
 ):
     _require_hub_admin(request)
     module = _finance_document_module(module_key)
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    invoice_page = service.list_invoice_page(page=page) if module.is_invoice else None
     return templates.TemplateResponse(
         request,
         "finance_documents.html",
         {
             "module": module,
-            "entries": HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).list_documents(module=module),
+            "entries": invoice_page.entries if invoice_page else service.list_documents(module=module),
+            "invoice_page": invoice_page,
+            "invoice_page_links": range(max(1, invoice_page.page - 2), min(invoice_page.page_count, invoice_page.page + 2) + 1) if invoice_page else (),
             "created": created,
             "deleted": deleted,
+            "csrf_token": get_csrf_token(request),
         },
     )
 
 
 @router.get("/finance/{module_key}/new", response_class=HTMLResponse)
-def new_finance_document_page(module_key: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+def new_finance_document_page(
+    module_key: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    customer_id: int | None = None,
+    invoice_id: int | None = None,
+):
     _require_hub_admin(request)
-    return templates.TemplateResponse(request, "finance_document_create.html", _finance_document_create_context(request, db, module=_finance_document_module(module_key)))
+    module = _finance_document_module(module_key)
+    try:
+        context = _finance_document_create_context(
+            request,
+            db,
+            module=module,
+            selected_customer_id=customer_id,
+            source_invoice_id=invoice_id,
+        )
+    except HubFinanceDocumentError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return templates.TemplateResponse(
+        request,
+        "finance_document_create.html",
+        context,
+    )
 
 
 @router.post("/finance/{module_key}")
-async def create_finance_document_page(module_key: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+async def create_finance_document_page(
+    module_key: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
     form = await request.form()
     require_csrf(request, str(form.get("csrf_token") or ""))
     user = _require_hub_admin(request)
@@ -1292,6 +1864,7 @@ async def create_finance_document_page(module_key: str, request: Request, db: An
     customer_id = _optional_form_id(form.get("customer_id"))
     contact_id = _optional_form_id(form.get("contact_id"))
     link_id = _optional_form_id(form.get("linked_record_id"))
+    pdf_template_id = _optional_form_id(form.get("pdf_template_id"))
     try:
         document = HubFinanceDocumentService(db=db, cipher=get_secret_cipher()).create_document(
             module=module,
@@ -1299,7 +1872,14 @@ async def create_finance_document_page(module_key: str, request: Request, db: An
             contact_id=contact_id,
             link_id=link_id,
             submitted_values=submitted_values,
+            pdf_template_id=pdf_template_id,
         )
+        generation_token = None
+        if module.key in {"orders", "invoices", "dunnings"}:
+            generation_token = HubFinancePdfService(db=db, cipher=get_secret_cipher()).queue(
+                document_type=module.key,
+                document_id=document.id,
+            )
     except (ValueError, HubFinanceDocumentError) as exc:
         db.rollback()
         return templates.TemplateResponse(
@@ -1312,6 +1892,7 @@ async def create_finance_document_page(module_key: str, request: Request, db: An
                 selected_customer_id=customer_id,
                 selected_contact_id=contact_id,
                 selected_link_id=link_id,
+                selected_pdf_template_id=pdf_template_id,
                 submitted_values=submitted_values,
                 error=str(exc),
             ),
@@ -1319,6 +1900,8 @@ async def create_finance_document_page(module_key: str, request: Request, db: An
         )
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"create-finance-{module.key}", result="ok", detail=f"Created Finance {module.singular} {document.id}; document data is not retained in the audit log.")
     db.commit()
+    if generation_token:
+        background_tasks.add_task(run_finance_pdf_generation, generation_token)
     return RedirectResponse(url=f"/finance/{module.key}/{document.id}", status_code=303)
 
 
@@ -1374,8 +1957,110 @@ def finance_invoice_pdf_preview(invoice_id: int, request: Request, db: Annotated
     )
 
 
+@router.get("/finance/orders/{order_id}/pdf")
+def finance_order_pdf_preview(order_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    _require_hub_admin(request)
+    service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    try:
+        pdf, content = service.load_order_pdf(order_id=order_id)
+    except HubFinanceDocumentError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type=pdf.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(pdf.filename, safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/finance/{document_type}/{document_id}/generated-pdf")
+def finance_generated_pdf_preview(
+    document_type: str,
+    document_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    try:
+        pdf, content = HubFinancePdfService(db=db, cipher=get_secret_cipher()).load(
+            document_type=document_type,
+            document_id=document_id,
+        )
+    except HubFinancePdfError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type=pdf.content_type,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f"inline; filename*=UTF-8''{quote(pdf.filename or 'beleg.pdf', safe='')}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get("/finance/{document_type}/{document_id}/generated-pdf/status")
+def finance_generated_pdf_status(
+    document_type: str,
+    document_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    try:
+        view = HubFinancePdfService(db=db, cipher=get_secret_cipher()).view(
+            document_type=document_type,
+            document_id=document_id,
+        )
+    except HubFinancePdfError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": view.status if view else "missing"}
+
+
+@router.post("/finance/{document_type}/{document_id}/generated-pdf")
+async def regenerate_finance_pdf(
+    document_type: str,
+    document_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        generation_token = HubFinancePdfService(db=db, cipher=get_secret_cipher()).queue(
+            document_type=document_type,
+            document_id=document_id,
+        )
+    except HubFinancePdfError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action=f"generate-finance-{document_type}-pdf",
+        result="queued",
+        detail=f"Queued generated PDF for {document_type} {document_id}.",
+    )
+    db.commit()
+    background_tasks.add_task(run_finance_pdf_generation, generation_token)
+    return RedirectResponse(url=f"/finance/{document_type}/{document_id}", status_code=303)
+
+
 @router.post("/finance/{module_key}/{document_id}/fields")
-async def update_finance_document_fields(module_key: str, document_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+async def update_finance_document_fields(
+    module_key: str,
+    document_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[Session, Depends(get_db)],
+):
     form = await request.form()
     require_csrf(request, str(form.get("csrf_token") or ""))
     user = _require_hub_admin(request)
@@ -1388,13 +2073,22 @@ async def update_finance_document_fields(module_key: str, document_id: int, requ
             contact_id=_optional_form_id(form.get("contact_id")),
             link_id=_optional_form_id(form.get("linked_record_id")),
             submitted_values=_finance_submitted_values(form, prefix="document_"),
+            pdf_template_id=_optional_form_id(form.get("pdf_template_id")),
         )
+        generation_token = None
+        if module.key in {"orders", "invoices", "dunnings"}:
+            generation_token = HubFinancePdfService(db=db, cipher=get_secret_cipher()).queue(
+                document_type=module.key,
+                document_id=document.id,
+            )
     except (ValueError, HubFinanceDocumentError) as exc:
         db.rollback()
         query = urlencode({"fields": "error", "fields_message": str(exc)})
         return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}", status_code=303)
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"update-finance-{module.key}", result="ok", detail=f"Updated Finance {module.singular} {document.id}; document data is not retained in the audit log.")
     db.commit()
+    if generation_token:
+        background_tasks.add_task(run_finance_pdf_generation, generation_token)
     query = urlencode({"fields": "success", "fields_message": "Die Daten wurden im Hub gespeichert."})
     return RedirectResponse(url=f"/finance/{module.key}/{document_id}?{query}#finance-document-fields", status_code=303)
 
@@ -1440,6 +2134,42 @@ async def delete_finance_document(module_key: str, document_id: int, request: Re
     write_audit_log(db, site=None, actor=user.username, source="hub-web", action=f"delete-finance-{module.key}", result="ok", detail=f"Deleted Finance {module.singular} {document.id}; no Zoho Books record was changed.")
     db.commit()
     return RedirectResponse(url=f"/finance/{module.key}?deleted=true", status_code=303)
+
+
+@router.get("/activities/{activity_kind}/{activity_id}", response_class=HTMLResponse)
+def customer_activity_permalink(
+    activity_kind: str,
+    activity_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    models = {
+        "call": CustomerCallActivity,
+        "meeting": CustomerMeetingActivity,
+        "task": CustomerTaskActivity,
+    }
+    model = models.get(activity_kind)
+    activity = db.get(model, activity_id) if model is not None else None
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Activity not found.")
+    if activity.customer_id is not None:
+        return RedirectResponse(
+            url=f"/customers/{activity.customer_id}#{activity_kind}-{activity.id}",
+            status_code=302,
+        )
+    if activity.lead_id is not None:
+        return RedirectResponse(url=f"/leads/{activity.lead_id}#{activity_kind}-{activity.id}", status_code=302)
+    if activity_kind != "task":
+        local_date = activity.starts_at.replace(tzinfo=UTC).astimezone(ZoneInfo("Europe/Berlin")).date()
+        return RedirectResponse(
+            url=f"/calendar?week={local_date.isoformat()}#{activity_kind}-{activity.id}",
+            status_code=302,
+        )
+    return templates.TemplateResponse(
+        request,
+        "customer_activity_standalone.html",
+        {"activity": activity},
+    )
 
 
 @router.get("/calendar", response_class=HTMLResponse)
@@ -1548,9 +2278,13 @@ def schedule_calendar_activity(
     direction: Annotated[str, Form()] = "outbound",
     start_date: Annotated[str, Form()] = "",
     start_time: Annotated[str, Form()] = "",
+    due_date: Annotated[str, Form()] = "",
+    due_time: Annotated[str, Form()] = "",
     duration_minutes: Annotated[str, Form()] = "60",
     reminder_channels: Annotated[list[str] | None, Form()] = None,
     reminder_minutes_before: Annotated[list[str] | None, Form()] = None,
+    reminder_channel: Annotated[str, Form()] = "email",
+    task_reminder_minutes_before: Annotated[str, Form()] = "0",
     description: Annotated[str, Form()] = "",
     week: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
@@ -1580,6 +2314,22 @@ def schedule_calendar_activity(
             )
             action = "schedule-calendar-call"
             message = "Anruf wurde im Kalender geplant."
+        elif activity_kind == "task":
+            if selected_customer_id is None:
+                raise CustomerActivityError("Bitte einen Kunden für die Aufgabe auswählen.")
+            activity = service.schedule_task(
+                customer_id=selected_customer_id,
+                actor=user.username,
+                name=name,
+                status=status,
+                due_date=due_date,
+                due_time=due_time,
+                reminder_channel=reminder_channel,
+                reminder_minutes_before=task_reminder_minutes_before,
+                description=description,
+            )
+            action = "schedule-calendar-task"
+            message = "Aufgabe wurde angelegt."
         elif activity_kind == "meeting":
             activity = service.schedule_meeting(
                 customer_id=selected_customer_id,
@@ -1611,6 +2361,8 @@ def schedule_calendar_activity(
         detail=f"Scheduled calendar {activity_kind} {activity.id} for customer {selected_customer_id or 'none'}; description is not retained in the audit log.",
     )
     db.commit()
+    if activity_kind == "task":
+        return _customer_activity_redirect(selected_customer_id, "success", message)
     return _calendar_redirect(week_start, "success", message)
 
 
@@ -1993,11 +2745,29 @@ def mailbox_page(
         cipher=get_secret_cipher(),
         public_base_url=get_settings().public_base_url,
     ).get_view(folder=folder, unread_only=unread, selected_key=selected)
+    mailbox_sync_failures = HubMailboxImapSyncService(
+        db=db, cipher=get_secret_cipher(), public_base_url=get_settings().public_base_url,
+    ).list_failed_messages()
+    mailbox_sync_warnings = tuple(
+        (email_address, HubMailboxHealthService._alert_reason(state=state, now=datetime.now(UTC)))
+        for state, email_address in db.execute(
+            select(HubMailboxImapSyncState, HubMailboxAccount.email_address)
+            .join(HubMailboxAccount)
+            .where(
+                HubMailboxImapSyncState.folder == "INBOX",
+                HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.verified_at.is_not(None),
+            )
+        ).all()
+        if HubMailboxHealthService._alert_reason(state=state, now=datetime.now(UTC)) is not None
+    )
     return templates.TemplateResponse(
         request,
         "emails.html",
         {
             "mailbox": mailbox,
+            "mailbox_sync_failures": mailbox_sync_failures,
+            "mailbox_sync_warnings": mailbox_sync_warnings,
             "linked_case": _mailbox_linked_case(db, mailbox.selected),
             "folder": folder,
             "unread": unread,
@@ -2028,6 +2798,7 @@ def email_template_management_page(
             "module": email_template.module,
             "category": email_template.category or email_template.module or "Weitere Vorlagen",
             "compiler_mode": email_template.compiler_mode,
+            "context_module": email_template.context_module,
         }
         for email_template in email_templates
     )
@@ -2044,6 +2815,8 @@ def email_template_management_page(
         {
             "template_library_templates": template_library_templates,
             "selected_template": selected_template,
+            "template_placeholders": email_placeholders(),
+            "email_template_contexts": EMAIL_TEMPLATE_CONTEXTS,
             "selected_template_id": selected_template_id,
             "template_state": state if state in {"success", "error"} else "",
             "template_message": message[:500] if state in {"success", "error"} else "",
@@ -2060,6 +2833,7 @@ def update_email_template(
     name: Annotated[str, Form()] = "",
     subject: Annotated[str, Form()] = "",
     content: Annotated[str, Form()] = "",
+    context_module: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
@@ -2070,6 +2844,7 @@ def update_email_template(
             name=name,
             subject=subject,
             content=content,
+            context_module=context_module,
         )
     except ValueError as exc:
         db.rollback()
@@ -3154,6 +3929,8 @@ def customer_detail_page(
     call_start = suggested_call_start(berlin_now).replace(tzinfo=None)
     task_default_date = _next_task_due_date(berlin_now)
     activity_service = CustomerActivityService(db=db)
+    finance_service = HubFinanceService(db=db, cipher=cipher)
+    finance_document_service = HubFinanceDocumentService(db=db, cipher=cipher)
     return templates.TemplateResponse(
         request,
         "customer_detail.html",
@@ -3173,6 +3950,19 @@ def customer_detail_page(
             "activity_meetings": activity_service.list_meetings(customer_id=customer_id),
             "activity_state": activity_state,
             "activity_message": activity_message[:500] if activity_state else "",
+            "customer_finance_offers": finance_service.list_customer_offers(customer_id=customer_id),
+            "customer_finance_orders": finance_document_service.list_customer_documents(
+                module=ORDER_MODULE, customer_id=customer_id
+            ),
+            "customer_finance_invoices": finance_document_service.list_customer_documents(
+                module=INVOICE_MODULE, customer_id=customer_id
+            ),
+            "customer_finance_recurring_invoices": finance_document_service.list_customer_documents(
+                module=RECURRING_INVOICE_MODULE, customer_id=customer_id
+            ),
+            "customer_finance_dunnings": finance_document_service.list_customer_documents(
+                module=DUNNING_MODULE, customer_id=customer_id
+            ),
             "call_status_options": CALL_STATUS_OPTIONS,
             "call_direction_options": CALL_DIRECTION_OPTIONS,
             "call_duration_options": CALL_DURATION_OPTIONS,
@@ -3223,6 +4013,29 @@ async def update_customer_fields(
         for key, value in form.multi_items()
         if isinstance(value, str)
     }
+    customer = db.get(Customer, customer_id)
+    if customer is not None and not customer.zoho_id:
+        try:
+            customer = CustomerDirectoryService(db=db, cipher=get_secret_cipher()).update_hub_customer(
+                customer_id=customer_id,
+                submitted_values=submitted_values,
+            )
+        except ValueError as exc:
+            db.rollback()
+            query = urlencode({"fields": "error", "fields_message": str(exc)})
+            return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="hub-web",
+            action="update-hub-customer-fields",
+            result="ok",
+            detail=f"Updated Hub Customer {customer.id}; customer data is not retained in the audit log.",
+        )
+        db.commit()
+        query = urlencode({"fields": "success", "fields_message": "Kundendaten wurden im Hub gespeichert."})
+        return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
     try:
         customer = ZohoCrmService(
             db=db,
@@ -6087,7 +6900,11 @@ def _contact_create_context(
     selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
     return {
         "customers": customers,
-        "fields": ZOHO_CONTACT_FIELDS,
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=CONTACT_FIELDS_LAYOUT_KEY,
+            fields=ZOHO_CONTACT_FIELDS,
+        ),
         "selected_customer_id": selected_customer_id,
         "selected_customer": selected_customer,
         "submitted_values": submitted_values or {},
@@ -6108,10 +6925,17 @@ def _case_create_context(
     service = HubCaseService(db=db, cipher=get_secret_cipher())
     values = service.new_form_values()
     values.update(submitted_values or {})
+    customers = service.list_linkable_customers()
+    selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
     return {
-        "fields": HUB_CASE_FIELDS,
-        "customers": service.list_linkable_customers(),
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=CASE_FIELDS_LAYOUT_KEY,
+            fields=HUB_CASE_FIELDS,
+        ),
+        "customers": customers,
         "selected_customer_id": selected_customer_id,
+        "selected_customer": selected_customer,
         "source_email": source_email,
         "submitted_values": values,
         "error": error,
@@ -6129,7 +6953,11 @@ def _finance_article_create_context(
     values = HubFinanceService(db=db, cipher=get_secret_cipher()).new_article_values()
     values.update(submitted_values or {})
     return {
-        "fields": ARTICLE_FIELDS,
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=ARTICLE_FIELDS_LAYOUT_KEY,
+            fields=ARTICLE_FIELDS,
+        ),
         "submitted_values": values,
         "error": error,
         "csrf_token": get_csrf_token(request),
@@ -6161,23 +6989,35 @@ def _finance_offer_create_context(
     *,
     selected_customer_id: int | None = None,
     selected_contact_id: int | None = None,
+    selected_pdf_template_id: int | None = None,
     submitted_values: dict[str, str] | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
     service = HubFinanceService(db=db, cipher=get_secret_cipher())
     values = service.new_offer_values()
     values.update(submitted_values or {})
+    pdf_templates = HubPdfTemplateService(db=db).list_templates(document_type="offers")
+    customers = service.list_linkable_customers()
+    selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
     return {
-        "fields": OFFER_FIELDS,
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=OFFER_FIELDS_LAYOUT_KEY,
+            fields=OFFER_FIELDS,
+        ),
         "articles": service.article_options(),
-        "customers": service.list_linkable_customers(),
+        "customers": customers,
         "contacts": service.list_linkable_contacts(),
         "selected_customer_id": selected_customer_id,
+        "selected_customer": selected_customer,
         "selected_contact_id": selected_contact_id,
+        "pdf_templates": pdf_templates,
+        "selected_pdf_template_id": selected_pdf_template_id or next((item.id for item in pdf_templates if item.is_default), None),
         "submitted_values": values,
         "line_rows": _finance_offer_line_form_rows(values),
         "error": error,
         "csrf_token": get_csrf_token(request),
+        **_finance_position_preset_context(db, SALES_POSITION_PRESET_LIBRARY),
     }
 
 
@@ -6206,17 +7046,24 @@ def _finance_offer_detail_context(
         })
     if not line_rows:
         line_rows = _finance_offer_line_form_rows(service.new_offer_values())
+    pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type="offers")
     return {
         "detail": detail,
         "articles": service.article_options(),
         "customers": service.list_linkable_customers(),
         "contacts": service.list_linkable_contacts(),
         "line_rows": line_rows,
+        "pdf_templates": pdf_templates,
+        "selected_pdf_template_id": detail.offer.pdf_template_id or next((item.id for item in pdf_templates if item.is_default), None),
+        "generated_pdf": HubFinancePdfService(db=service.db, cipher=get_secret_cipher()).view(
+            document_type="offers", document_id=detail.offer.id
+        ),
         "fields_state": fields if fields in {"success", "error"} else "",
         "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
         "layout_state": layout if layout in {"success", "error"} else "",
         "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
+        **_finance_position_preset_context(service.db, SALES_POSITION_PRESET_LIBRARY),
     }
 
 
@@ -6248,6 +7095,45 @@ def _finance_document_module(module_key: str):
     return module
 
 
+def _finance_position_preset_library(module: object) -> str | None:
+    if module.key == "orders":
+        return SALES_POSITION_PRESET_LIBRARY
+    if module.key == "invoices":
+        return INVOICE_POSITION_PRESET_LIBRARY
+    return None
+
+
+def _finance_position_preset_json(preset: FinancePositionPresetView) -> dict[str, object]:
+    return {
+        "id": preset.id,
+        "name": preset.name,
+        "line_count": preset.line_count,
+        "lines": [dict(line) for line in preset.lines],
+    }
+
+
+def _finance_position_preset_context(db: Session, library_key: str | None) -> dict[str, object]:
+    if library_key is None:
+        return {
+            "finance_position_preset_library_key": None,
+            "finance_position_preset_library_label": "",
+            "finance_position_presets": (),
+            "finance_position_presets_json": [],
+        }
+    presets = HubFinancePositionPresetService(
+        db=db,
+        cipher=get_secret_cipher(),
+    ).list_presets(library_key=library_key)
+    return {
+        "finance_position_preset_library_key": library_key,
+        "finance_position_preset_library_label": POSITION_PRESET_LIBRARIES[library_key],
+        "finance_position_presets": presets,
+        "finance_position_presets_json": [
+            _finance_position_preset_json(preset) for preset in presets
+        ],
+    }
+
+
 def _finance_document_create_context(
     request: Request,
     db: Session,
@@ -6256,26 +7142,58 @@ def _finance_document_create_context(
     selected_customer_id: int | None = None,
     selected_contact_id: int | None = None,
     selected_link_id: int | None = None,
+    selected_pdf_template_id: int | None = None,
+    source_invoice_id: int | None = None,
     submitted_values: dict[str, str] | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
     service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
     values = service.new_form_values(module=module)
+    source_invoice = None
+    if module is DUNNING_MODULE and source_invoice_id is not None:
+        source_invoice = service.dunning_draft_from_invoice(invoice_id=source_invoice_id)
+        selected_customer_id = source_invoice.customer_id
+        selected_contact_id = source_invoice.contact_id
+        selected_link_id = source_invoice.invoice_id
+        values.update(source_invoice.submitted_values)
     values.update(submitted_values or {})
+    if module.is_recurring:
+        count = values.get("document_field__custom_interval_count", "")
+        unit = values.get("document_field__custom_interval_unit", "")
+        values["document_field__custom_interval"] = f"{count}:{unit}" if count or unit else ""
+        due_count = values.get("document_field__payment_due_count", "")
+        due_unit = values.get("document_field__payment_due_unit", "")
+        values["document_field__payment_due"] = f"{due_count}:{due_unit}" if due_count or due_unit else ""
+    template_type = "invoices" if module.is_recurring else module.key
+    pdf_templates = HubPdfTemplateService(db=db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings"} else ()
+    customers = service.list_linkable_customers()
+    selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
     return {
         "module": module,
-        "fields": module.fields,
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=module.layout_key,
+            fields=module.fields,
+        ),
         "articles": service.article_options(),
-        "customers": service.list_linkable_customers(),
+        "customers": customers,
         "contacts": service.list_linkable_contacts(),
         "link_options": service.link_options(module=module),
         "selected_customer_id": selected_customer_id,
+        "selected_customer": selected_customer,
         "selected_contact_id": selected_contact_id,
         "selected_link_id": selected_link_id,
+        "source_invoice": source_invoice,
+        "pdf_templates": pdf_templates,
+        "selected_pdf_template_id": selected_pdf_template_id or next((item.id for item in pdf_templates if item.is_default), None),
         "submitted_values": values,
         "line_rows": _finance_document_line_form_rows(values),
         "error": error,
         "csrf_token": get_csrf_token(request),
+        **_finance_position_preset_context(
+            db,
+            _finance_position_preset_library(module),
+        ),
     }
 
 
@@ -6305,6 +7223,8 @@ def _finance_document_detail_context(
         for line in detail.lines
     ] or _finance_document_line_form_rows(service.new_form_values(module=module))
     selected_link_id = getattr(detail.document, f"{module.link_attribute}_id", None) if module.link_attribute else None
+    template_type = "invoices" if module.is_recurring else module.key
+    pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings"} else ()
     return {
         "module": module,
         "detail": detail,
@@ -6314,11 +7234,20 @@ def _finance_document_detail_context(
         "link_options": service.link_options(module=module),
         "selected_link_id": selected_link_id,
         "line_rows": line_rows,
+        "pdf_templates": pdf_templates,
+        "selected_pdf_template_id": getattr(detail.document, "pdf_template_id", None) or next((item.id for item in pdf_templates if item.is_default), None),
+        "generated_pdf": HubFinancePdfService(db=service.db, cipher=get_secret_cipher()).view(
+            document_type=module.key, document_id=detail.document.id
+        ) if module.key in {"orders", "invoices", "dunnings"} else None,
         "fields_state": fields if fields in {"success", "error"} else "",
         "fields_message": fields_message[:500] if fields in {"success", "error"} else "",
         "layout_state": layout if layout in {"success", "error"} else "",
         "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
+        **_finance_position_preset_context(
+            service.db,
+            _finance_position_preset_library(module),
+        ),
     }
 
 
@@ -6366,7 +7295,11 @@ def _lead_create_context(
     values = HubLeadService(db=db, cipher=get_secret_cipher()).new_form_values()
     values.update(submitted_values or {})
     return {
-        "fields": HUB_LEAD_FIELDS,
+        "fields": _ordered_layout_fields(
+            db,
+            layout_key=LEAD_FIELDS_LAYOUT_KEY,
+            fields=HUB_LEAD_FIELDS,
+        ),
         "subforms": HUB_LEAD_SUBFORMS,
         "submitted_values": values,
         "error": error,

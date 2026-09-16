@@ -12,12 +12,15 @@ class HubLeadNote(TimestampMixin, Base):
     __tablename__ = "hub_lead_notes"
     __table_args__ = (
         UniqueConstraint("lead_id", "zoho_note_id", name="uq_hub_lead_notes_lead_id_zoho_note_id"),
+        UniqueConstraint("lead_id", "source_system", "source_external_id", name="uq_hub_lead_notes_source_external"),
         Index("ix_hub_lead_notes_lead_created_at", "lead_id", "zoho_created_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     lead_id: Mapped[int] = mapped_column(ForeignKey("hub_leads.id", ondelete="CASCADE"), nullable=False, index=True)
     zoho_note_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    source_system: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     encrypted_payload_json: Mapped[str] = mapped_column(Text(), nullable=False)
     created_by_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     zoho_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

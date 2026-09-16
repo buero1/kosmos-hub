@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.hub_access_token import HubAccessToken
+from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.email_compose_image import EmailComposeImage
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
@@ -29,6 +30,7 @@ _SETUP_TOKEN_LIFETIME = timedelta(minutes=20)
 _USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _MCP_TOKEN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{2,79}$")
 _MCP_TOKEN_PREFIX = "khmcp_"
+_INTEGRATION_TOKEN_PREFIX = "khint_"
 _DESKTOP_DEVICE_TOKEN_PREFIX = "khdsk_"
 HUB_USER_ROLES = ("admin", "viewer")
 
@@ -83,6 +85,7 @@ class HubAccountService:
         role: str,
         password: str = "",
         password_confirmation: str = "",
+        reminder_email: str | None = None,
     ) -> HubUser:
         user = self.get_user(user_id)
         if user is None:
@@ -92,6 +95,11 @@ class HubAccountService:
         normalized_role = role.strip().casefold()
         if normalized_role not in HUB_USER_ROLES:
             raise ValueError("Bitte eine gültige Benutzerrolle auswählen.")
+        normalized_reminder_email = (
+            self._normalize_reminder_email(reminder_email, allow_empty=True)
+            if reminder_email is not None
+            else None
+        )
         if self.db.scalar(
             select(HubUser.id).where(HubUser.username == normalized_username).where(HubUser.id != user.id)
         ) is not None:
@@ -107,6 +115,8 @@ class HubAccountService:
 
         user.username = normalized_username
         user.role = normalized_role
+        if reminder_email is not None:
+            user.reminder_email = normalized_reminder_email
         self.db.flush()
         return user
 
@@ -121,6 +131,7 @@ class HubAccountService:
             self.db.scalars(select(EmailComposeImage.storage_key).where(EmailComposeImage.created_by_user_id == user.id))
         )
         self.db.execute(delete(HubAccessToken).where(HubAccessToken.user_id == user.id))
+        self.db.execute(delete(HubIntegrationToken).where(HubIntegrationToken.user_id == user.id))
         self.db.execute(delete(HubDesktopDevice).where(HubDesktopDevice.user_id == user.id))
         self.db.execute(delete(CustomerActivityReminderNotification).where(CustomerActivityReminderNotification.user_id == user.id))
         self.db.execute(delete(EmailComposeImage).where(EmailComposeImage.created_by_user_id == user.id))
@@ -214,12 +225,19 @@ class HubAccountService:
         self.db.commit()
 
     def configure_reminder_email(self, *, user: HubUser, reminder_email: str) -> HubUser:
-        _name, parsed_email = parseaddr(reminder_email.strip())
-        if not parsed_email or "@" not in parsed_email or len(parsed_email) > 320:
-            raise ValueError("Bitte eine gültige E-Mail-Adresse für Erinnerungen eingeben.")
-        user.reminder_email = parsed_email.casefold()
+        user.reminder_email = self._normalize_reminder_email(reminder_email, allow_empty=False)
         self.db.flush()
         return user
+
+    @staticmethod
+    def _normalize_reminder_email(reminder_email: str, *, allow_empty: bool) -> str | None:
+        value = reminder_email.strip()
+        if not value and allow_empty:
+            return None
+        _name, parsed_email = parseaddr(value)
+        if not parsed_email or "@" not in parsed_email or len(parsed_email) > 320:
+            raise ValueError("Bitte eine gültige E-Mail-Adresse für Erinnerungen eingeben.")
+        return parsed_email.casefold()
 
     def list_mcp_access_tokens(self, *, user: HubUser) -> list[HubAccessToken]:
         statement = (
@@ -228,6 +246,15 @@ class HubAccountService:
             .order_by(HubAccessToken.created_at.desc())
         )
         return list(self.db.scalars(statement))
+
+    def list_integration_tokens(self, *, user: HubUser) -> list[HubIntegrationToken]:
+        return list(
+            self.db.scalars(
+                select(HubIntegrationToken)
+                .where(HubIntegrationToken.user_id == user.id)
+                .order_by(HubIntegrationToken.created_at.desc())
+            )
+        )
 
     def list_desktop_devices(self, *, user: HubUser) -> list[HubDesktopDevice]:
         statement = (
@@ -273,6 +300,34 @@ class HubAccountService:
         self.db.refresh(access_token)
         return access_token, token
 
+    def create_integration_token(
+        self,
+        *,
+        user: HubUser,
+        name: str,
+        source_key: str = "callapp",
+    ) -> tuple[HubIntegrationToken, str]:
+        normalized_name = self.normalize_mcp_token_name(name)
+        normalized_source = source_key.strip().casefold()
+        if normalized_source != "callapp":
+            raise ValueError("Diese Integration unterstützt derzeit nur CallApp.")
+        token = _INTEGRATION_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        access_token = HubIntegrationToken(
+            user_id=user.id,
+            name=normalized_name,
+            source_key=normalized_source,
+            token_prefix=token[:18],
+            token_digest=self._digest_token(token),
+        )
+        self.db.add(access_token)
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise ValueError("Eine Integration mit diesem Namen besteht bereits.") from None
+        self.db.refresh(access_token)
+        return access_token, token
+
     def authenticate_mcp_access_token(self, token: str) -> tuple[HubUser, HubAccessToken] | None:
         if not token.startswith(_MCP_TOKEN_PREFIX) or len(token) > 256:
             return None
@@ -289,6 +344,23 @@ class HubAccountService:
         if user is None or not user.is_active:
             return None
 
+        access_token.last_used_at = datetime.now(UTC)
+        self.db.commit()
+        return user, access_token
+
+    def authenticate_integration_token(self, token: str) -> tuple[HubUser, HubIntegrationToken] | None:
+        if not token.startswith(_INTEGRATION_TOKEN_PREFIX) or len(token) > 256:
+            return None
+        access_token = self.db.scalar(
+            select(HubIntegrationToken)
+            .where(HubIntegrationToken.token_digest == self._digest_token(token))
+            .where(HubIntegrationToken.revoked_at.is_(None))
+        )
+        if access_token is None:
+            return None
+        user = self.get_user(access_token.user_id)
+        if user is None or not user.is_active:
+            return None
         access_token.last_used_at = datetime.now(UTC)
         self.db.commit()
         return user, access_token
@@ -323,6 +395,19 @@ class HubAccountService:
         if access_token is None:
             raise ValueError("This active MCP token was not found.")
 
+        access_token.revoked_at = datetime.now(UTC)
+        self.db.commit()
+        return access_token
+
+    def revoke_integration_token(self, *, user: HubUser, token_id: int) -> HubIntegrationToken:
+        access_token = self.db.scalar(
+            select(HubIntegrationToken)
+            .where(HubIntegrationToken.id == token_id)
+            .where(HubIntegrationToken.user_id == user.id)
+            .where(HubIntegrationToken.revoked_at.is_(None))
+        )
+        if access_token is None:
+            raise ValueError("Diese aktive Integration wurde nicht gefunden.")
         access_token.revoked_at = datetime.now(UTC)
         self.db.commit()
         return access_token
