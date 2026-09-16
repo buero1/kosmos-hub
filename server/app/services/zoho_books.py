@@ -347,6 +347,61 @@ class ZohoBooksService:
             raise ZohoBooksError("Zoho Books hat keine gültigen Daten der periodischen Rechnung zurückgegeben.")
         return recurring_invoice
 
+    def list_all_sales_order_ids(self) -> tuple[str, ...]:
+        """Return every accessible Books sales order ID, newest first."""
+        return tuple(
+            str(row.get("salesorder_id") or "").strip()
+            for row in self.list_all_sales_orders()
+        )
+
+    def list_all_sales_orders(self) -> tuple[dict[str, object], ...]:
+        """Return the lightweight Books order rows needed to create an import batch."""
+        connection = self._require_import_connection()
+        result: list[dict[str, object]] = []
+        seen: set[str] = set()
+        per_page = 200
+        for page in range(1, 10_001):
+            query = urlencode(
+                {
+                    "organization_id": connection.organization_id or "",
+                    "page": str(page),
+                    "per_page": str(per_page),
+                    "sort_column": "date",
+                    "sort_order": "D",
+                }
+            )
+            response = self._api_get(connection, f"/books/v3/salesorders?{query}")
+            rows = response.get("salesorders")
+            if not isinstance(rows, list):
+                raise ZohoBooksError("Zoho Books hat keine gültige Auftragsliste zurückgegeben.")
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                sales_order_id = str(row.get("salesorder_id") or "").strip()
+                if sales_order_id and sales_order_id not in seen:
+                    seen.add(sales_order_id)
+                    result.append(dict(row))
+
+            page_context = response.get("page_context")
+            has_more = (
+                str(page_context.get("has_more_page", "")).strip().casefold() in {"true", "1", "yes"}
+                if isinstance(page_context, dict)
+                else len(rows) >= per_page
+            )
+            if not has_more:
+                return tuple(result)
+        raise ZohoBooksError("Zoho Books liefert ungewöhnlich viele Auftragsseiten. Der Import wurde nicht gestartet.")
+
+    def get_sales_order(self, *, sales_order_id: str) -> dict[str, object]:
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(sales_order_id, "Auftrag")
+        query = urlencode({"organization_id": connection.organization_id or ""})
+        response = self._api_get(connection, f"/books/v3/salesorders/{normalized_id}?{query}")
+        sales_order = response.get("salesorder")
+        if not isinstance(sales_order, dict):
+            raise ZohoBooksError("Zoho Books hat keine gültigen Auftragsdaten zurückgegeben.")
+        return sales_order
+
     def get_books_contact(self, *, contact_id: str) -> dict[str, object]:
         """Resolve a Books customer to its linked CRM account and contact IDs."""
         connection = self._require_import_connection()
@@ -366,6 +421,16 @@ class ZohoBooksService:
         download = self._api_get_binary(connection, f"/books/v3/invoices/{normalized_id}?{query}")
         if download.content_type != "application/pdf" or not download.content.startswith(b"%PDF-"):
             raise ZohoBooksError("Zoho Books hat für diese Rechnung keine PDF-Datei zurückgegeben.")
+        return download
+
+    def download_sales_order_pdf(self, *, sales_order_id: str) -> ZohoBinaryDownload:
+        """Fetch the PDF for one sales order that already exists in the Hub."""
+        connection = self._require_import_connection()
+        normalized_id = self._numeric_identifier(sales_order_id, "Auftrag")
+        query = urlencode({"organization_id": connection.organization_id or "", "accept": "pdf"})
+        download = self._api_get_binary(connection, f"/books/v3/salesorders/{normalized_id}?{query}")
+        if download.content_type != "application/pdf" or not download.content.startswith(b"%PDF-"):
+            raise ZohoBooksError("Zoho Books hat für diesen Auftrag keine PDF-Datei zurückgegeben.")
         return download
 
     def record_error(self, message: str) -> None:

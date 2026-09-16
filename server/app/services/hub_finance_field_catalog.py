@@ -13,6 +13,9 @@ class HubFinanceField:
     options: tuple[tuple[str, str], ...] = ()
 
 
+FINANCE_POSITION_UNITS = ("Monatlich", "Einmalig", "Jährlich")
+
+
 ARTICLE_FIELDS = (
     HubFinanceField("name", "Name", "Text", required=True),
     HubFinanceField("sku", "Artikelnummer / SKU", "Text", required=True),
@@ -32,7 +35,7 @@ OFFER_FIELDS = (
     HubFinanceField("offer_date", "Angebotsdatum", "Datum", required=True),
     HubFinanceField("valid_until", "Gültig bis", "Datum", required=True),
     HubFinanceField("customer", "Kunde", "Verknuepfung", required=True),
-    HubFinanceField("contact", "Ansprechpartner", "Verknuepfung"),
+    HubFinanceField("contact", "Ansprechpartner", "Verknuepfung", required=True),
     HubFinanceField("reference", "Referenz", "Text"),
     HubFinanceField("currency", "Währung", "Auswahlliste", required=True, options=(("EUR", "EUR"), ("CHF", "CHF"), ("USD", "USD"))),
     HubFinanceField("payment_terms", "Zahlungsbedingungen", "Auswahlliste", options=(("due_on_receipt", "Sofort fällig"), ("14_days", "14 Tage"), ("30_days", "30 Tage"))),

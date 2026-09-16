@@ -1,0 +1,22 @@
+{% macro create_customer_link_panel(form_id, selected_customer) %}
+  <aside class="customer-detail-side-column" data-create-customer-link-panel data-create-customer-link-form="{{ form_id }}">
+    <article class="card customer-detail-panel">
+      <div class="customer-detail-panel-heading">
+        <div>
+          <p class="eyebrow">Hub-Daten</p>
+          <h3>Verknüpfung</h3>
+        </div>
+      </div>
+      <dl class="customer-fields-grid">
+        <div>
+          <dt>Kunde</dt>
+          <dd>
+            <a href="{% if selected_customer %}/customers/{{ selected_customer.id }}{% endif %}" data-create-customer-link{% if not selected_customer %} hidden{% endif %}>{{ selected_customer.name if selected_customer else "" }}</a>
+            <span data-create-customer-link-empty{% if selected_customer %} hidden{% endif %}>-</span>
+          </dd>
+        </div>
+        <div><dt>Quelle</dt><dd>Hub</dd></div>
+      </dl>
+    </article>
+  </aside>
+{% endmacro %}

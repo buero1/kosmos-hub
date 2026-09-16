@@ -254,7 +254,7 @@ class TaskEmailReminderService:
         _name, parsed_email = parseaddr(email)
         if not parsed_email or "@" not in parsed_email or len(parsed_email) > 320:
             raise TaskEmailReminderError(
-                "Für E-Mail-Erinnerungen zuerst unter Account eine persönliche Erinnerungsadresse speichern."
+                "Für E-Mail-Erinnerungen zuerst unter Account → Benutzer eine Erinnerungsadresse beim Benutzer speichern."
             )
         return parsed_email.casefold()
 
@@ -315,9 +315,11 @@ class TaskEmailReminderService:
 
     def _task_url(self, reminder: CustomerTaskEmailReminder) -> str | None:
         customer_url = self._customer_url(reminder)
-        if reminder.task_id is None or customer_url is None:
+        if reminder.task_id is None or not self.public_base_url:
             return None
-        return f"{customer_url}#task-{reminder.task_id}"
+        return f"{customer_url}#task-{reminder.task_id}" if customer_url else (
+            f"{self.public_base_url}/activities/task/{reminder.task_id}"
+        )
 
     @staticmethod
     def _hub_link(*, url: str, label: str) -> str:

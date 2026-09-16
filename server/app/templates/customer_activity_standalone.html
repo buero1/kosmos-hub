@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.name }} · Aufgabe · kosmos-hub{% endblock %}
+{% block content %}
+  <section class="card customer-detail-panel" aria-labelledby="activity-heading">
+    <p class="eyebrow">Aufgaben</p>
+    <h1 id="activity-heading">{{ activity.name }}</h1>
+    <p class="subtle">{% if activity.status == "planned" %}Geplant{% elif activity.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}{% if activity.due_at %} · {{ activity.due_at | berlin_time }}{% endif %}</p>
+    {% if activity.description %}<p class="customer-activity-entry-description">{{ activity.description }}</p>{% endif %}
+  </section>
+{% endblock %}

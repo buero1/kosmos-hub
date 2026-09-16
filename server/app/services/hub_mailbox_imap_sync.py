@@ -6,13 +6,17 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_import import HubMailboxImapImportItem
+from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
-from app.services.hub_mailbox_imap_import import HubMailboxImapImportService, HubMailboxImapImportError
+from app.services.hub_mailbox_imap_import import (
+    HubMailboxImapImportService, HubMailboxImapImportError, HubMailboxImapMessageError,
+)
 
 
 _FOLDERS = ("INBOX", "INBOX.Sent")
@@ -25,6 +29,17 @@ class HubMailboxImapSyncSummary:
     imported: int
     skipped: int
     failed: int
+
+
+@dataclass(frozen=True)
+class HubMailboxSyncFailureStatus:
+    id: int
+    mailbox_email: str
+    folder: str
+    imap_uid: str
+    error: str
+    attempts: int
+    last_failed_at: datetime
 
 
 class HubMailboxImapSyncService:
@@ -75,6 +90,20 @@ class HubMailboxImapSyncService:
                 for uid in batch_uids:
                     try:
                         raw_message, flags = self.importer._fetch_message(account=account, folder=folder, uid=uid)
+                    except HubMailboxImapMessageError as exc:
+                        self.db.rollback()
+                        self._record_message_failure(
+                            account_id=account.id, folder=folder, uid=uid, error=str(exc), state=state,
+                        )
+                        summary["failed"] += 1
+                        summary["checked"] += 1
+                        continue
+                    except HubMailboxImapImportError as exc:
+                        self.db.rollback()
+                        self._record_folder_error(state=state, error=str(exc))
+                        summary["failed"] += 1
+                        break
+                    try:
                         parsed = self.importer._parse_message(
                             raw_message=raw_message,
                             account=account,
@@ -82,20 +111,37 @@ class HubMailboxImapSyncService:
                             uid=uid,
                             flags=flags,
                         )
+                    except Exception as exc:
+                        self.db.rollback()
+                        self._record_message_failure(
+                            account_id=account.id, folder=folder, uid=uid,
+                            error=f"Nachricht konnte nicht gelesen werden ({type(exc).__name__}).",
+                            state=state,
+                        )
+                        summary["failed"] += 1
+                        summary["checked"] += 1
+                        continue
+                    try:
                         outcome, _attachment_count, _attachment_bytes = self.importer._store_message(parsed=parsed)
                         state.last_imap_uid = self._later_uid(state.last_imap_uid, uid)
                         self._record_folder_success(state=state)
                         self.db.commit()
-                    except (HubMailboxImapImportError, ValueError) as exc:
+                    except (DataError, ValueError) as exc:
                         self.db.rollback()
-                        self._record_folder_error(state=state, error=str(exc))
+                        self._record_message_failure(
+                            account_id=account.id, folder=folder, uid=uid,
+                            error=("Nachricht überschreitet eine Datenbank-Feldgröße."
+                                   if isinstance(exc, DataError) else str(exc)),
+                            state=state,
+                        )
                         summary["failed"] += 1
-                        break
-                    except Exception:
+                        summary["checked"] += 1
+                        continue
+                    except Exception as exc:
                         self.db.rollback()
                         self._record_folder_error(
                             state=state,
-                            error="Eine neue Mittwald-E-Mail konnte nicht sicher übernommen werden.",
+                            error=f"Eine neue Mittwald-E-Mail konnte nicht sicher übernommen werden ({type(exc).__name__}).",
                         )
                         summary["failed"] += 1
                         break
@@ -108,6 +154,79 @@ class HubMailboxImapSyncService:
                     self._record_folder_success(state=state)
                     self.db.commit()
         return HubMailboxImapSyncSummary(**summary)
+
+    def list_failed_messages(self) -> tuple[HubMailboxSyncFailureStatus, ...]:
+        rows = self.db.execute(
+            select(HubMailboxImapSyncFailure, HubMailboxAccount.email_address)
+            .join(HubMailboxAccount)
+            .where(HubMailboxImapSyncFailure.resolved_at.is_(None))
+            .order_by(HubMailboxImapSyncFailure.last_failed_at.desc())
+            .limit(100)
+        ).all()
+        return tuple(
+            HubMailboxSyncFailureStatus(
+                id=failure.id, mailbox_email=email, folder=failure.folder,
+                imap_uid=failure.imap_uid, error=failure.error,
+                attempts=failure.attempts, last_failed_at=failure.last_failed_at,
+            )
+            for failure, email in rows
+        )
+
+    def retry_failed_message(self, failure_id: int) -> bool:
+        failure = self.db.get(HubMailboxImapSyncFailure, failure_id)
+        if failure is None or failure.resolved_at is not None:
+            raise ValueError("Die fehlgeschlagene Nachricht wurde nicht gefunden.")
+        account = self.db.get(HubMailboxAccount, failure.mailbox_account_id)
+        if account is None:
+            raise ValueError("Das zugehörige Postfach wurde nicht gefunden.")
+        account_id, folder, uid = account.id, failure.folder, failure.imap_uid
+        try:
+            raw_message, flags = self.importer._fetch_message(account=account, folder=folder, uid=uid)
+            parsed = self.importer._parse_message(
+                raw_message=raw_message, account=account, folder=folder, uid=uid, flags=flags
+            )
+            self.importer._store_message(parsed=parsed)
+            failure.resolved_at = datetime.now(UTC)
+            failure.error = ""
+            self.db.commit()
+            return True
+        except Exception as exc:
+            self.db.rollback()
+            failure = self.db.get(HubMailboxImapSyncFailure, failure_id)
+            if failure is not None:
+                failure.attempts += 1
+                failure.last_failed_at = datetime.now(UTC)
+                failure.error = f"Erneuter Import fehlgeschlagen ({type(exc).__name__})."
+                self.db.commit()
+            return False
+
+    def _record_message_failure(
+        self, *, account_id: int, folder: str, uid: str, error: str, state: HubMailboxImapSyncState
+    ) -> None:
+        failure = self.db.scalar(
+            select(HubMailboxImapSyncFailure).where(
+                HubMailboxImapSyncFailure.mailbox_account_id == account_id,
+                HubMailboxImapSyncFailure.folder == folder,
+                HubMailboxImapSyncFailure.imap_uid == uid,
+            )
+        )
+        now = datetime.now(UTC)
+        if failure is None:
+            failure = HubMailboxImapSyncFailure(
+                mailbox_account_id=account_id, folder=folder, imap_uid=uid,
+                error=error[:1000], last_failed_at=now,
+            )
+            self.db.add(failure)
+        else:
+            failure.error = error[:1000]
+            failure.attempts += 1
+            failure.last_failed_at = now
+            failure.resolved_at = None
+            failure.alerted_at = None
+        refreshed = self.db.get(HubMailboxImapSyncState, state.id)
+        refreshed.last_imap_uid = self._later_uid(refreshed.last_imap_uid, uid)
+        self._record_folder_success(state=refreshed)
+        self.db.commit()
 
     def _state(self, *, account: HubMailboxAccount, folder: str) -> HubMailboxImapSyncState:
         state = self.db.scalar(

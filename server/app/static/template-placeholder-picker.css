@@ -1,0 +1,20 @@
+.template-placeholder-picker { display: grid; gap: 0.55rem; min-width: 0; }
+.template-placeholder-picker > strong { font-size: 0.88rem; }
+.template-placeholder-picker > p { margin: 0; font-size: 0.78rem; }
+.template-placeholder-controls { display: grid; grid-template-columns: minmax(10rem, 0.4fr) minmax(0, 0.6fr); gap: 0.55rem; }
+.template-placeholder-controls.is-contextual { grid-template-columns: minmax(10rem, 0.3fr) minmax(10rem, 0.3fr) minmax(0, 0.4fr); }
+.template-placeholder-controls label { display: grid; gap: 0.3rem; min-width: 0; font-size: 0.8rem; font-weight: 700; }
+.template-placeholder-controls input, .template-placeholder-controls select { width: 100%; min-width: 0; margin: 0; }
+.template-placeholder-field-wrap { position: relative; min-width: 0; }
+.template-placeholder-results { position: absolute; z-index: 20; top: calc(100% + 0.2rem); right: 0; left: 0; max-height: 16rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.16); }
+.template-placeholder-results[hidden] { display: none; }
+.template-placeholder-results button { display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; width: 100%; margin: 0; padding: 0.55rem 0.65rem; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+.template-placeholder-results button[hidden] { display: none; }
+.template-placeholder-results button:last-of-type { border-bottom: 0; }
+.template-placeholder-results button:hover, .template-placeholder-results button:focus-visible { background: var(--accent-soft); outline: none; }
+.template-placeholder-results button span { display: grid; gap: 0.1rem; min-width: 0; }
+.template-placeholder-results button small { color: var(--muted); font-size: 0.7rem; font-weight: 400; }
+.template-placeholder-results button code { flex: 0 1 auto; overflow: hidden; color: var(--accent); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.template-placeholder-results > p { margin: 0; padding: 0.65rem; }
+@media (max-width: 760px) { .template-placeholder-controls.is-contextual { grid-template-columns: 1fr; } }
+@media (max-width: 550px) { .template-placeholder-controls { grid-template-columns: 1fr; } }

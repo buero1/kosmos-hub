@@ -31,6 +31,29 @@ ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
 ZOHO_CASE_MODULE = "Cases"
 ZOHO_LEAD_MODULE = "Leads"
+ZOHO_ORDER_MODULE = "Auftraege"
+ZOHO_ORDER_IMPORT_FIELDS = (
+    "id",
+    "Name",
+    "Created_Time",
+    "Modified_Time",
+    "Aussendienst",
+    "Vertragsbeginn",
+    "Vertragsbemerkung",
+    "Vertragsdatum",
+    "Vertragslaufzeit",
+    "Zahlungsart",
+    "Zahlweise",
+    "K_ndigungsfrist",
+    "Kunden",
+    "Domainwunsch",
+    "Auftragsaufnahme_Art",
+    "Vertragsdauer_in_Jahren",
+    "K_ndigungsdatum",
+    "Kontakt",
+    "Auftrag_erzielt_von",
+    "Auftragswertung_Agent",
+)
 _ZOHO_EMAIL_HISTORY_MODULES = frozenset({ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZOHO_LEAD_MODULE})
 _ZOHO_NOTE_MODULES = frozenset({ZOHO_ACCOUNT_MODULE, ZOHO_LEAD_MODULE})
 # Request the complete CRM API scope once. Individual Hub workflows still decide
@@ -1049,6 +1072,30 @@ class ZohoCrmService:
         else:
             raise ZohoCrmError("Zoho returned more than 20,000 Cases. The import was not changed.")
         return list(records_by_id.values())
+
+    def list_order_records_for_account(self, account_id: str) -> list[dict[str, object]]:
+        """Return the reviewed custom CRM orders linked to one exact Account ID."""
+        normalized_id = self._as_text(account_id)
+        if not re.fullmatch(r"\d{8,255}", normalized_id):
+            raise ZohoCrmError("The Zoho CRM Account ID for the order import is invalid.")
+        connection = self._require_connected_connection()
+        response = self._api_get(
+            connection,
+            f"/crm/v8/{ZOHO_ORDER_MODULE}/search",
+            {
+                "criteria": f"(Kunden:equals:{normalized_id})",
+                "fields": ",".join(ZOHO_ORDER_IMPORT_FIELDS),
+                "page": "1",
+                "per_page": "200",
+            },
+            allow_empty_response=True,
+        )
+        records = response.get("data")
+        if records is None:
+            return []
+        if not isinstance(records, list):
+            raise ZohoCrmError("Zoho returned an invalid order response. No order was imported.")
+        return [record for record in records if isinstance(record, dict)]
 
     def list_lead_records(self) -> list[dict[str, object]]:
         """Return every Lead and its reviewed subform rows for a one-time Hub import."""

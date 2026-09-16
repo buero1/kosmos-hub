@@ -32,7 +32,11 @@ class DesktopReminderView:
     id: int
     customer_id: int | None
     activity_kind: str
+    activity_id: int
     activity_label: str
+    activity_url: str
+    related_label: str | None
+    related_url: str | None
     activity_name: str
     customer_name: str
     starts_at: datetime
@@ -44,7 +48,11 @@ class DesktopReminderView:
             "id": self.id,
             "customer_id": self.customer_id,
             "activity_kind": self.activity_kind,
+            "activity_id": self.activity_id,
             "activity_label": self.activity_label,
+            "activity_url": self.activity_url,
+            "related_label": self.related_label,
+            "related_url": self.related_url,
             "activity_name": self.activity_name,
             "customer_name": self.customer_name,
             "starts_at": self.starts_at.replace(tzinfo=UTC).isoformat(),
@@ -79,24 +87,39 @@ class CustomerDesktopReminderService:
                 notification.completed_at = now
                 notification.snoozed_until = None
                 continue
-            if notification.customer_id is None:
+            customer_id = activity.customer_id
+            if notification.customer_id != customer_id:
+                notification.customer_id = customer_id
+            if customer_id is None:
                 customer_name = ""
             else:
-                customer_name = customer_names.get(notification.customer_id)
+                customer_name = customer_names.get(customer_id)
                 if customer_name is None:
-                    customer = self.db.get(Customer, notification.customer_id)
+                    customer = self.db.get(Customer, customer_id)
                     customer_name = customer.name if customer is not None else "Unbekannter Kunde"
-                    customer_names[notification.customer_id] = customer_name
+                    customer_names[customer_id] = customer_name
             starts_at = self._activity_starts_at(activity)
             if starts_at is None:
                 notification.completed_at = now
                 continue
+            related_label = None
+            related_url = None
+            if customer_id is not None:
+                related_label, related_url = "Kunde", f"/customers/{customer_id}"
+            elif activity.lead_id is not None:
+                related_label, related_url = "Lead", f"/leads/{activity.lead_id}"
+            elif isinstance(activity, CustomerTaskActivity) and activity.case_id is not None:
+                related_label, related_url = "Fall", f"/cases/{activity.case_id}"
             views.append(
                 DesktopReminderView(
                     id=notification.id,
-                    customer_id=notification.customer_id,
+                    customer_id=customer_id,
                     activity_kind=notification.activity_kind,
+                    activity_id=notification.activity_id,
                     activity_label=_ACTIVITY_LABELS[notification.activity_kind],
+                    activity_url=f"/activities/{notification.activity_kind}/{notification.activity_id}",
+                    related_label=related_label,
+                    related_url=related_url,
                     activity_name=activity.name,
                     customer_name=customer_name,
                     starts_at=starts_at,

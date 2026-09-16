@@ -1,0 +1,33 @@
+<script>
+  (function () {
+    document.querySelectorAll('[data-finance-document-form]').forEach(function (form) {
+      var rhythm = form.querySelector('[data-recurring-interval]');
+      var customField = form.querySelector('[data-recurring-custom-field]');
+      if (!rhythm || !customField) return;
+      var controls = customField.querySelectorAll('input, select');
+      function syncCustomField() {
+        var visible = rhythm.value === 'custom';
+        customField.hidden = !visible;
+        controls.forEach(function (control) {
+          control.disabled = !visible;
+          control.required = visible;
+        });
+      }
+      rhythm.addEventListener('change', syncCustomField);
+      syncCustomField();
+
+      var paymentDue = form.querySelector('[data-recurring-payment-due]');
+      if (!paymentDue) return;
+      var count = paymentDue.querySelector('input');
+      var unit = paymentDue.querySelector('select');
+      function syncPaymentDue() {
+        var partiallyEntered = Boolean(count.value || unit.value);
+        count.required = partiallyEntered;
+        unit.required = partiallyEntered;
+      }
+      count.addEventListener('input', syncPaymentDue);
+      unit.addEventListener('change', syncPaymentDue);
+      syncPaymentDue();
+    });
+  }());
+</script>

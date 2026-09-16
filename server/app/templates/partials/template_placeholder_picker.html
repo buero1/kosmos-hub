@@ -1,0 +1,40 @@
+<div class="template-placeholder-picker" data-template-placeholder-picker>
+  <strong>Platzhalter einfügen</strong>
+  <div class="template-placeholder-controls{% if placeholder_context_options %} is-contextual{% endif %}">
+    {% if placeholder_context_options %}
+      <label>Kontextmodul
+        <select name="context_module" required data-email-template-context>
+          {% for context in placeholder_context_options %}<option value="{{ context.key }}"{% if context.key == placeholder_selected_context %} selected{% endif %}>{{ context.label }}</option>{% endfor %}
+        </select>
+      </label>
+    {% endif %}
+    <label>Quelle
+      <select data-template-placeholder-source>
+        {% set picker_groups = namespace(seen=[]) %}
+        {% for placeholder in placeholder_options %}
+          {% if placeholder.group not in picker_groups.seen %}
+            <option value="{{ placeholder.group }}" data-template-placeholder-source-option>{{ placeholder.group }}</option>
+            {% set picker_groups.seen = picker_groups.seen + [placeholder.group] %}
+          {% endif %}
+        {% endfor %}
+        <option value="" data-template-placeholder-source-option>Alle Quellen</option>
+      </select>
+    </label>
+    <div class="template-placeholder-field-wrap">
+      <label>Feld suchen
+        <input type="search" role="combobox" autocomplete="off" placeholder="Feldname oder Platzhalter" aria-autocomplete="list" aria-expanded="false" aria-controls="{{ placeholder_picker_id }}" data-template-placeholder-search>
+      </label>
+      <div class="template-placeholder-results" id="{{ placeholder_picker_id }}" role="listbox" data-template-placeholder-results hidden>
+        {% for placeholder in placeholder_options %}
+          <button type="button" role="option" data-template-placeholder-option data-source="{{ placeholder.group }}" data-token="{{ placeholder.token }}" data-contexts="{{ placeholder.contexts|join(',') }}" {% if placeholder.token == "${Company.EmailSignature}" %}data-body-only{% endif %} hidden>
+            <span><strong>{{ placeholder.label }}</strong><small>{{ placeholder.group }}{% if placeholder.hint %} · {{ placeholder.hint }}{% endif %}</small></span>
+            <code>{{ placeholder.token }}</code>
+          </button>
+        {% endfor %}
+        <p class="subtle" data-template-placeholder-empty hidden>Kein passendes Feld gefunden.</p>
+      </div>
+    </div>
+  </div>
+  {% if placeholder_context_options %}<p class="subtle">Das Kontextmodul bestimmt, welche Datensatz- und Verknüpfungsfelder verfügbar sind.</p>{% endif %}
+  <p class="subtle">Klick auf ein Feld fügt den Platzhalter an der letzten Cursorposition ein.</p>
+</div>

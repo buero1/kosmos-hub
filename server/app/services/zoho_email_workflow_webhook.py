@@ -20,6 +20,7 @@ from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.zoho_email_workflow_delivery import ZohoEmailWorkflowDelivery
 from app.models.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhook
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.zoho_crm import ZohoCrmError
 
 
@@ -262,6 +263,9 @@ class ZohoEmailWorkflowWebhookService:
         self.db.add(
             HubMailboxEmail(
                 direction=direction,
+                mailbox_state="spam" if HubSpamSenderService(db=self.db).is_blocked(
+                    direction=direction, payload=payload
+                ) else "active",
                 is_unread=direction == "inbound",
                 fingerprint=fingerprint,
                 encrypted_payload_json=self.cipher.encrypt(normalized_payload),

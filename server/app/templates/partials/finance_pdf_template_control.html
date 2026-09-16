@@ -1,0 +1,8 @@
+<label class="customer-field-control">
+  <span>PDF-Vorlage <small>erforderlich</small></span>
+  <select name="pdf_template_id" required>
+    {% for pdf_template in pdf_templates %}
+      <option value="{{ pdf_template.id }}"{% if pdf_template.id == selected_pdf_template_id %} selected{% endif %}>{{ pdf_template.name }}{% if pdf_template.is_default %} · Standard{% endif %}</option>
+    {% endfor %}
+  </select>
+</label>

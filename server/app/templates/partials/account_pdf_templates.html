@@ -1,0 +1,183 @@
+{% macro edit_icon() -%}
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+{%- endmacro %}
+{% macro render_block(block_key, extra_class="") -%}
+  {% for block in selected_pdf_template.blocks if block.key == block_key %}
+    <div class="pdf-template-editable-block pdf-template-block-{{ block.key }} {{ extra_class }}{% if not block.is_visible %} is-template-block-hidden{% endif %}" data-pdf-template-preview-block="{{ block.key }}">
+      <button class="pdf-template-block-edit" type="button" aria-label="{{ block.label }} bearbeiten" title="{{ block.label }} bearbeiten" data-pdf-template-edit-block="{{ block.key }}">{{ edit_icon() }}</button>
+      <div class="pdf-template-block-content" data-pdf-template-block-content="{{ block.key }}">
+        {% if block.is_visible %}{{ block.preview_html | safe }}{% else %}<span class="pdf-template-hidden-copy">{{ block.label }} ist ausgeblendet</span>{% endif %}
+      </div>
+    </div>
+  {% endfor %}
+{%- endmacro %}
+
+<section id="account-pdf-templates" class="account-panel account-panel-wide account-section account-pdf-templates" data-account-section data-pdf-template-root>
+  <div class="pdf-template-heading">
+    <div>
+      <p class="eyebrow">Dokumentgestaltung</p>
+      <h3>PDF-Vorlagen</h3>
+      <p class="subtle">Feste A4-Bereiche sorgen für verlässliche Belege. Texte und Tabellenkopf können kontrolliert angepasst werden.</p>
+    </div>
+    {% if selected_pdf_template %}<span class="status-pill">Version {{ selected_pdf_template.template.version }}</span>{% endif %}
+  </div>
+  {% if request.query_params.get("pdf_template_state") %}
+    <p class="notice-success">
+      {% if request.query_params.get("pdf_template_state") == "created" %}Die PDF-Vorlage wurde angelegt.
+      {% elif request.query_params.get("pdf_template_state") == "duplicated" %}Die PDF-Vorlage wurde dupliziert.
+      {% elif request.query_params.get("pdf_template_state") == "default-set" %}Die Standardvorlage wurde geändert.
+      {% elif request.query_params.get("pdf_template_state") == "deleted" %}Die PDF-Vorlage wurde gelöscht.
+      {% else %}Die PDF-Vorlage wurde als neue Version gespeichert.{% endif %}
+    </p>
+  {% endif %}
+
+  <nav class="account-pdf-template-nav" aria-label="PDF-Vorlagenbereiche">
+    {% for definition in pdf_template_types %}
+      <a href="/account?pdf_template_type={{ definition.key }}#account-pdf-templates"{% if definition.key == selected_pdf_template_type %} aria-current="page"{% endif %}>{{ definition.label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% for definition in pdf_template_types if definition.key == selected_pdf_template_type %}
+    <div class="pdf-template-library-header">
+      <div>
+        <p class="eyebrow">{{ definition.label }}</p>
+        <h4>{{ definition.singular }}svorlagen</h4>
+      </div>
+      <form class="pdf-template-create-form" method="post" action="/account/pdf-templates">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="document_type" value="{{ definition.key }}">
+        <label class="visually-hidden" for="pdf-template-new-name-{{ definition.key }}">Vorlagenname</label>
+        <input id="pdf-template-new-name-{{ definition.key }}" name="name" placeholder="Neue Vorlage benennen" maxlength="255" required>
+        <button class="button button-secondary" type="submit">Neu anlegen</button>
+      </form>
+    </div>
+    <div class="pdf-template-library" aria-label="{{ definition.label }} Vorlagen">
+      {% for template in pdf_templates_by_type[definition.key] %}
+        <article class="pdf-template-library-item{% if selected_pdf_template and template.id == selected_pdf_template.template.id %} is-selected{% endif %}">
+          <a class="pdf-template-library-select" href="/account?pdf_template_type={{ definition.key }}&pdf_template={{ template.id }}#account-pdf-templates">
+            <strong>{{ template.name }}</strong>
+            <span>Version {{ template.version }}{% if template.is_default %} · Standard{% endif %}</span>
+          </a>
+          <div class="pdf-template-library-actions">
+            {% if not template.is_default %}
+              <form method="post" action="/account/pdf-templates/{{ template.id }}/default"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" title="Als Standard festlegen">Standard</button></form>
+            {% endif %}
+            <form method="post" action="/account/pdf-templates/{{ template.id }}/duplicate"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" title="Vorlage duplizieren">Duplizieren</button></form>
+            <form method="post" action="/account/pdf-templates/{{ template.id }}/delete" onsubmit="return window.confirm('Diese PDF-Vorlage wirklich löschen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="is-danger" type="submit" title="Vorlage löschen">Löschen</button></form>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endfor %}
+
+  {% if selected_pdf_template %}
+    <div class="pdf-template-editor-heading">
+      <form class="pdf-template-rename-form" method="post" action="/account/pdf-templates/{{ selected_pdf_template.template.id }}/rename">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Vorlagenname<input name="name" value="{{ selected_pdf_template.template.name }}" maxlength="255" required></label>
+        <button class="button button-secondary" type="submit">Namen speichern</button>
+      </form>
+      <p class="subtle">Klicke auf einen umrahmten Bereich oder sein Stift-Icon, um ihn rechts zu bearbeiten.</p>
+    </div>
+    {% if selected_pdf_template.type_definition.key in ("offers", "orders") %}
+      <form class="pdf-template-legal-assignment-form" method="post" action="/account/pdf-templates/{{ selected_pdf_template.template.id }}/legal-terms">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>AGB
+          <select name="legal_terms_id">
+            <option value="">Keine AGB anhängen</option>
+            {% for legal_item in legal_terms %}<option value="{{ legal_item.id }}"{% if selected_pdf_template.legal_terms and selected_pdf_template.legal_terms.id == legal_item.id %} selected{% endif %}>{{ legal_item.name }} · Version {{ legal_item.version }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="button button-secondary" type="submit">AGB zuordnen</button>
+        <a href="#account-legal-terms">AGBs verwalten</a>
+      </form>
+    {% endif %}
+
+    <div class="pdf-template-preview-stage">
+      <article class="pdf-template-a4-page" aria-label="Vorschau Seite 1">
+        <div class="pdf-template-page-number">1</div>
+        <div class="pdf-template-preview-top-grid">
+          {{ render_block("sender") }}
+          {{ render_block("title") }}
+          {{ render_block("recipient") }}
+          {{ render_block("metadata") }}
+        </div>
+        {{ render_block("intro", "pdf-template-wide-block") }}
+        <div class="pdf-template-editable-block pdf-template-position-preview" data-pdf-template-edit-positions>
+          <button class="pdf-template-block-edit" type="button" aria-label="Positionstabelle bearbeiten" title="Positionstabelle bearbeiten" data-pdf-template-open-positions>{{ edit_icon() }}</button>
+          <table>
+            <colgroup>{% for column in selected_pdf_template.columns if column.is_enabled %}<col style="width:{{ column.width }}%">{% endfor %}</colgroup>
+            <thead><tr>{% for column in selected_pdf_template.columns if column.is_enabled %}<th style="text-align:{{ column.alignment }}">{{ column.label }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for row_number in range(1, 5) %}
+                <tr>{% for column in selected_pdf_template.columns if column.is_enabled %}<td style="text-align:{{ column.alignment }}">{% if column.source_key == "position" %}{{ row_number }}{% elif row_number == 1 %}{{ column.sample }}{% elif column.source_key == "article_name" %}Beispielposition {{ row_number }}{% elif column.source_key == "quantity" %}1,00{% elif column.source_key == "line_total" or column.source_key == "unit_price" %}0,00 €{% else %}{{ column.sample }}{% endif %}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div class="pdf-template-preview-totals"><span>Netto</span><strong>448,99 €</strong><span>USt.</span><strong>85,31 €</strong><span>Gesamt</span><strong>534,30 €</strong></div>
+        </div>
+        {{ render_block("payment", "pdf-template-wide-block") }}
+        <footer class="pdf-template-preview-footer">{{ render_block("footer", "pdf-template-wide-block") }}</footer>
+      </article>
+      {% if selected_pdf_template.type_definition.key in ("offers", "orders") and selected_pdf_template.legal_terms %}
+        <article class="pdf-template-a4-page pdf-template-legal-page" aria-label="Vorschau Zusatzseite">
+          <div class="pdf-template-page-number">2</div>
+          <div class="pdf-template-linked-legal">
+            <p class="eyebrow">{{ selected_pdf_template.legal_terms.name }} · Version {{ selected_pdf_template.legal_terms.version }}</p>
+            <div>{{ selected_pdf_template.legal_terms_preview_html | safe }}</div>
+          </div>
+          <footer class="pdf-template-preview-footer">{{ render_block("footer", "pdf-template-wide-block") }}</footer>
+        </article>
+      {% endif %}
+    </div>
+
+    <script type="application/json" data-pdf-template-editor-data>{{ selected_pdf_template.editor_data | tojson }}</script>
+    <div class="pdf-template-edit-layer" data-pdf-template-edit-layer hidden>
+      <button class="pdf-template-edit-backdrop" type="button" aria-label="Vorlageneditor schließen" data-pdf-template-edit-close></button>
+      <aside class="pdf-template-edit-drawer" role="dialog" aria-modal="true" aria-labelledby="pdf-template-edit-title" aria-hidden="true" data-pdf-template-edit-drawer tabindex="-1">
+        <div class="email-compose-header">
+          <div><p class="eyebrow">PDF-Vorlage</p><h2 id="pdf-template-edit-title" data-pdf-template-edit-title>Bereich bearbeiten</h2><p class="subtle" data-pdf-template-edit-hint></p></div>
+          <button class="email-compose-close" type="button" aria-label="Vorlageneditor schließen" data-pdf-template-edit-close>×</button>
+        </div>
+
+        <form class="pdf-template-block-form" method="post" data-pdf-template-block-form>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="checkbox-row"><input type="checkbox" name="is_visible" value="true" data-pdf-template-block-visible> Bereich in der PDF anzeigen</label>
+          <label class="pdf-template-rich-editor-label">
+            <span>Inhalt</span>
+            <div class="email-rich-editor" data-email-rich-editor><textarea data-email-compose-content aria-label="Vorlagenbereich"></textarea></div>
+            <textarea name="content_html" hidden data-email-compose-content-value></textarea>
+          </label>
+          {% set placeholder_options = selected_pdf_template.placeholders %}
+          {% set placeholder_picker_id = "pdf-template-placeholder-results" %}
+          {% include "partials/template_placeholder_picker.html" %}
+          <div class="email-compose-actions"><button class="button button-secondary" type="button" data-pdf-template-edit-close>Abbrechen</button><button class="button" type="submit">Speichern</button></div>
+        </form>
+
+        <form class="pdf-template-position-form" method="post" action="/account/pdf-templates/{{ selected_pdf_template.template.id }}/positions" data-pdf-template-position-form hidden>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <p class="subtle">Aktiviere und ordne die Tabellenspalten. Die Breiten aller sichtbaren Spalten müssen zusammen 100 % ergeben.</p>
+          <div class="pdf-template-column-total"><span>Sichtbare Spalten</span><strong data-pdf-template-column-count>0</strong><span>Gesamtbreite</span><strong data-pdf-template-width-total>0 %</strong></div>
+          <div class="pdf-template-column-editor" data-pdf-template-column-editor>
+            {% for column in selected_pdf_template.columns %}
+              <article class="pdf-template-column-row" data-pdf-template-column-row>
+                <input type="hidden" name="column_key" value="{{ column.key }}">
+                <div class="pdf-template-column-row-heading">
+                  <label class="checkbox-row"><input type="checkbox" name="column_enabled" value="{{ column.key }}"{% if column.is_enabled %} checked{% endif %} data-pdf-template-column-enabled> {{ column.label }}</label>
+                  <div><button type="button" title="Nach oben" aria-label="Spalte nach oben" data-pdf-template-column-up>↑</button><button type="button" title="Nach unten" aria-label="Spalte nach unten" data-pdf-template-column-down>↓</button></div>
+                </div>
+                <div class="pdf-template-column-fields">
+                  <label>Überschrift<input name="column_label" value="{{ column.label }}" maxlength="80" required></label>
+                  <label>Datenfeld<select name="column_source">{% for source_key, source_label, source_sample in pdf_line_sources %}<option value="{{ source_key }}"{% if source_key == column.source_key %} selected{% endif %}>{{ source_label }}</option>{% endfor %}</select></label>
+                  <label>Breite %<input name="column_width" type="number" min="4" max="80" step="1" value="{{ column.width }}" required data-pdf-template-column-width></label>
+                  <label>Ausrichtung<select name="column_alignment"><option value="left"{% if column.alignment == "left" %} selected{% endif %}>Links</option><option value="center"{% if column.alignment == "center" %} selected{% endif %}>Mittig</option><option value="right"{% if column.alignment == "right" %} selected{% endif %}>Rechts</option></select></label>
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+          <div class="email-compose-actions"><button class="button button-secondary" type="button" data-pdf-template-edit-close>Abbrechen</button><button class="button" type="submit">Tabellenkopf speichern</button></div>
+        </form>
+      </aside>
+    </div>
+  {% endif %}
+</section>

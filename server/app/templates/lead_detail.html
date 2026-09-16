@@ -2,6 +2,72 @@
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/lead_field_control.html" import lead_field_control %}
 {% block title %}{{ detail.name }} · Leads · kosmos-hub{% endblock %}
+{% macro lead_note_entry_action(note, action) %}
+  {% if action == "edit" %}
+    <button class="customer-activity-entry-action" type="button" data-customer-note-edit data-customer-note-update-url="/leads/{{ detail.lead.id }}/notes/{{ note.id }}" data-customer-note-title="{{ note.title }}" data-customer-note-content="{{ note.content }}" aria-label="Notiz bearbeiten" title="Notiz bearbeiten"><svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 18.8 6.1 14.6 15.4 5.3a1.85 1.85 0 0 1 2.62 0l.72.72a1.85 1.85 0 0 1 0 2.62l-9.33 9.33-4.55 1.1Z"/><path d="M14.2 6.5 17.6 9.9"/><path d="M6.1 14.6 9.45 17.95"/></g></svg></button>
+  {% else %}
+    <button class="customer-activity-entry-action" type="button" data-customer-note-delete-open data-customer-note-delete-url="/leads/{{ detail.lead.id }}/notes/{{ note.id }}/delete" data-customer-note-name="{{ note.title }}" aria-label="Notiz löschen" title="Notiz löschen"><svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 5.1h5.6"/><path d="M7 7.25h10"/><path d="M6 7.25h12.2a.95.95 0 0 1 .95.95v.85a.95.95 0 0 1-.95.95H6a.95.95 0 0 1-.95-.95V8.2A.95.95 0 0 1 6 7.25Z"/><path d="M8 7.25v-1.1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1.1"/><path d="M6.9 10 7.9 18.15a1.3 1.3 0 0 0 1.29 1.15h5.84a1.3 1.3 0 0 0 1.29-1.15L17.1 10"/><path d="M10 11.3v5.6M12 11.3v5.6M14 11.3v5.6"/></g></svg></button>
+  {% endif %}
+{% endmacro %}
+{% macro lead_notes_panel() %}
+  <article id="lead-notes" class="card customer-detail-panel lead-subform-panel">
+    <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Notizen</h3><p class="subtle">Notizen aus Zoho und aus dem Hub.</p></div></div>
+    <div class="customer-note-composer" data-note-composer>
+      <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
+      <form method="post" action="/leads/{{ detail.lead.id }}/notes" class="communication-form" data-note-composer-form hidden>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <textarea name="content" rows="5" maxlength="30000" required aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
+        <div class="customer-note-composer-actions">
+          <button class="button button-secondary" type="button" data-note-composer-cancel>Abbrechen</button>
+          <button class="button" type="submit">Senden</button>
+        </div>
+      </form>
+    </div>
+    <div class="customer-section-expandable" data-expandable-section>
+      <div data-expandable-content>
+        {% for note in lead_notes %}
+          <article class="communication-entry">
+            <div class="communication-entry-heading">
+              <strong>{{ note.title }}</strong>
+              <div class="customer-activity-entry-actions" role="group" aria-label="Notizaktionen">
+                {{ lead_note_entry_action(note, "edit") }}
+                {{ lead_note_entry_action(note, "delete") }}
+              </div>
+            </div>
+            {% if note.author or note.occurred_at %}<p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>{% endif %}
+            <p class="communication-note-content">{{ note.content }}</p>
+          </article>
+        {% else %}
+          <p class="subtle">Noch keine Notizen gespeichert.</p>
+        {% endfor %}
+      </div>
+      <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+    </div>
+    <dialog class="update-confirmation-dialog customer-note-edit-dialog" data-customer-note-edit-dialog aria-labelledby="lead-note-edit-heading">
+      <form method="post" data-customer-note-edit-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <h3 id="lead-note-edit-heading">Notiz bearbeiten</h3>
+        <label>Titel<input name="title" maxlength="255" required data-customer-note-edit-title></label>
+        <label>Notiz<textarea name="content" rows="7" maxlength="30000" required data-customer-note-edit-content></textarea></label>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-customer-note-edit-cancel>Abbrechen</button>
+          <button class="button" type="submit">Änderungen speichern</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-customer-note-delete-dialog aria-labelledby="lead-note-delete-heading">
+      <form method="post" data-customer-note-delete-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <h3 id="lead-note-delete-heading">Notiz löschen?</h3>
+        <p>Die Notiz <strong data-customer-note-delete-name></strong> wird aus dem Kosmos Hub entfernt.</p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-customer-note-delete-cancel>Abbrechen</button>
+          <button class="button button-danger" type="submit">Notiz löschen</button>
+        </div>
+      </form>
+    </dialog>
+  </article>
+{% endmacro %}
 {% block content %}
   <style>
     .lead-subform-panel { margin-top: 1rem; }
@@ -11,6 +77,9 @@
     .lead-subform-editor-card .customer-subform-row { margin-top: 0.8rem; }
     .lead-multiselect-control { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.35rem 0.75rem; margin: 0; padding: 0; border: 0; }
     .lead-multiselect-control label, .lead-boolean-control { font-weight: 400; }
+    .lead-activities-panel .customer-activity-entry-heading { flex-wrap: wrap; }
+    .lead-activities-panel .customer-activity-entry strong { overflow-wrap: anywhere; }
+    .lead-activities-panel .customer-activity-entry-action .customer-activity-action-icon { width: 1.25rem; height: 1.25rem; }
   </style>
   <section>
     {% call module_detail_header("/leads", "Zurück zu Leads", "Hub-Lead", detail.name, status=detail.status, has_actions=true) %}
@@ -34,16 +103,33 @@
 
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
     {% if layout_state and layout_message %}<p class="notice-{{ layout_state }}">{{ layout_message }}</p>{% endif %}
+    {% if activity_state and activity_message %}<p class="notice-{{ activity_state }}">{{ activity_message }}</p>{% endif %}
+    {% if note_state and note_message %}<p class="notice-{{ note_state }}">{{ note_message }}</p>{% endif %}
     <div class="customer-detail-layout">
-      <div class="customer-detail-main-column" data-layout-editor="lead-fields">
+      <div class="customer-detail-main-column">
         <section data-expandable-section>
           <div data-expandable-content class="is-expanded">
             <div data-customer-fields-readonly>
-              <article id="lead-fields" class="card customer-detail-panel">
+              <article id="lead-fields" class="card customer-detail-panel" data-layout-editor="lead-fields">
                 <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Alle Felder</h3><p class="subtle">Stammdaten des Leads im Hub.</p></div></div>
-                <dl class="customer-fields-grid">
-                  {% for field in detail.fields %}<div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
-                </dl>
+                <div class="customer-section-expandable" data-expandable-section>
+                  <div data-customer-fields-readonly>
+                    <div data-expandable-content class="is-expanded">
+                      <dl class="customer-fields-grid">
+                        {% for field in detail.fields %}<div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+                      </dl>
+                    </div>
+                  </div>
+                  <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
+                    <dl class="customer-fields-grid" data-layout-sortable>
+                      {% for field in detail.fields %}<div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+                    </dl>
+                  </div>
+                  <form id="lead-fields-layout-form" method="post" action="/leads/{{ detail.lead.id }}/layout" data-layout-form hidden>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="order_json" value="" data-layout-order-input>
+                  </form>
+                </div>
               </article>
               {% for subform in detail.subforms %}
                 <article class="card customer-detail-panel lead-subform-panel">
@@ -58,23 +144,6 @@
                   </div>
                 </article>
               {% endfor %}
-              <article id="lead-notes" class="card customer-detail-panel lead-subform-panel">
-                <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Notizen</h3><p class="subtle">Notizen der vergangenen zwölf Monate.</p></div></div>
-                <div class="customer-section-expandable" data-expandable-section>
-                  <div data-expandable-content>
-                    {% for note in lead_notes %}
-                      <article class="communication-entry">
-                        <div class="communication-entry-heading"><strong>{{ note.title }}</strong></div>
-                        {% if note.author or note.occurred_at %}<p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>{% endif %}
-                        <p class="communication-note-content">{{ note.content }}</p>
-                      </article>
-                    {% else %}
-                      <p class="subtle">Keine verknüpften Notizen aus den vergangenen zwölf Monaten vorhanden.</p>
-                    {% endfor %}
-                  </div>
-                  <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
-                </div>
-              </article>
               <article id="lead-emails" class="card customer-detail-panel lead-subform-panel">
                 <div class="customer-detail-panel-heading"><div><p class="eyebrow">Zoho CRM</p><h3>Verknüpfte E-Mails</h3><p class="subtle">E-Mail-Kopf und Inhalt der vergangenen zwölf Monate.</p></div></div>
                 <div class="customer-section-expandable" data-expandable-section>
@@ -110,18 +179,6 @@
             </div>
           </div>
 
-          <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
-            <article class="card customer-detail-panel">
-              <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Feldreihenfolge</h3><p class="subtle">Die Reihenfolge gilt für alle Leads.</p></div></div>
-              <dl class="customer-fields-grid" data-layout-sortable>
-                {% for field in detail.fields %}<div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
-              </dl>
-            </article>
-          </div>
-          <form id="lead-fields-layout-form" method="post" action="/leads/{{ detail.lead.id }}/layout" data-layout-form hidden>
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="order_json" value="" data-layout-order-input>
-          </form>
           <form id="lead-fields-form" method="post" action="/leads/{{ detail.lead.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <article class="card customer-detail-panel">
@@ -163,8 +220,25 @@
             {% if detail.lead.zoho_id %}<div><dt>Letzte Änderung in Zoho</dt><dd>{{ (detail.lead.zoho_modified_at or "-") | berlin_time }}</dd></div><div><dt>Importiert am</dt><dd>{{ (detail.lead.zoho_imported_at or "-") | berlin_time }}</dd></div>{% endif %}
           </dl>
         </article>
+        {{ lead_notes_panel() }}
+        {% include "partials/lead_activity_panel.html" %}
       </aside>
     </div>
+    <dialog class="update-confirmation-dialog" data-customer-call-complete-dialog aria-labelledby="lead-call-complete-heading">
+      <form method="post" data-customer-call-complete-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="lead-call-complete-heading">Anruf abschließen?</h3><p>Der Anruf <strong data-customer-call-complete-name></strong> wird abgeschlossen.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-customer-call-complete-cancel>Abbrechen</button><button class="button" type="submit">Abschließen</button></div></form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-customer-task-complete-dialog aria-labelledby="lead-task-complete-heading">
+      <form method="post" data-customer-task-complete-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="lead-task-complete-heading">Aufgabe abschließen?</h3><p>Die Aufgabe <strong data-customer-task-complete-name></strong> wird abgeschlossen.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-customer-task-complete-cancel>Abbrechen</button><button class="button" type="submit">Abschließen</button></div></form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-customer-call-delete-dialog aria-labelledby="lead-call-delete-heading">
+      <form method="post" data-customer-call-delete-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="lead-call-delete-heading">Anruf löschen?</h3><p>Der Anruf <strong data-customer-call-delete-name></strong> wird gelöscht.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-customer-call-delete-cancel>Abbrechen</button><button class="button button-danger" type="submit">Löschen</button></div></form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-customer-task-delete-dialog aria-labelledby="lead-task-delete-heading">
+      <form method="post" data-customer-task-delete-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="lead-task-delete-heading">Aufgabe löschen?</h3><p>Die Aufgabe <strong data-customer-task-delete-name></strong> wird gelöscht.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-customer-task-delete-cancel>Abbrechen</button><button class="button button-danger" type="submit">Löschen</button></div></form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-customer-meeting-delete-dialog aria-labelledby="lead-meeting-delete-heading">
+      <form method="post" data-customer-meeting-delete-form><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="lead-meeting-delete-heading">Meeting löschen?</h3><p>Das Meeting <strong data-customer-meeting-delete-name></strong> wird gelöscht.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-customer-meeting-delete-cancel>Abbrechen</button><button class="button button-danger" type="submit">Löschen</button></div></form>
+    </dialog>
     <dialog class="update-confirmation-dialog" data-lead-delete-dialog aria-labelledby="lead-delete-heading">
       <form method="post" action="/leads/{{ detail.lead.id }}/delete">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -174,4 +248,6 @@
       </form>
     </dialog>
   </section>
+  {% set activity_composer_mode = "lead" %}
+  {% include "partials/customer_activity_composer.html" %}
 {% endblock %}

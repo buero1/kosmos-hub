@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.base import Base
 from app.models.customer import Customer
-from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder
+from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder, CustomerTaskActivity
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.hub_user import HubUser
 from app.services.customer_desktop_reminders import SNOOZE_MINUTES_OPTIONS, CustomerDesktopReminderService, DesktopReminderError
@@ -55,6 +55,10 @@ def test_due_popup_reminders_are_materialized_and_can_be_snoozed_or_completed(mo
         ]
         assert due[0].due_at == now
         assert due[0].as_dict()["due_at"] == "2026-09-06T10:00:00+00:00"
+        assert due[0].as_dict()["activity_url"] == f"/activities/call/{call.id}"
+        assert due[0].as_dict()["related_url"] == f"/customers/{customer.id}"
+        assert due[0].as_dict()["related_label"] == "Kunde"
+        assert due[0].as_dict()["activity_id"] == call.id
         assert db.scalars(select(CustomerActivityReminderNotification)).all()
 
         assert service.snooze_reminders(user=user, notification_ids=[due[0].id], minutes=1) == 1
@@ -94,6 +98,73 @@ def test_desktop_reminders_reject_invalid_snooze_choices_and_foreign_ids():
 
 def test_desktop_reminder_snooze_options_include_long_intervals():
     assert SNOOZE_MINUTES_OPTIONS[-9:] == (240, 480, 720, 1440, 2880, 4320, 5760, 10080, 20160)
+
+
+def test_unlinked_call_has_activity_link_but_no_related_link(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 9, 6, 10, 0)
+    monkeypatch.setattr(CustomerDesktopReminderService, "_utc_now", staticmethod(lambda: now))
+
+    with Session(engine) as db:
+        user = HubUser(username="hub-admin", password_hash="hash", role="admin")
+        call = CustomerCallActivity(
+            name="Rückruf ohne Kundenbezug",
+            status="planned",
+            direction="outbound",
+            starts_at=now,
+            ends_at=now + timedelta(minutes=30),
+            duration_minutes=30,
+            created_by_username=user.username,
+            reminders=[CustomerCallReminder(channel="popup", minutes_before=0, sort_order=0)],
+        )
+        db.add_all([user, call])
+        db.flush()
+
+        reminder = CustomerDesktopReminderService(db=db).list_due_reminders(user=user)[0].as_dict()
+
+        assert reminder["activity_url"] == f"/activities/call/{call.id}"
+        assert reminder["related_url"] is None
+        assert reminder["related_label"] is None
+
+
+def test_desktop_reminder_uses_current_task_customer_after_relink(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 9, 6, 10, 0)
+    monkeypatch.setattr(CustomerDesktopReminderService, "_utc_now", staticmethod(lambda: now))
+
+    with Session(engine) as db:
+        user = HubUser(username="hub-admin", password_hash="hash", role="admin")
+        first_customer = Customer(name="Alt", is_visible=True)
+        current_customer = Customer(name="Neu", is_visible=True)
+        db.add_all([user, first_customer, current_customer])
+        db.flush()
+        task = CustomerTaskActivity(
+            customer_id=current_customer.id,
+            name="Aufgabe",
+            status="planned",
+            due_at=now,
+            reminder_channel="popup",
+            reminder_minutes_before=0,
+            created_by_username=user.username,
+        )
+        db.add(task)
+        db.flush()
+        db.add(CustomerActivityReminderNotification(
+            user_id=user.id,
+            customer_id=first_customer.id,
+            activity_kind="task",
+            activity_id=task.id,
+            reminder_key="primary",
+            remind_at=now,
+        ))
+        db.flush()
+
+        reminder = CustomerDesktopReminderService(db=db).list_due_reminders(user=user)[0].as_dict()
+
+        assert reminder["activity_url"] == f"/activities/task/{task.id}"
+        assert reminder["related_url"] == f"/customers/{current_customer.id}"
 
 
 def test_desktop_reminders_can_be_snoozed_until_before_their_individual_starts(monkeypatch):

@@ -13,12 +13,13 @@
       <div>
         <p class="eyebrow">CRM directory</p>
         <h2>Customers</h2>
-        <p class="subtle">{% if filters.email == "unread" %}Kunden mit ungelesenen eingehenden E-Mails.{% else %}Imported from Zoho Accounts. A site is linked only after explicit confirmation in the Hub.{% endif %}</p>
+        <p class="subtle">{% if filters.email == "unread" %}Kunden mit ungelesenen eingehenden E-Mails.{% else %}Kunden aus Zoho CRM und im Hub angelegte Kunden. Websites werden nur nach ausdrücklicher Bestätigung verknüpft.{% endif %}</p>
       </div>
       <div class="inventory-totals">
         <span><strong>{{ entries | length }}</strong> shown</span>
         <span><strong>{{ candidate_count }}</strong> exact matches to review</span>
       </div>
+      {% if can_create_customer %}<a class="button button-variant-1" href="/customers/new">Customer neu anlegen</a>{% endif %}
     </div>
 
     <form id="customer-filter-form" class="filter-panel customer-filter-panel" method="get" action="/customers">

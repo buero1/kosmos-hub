@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -20,7 +21,7 @@ class HubMailboxEmail(TimestampMixin, Base):
     is_unread: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True, index=True)
     mailbox_state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    encrypted_payload_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    encrypted_payload_json: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     last_error: Mapped[str | None] = mapped_column(Text(), nullable=True)
 

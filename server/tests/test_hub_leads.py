@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -7,7 +8,7 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.hub_user import HubUser
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
-from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadService
+from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY, HubLeadError, HubLeadService
 from app.services.module_layouts import ModuleLayoutService
 
 
@@ -19,6 +20,7 @@ def _submitted_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "lead_field__first_name": "Erika",
         "lead_field__last_name": "Beispiel",
+        "lead_field__salutation": "Frau Dr.",
         "lead_field__company": "Beispiel GmbH",
         "lead_field__email": "erika@beispiel.de",
         "lead_field__industry": "Bäckereien",
@@ -32,12 +34,16 @@ def _submitted_values(**overrides: object) -> dict[str, object]:
 
 
 def test_lead_catalog_contains_reviewed_fields_options_and_repeater():
-    assert len(HUB_LEAD_FIELDS) == 52
+    assert len(HUB_LEAD_FIELDS) == 53
     assert len(HUB_LEAD_SUBFORMS) == 1
     assert len(HUB_LEAD_SUBFORMS[0].fields) == 10
     industry = next(field for field in HUB_LEAD_FIELDS if field.key == "industry")
     assert ("Bäckereien", "Bäckereien") in industry.options
     assert len(industry.options) > 400
+    salutation = next(field for field in HUB_LEAD_FIELDS if field.key == "salutation")
+    assert salutation.label == "Anrede"
+    assert salutation.display_type == "Auswahlliste"
+    assert tuple(value for value, _label in salutation.options) == ("Frau", "Herr", "Frau Dr.", "Herr Dr.")
 
 
 def test_hub_lead_stores_encrypted_fields_and_a_new_repeater_row():
@@ -64,6 +70,7 @@ def test_hub_lead_stores_encrypted_fields_and_a_new_repeater_row():
         detail = _service(db).get_detail(lead_id=lead.id)
         assert detail is not None
         assert detail.name == "Erika Beispiel"
+        assert next(field.value for field in detail.fields if field.key == "salutation") == "Frau Dr."
         assert next(field.value for field in detail.fields if field.key == "lead_source") == "Internetrecherche"
         assert len(detail.subforms[0].rows) == 1
         assert next(field.value for field in detail.subforms[0].rows[0].fields if field.key == "lead_type") == "Termin vor Ort"
@@ -91,6 +98,17 @@ def test_hub_lead_does_not_save_an_empty_repeater_row_and_orders_newest_first():
         assert older_detail is not None
         assert older_detail.subforms[0].rows == ()
         assert [entry.lead.id for entry in _service(db).list_leads()] == [newer.id, older.id]
+
+
+def test_hub_lead_rejects_an_unknown_salutation():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        with pytest.raises(HubLeadError, match="Anrede"):
+            _service(db).create_lead(
+                submitted_values=_submitted_values(**{"lead_field__salutation": "Professor"})
+            )
 
 
 def test_hub_lead_detail_uses_the_saved_global_field_layout():

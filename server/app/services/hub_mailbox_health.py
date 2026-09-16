@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.models.hub_user import HubUser
 from app.services.hub_mailbox import HubMailboxService, MAILBOX_HEALTH_ALERT_SOURCE
 
@@ -58,11 +59,37 @@ class HubMailboxHealthService:
             if reason is None:
                 continue
 
-            # Persist before SMTP so a temporary delivery problem cannot generate a mail flood every minute.
-            state.alerted_at = now
-            self.db.commit()
-            alerts_created += 1
-            emails_sent += self._send_alert(state=state, reason=reason)
+            sent = self._send_alert(state=state, reason=reason)
+            if sent:
+                state.alerted_at = now
+                self.db.commit()
+                alerts_created += 1
+                emails_sent += sent
+
+        failures = self.db.scalars(
+            select(HubMailboxImapSyncFailure)
+            .where(
+                HubMailboxImapSyncFailure.resolved_at.is_(None),
+                HubMailboxImapSyncFailure.alerted_at.is_(None),
+                HubMailboxImapSyncFailure.folder == _INBOX_FOLDER)
+            .order_by(HubMailboxImapSyncFailure.id.asc())
+            .limit(20)
+        ).all()
+        states_by_account = {state.mailbox_account_id: state for state in states}
+        for failure in failures:
+            state = states_by_account.get(failure.mailbox_account_id)
+            if state is None:
+                continue
+            sent = self._send_alert(
+                state=state,
+                reason=f"Nachricht UID {failure.imap_uid} konnte nicht übernommen werden; spätere Nachrichten werden weiter abgerufen",
+                error=failure.error,
+            )
+            if sent:
+                failure.alerted_at = now
+                self.db.commit()
+                alerts_created += 1
+                emails_sent += sent
         return HubMailboxHealthSummary(alerts_created=alerts_created, emails_sent=emails_sent)
 
     @staticmethod
@@ -74,7 +101,7 @@ class HubMailboxHealthService:
             return "seit mindestens 5 Minuten kein erfolgreicher INBOX-Abgleich"
         return None
 
-    def _send_alert(self, *, state: HubMailboxImapSyncState, reason: str) -> int:
+    def _send_alert(self, *, state: HubMailboxImapSyncState, reason: str, error: str | None = None) -> int:
         account = self.db.get(HubMailboxAccount, state.mailbox_account_id)
         if account is None:
             return 0
@@ -82,12 +109,12 @@ class HubMailboxHealthService:
         sender_email = self._sender_email()
         if not recipients or sender_email is None:
             logger.warning(
-                "Mittwald INBOX alert for %s was recorded but could not be emailed: sender or admin recipient missing.",
+                "Mittwald INBOX alert for %s could not be emailed: sender or independent alert recipient missing.",
                 account.email_address,
             )
             return 0
 
-        content = self._alert_html(account=account, state=state, reason=reason)
+        content = self._alert_html(account=account, state=state, reason=reason, error=error)
         sent = 0
         for recipient in recipients:
             try:
@@ -112,15 +139,19 @@ class HubMailboxHealthService:
 
     def _recipient_emails(self) -> tuple[str, ...]:
         addresses = self.db.scalars(
-            select(HubUser.reminder_email)
+            select(HubUser.mailbox_alert_email)
             .where(
                 HubUser.is_active.is_(True),
                 HubUser.role == "admin",
-                HubUser.reminder_email.is_not(None),
+                HubUser.mailbox_alert_email.is_not(None),
             )
             .order_by(HubUser.id.asc())
         ).all()
-        return tuple(dict.fromkeys(address.strip().casefold() for address in addresses if address and address.strip()))
+        monitored = {address.casefold() for address in self.db.scalars(select(HubMailboxAccount.email_address)).all()}
+        return tuple(dict.fromkeys(
+            address.strip().casefold() for address in addresses
+            if address and address.strip() and address.strip().casefold() not in monitored
+        ))
 
     def _sender_email(self) -> str | None:
         accounts = self.db.scalars(
@@ -131,9 +162,12 @@ class HubMailboxHealthService:
         preferred = next((account for account in accounts if account.email_address.casefold() == _PREFERRED_SENDER), None)
         return (preferred or (accounts[0] if accounts else None)).email_address if accounts else None
 
-    def _alert_html(self, *, account: HubMailboxAccount, state: HubMailboxImapSyncState, reason: str) -> str:
+    def _alert_html(
+        self, *, account: HubMailboxAccount, state: HubMailboxImapSyncState,
+        reason: str, error: str | None = None,
+    ) -> str:
         last_success = self._format_timestamp(state.last_success_at)
-        last_error = html.escape(state.last_error or "Keine Detailmeldung verfügbar.")
+        last_error = html.escape(error or state.last_error or "Keine Detailmeldung verfügbar.")
         return (
             "<p>Der automatische Abruf des Mittwald-Posteingangs benötigt Aufmerksamkeit.</p>"
             "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">"

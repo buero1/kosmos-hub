@@ -15,9 +15,12 @@ from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer, HubFinanceOfferLine
+from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.services.customer_directory import CustomerDirectoryService
-from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS, HubFinanceField
+from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, FINANCE_POSITION_UNITS, OFFER_FIELDS, HubFinanceField
 from app.services.module_layouts import ModuleLayoutService
+from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
+from app.services.hub_pdf_templates import HubPdfTemplateService
 
 
 ARTICLE_FIELDS_LAYOUT_KEY = "finance-article-fields"
@@ -213,6 +216,17 @@ class HubFinanceService:
         offers = self.db.scalars(
             select(HubFinanceOffer).options(selectinload(HubFinanceOffer.customer), selectinload(HubFinanceOffer.lines))
         ).all()
+        return self._sorted_offer_entries(offers)
+
+    def list_customer_offers(self, *, customer_id: int) -> tuple[FinanceOfferEntry, ...]:
+        offers = self.db.scalars(
+            select(HubFinanceOffer)
+            .options(selectinload(HubFinanceOffer.customer), selectinload(HubFinanceOffer.lines))
+            .where(HubFinanceOffer.customer_id == customer_id)
+        ).all()
+        return self._sorted_offer_entries(offers)
+
+    def _sorted_offer_entries(self, offers: list[HubFinanceOffer]) -> tuple[FinanceOfferEntry, ...]:
         entries = [self._offer_entry(offer) for offer in offers]
         return tuple(sorted(entries, key=lambda entry: (entry.offer_date, entry.offer.created_at.isoformat() if entry.offer.created_at else "", entry.offer.id), reverse=True))
 
@@ -266,12 +280,15 @@ class HubFinanceService:
         customer_id: int | None,
         contact_id: int | None,
         submitted_values: dict[str, str],
+        pdf_template_id: int | None = None,
     ) -> HubFinanceOffer:
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
+        pdf_template = self._pdf_template(pdf_template_id)
         values = self._submitted_offer_values(submitted_values)
         offer = HubFinanceOffer(
             customer=customer,
             contact=contact,
+            pdf_template=pdf_template,
             encrypted_fields_json=self._encrypt(values),
         )
         self.db.add(offer)
@@ -288,6 +305,7 @@ class HubFinanceService:
         customer_id: int | None,
         contact_id: int | None,
         submitted_values: dict[str, str],
+        pdf_template_id: int | None = None,
     ) -> HubFinanceOffer:
         offer = self.db.scalar(
             select(HubFinanceOffer).options(selectinload(HubFinanceOffer.lines)).where(HubFinanceOffer.id == offer_id)
@@ -295,8 +313,10 @@ class HubFinanceService:
         if offer is None:
             raise HubFinanceError("Das Angebot wurde nicht gefunden.")
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
+        pdf_template = self._pdf_template(pdf_template_id)
         offer.customer = customer
         offer.contact = contact
+        offer.pdf_template = pdf_template
         offer.encrypted_fields_json = self._encrypt(self._submitted_offer_values(submitted_values))
         self._replace_lines(offer=offer, submitted_values=submitted_values)
         self.db.flush()
@@ -306,9 +326,26 @@ class HubFinanceService:
         offer = self.db.get(HubFinanceOffer, offer_id)
         if offer is None:
             raise HubFinanceError("Das Angebot wurde nicht gefunden.")
+        generated_pdf = self.db.scalar(
+            select(HubFinanceGeneratedPdf).where(
+                HubFinanceGeneratedPdf.document_type == "offers",
+                HubFinanceGeneratedPdf.document_id == offer.id,
+            )
+        )
+        if generated_pdf is not None:
+            if generated_pdf.storage_key:
+                FinanceGeneratedPdfStorage(cipher=self.cipher).remove(generated_pdf.storage_key)
+            self.db.delete(generated_pdf)
         self.db.delete(offer)
         self.db.flush()
         return offer
+
+    def _pdf_template(self, template_id: int | None):
+        service = HubPdfTemplateService(db=self.db)
+        template = service.get(template_id) if template_id else service.default_for("offers")
+        if template is None or template.document_type != "offers":
+            raise HubFinanceError("Die gewählte PDF-Vorlage passt nicht zum Angebot.")
+        return template
 
     def list_linkable_customers(self) -> tuple[Customer, ...]:
         return tuple(self.db.scalars(select(Customer).where(Customer.is_visible.is_(True)).order_by(Customer.name.asc())).all())
@@ -467,6 +504,10 @@ class HubFinanceService:
                 raise HubFinanceError("Jede Position benötigt eine Bezeichnung.")
             quantity = self._decimal_text(row.get("quantity"), "Position: Menge", minimum=Decimal("0.001"), places=_QUANTITY_STEP)
             unit = self._limited_text(row.get("unit"), "Position: Einheit")
+            if not unit:
+                raise HubFinanceError("Position: Einheit ist erforderlich.")
+            if unit not in FINANCE_POSITION_UNITS:
+                raise HubFinanceError("Die Auswahl für Position: Einheit ist ungültig.")
             unit_price = self._decimal_text(row.get("unit_price"), "Position: Einzelpreis netto", minimum=Decimal("0"), places=_CENT)
             discount = self._decimal_text(row.get("discount_percent"), "Position: Rabatt", minimum=Decimal("0"), maximum=Decimal("100"), places=_CENT)
             tax_rate = self._limited_text(row.get("tax_rate"), "Position: MwSt.-Satz")
@@ -493,7 +534,7 @@ class HubFinanceService:
         if customer is None:
             raise HubFinanceError("Der ausgewählte Kunde ist nicht verfügbar.")
         if contact_id is None:
-            return customer, None
+            raise HubFinanceError("Ansprechpartner ist erforderlich.")
         contact = self.db.get(CustomerContact, contact_id)
         if contact is None or contact.customer_id != customer.id:
             raise HubFinanceError("Der Ansprechpartner gehört nicht zum ausgewählten Kunden.")

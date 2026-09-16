@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 from threading import Lock
@@ -225,7 +225,12 @@ class ZohoBooksRecurringInvoiceImportService:
         contact = self._matching_contact(payload, customer=customer, books_contact=books_contact)
         recurring_invoice.customer = customer
         recurring_invoice.contact = contact
-        recurring_invoice.encrypted_fields_json = self._encrypt(self._recurring_invoice_values(payload))
+        values = self._recurring_invoice_values(payload)
+        if recurring_invoice.hub_next_run_on is None and values["next_invoice_date"]:
+            recurring_invoice.hub_next_run_on = date.fromisoformat(values["next_invoice_date"])
+        if recurring_invoice.hub_next_run_on is not None:
+            values["next_invoice_date"] = recurring_invoice.hub_next_run_on.isoformat()
+        recurring_invoice.encrypted_fields_json = self._encrypt(values)
         recurring_invoice.zoho_modified_at = self._timestamp(payload.get("last_modified_time"))
         recurring_invoice.zoho_imported_at = datetime.now(UTC)
         self._replace_lines(recurring_invoice=recurring_invoice, payload=payload)
@@ -260,7 +265,7 @@ class ZohoBooksRecurringInvoiceImportService:
                 or article_values.get("sku", ""),
                 "description": description,
                 "quantity": self._decimal_text(raw_line.get("quantity"), default="1", places=_QUANTITY_STEP),
-                "unit": self._text(raw_line.get("unit")),
+                "unit": self._normalized_unit(raw_line.get("unit")),
                 "unit_price": self._decimal_text(raw_line.get("rate"), default="0", places=_CENT),
                 "discount_percent": self._discount_percent(raw_line),
                 "tax_rate": self._tax_rate(raw_line.get("tax_percentage")),
@@ -394,6 +399,8 @@ class ZohoBooksRecurringInvoiceImportService:
             "automatic_creation": "false" if recurrence_preferences == "save_as_draft" else "true",
             "currency": self._text(payload.get("currency_code")) or "EUR",
             "payment_terms": self._payment_terms(payload.get("payment_terms")),
+            "payment_due_count": self._payment_due_count(payload.get("payment_terms")),
+            "payment_due_unit": "day" if self._payment_due_count(payload.get("payment_terms")) else "",
             "late_fee": self._decimal_text(
                 custom_values.get("cf_mahngeb_unformatted"),
                 default="0",
@@ -442,12 +449,15 @@ class ZohoBooksRecurringInvoiceImportService:
             days = int(str(value or "0"))
         except ValueError:
             return ""
-        return {
-            0: "due_on_receipt",
-            7: "7_days",
-            14: "14_days",
-            30: "30_days",
-        }.get(days, "")
+        return ("due_on_receipt" if days == 0 else f"{days}_days") if days >= 0 else ""
+
+    @staticmethod
+    def _payment_due_count(value: object) -> str:
+        try:
+            days = int(str(value or "0"))
+        except ValueError:
+            return ""
+        return str(days) if 0 <= days <= 9999 else ""
 
     @staticmethod
     def _free_text_values(
@@ -456,9 +466,18 @@ class ZohoBooksRecurringInvoiceImportService:
         name: str,
         description: str,
     ) -> tuple[str, str]:
-        if article is None and name.strip().casefold() in {"freitextposition", "freitext position"} and description.strip():
+        if (
+            article is None
+            and description.strip()
+            and (not name.strip() or name.strip().casefold() in {"freitextposition", "freitext position"})
+        ):
             return description, ""
         return name, description
+
+    @staticmethod
+    def _normalized_unit(value: object) -> str:
+        unit = ZohoBooksRecurringInvoiceImportService._text(value).strip()
+        return "Monatlich" if not unit or unit.casefold() == "monatlich" else unit
 
     @staticmethod
     def _discount_percent(raw_line: dict[str, object]) -> str:

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "partials/detail_header.html" import module_detail_header with context %}
+{% block title %}Customer neu anlegen · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    {% call module_detail_header("/customers", "Zurück zu Customers", "Hub-Daten", "Customer neu anlegen", has_actions=true) %}
+      <a class="button button-secondary button-variant-1" href="/customers">Abbrechen</a>
+      <button class="button button-variant-1" type="submit" form="customer-create-form">Customer anlegen</button>
+    {% endcall %}
+
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+
+    <div class="customer-detail-layout">
+      <div class="customer-detail-main-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Hub-Daten</p>
+              <h3>Stammdaten</h3>
+            </div>
+          </div>
+          <form id="customer-create-form" method="post" action="/customers" class="communication-form customer-field-editor">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="customer-field-editor-grid">
+              {% for field_key in field_order %}
+                {% if field_key == "customer_name" %}<label class="customer-field-control"><span>Name <small>erforderlich</small></span><input name="customer_field__customer_name" value="{{ values.get('customer_field__customer_name', '') }}" maxlength="255" required autofocus></label>
+                {% elif field_key == "account_status" %}<label class="customer-field-control"><span>Status <small>erforderlich</small></span><select name="customer_field__account_status" required>{% for status in status_options %}<option value="{{ status }}"{% if values.get('customer_field__account_status', 'Neu') == status %} selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
+                {% elif field_key == "website" %}<label class="customer-field-control"><span>Website</span><input name="customer_field__website" type="url" placeholder="https://example.de" value="{{ values.get('customer_field__website', '') }}" maxlength="255"></label>
+                {% elif field_key == "phone" %}<label class="customer-field-control"><span>Tel.</span><input name="customer_field__phone" type="tel" value="{{ values.get('customer_field__phone', '') }}" maxlength="255"></label>
+                {% elif field_key == "industry" %}<label class="customer-field-control"><span>Branche</span><input name="customer_field__industry" value="{{ values.get('customer_field__industry', '') }}" maxlength="255"></label>
+                {% elif field_key == "billing_street" %}<label class="customer-field-control"><span>Rechnungsadresse - Straße</span><input name="customer_field__billing_street" value="{{ values.get('customer_field__billing_street', '') }}" maxlength="255"></label>
+                {% elif field_key == "billing_postal_code" %}<label class="customer-field-control"><span>Rechnungsadresse - PLZ</span><input name="customer_field__billing_postal_code" value="{{ values.get('customer_field__billing_postal_code', '') }}" maxlength="255"></label>
+                {% elif field_key == "billing_city" %}<label class="customer-field-control"><span>Rechnungsadresse - Stadt</span><input name="customer_field__billing_city" value="{{ values.get('customer_field__billing_city', '') }}" maxlength="255"></label>
+                {% elif field_key == "billing_state" %}<label class="customer-field-control"><span>Rechnungsadresse - Bundesland</span><input name="customer_field__billing_state" value="{{ values.get('customer_field__billing_state', '') }}" maxlength="255"></label>
+                {% elif field_key == "billing_country" %}<label class="customer-field-control"><span>Rechnungsadresse - Land</span><input name="customer_field__billing_country" value="{{ values.get('customer_field__billing_country', '') }}" maxlength="255"></label>
+                {% elif field_key == "important_info" %}<label class="customer-field-control"><span>Wichtige Infos</span><textarea name="customer_field__important_info" rows="3" maxlength="5000">{{ values.get('customer_field__important_info', '') }}</textarea></label>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </form>
+        </article>
+      </div>
+      <aside class="customer-detail-side-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading"><div><p class="eyebrow">Hub-Daten</p><h3>Quelle</h3></div></div>
+          <p class="subtle">Dieser Customer wird im Hub gespeichert und nicht an Zoho CRM übertragen. Eine Website wird nur nach ausdrücklicher Bestätigung verknüpft.</p>
+        </article>
+      </aside>
+    </div>
+  </section>
+{% endblock %}

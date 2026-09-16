@@ -1151,7 +1151,443 @@
         background: var(--accent);
         color: #fffdf8;
       }
+      .account-pdf-template-nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.45rem;
+        padding: 0.35rem;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(235, 239, 252, 0.68);
+      }
+      .account-pdf-template-nav a {
+        display: grid;
+        place-items: center;
+        min-height: 2.65rem;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--ink);
+        font: 700 0.88rem "Trebuchet MS", sans-serif;
+        text-decoration: none;
+      }
+      .account-pdf-template-nav a:hover,
+      .account-pdf-template-nav a:focus-visible { background: var(--accent-soft); color: #075f4e; }
+      .account-pdf-template-nav a[aria-current="page"] { background: var(--accent); color: #fffdf8; }
+      .account-pdf-template-placeholder {
+        min-height: 11rem;
+        padding: 1.15rem;
+        border: 1px dashed var(--border);
+        border-radius: 16px;
+        background: rgba(255, 250, 242, 0.48);
+      }
+      .account-pdf-template-placeholder h4,
+      .account-pdf-template-placeholder p { margin-top: 0; }
+      .account-pdf-templates { max-width: 78rem; }
+      .account-legal-terms { max-width: 72rem; }
+      .legal-terms-heading,
+      .legal-terms-editor-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .legal-terms-heading h3,
+      .legal-terms-editor-heading h4,
+      .legal-terms-editor-heading p { margin: 0; }
+      .legal-terms-create-form {
+        display: grid;
+        grid-template-columns: minmax(15rem, 1fr) auto;
+        align-items: end;
+        gap: 0.55rem;
+        width: min(100%, 34rem);
+      }
+      .legal-terms-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        padding: 0.35rem;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: rgba(235, 239, 252, 0.68);
+      }
+      .legal-terms-tabs a {
+        display: grid;
+        gap: 0.05rem;
+        min-width: 10rem;
+        padding: 0.62rem 0.8rem;
+        border-radius: 10px;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .legal-terms-tabs a:hover,
+      .legal-terms-tabs a:focus-visible { background: var(--accent-soft); color: #075f4e; }
+      .legal-terms-tabs a[aria-current="page"] { background: var(--accent); color: #fffdf8; }
+      .legal-terms-tabs span { font-size: 0.72rem; opacity: 0.78; }
+      .legal-terms-editor-heading {
+        align-items: end;
+        padding-top: 0.9rem;
+        border-top: 1px solid var(--border);
+      }
+      .legal-terms-editor-form { display: grid; gap: 0.85rem; }
+      .legal-terms-rich-editor .jodit-workplace { min-height: 30rem; }
+      .legal-terms-rich-editor .jodit-wysiwyg_iframe { min-height: 30rem !important; }
+      .legal-terms-editor-actions,
+      .legal-terms-secondary-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; }
+      .legal-terms-secondary-actions { padding-top: 0.8rem; border-top: 1px solid var(--border); }
+      .legal-terms-secondary-actions form { margin: 0; }
+      .legal-terms-delete { color: #9f472b; }
+      .pdf-template-heading,
+      .pdf-template-library-header,
+      .pdf-template-editor-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .pdf-template-legal-assignment-form {
+        display: grid;
+        grid-template-columns: minmax(15rem, 24rem) auto auto;
+        align-items: end;
+        gap: 0.55rem;
+      }
+      .pdf-template-legal-assignment-form > a {
+        align-self: center;
+        font-weight: 700;
+      }
+      .pdf-template-heading h3,
+      .pdf-template-library-header h4,
+      .pdf-template-editor-heading p { margin: 0; }
+      .pdf-template-create-form {
+        display: grid;
+        grid-template-columns: minmax(11rem, 1fr) auto;
+        gap: 0.45rem;
+        width: min(100%, 28rem);
+      }
+      .pdf-template-library {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 0.65rem;
+      }
+      .pdf-template-library-item {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 13px;
+        background: rgba(255, 253, 248, 0.78);
+      }
+      .pdf-template-library-item.is-selected {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+      .pdf-template-library-select {
+        display: grid;
+        gap: 0.2rem;
+        padding: 0.75rem;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .pdf-template-library-select:hover,
+      .pdf-template-library-select:focus-visible { background: var(--accent-soft); }
+      .pdf-template-library-select span { color: var(--muted); font-size: 0.78rem; }
+      .pdf-template-library-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+        padding: 0.5rem 0.65rem;
+        border-top: 1px solid var(--border);
+      }
+      .pdf-template-library-actions form { margin: 0; }
+      .pdf-template-library-actions button,
+      .pdf-template-placeholder-list button,
+      .pdf-template-column-row-heading button {
+        min-height: 1.9rem;
+        padding: 0.28rem 0.5rem;
+        border: 0;
+        border-radius: 8px;
+        background: rgba(235, 239, 252, 0.82);
+        color: var(--accent);
+        font: 700 0.74rem "Trebuchet MS", sans-serif;
+        cursor: pointer;
+      }
+      .pdf-template-library-actions button:hover,
+      .pdf-template-placeholder-list button:hover,
+      .pdf-template-column-row-heading button:hover { background: var(--accent-soft); color: #075f4e; }
+      .pdf-template-library-actions button.is-danger { background: rgba(159, 71, 43, 0.1); color: #9f472b; }
+      .pdf-template-editor-heading {
+        align-items: end;
+        margin-top: 0.35rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+      }
+      .pdf-template-rename-form {
+        display: grid;
+        grid-template-columns: minmax(14rem, 22rem) auto;
+        align-items: end;
+        gap: 0.55rem;
+      }
+      .pdf-template-preview-stage {
+        display: grid;
+        justify-items: center;
+        gap: 1.25rem;
+        overflow-x: auto;
+        padding: 1.2rem;
+        border-radius: 18px;
+        background:
+          linear-gradient(135deg, rgba(37, 105, 255, 0.07), transparent 44%),
+          rgba(218, 222, 235, 0.58);
+      }
+      .pdf-template-a4-page {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 0.62rem;
+        width: min(100%, 48rem);
+        min-width: 42rem;
+        aspect-ratio: 210 / 297;
+        padding: 3rem 3rem 5.4rem;
+        overflow: hidden;
+        background: #fff;
+        color: #30373a;
+        font-family: "Trebuchet MS", sans-serif;
+        font-size: 0.75rem;
+        line-height: 1.35;
+        box-shadow: 0 18px 44px rgba(29, 42, 47, 0.16);
+      }
+      .pdf-template-page-number {
+        position: absolute;
+        right: 1.15rem;
+        bottom: 3.78rem;
+        color: #5b6570;
+        font-size: 0.65rem;
+      }
+      .pdf-template-preview-top-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.65rem 1rem;
+      }
+      .pdf-template-editable-block {
+        position: relative;
+        min-height: 3rem;
+        padding: 0.48rem;
+        border: 1px dashed rgba(37, 105, 255, 0.3);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: border-color 150ms ease, background 150ms ease;
+      }
+      .pdf-template-editable-block:hover,
+      .pdf-template-editable-block:focus-within {
+        border-color: var(--accent);
+        background: rgba(37, 105, 255, 0.035);
+      }
+      .pdf-template-block-content > :first-child { margin-top: 0; }
+      .pdf-template-block-content > :last-child { margin-bottom: 0; }
+      .pdf-template-block-title { text-align: right; color: #0baee4; }
+      .pdf-template-block-title h1 { margin: 0; font-size: 1.65rem; font-weight: 500; }
+      .pdf-template-block-metadata { text-align: right; align-content: end; }
+      .pdf-template-wide-block { width: 100%; }
+      .pdf-template-block-edit {
+        position: absolute;
+        z-index: 2;
+        top: 0.3rem;
+        right: 0.3rem;
+        display: grid;
+        place-items: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--accent);
+        box-shadow: 0 2px 10px rgba(29, 42, 47, 0.13);
+        opacity: 0;
+        cursor: pointer;
+        transition: opacity 140ms ease, background 140ms ease;
+      }
+      .pdf-template-block-edit svg { width: 1rem; height: 1rem; }
+      .pdf-template-editable-block:hover .pdf-template-block-edit,
+      .pdf-template-block-edit:focus-visible { opacity: 1; }
+      .pdf-template-position-preview { padding: 0.65rem; }
+      .pdf-template-position-preview table {
+        width: 100%;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .pdf-template-position-preview th {
+        padding: 0.48rem 0.42rem;
+        border-radius: 0;
+        background: #0baee4;
+        color: #fff;
+        font-weight: 500;
+      }
+      .pdf-template-position-preview td {
+        padding: 0.55rem 0.42rem;
+        border-bottom: 1px solid #c7ccd0;
+        overflow-wrap: anywhere;
+        vertical-align: top;
+      }
+      .pdf-template-preview-totals {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.25rem 1.4rem;
+        width: 15rem;
+        margin: 0.7rem 0 0 auto;
+        padding: 0.55rem;
+        background: #f2f4f6;
+      }
+      .pdf-template-preview-totals strong { text-align: right; }
+      .pdf-template-block-payment { margin-bottom: 0.8rem; }
+      .pdf-template-payment-continuation .pdf-template-block-payment { width: 100%; }
+      .pdf-template-preview-footer {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        min-height: 3.4rem;
+        padding: 0.35rem 3rem;
+        background: #0baee4;
+        color: #07181f;
+        font-size: 0.58rem;
+      }
+      .pdf-template-preview-footer .pdf-template-editable-block {
+        min-height: 2.65rem;
+        padding: 0.25rem;
+        border-radius: 0;
+        background: transparent;
+      }
+      .pdf-template-preview-footer table {
+        width: 100%;
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+      }
+      .pdf-template-linked-legal { flex: 1; }
+      .pdf-template-linked-legal h2 { font-size: 1.25rem; }
+      .is-template-block-hidden {
+        display: grid;
+        place-items: center;
+        min-height: 3rem;
+        background: repeating-linear-gradient(-45deg, transparent 0 8px, rgba(108, 116, 105, 0.05) 8px 16px);
+      }
+      .is-template-block-hidden .pdf-template-block-edit { opacity: 1; }
+      .pdf-template-hidden-copy { color: var(--muted); font-style: italic; }
+      .pdf-template-unresolved-placeholder { color: #9f472b; background: rgba(159, 71, 43, 0.08); }
+      .pdf-template-edit-layer { position: fixed; z-index: 120; inset: 0; }
+      .pdf-template-edit-layer[hidden] { display: none; }
+      .pdf-template-edit-backdrop {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        border: 0;
+        background: rgba(29, 42, 47, 0.22);
+        opacity: 0;
+        backdrop-filter: blur(5px);
+        transition: opacity 180ms ease;
+      }
+      .pdf-template-edit-drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        flex-direction: column;
+        width: max(32rem, 48vw);
+        height: 100dvh;
+        overflow-y: auto;
+        padding: 1.45rem;
+        border-left: 1px solid var(--border);
+        background: #fffdfa;
+        box-shadow: -24px 0 56px rgba(29, 42, 47, 0.18);
+        transform: translateX(103%);
+        transition: transform 220ms ease;
+      }
+      .pdf-template-edit-layer.is-open .pdf-template-edit-backdrop { opacity: 1; }
+      .pdf-template-edit-layer.is-open .pdf-template-edit-drawer { transform: translateX(0); }
+      body.finance-position-preset-open { overflow: hidden; }
+      .finance-position-preset-drawer { width: min(34rem, 100vw); }
+      .finance-position-preset-drawer .email-compose-header h2,
+      .finance-position-preset-drawer .email-compose-header p { margin: 0; }
+      .finance-position-preset-drawer .email-compose-header p:last-child { margin-top: 0.3rem; color: var(--muted); }
+      .finance-position-preset-content { display: grid; gap: 1rem; margin-top: 1rem; }
+      .finance-position-preset-section {
+        display: grid;
+        gap: 0.85rem;
+      }
+      .finance-position-preset-section[hidden] { display: none; }
+      .finance-position-preset-section h3,
+      .finance-position-preset-section p { margin: 0; }
+      .finance-position-preset-section .subtle { margin-top: 0.25rem; }
+      .finance-position-preset-section label { display: grid; gap: 0.35rem; font-weight: 700; }
+      .finance-position-preset-section input,
+      .finance-position-preset-section select { width: 100%; }
+      .finance-position-preset-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; }
+      .finance-position-preset-open-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem; }
+      [data-finance-position-preset-save] { width: min(240px, 100%); }
+      .finance-position-preset-feedback {
+        margin: 0;
+        padding: 0.75rem 0.85rem;
+        border: 1px solid rgba(14, 124, 102, 0.28);
+        border-radius: var(--control-v1-radius);
+        background: var(--accent-soft);
+        color: var(--ink);
+      }
+      .finance-position-preset-feedback.is-error {
+        border-color: rgba(159, 71, 43, 0.35);
+        background: rgba(159, 71, 43, 0.08);
+        color: #8c3d27;
+      }
+      .pdf-template-block-form,
+      .pdf-template-position-form { display: grid; gap: 0.9rem; }
+      .pdf-template-block-form[hidden],
+      .pdf-template-position-form[hidden] { display: none; }
+      .pdf-template-rich-editor-label .jodit-workplace { min-height: 20rem; }
+      .pdf-template-rich-editor-label .jodit-wysiwyg_iframe { min-height: 20rem !important; }
+      .pdf-template-placeholder-picker { display: grid; gap: 0.55rem; }
+      .pdf-template-placeholder-picker > div:first-child { display: grid; gap: 0.15rem; }
+      .pdf-template-placeholder-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+      .pdf-template-column-total {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.35rem 1rem;
+        padding: 0.7rem;
+        border-radius: 10px;
+        background: rgba(235, 239, 252, 0.72);
+      }
+      .pdf-template-column-editor { display: grid; gap: 0.65rem; }
+      .pdf-template-column-row {
+        display: grid;
+        gap: 0.65rem;
+        padding: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 250, 242, 0.72);
+      }
+      .pdf-template-column-row-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+      .pdf-template-column-row-heading > div { display: flex; gap: 0.25rem; }
+      .pdf-template-column-fields { display: grid; grid-template-columns: 1fr 1fr 6rem 7rem; gap: 0.45rem; }
+      .pdf-template-column-row:not(:has([data-pdf-template-column-enabled]:checked)) .pdf-template-column-fields { opacity: 0.52; }
+      body.pdf-template-edit-open { overflow: hidden; }
+      @media (max-width: 860px) {
+        .pdf-template-heading,
+        .pdf-template-library-header,
+        .pdf-template-editor-heading { display: grid; }
+        .pdf-template-create-form,
+        .pdf-template-rename-form { grid-template-columns: 1fr; width: 100%; }
+        .legal-terms-heading,
+        .legal-terms-editor-heading { display: grid; }
+        .legal-terms-create-form,
+        .pdf-template-legal-assignment-form { grid-template-columns: 1fr; width: 100%; }
+        .pdf-template-edit-drawer { width: 100vw; }
+        .pdf-template-column-fields { grid-template-columns: 1fr 1fr; }
+      }
       .account-section { scroll-margin-top: 1rem; }
+      .account-section-stack { display: grid; gap: 1rem; margin: 1.25rem 0; }
+      .account-section-stack > .account-panel { width: 100%; margin: 0; }
       .account-section[hidden] { display: none; }
       .account-session {
         display: grid;
@@ -1165,6 +1601,11 @@
       .account-session p { margin: 0; }
       .account-session form { margin: 0; }
       .account-panel.account-panel-wide { max-width: 72rem; }
+      .account-panel .account-protocol-filters {
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+        align-items: end;
+      }
+      .account-protocol-filters .button { justify-self: start; }
       .account-panel label {
         display: grid;
         gap: 0.3rem;
@@ -1227,30 +1668,64 @@
       .account-workflow-description[hidden] { display: none; }
       .account-users-table th:last-child,
       .account-users-table td:last-child { text-align: right; }
-      .account-user-actions { position: relative; }
-      .account-user-actions summary {
-        color: var(--accent);
-        cursor: pointer;
-        font-weight: 700;
-        white-space: nowrap;
+      .account-user-disclosures { display: grid; }
+      .account-user-area > summary {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 0.45rem;
+        list-style: none;
       }
-      .account-user-actions summary:hover,
-      .account-user-actions summary:focus-visible { color: #075f4e; text-decoration: none; }
-      .account-user-actions[open] {
-        position: absolute;
-        z-index: 4;
-        right: 0;
-        width: min(22rem, calc(100vw - 3rem));
-        padding: 0.85rem;
+      .account-user-area > summary::-webkit-details-marker { display: none; }
+      .account-user-area > summary::before {
+        width: 0;
+        height: 0;
+        margin-top: 0.35rem;
+        border-top: 0.3rem solid transparent;
+        border-bottom: 0.3rem solid transparent;
+        border-left: 0.42rem solid var(--accent);
+        content: "";
+        transform-origin: 35% 50%;
+        transition: transform 140ms ease;
+      }
+      .account-user-area[open] > summary::before { transform: rotate(90deg); }
+      .account-user-summary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        width: 100%;
+      }
+      .account-user-summary-name {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+      }
+      .account-user-summary-meta {
+        color: var(--muted);
+        font-size: 0.88rem;
+        font-weight: 500;
+        text-align: right;
+      }
+      .account-user-facts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+        padding: 0.8rem;
         border: 1px solid var(--border);
         border-radius: 12px;
-        background: #fffdf8;
-        box-shadow: 0 12px 28px rgba(29, 42, 47, 0.16);
-        text-align: left;
+        background: rgba(255, 253, 248, 0.62);
       }
-      .account-user-actions[open] summary { margin-bottom: 0.75rem; }
-      .account-user-edit-form { display: grid; gap: 0.65rem; }
-      .account-user-actions form { margin: 0; }
+      .account-user-facts > div { display: grid; gap: 0.18rem; }
+      .account-user-facts span { color: var(--muted); font-size: 0.78rem; }
+      .account-user-facts strong { font-size: 0.92rem; overflow-wrap: anywhere; }
+      .account-user-edit-form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+      }
+      .account-user-reminder-field { grid-column: 1 / -1; }
       .account-user-action-buttons {
         display: flex;
         align-items: center;
@@ -1260,6 +1735,16 @@
       }
       .account-user-action-buttons form { display: block; }
       .account-user-action-buttons .subtle { margin-right: auto; }
+      @media (max-width: 700px) {
+        .account-user-summary { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
+        .account-user-summary-meta { text-align: left; }
+        .account-user-facts,
+        .account-user-edit-form { grid-template-columns: 1fr; }
+        .account-user-action-buttons { align-items: stretch; flex-direction: column; }
+        .account-user-action-buttons .subtle { margin-right: 0; }
+        .account-user-action-buttons form,
+        .account-user-action-buttons .button { width: 100%; }
+      }
       .account-panel label.checkbox-label {
         display: flex;
         align-items: center;
@@ -2234,8 +2719,26 @@
         border-radius: 18px;
       }
       .finance-directory-table { min-width: 760px; }
+      .finance-invoice-directory-table .finance-invoice-select-cell {
+        width: 2.75rem;
+        min-width: 2.75rem;
+        padding-left: 0.7rem;
+        padding-right: 0.2rem;
+        text-align: center;
+        vertical-align: middle;
+      }
+      .finance-invoice-pending-action:disabled { opacity: 0.55; cursor: not-allowed; }
+      .finance-invoice-select-cell input { width: 1rem; height: 1rem; margin: 0; cursor: pointer; accent-color: var(--accent); }
+      .finance-invoice-list-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem 1rem; margin-top: 1rem; }
+      .finance-invoice-selection-status { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; color: var(--muted); }
+      .finance-invoice-selection-status .button { margin: 0; }
+      .finance-invoice-selection-status [hidden] { display: none; }
+      .finance-invoice-page-summary { margin-left: auto; color: var(--muted); white-space: nowrap; }
+      .finance-invoice-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; width: 100%; }
+      .finance-invoice-pagination .button { margin: 0; min-width: 2.25rem; text-align: center; }
       .finance-offer-form { display: grid; gap: 1rem; }
       .finance-positions-panel { overflow: visible; }
+      .finance-positions-panel > .table-scroll { margin-top: 20px; }
       .finance-positions-panel[data-customer-edit-position-editor][hidden],
       .finance-positions-panel[data-customer-edit-position-readonly][hidden] { display: none !important; }
       .finance-positions-table { min-width: 940px; }
@@ -2250,8 +2753,8 @@
       .finance-position-details > small,
       .finance-position-details > p { margin: 0; }
       .finance-address-snapshot { margin: 0; white-space: pre-line; }
-      .finance-invoice-pdf-panel { overflow: hidden; }
-      .finance-invoice-pdf-preview { display: block; width: 100%; min-height: 42rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); }
+      .finance-document-pdf-panel { overflow: hidden; }
+      .finance-document-pdf-preview { display: block; width: 100%; min-height: 42rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); }
       .finance-position-details small,
       .finance-positions-table td > small { display: block; margin-top: 0.2rem; color: var(--muted); font-size: 0.78rem; }
       .finance-positions-table input,
@@ -2259,10 +2762,76 @@
       .finance-positions-table textarea { width: 100%; min-width: 0; }
       .finance-positions-table td:nth-child(2),
       .finance-positions-table td:nth-child(3) { min-width: 8.8rem; }
-      .finance-position-discount { display: grid; gap: 0.2rem; margin-top: 0.45rem; color: var(--muted); font-size: 0.76rem; }
+      .finance-position-discount,
+      .finance-position-unit { display: grid; gap: 0.2rem; margin-top: 0.45rem; color: var(--muted); font-size: 0.76rem; }
       .finance-position-amount { color: var(--ink); font-weight: 700; white-space: nowrap; }
       .finance-position-action-heading,
       .finance-positions-table td:last-child { width: 2.6rem; padding-left: 0.25rem; padding-right: 0.25rem; text-align: center; }
+      .finance-position-net-heading { width: 100px !important; }
+      .finance-position-actions { position: relative; min-width: 2.6rem; height: 1px; vertical-align: top; }
+      [data-finance-position-editor] > .table-scroll,
+      [data-finance-document-position-editor] > .table-scroll { width: 100%; overflow-x: hidden; }
+      [data-finance-position-editor] .finance-positions-table,
+      [data-finance-document-position-editor] .finance-positions-table { width: 100%; min-width: 0; table-layout: fixed; }
+      [data-finance-position-editor] .finance-positions-table th:first-child,
+      [data-finance-document-position-editor] .finance-positions-table th:first-child { width: 30px; }
+      [data-finance-position-editor] .finance-positions-table th:nth-child(2),
+      [data-finance-document-position-editor] .finance-positions-table th:nth-child(2) { width: auto; }
+      [data-finance-position-editor] .finance-positions-table th:nth-child(3),
+      [data-finance-document-position-editor] .finance-positions-table th:nth-child(3) { width: 134px; }
+      [data-finance-position-editor] .finance-positions-table th:nth-child(4),
+      [data-finance-document-position-editor] .finance-positions-table th:nth-child(4) { width: 90px; }
+      [data-finance-position-editor] .finance-positions-table th:nth-child(5),
+      [data-finance-document-position-editor] .finance-positions-table th:nth-child(5) { width: 100px; }
+      [data-finance-position-editor] .finance-positions-table th:nth-child(6),
+      [data-finance-document-position-editor] .finance-positions-table th:nth-child(6) { width: 100px; }
+      [data-finance-position-editor] .finance-positions-table td:nth-child(3),
+      [data-finance-position-editor] .finance-positions-table td:nth-child(4),
+      [data-finance-document-position-editor] .finance-positions-table td:nth-child(3),
+      [data-finance-document-position-editor] .finance-positions-table td:nth-child(4) { min-width: 0; }
+      [data-finance-position-editor] .finance-positions-table td:nth-child(5) select,
+      [data-finance-document-position-editor] .finance-positions-table td:nth-child(5) select { padding-left: 0.4rem; padding-right: 1.2rem; }
+      [data-customer-edit-position-readonly] > .table-scroll { width: 100%; overflow-x: hidden; }
+      [data-customer-edit-position-readonly] .finance-positions-table { width: 100%; min-width: 0; table-layout: fixed; }
+      [data-customer-edit-position-readonly] .finance-positions-table th:first-child { width: auto; }
+      [data-customer-edit-position-readonly] .finance-positions-table th:nth-child(2) { width: 134px; }
+      [data-customer-edit-position-readonly] .finance-positions-table th:nth-child(3) { width: 90px; }
+      [data-customer-edit-position-readonly] .finance-positions-table th:nth-child(4) { width: 100px; }
+      [data-customer-edit-position-readonly] .finance-positions-table th:nth-child(5) { width: 100px; }
+      [data-customer-edit-position-readonly] .finance-positions-table td:nth-child(2),
+      [data-customer-edit-position-readonly] .finance-positions-table td:nth-child(3) { min-width: 0; }
+      .finance-position-drag-heading,
+      .finance-position-drag-cell { padding-left: 0.3rem !important; padding-right: 0.3rem !important; text-align: center; vertical-align: middle; }
+      .finance-position-drag-handle {
+        position: relative;
+        display: inline-grid;
+        place-items: center;
+        width: 1.85rem;
+        height: 2.35rem;
+        border-radius: var(--control-v2-radius);
+        color: var(--muted);
+        cursor: grab;
+        touch-action: none;
+      }
+      .finance-position-drag-handle::before {
+        width: 0.17rem;
+        height: 0.17rem;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow:
+          -0.36rem -0.36rem currentColor,
+          0 -0.36rem currentColor,
+          0.36rem -0.36rem currentColor,
+          -0.36rem 0 currentColor,
+          0.36rem 0 currentColor,
+          -0.36rem 0.36rem currentColor,
+          0 0.36rem currentColor,
+          0.36rem 0.36rem currentColor;
+        content: "";
+      }
+      .finance-position-sortable-ghost > td { background: var(--accent-soft) !important; opacity: 0.4; }
+      .finance-position-sortable-chosen .finance-position-drag-handle { color: var(--accent); cursor: grabbing; }
+      .finance-position-sortable-drag > td { box-shadow: 0 0.65rem 1.5rem rgba(29, 42, 47, 0.18); }
       .finance-position-remove {
         width: 1.85rem;
         height: 1.85rem;
@@ -2276,7 +2845,26 @@
       }
       .finance-position-remove:hover,
       .finance-position-remove:focus-visible { background: #efd0c1; outline: 2px solid #843a26; outline-offset: 2px; }
-      .finance-positions-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, 22rem); align-items: start; gap: 1.5rem; }
+      .finance-position-actions .finance-position-remove,
+      .finance-position-actions .finance-position-insert { position: absolute; left: 50%; transform: translateX(-50%); }
+      .finance-position-actions .finance-position-remove { top: 0.55rem; }
+      .finance-position-insert {
+        bottom: 0.55rem;
+        width: 1.85rem;
+        height: 1.85rem;
+        padding: 0;
+        border: 0;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        cursor: pointer;
+        font: 700 1.15rem/1 Arial, sans-serif;
+      }
+      .finance-position-insert:hover,
+      .finance-position-insert:focus-visible { background: #cfdcf8; outline: 2px solid var(--accent); outline-offset: 2px; }
+      .finance-positions-footer { display: grid; grid-template-columns: 200px minmax(15rem, 22rem); justify-content: space-between; align-items: start; gap: 1.5rem; }
+      .finance-positions-footer > [data-finance-position-add],
+      .finance-positions-footer > [data-finance-document-position-add] { width: 200px; }
       .finance-totals { display: grid; margin: 0; border: 1px solid var(--border); border-radius: var(--control-v1-radius); overflow: hidden; }
       .finance-totals div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
       .finance-totals div:last-child { border-bottom: 0; }
@@ -2576,6 +3164,9 @@
         border-radius: var(--control-v1-radius);
       }
       .customer-communication-tab-empty .subtle { margin: 0; }
+      .customer-linked-finance-table { min-width: 39rem; }
+      .customer-linked-finance-table th:first-child { width: 30%; }
+      .customer-linked-records-toggle { margin-top: 0.8rem; }
       .field-tabs-list {
         display: flex;
         gap: 0.2rem;
@@ -2689,6 +3280,47 @@
         font-size: 0.82rem;
       }
       .customer-field-control small { font-weight: 400; }
+      .finance-customer-combobox { position: relative; min-width: 0; }
+      .finance-customer-combobox > input[type="search"] { width: 100%; }
+      .finance-customer-options {
+        position: absolute;
+        z-index: 30;
+        top: calc(100% + 0.3rem);
+        left: 0;
+        right: 0;
+        max-height: 15rem;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        background: var(--panel);
+        box-shadow: 0 12px 25px rgba(40, 45, 44, 0.14);
+      }
+      .finance-customer-options[hidden], .finance-customer-option[hidden], .finance-customer-empty[hidden] { display: none; }
+      .finance-customer-option {
+        display: block;
+        width: 100%;
+        padding: 0.55rem 0.7rem;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--ink);
+        text-align: left;
+        cursor: pointer;
+      }
+      .finance-customer-option + .finance-customer-option { border-top: 1px solid var(--border); }
+      .finance-customer-option:hover, .finance-customer-option:focus-visible,
+      .finance-customer-option.is-active { background: var(--accent-soft); }
+      .finance-customer-empty { margin: 0; padding: 0.7rem; color: var(--muted); }
+      .finance-article-options { right: auto; z-index: 120; }
+      .finance-recurring-custom-control[hidden] { display: none; }
+      .finance-recurring-custom-inputs {
+        display: grid;
+        grid-template-columns: minmax(5rem, 6rem) minmax(0, 1fr);
+        gap: 0.5rem;
+        min-width: 0;
+      }
+      .finance-recurring-custom-inputs > input,
+      .finance-recurring-custom-inputs > select { width: 100%; min-width: 0; }
       .customer-field-control input[type="checkbox"] {
         width: 1rem;
         min-height: 1rem;
@@ -2952,6 +3584,7 @@
       .customer-activity-action-icon { display: block; width: 1.6rem; height: 1.6rem; }
       .customer-activity-list { display: grid; gap: 0.8rem; margin-top: 1rem; }
       .customer-activity-entry { padding-top: 0.8rem; border-top: 1px solid var(--border); }
+      .customer-activity-entry:target { scroll-margin-top: 5rem; border-radius: var(--control-v1-radius); background: var(--accent-soft); outline: 2px solid var(--accent); }
       .customer-activity-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.65rem; }
       .customer-activity-entry-controls,
       .customer-activity-entry-actions { display: flex; align-items: center; gap: 0.3rem; }
@@ -3716,6 +4349,7 @@
       button.calendar-event { cursor: pointer; }
       .calendar-event:hover,
       .calendar-event:focus-visible { z-index: 2; filter: brightness(0.93); outline: 2px solid var(--ink); outline-offset: 1px; }
+      .calendar-event:target { z-index: 3; outline: 3px solid var(--ink); outline-offset: 2px; }
       .calendar-event-call { background: #949494; }
       .calendar-event-meeting { background: #297db8; }
       .calendar-event.is-completed { background: #6c8c7d; opacity: 0.78; }
@@ -4163,6 +4797,12 @@
         .customer-fields-grid,
         .customer-field-editor-grid { grid-template-columns: 1fr; }
         .finance-positions-footer { grid-template-columns: 1fr; }
+        .finance-positions-footer > [data-finance-position-add],
+        .finance-positions-footer > [data-finance-document-position-add] { width: 100%; }
+        [data-finance-position-editor] > .table-scroll,
+        [data-finance-document-position-editor] > .table-scroll { overflow-x: auto; }
+        [data-finance-position-editor] .finance-positions-table,
+        [data-finance-document-position-editor] .finance-positions-table { min-width: 42rem; }
         .finance-totals { width: 100%; }
         .styling-page-layout { grid-template-columns: 1fr; }
         .styling-settings-grid-foundation,
@@ -4212,6 +4852,7 @@
         .account-section-nav {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .account-pdf-template-nav { grid-template-columns: 1fr; }
         .account-panel .zoho-credentials-form { grid-template-columns: 1fr; }
         .zoho-connection-status { align-items: flex-start; flex-direction: column; }
         .zoho-import-row { grid-template-columns: 1fr; }
@@ -4266,6 +4907,8 @@
         }
       }
     </style>
+    <link rel="stylesheet" href="/static/template-placeholder-picker.css?v=2">
+    <link rel="stylesheet" href="/static/hub-quick-access.css?v=1">
   </head>
   <body data-email-composer-font-family="{{ email_composer_settings.font_family }}" data-email-composer-font-size="{{ email_composer_settings.font_size }}" data-email-composer-line-height="{{ email_composer_settings.line_height }}">
     <div class="app-shell">
@@ -4293,6 +4936,7 @@
               <a href="/finance/offers"{% if request.url.path.startswith("/finance/offers") %} class="is-active"{% endif %}>Angebote</a>
               <a href="/finance/orders"{% if request.url.path.startswith("/finance/orders") %} class="is-active"{% endif %}>Aufträge</a>
               <a href="/finance/invoices"{% if request.url.path.startswith("/finance/invoices") %} class="is-active"{% endif %}>Rechnungen</a>
+              <a href="/finance/dunnings"{% if request.url.path.startswith("/finance/dunnings") %} class="is-active"{% endif %}>Mahnungen</a>
               <a href="/finance/recurring-invoices"{% if request.url.path.startswith("/finance/recurring-invoices") %} class="is-active"{% endif %}>Periodische Rechnungen</a>
             </div>
           </details>
@@ -4309,7 +4953,41 @@
         </nav>
       </aside>
       <main class="app-main">
-        {% block content %}{% endblock %}
+        <header class="hub-quick-access" data-hub-quick-access aria-label="Schnellzugriff">
+          <div class="hub-quick-search" data-hub-quick-search>
+            <label class="visually-hidden" for="hub-quick-search-input">Hub durchsuchen</label>
+            <span class="hub-quick-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.4"/><path d="m15.6 15.6 5 5"/></svg></span>
+            <input id="hub-quick-search-input" type="search" placeholder="Hub durchsuchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="hub-quick-search-results" data-hub-quick-search-input>
+            <div id="hub-quick-search-results" class="hub-quick-search-results" role="listbox" aria-label="Suchergebnisse" data-hub-quick-search-results hidden></div>
+          </div>
+          {% if can_use_global_email_composer %}
+            <details class="hub-quick-create" data-hub-quick-create>
+              <summary aria-label="Neuen Datensatz anlegen" title="Neuen Datensatz anlegen">+</summary>
+              <div class="hub-quick-create-menu" aria-label="Neu anlegen">
+                <p>CRM</p>
+                <a href="/customers/new">Customer</a>
+                <a href="/contacts/new">Kontakt</a>
+                <a href="/leads/new">Lead</a>
+                <a href="/cases/new">Fall</a>
+                <p>Kalender &amp; E-Mail</p>
+                <a href="/calendar?create=call">Anruf</a>
+                <a href="/calendar?create=task">Aufgabe</a>
+                <a href="/calendar?create=meeting">Meeting</a>
+                <button type="button" data-email-compose-open data-hub-quick-create-email>E-Mail</button>
+                <p>Finance</p>
+                <a href="/finance/articles/new">Artikel</a>
+                <a href="/finance/offers/new">Angebot</a>
+                <a href="/finance/orders/new">Auftrag</a>
+                <a href="/finance/invoices/new">Rechnung</a>
+                <a href="/finance/dunnings/new">Mahnung</a>
+                <a href="/finance/recurring-invoices/new">Periodische Rechnung</a>
+              </div>
+            </details>
+          {% else %}
+            <button class="hub-quick-create-unavailable" type="button" aria-label="Neuen Datensatz anlegen: keine Berechtigung" title="Keine Berechtigung zum Anlegen" disabled>+</button>
+          {% endif %}
+        </header>
+        <div class="app-main-content">{% block content %}{% endblock %}</div>
       </main>
     </div>
     <button class="agent-launcher" type="button" data-agent-float-open aria-label="Hub-Agent öffnen" aria-expanded="false">
@@ -4352,6 +5030,8 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <link rel="stylesheet" href="/static/jodit-editor.css?v=1">
     <script src="/static/jodit-editor.js?v=11"></script>
+    <script src="/static/template-placeholder-picker.js?v=2" defer></script>
+    <script src="/static/hub-quick-access.js?v=1" defer></script>
     <script>
       (function () {
         var selectionByContent = new WeakMap();
@@ -6437,7 +7117,7 @@
           });
           document.addEventListener("calendar:activity-open", function (event) {
             var activity = event.detail || {};
-            if (activity.kind !== "call" && activity.kind !== "meeting") return;
+            if (activity.kind !== "call" && activity.kind !== "task" && activity.kind !== "meeting") return;
             customerActivityOpen(activity.kind, activity);
           });
           document.addEventListener("calendar:activity-edit", function (event) {
@@ -6645,6 +7325,18 @@
           window.requestAnimationFrame(updateExpandableSection);
         });
 
+        document.querySelectorAll("[data-customer-linked-records]").forEach(function (list) {
+          var toggle = list.querySelector("[data-customer-linked-records-toggle]");
+          var overflowRows = list.querySelectorAll("[data-customer-linked-overflow]");
+          if (!toggle || !overflowRows.length) { return; }
+          toggle.addEventListener("click", function () {
+            var expanded = toggle.getAttribute("aria-expanded") !== "true";
+            overflowRows.forEach(function (row) { row.hidden = !expanded; });
+            toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+            toggle.textContent = expanded ? "Weniger anzeigen..." : "Mehr anzeigen...";
+          });
+        });
+
         document.addEventListener("toggle", function (event) {
           var details = event.target;
           if (!(details instanceof HTMLDetailsElement) || !details.open) { return; }
@@ -6699,10 +7391,12 @@
             readonlyPositionPanels.forEach(function (panel) { panel.hidden = editing; });
             if (toggle) { toggle.hidden = true; }
             if (editing) {
+              positionEditors.forEach(function (panel) { panel.dispatchEvent(new Event("finance:position-edit-start")); });
               var firstControl = editor.querySelector("input:not([type=hidden]), select, textarea");
               if (firstControl) { firstControl.focus(); }
             } else {
               editor.reset();
+              positionEditors.forEach(function (panel) { panel.dispatchEvent(new Event("finance:position-edit-cancel")); });
             }
             window.dispatchEvent(new Event("resize"));
           }

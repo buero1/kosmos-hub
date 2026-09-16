@@ -122,6 +122,39 @@
     </table>
   </div>
 {% endmacro %}
+{% macro customer_finance_table(entries, module_key, identifier_label, date_label, empty_message) %}
+  {% if entries %}
+    <div data-customer-linked-records>
+      <div class="table-scroll">
+        <table class="finance-directory-table customer-linked-finance-table">
+          <thead><tr><th>{{ identifier_label }}</th><th>Status</th><th>{{ date_label }}</th><th>Gesamt</th></tr></thead>
+          <tbody>
+            {% for entry in entries %}
+              {% if module_key == "offers" %}
+                {% set record = entry.offer %}
+                {% set identifier = entry.offer_number %}
+                {% set record_date = entry.offer_date %}
+              {% else %}
+                {% set record = entry.document %}
+                {% set identifier = entry.identifier %}
+                {% set record_date = entry.document_date %}
+              {% endif %}
+              <tr{% if loop.index > 10 %} data-customer-linked-overflow hidden{% endif %}>
+                <td><a href="/finance/{{ module_key }}/{{ record.id }}">{{ identifier }}</a></td>
+                <td>{{ entry.status }}</td>
+                <td>{{ record_date }}</td>
+                <td>{{ entry.total_gross }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if entries|length > 10 %}<button class="button button-secondary button-variant-2 customer-linked-records-toggle" type="button" data-customer-linked-records-toggle aria-expanded="false">Mehr anzeigen...</button>{% endif %}
+    </div>
+  {% else %}
+    <p class="subtle">{{ empty_message }}</p>
+  {% endif %}
+{% endmacro %}
 {% macro customer_field_control(field, name) %}
   <label class="customer-field-control">
     <span>{{ field.label }}{% if field.sensitive %} <small>geschützt</small>{% endif %}</span>
@@ -146,7 +179,7 @@
     {% call module_detail_header(
       "/customers",
       "Back to customers",
-      "CRM customer",
+      "Hub-Customer" if not detail.entry.customer.zoho_id else "CRM customer",
       detail.entry.customer.name,
       status=detail.entry.account_status or "Status not available",
       has_actions=true
@@ -169,7 +202,7 @@
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
               <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
-              {% if can_manage_communications %}
+              {% if can_manage_communications and detail.entry.customer.zoho_id %}
                 <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
@@ -209,7 +242,7 @@
         <article id="customer-fields" class="card customer-detail-panel" data-layout-editor="customer-fields">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
               <h3>Kundenfelder</h3>
               <p class="subtle">Aktuelle Stammdaten und verknüpfte Hub-Informationen.</p>
             </div>
@@ -256,10 +289,13 @@
                   <div class="customer-system-details">
                     <p class="eyebrow">Hub-Daten</p>
                     <dl class="customer-fields-grid">
-                      <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id or "-" }}</dd></div>
+                      <div><dt>Quelle</dt><dd>{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub" }}</dd></div>
                       <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
-                      <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
-                      <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
+                      {% if detail.entry.customer.zoho_id %}
+                        <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id }}</dd></div>
+                        <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
+                        <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
+                      {% endif %}
                     </dl>
                     <p class="eyebrow customer-linked-sites-heading">Verknüpfte Hub-Websites</p>
                     <div class="customer-linked-sites">
@@ -357,7 +393,7 @@
         <article class="card customer-detail-panel customer-communication-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
               <h3>Kommunikation</h3>
             </div>
           </div>
@@ -366,7 +402,11 @@
               <button id="customer-communications-tab-emails" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-emails" aria-selected="true" tabindex="0" data-field-tab="emails">E-Mails</button>
               <button id="customer-communications-tab-contacts" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-contacts" aria-selected="false" tabindex="-1" data-field-tab="contacts">Kontakte</button>
               <button id="customer-communications-tab-cases" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-cases" aria-selected="false" tabindex="-1" data-field-tab="cases">Fälle</button>
+              <button id="customer-communications-tab-orders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-orders" aria-selected="false" tabindex="-1" data-field-tab="orders">Aufträge</button>
+              <button id="customer-communications-tab-invoices" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-invoices" aria-selected="false" tabindex="-1" data-field-tab="invoices">Rechnungen</button>
+              <button id="customer-communications-tab-recurring-invoices" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-recurring-invoices" aria-selected="false" tabindex="-1" data-field-tab="recurring-invoices">Periodische Rechnungen</button>
               <button id="customer-communications-tab-reminders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-reminders" aria-selected="false" tabindex="-1" data-field-tab="reminders">Mahnungen</button>
+              <button id="customer-communications-tab-offers" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-offers" aria-selected="false" tabindex="-1" data-field-tab="offers">Angebote</button>
             </div>
           </div>
           <div id="customer-communications-panel-emails" role="tabpanel" aria-labelledby="customer-communications-tab-emails" data-field-tab-panel="emails">
@@ -433,7 +473,7 @@
                     {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
                   </article>
                 {% else %}
-                  <p class="subtle">Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.</p>
+                  <p class="subtle">{% if detail.entry.customer.zoho_id %}Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.{% else %}Noch keine E-Mails gespeichert.{% endif %}</p>
                 {% endfor %}
               </div>
               <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
@@ -449,6 +489,10 @@
             {{ customer_contacts_table(detail.contacts, detail.entry.customer) }}
           </div>
           <div id="customer-communications-panel-cases" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Fälle.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/cases/new?customer_id={{ detail.entry.customer.id }}">Fall anlegen</a>{% endif %}
+            </div>
             {% if detail.cases %}
               <div class="table-scroll">
                 <table class="customer-contacts-table contacts-directory-table">
@@ -471,14 +515,47 @@
               <p class="subtle">Für diesen Kunden sind keine Fälle vorhanden.</p>
             {% endif %}
           </div>
-          <div id="customer-communications-panel-reminders" class="customer-communication-tab-empty" role="tabpanel" aria-labelledby="customer-communications-tab-reminders" data-field-tab-panel="reminders" hidden>
-            <p class="subtle">Mahnungen werden hier künftig angezeigt.</p>
+          <div id="customer-communications-panel-orders" role="tabpanel" aria-labelledby="customer-communications-tab-orders" data-field-tab-panel="orders" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Aufträge.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/orders/new?customer_id={{ detail.entry.customer.id }}">Auftrag anlegen</a>{% endif %}
+            </div>
+            {{ customer_finance_table(customer_finance_orders, "orders", "Auftragsnummer", "Auftragsdatum", "Für diesen Kunden sind keine Aufträge vorhanden.") }}
+          </div>
+          <div id="customer-communications-panel-invoices" role="tabpanel" aria-labelledby="customer-communications-tab-invoices" data-field-tab-panel="invoices" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Rechnungen.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/invoices/new?customer_id={{ detail.entry.customer.id }}">Rechnung anlegen</a>{% endif %}
+            </div>
+            {{ customer_finance_table(customer_finance_invoices, "invoices", "Rechnungsnummer", "Rechnungsdatum", "Für diesen Kunden sind keine Rechnungen vorhanden.") }}
+          </div>
+          <div id="customer-communications-panel-recurring-invoices" role="tabpanel" aria-labelledby="customer-communications-tab-recurring-invoices" data-field-tab-panel="recurring-invoices" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften periodischen Rechnungen.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/recurring-invoices/new?customer_id={{ detail.entry.customer.id }}">Periodische Rechnung anlegen</a>{% endif %}
+            </div>
+            {{ customer_finance_table(customer_finance_recurring_invoices, "recurring-invoices", "Bezeichnung", "Nächstes Rechnungsdatum", "Für diesen Kunden sind keine periodischen Rechnungen vorhanden.") }}
+          </div>
+          <div id="customer-communications-panel-reminders" role="tabpanel" aria-labelledby="customer-communications-tab-reminders" data-field-tab-panel="reminders" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Mahnungen.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/dunnings/new?customer_id={{ detail.entry.customer.id }}">Mahnung anlegen</a>{% endif %}
+            </div>
+            {{ customer_finance_table(customer_finance_dunnings, "dunnings", "Mahnungsnummer", "Mahnungsdatum", "Für diesen Kunden sind keine Mahnungen vorhanden.") }}
+          </div>
+          <div id="customer-communications-panel-offers" role="tabpanel" aria-labelledby="customer-communications-tab-offers" data-field-tab-panel="offers" hidden>
+            <div class="customer-communication-tab-heading">
+              <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Angebote.</p>
+              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/offers/new?customer_id={{ detail.entry.customer.id }}">Angebot anlegen</a>{% endif %}
+            </div>
+            {{ customer_finance_table(customer_finance_offers, "offers", "Angebotsnummer", "Angebotsdatum", "Für diesen Kunden sind keine Angebote vorhanden.") }}
           </div>
         </article>
 
       </div>
 
       <aside class="customer-detail-side-column">
+        {% if detail.entry.customer.zoho_id %}
         <article class="card customer-detail-panel customer-notes-panel">
           <div class="customer-detail-panel-heading">
             <div>
@@ -554,11 +631,12 @@
             </dialog>
           {% endif %}
         </article>
+        {% endif %}
 
         <article id="customer-activities" class="card customer-detail-panel customer-activities-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
               <h3>Aktivitäten</h3>
             </div>
             <div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
@@ -570,7 +648,7 @@
           <div class="customer-activity-list">
             {% if activity_calls or activity_tasks or activity_meetings %}
               {% for call in activity_calls %}
-                <article class="customer-activity-entry">
+                <article id="call-{{ call.id }}" class="customer-activity-entry">
                   <div class="customer-activity-entry-heading">
                     <strong>{{ call.name }}</strong>
                     <div class="customer-activity-entry-controls">
@@ -609,7 +687,7 @@
                 </article>
               {% endfor %}
               {% for meeting in activity_meetings %}
-                <article class="customer-activity-entry">
+                <article id="meeting-{{ meeting.id }}" class="customer-activity-entry">
                   <div class="customer-activity-entry-heading">
                     <strong>{{ meeting.name }}</strong>
                     <div class="customer-activity-entry-controls">

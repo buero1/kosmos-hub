@@ -2,7 +2,7 @@ import json
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
@@ -21,6 +21,18 @@ from app.services.module_layouts import ModuleLayoutService
 
 def _service(db: Session) -> HubFinanceService:
     return HubFinanceService(db=db, cipher=SecretCipher("a" * 32))
+
+
+def _contact_id(db: Session, customer: Customer) -> int:
+    contact = db.scalar(select(CustomerContact).where(CustomerContact.customer_id == customer.id))
+    if contact is None:
+        contact = CustomerContact(
+            customer=customer,
+            encrypted_profile_json=SecretCipher("a" * 32).encrypt(json.dumps({"fields": {"Name": "Test Kontakt"}})),
+        )
+        db.add(contact)
+        db.flush()
+    return contact.id
 
 
 def _article_values(**overrides: str) -> dict[str, str]:
@@ -52,7 +64,7 @@ def _offer_values(*, article_id: int, **overrides: str) -> dict[str, str]:
         "offer_line__0__sku": "260",
         "offer_line__0__description": "Monatliche Betreuung der Homepage.",
         "offer_line__0__quantity": "2",
-        "offer_line__0__unit": "Monat",
+        "offer_line__0__unit": "Monatlich",
         "offer_line__0__unit_price": "49.99",
         "offer_line__0__discount_percent": "10",
         "offer_line__0__tax_rate": "19",
@@ -91,7 +103,7 @@ def test_finance_offer_calculates_totals_and_snapshots_its_position_values():
         article = _service(db).create_article(submitted_values=_article_values())
         offer = _service(db).create_offer(
             customer_id=customer.id,
-            contact_id=None,
+            contact_id=_contact_id(db, customer),
             submitted_values=_offer_values(article_id=article.id),
         )
         db.commit()
@@ -110,6 +122,49 @@ def test_finance_offer_calculates_totals_and_snapshots_its_position_values():
         assert detail.totals.tax_total == Decimal("17.10")
         assert detail.totals.total_gross == Decimal("107.08")
         assert _service(db).list_offers()[0].total_gross == "107,08 EUR"
+
+
+def test_customer_offer_list_contains_only_the_linked_customer():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        first_customer = Customer(name="Erster Kunde")
+        second_customer = Customer(name="Zweiter Kunde")
+        db.add_all([first_customer, second_customer])
+        db.flush()
+        article = _service(db).create_article(submitted_values=_article_values())
+        first_offer = _service(db).create_offer(
+            customer_id=first_customer.id,
+            contact_id=_contact_id(db, first_customer),
+            submitted_values=_offer_values(article_id=article.id),
+        )
+        _service(db).create_offer(
+            customer_id=second_customer.id,
+            contact_id=_contact_id(db, second_customer),
+            submitted_values=_offer_values(article_id=article.id, offer_field__offer_date="2026-09-12"),
+        )
+        db.commit()
+
+        entries = _service(db).list_customer_offers(customer_id=first_customer.id)
+
+        assert [entry.offer.id for entry in entries] == [first_offer.id]
+
+
+@pytest.mark.parametrize("unit", ("", "Wöchentlich"))
+def test_finance_offer_requires_a_supported_position_unit(unit: str):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        article = _service(db).create_article(submitted_values=_article_values())
+        values = _offer_values(article_id=article.id, offer_line__0__unit=unit)
+
+        with pytest.raises(HubFinanceError, match="Einheit"):
+            _service(db).create_offer(customer_id=customer.id, contact_id=_contact_id(db, customer), submitted_values=values)
 
 
 def test_finance_offer_rejects_a_contact_of_another_customer():
@@ -135,6 +190,24 @@ def test_finance_offer_rejects_a_contact_of_another_customer():
             )
 
 
+def test_finance_offer_requires_contact():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        article = _service(db).create_article(submitted_values=_article_values())
+
+        with pytest.raises(HubFinanceError, match="Ansprechpartner ist erforderlich"):
+            _service(db).create_offer(
+                customer_id=customer.id,
+                contact_id=None,
+                submitted_values=_offer_values(article_id=article.id),
+            )
+
+
 def test_finance_fields_follow_the_global_layout_configuration():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -149,7 +222,7 @@ def test_finance_fields_follow_the_global_layout_configuration():
         db.flush()
         offer = _service(db).create_offer(
             customer_id=customer.id,
-            contact_id=None,
+            contact_id=_contact_id(db, customer),
             submitted_values=_offer_values(article_id=article.id),
         )
         db.commit()

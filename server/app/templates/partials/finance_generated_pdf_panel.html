@@ -1,0 +1,43 @@
+<article class="card customer-detail-panel finance-document-pdf-panel" data-generated-pdf-panel data-status-url="/finance/{{ generated_pdf_document_type }}/{{ generated_pdf_document_id }}/generated-pdf/status">
+  <div class="customer-detail-panel-heading">
+    <div>
+      <p class="eyebrow">Erzeugter Beleg</p>
+      <h3>{% if generated_pdf and generated_pdf.is_zugferd %}ZUGFeRD-Entwurf{% else %}PDF-Vorschau{% endif %}</h3>
+    </div>
+  </div>
+  {% if generated_pdf and generated_pdf.is_ready %}
+    <iframe class="finance-document-pdf-preview" src="/finance/{{ generated_pdf_document_type }}/{{ generated_pdf_document_id }}/generated-pdf#view=FitH" title="Vorschau: {{ generated_pdf.filename }}"></iframe>
+    <p class="subtle">{{ generated_pdf.filename }} · {{ (generated_pdf.byte_size / 1024 / 1024) | round(1) }} MB</p>
+    <p class="subtle">Vorlage: {{ generated_pdf.template_name }}, Version {{ generated_pdf.template_version }}{% if generated_pdf.is_zugferd %} · ZUGFeRD {{ generated_pdf.zugferd_version }} · {{ generated_pdf.zugferd_profile }} · XML XSD-geprüft{% endif %}</p>
+  {% elif generated_pdf and generated_pdf.is_pending %}
+    <p class="finance-generated-pdf-status">PDF wird im Hintergrund erstellt. Die Vorschau erscheint automatisch.</p>
+    <p class="subtle">Vorlage: {{ generated_pdf.template_name }}, Version {{ generated_pdf.template_version }}</p>
+  {% elif generated_pdf and generated_pdf.status == "failed" %}
+    <p class="notice-error">{{ generated_pdf.error_message or "Die PDF konnte nicht erstellt werden." }}</p>
+    <p class="subtle">Vorlage: {{ generated_pdf.template_name }}, Version {{ generated_pdf.template_version }}</p>
+  {% else %}
+    <p class="subtle">Für diesen Beleg wurde noch keine Hub-PDF erzeugt.</p>
+  {% endif %}
+  <form method="post" action="/finance/{{ generated_pdf_document_type }}/{{ generated_pdf_document_id }}/generated-pdf">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button button-secondary button-variant-1" type="submit"{% if generated_pdf and generated_pdf.is_pending %} disabled{% endif %}>PDF neu erzeugen</button>
+  </form>
+</article>
+{% if generated_pdf and generated_pdf.is_pending %}
+  <script>
+    (function () {
+      var panel = document.querySelector('[data-generated-pdf-panel]');
+      if (!panel) return;
+      var poll = function () {
+        fetch(panel.dataset.statusUrl, {headers: {'Accept': 'application/json'}, cache: 'no-store'})
+          .then(function (response) { return response.ok ? response.json() : null; })
+          .then(function (result) {
+            if (result && (result.status === 'ready' || result.status === 'failed')) window.location.reload();
+            else window.setTimeout(poll, 2000);
+          })
+          .catch(function () { window.setTimeout(poll, 4000); });
+      };
+      window.setTimeout(poll, 1500);
+    }());
+  </script>
+{% endif %}

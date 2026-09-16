@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from base64 import b64encode
 import re
 from dataclasses import dataclass
 from secrets import token_urlsafe
@@ -113,6 +114,22 @@ class EmailComposeImageService:
             return f'{match.group("prefix")}{match.group("quote")}cid:{inline.content_id}{match.group("quote")}'
 
         return _LOCAL_IMAGE_SRC_PATTERN.sub(replace, content), tuple(images.values())
+
+    def embed_local_images(self, content: str) -> str:
+        """Embed Hub-local images so offline renderers do not need an authenticated request."""
+        data_urls: dict[str, str] = {}
+
+        def replace(match: re.Match[str]) -> str:
+            token = match.group("token")
+            data_url = data_urls.get(token)
+            if data_url is None:
+                image, binary = self.load_image(token=token)
+                encoded = b64encode(binary).decode("ascii")
+                data_url = f"data:{image.content_type};base64,{encoded}"
+                data_urls[token] = data_url
+            return f'{match.group("prefix")}{match.group("quote")}{data_url}{match.group("quote")}'
+
+        return _LOCAL_IMAGE_SRC_PATTERN.sub(replace, content)
 
     @staticmethod
     def is_local_image_path(value: str) -> bool:

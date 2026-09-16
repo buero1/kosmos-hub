@@ -1,11 +1,19 @@
 {% extends "base.html" %}
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/case_field_control.html" import case_field_control %}
+{% from "partials/create_customer_link_panel.html" import create_customer_link_panel %}
 {% block title %}Fall neu anlegen · kosmos-hub{% endblock %}
 {% block content %}
   <section>
-    {% call module_detail_header("/cases", "Zurück zu Fälle", "Hub-Fall", "Fall neu anlegen", has_actions=true) %}
-      <a class="button button-secondary button-variant-1" href="/cases">Abbrechen</a>
+    {% if selected_customer %}
+      {% set back_href = "/customers/" ~ selected_customer.id %}
+      {% set back_label = "Zurück zu " ~ selected_customer.name %}
+    {% else %}
+      {% set back_href = "/cases" %}
+      {% set back_label = "Zurück zu Fälle" %}
+    {% endif %}
+    {% call module_detail_header(back_href, back_label, "Hub-Fall", "Fall neu anlegen", has_actions=true) %}
+      <a class="button button-secondary button-variant-1" href="{{ back_href }}">Abbrechen</a>
       <button class="button button-variant-1" type="submit" form="case-create-form">Fall anlegen</button>
     {% endcall %}
 
@@ -13,23 +21,29 @@
     {% if source_email %}
       <p class="notice-info">Der neue Fall wird mit der E-Mail „{{ source_email.subject }}“ verknüpft.</p>
     {% endif %}
-    <article class="card customer-detail-panel">
-      <div class="customer-detail-panel-heading">
-        <div>
-          <p class="eyebrow">Fälle</p>
-          <h3>Alle Felder</h3>
-          <p class="subtle">Die Angaben werden ausschließlich im Hub gespeichert.</p>
-        </div>
+    <div class="customer-detail-layout">
+      <div class="customer-detail-main-column">
+        <article class="card customer-detail-panel">
+          <div class="customer-detail-panel-heading">
+            <div>
+              <p class="eyebrow">Fälle</p>
+              <h3>Alle Felder</h3>
+              <p class="subtle">Die Angaben werden ausschließlich im Hub gespeichert.</p>
+            </div>
+          </div>
+          <form id="case-create-form" method="post" action="/cases" class="communication-form customer-field-editor contact-create-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            {% if source_email %}<input type="hidden" name="source_email_key" value="{{ source_email.key }}">{% endif %}
+            <div class="customer-field-editor-grid">
+              {% for field in fields %}
+                {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
+              {% endfor %}
+            </div>
+          </form>
+        </article>
       </div>
-      <form id="case-create-form" method="post" action="/cases" class="communication-form customer-field-editor contact-create-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {% if source_email %}<input type="hidden" name="source_email_key" value="{{ source_email.key }}">{% endif %}
-        <div class="customer-field-editor-grid">
-          {% for field in fields %}
-            {{ case_field_control(field, submitted_values.get("case_field__" ~ field.key, ""), customers, selected_customer_id, true) }}
-          {% endfor %}
-        </div>
-      </form>
-    </article>
+      {{ create_customer_link_panel("case-create-form", selected_customer) }}
+    </div>
+    {% include "partials/create_customer_link_script.html" %}
   </section>
 {% endblock %}

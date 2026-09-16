@@ -2,12 +2,14 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.services import maintenance_worker
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError
 from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
@@ -122,6 +124,48 @@ def test_incremental_sync_records_a_failure_streak_and_resets_it_after_a_success
         assert state.last_success_at is not None
         assert state.consecutive_failures == 0
         assert state.alerted_at is None
+
+
+def test_message_storage_failure_is_visible_and_does_not_block_next_uid():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    with Session(engine) as db:
+        account = HubMailboxAccount(
+            email_address="info@kosmos.example", display_name="Kosmos Hub",
+            username="info@kosmos.example", encrypted_password=cipher.encrypt("secret"),
+            verified_at=datetime.now(UTC),
+        )
+        db.add(account)
+        db.flush()
+        state = HubMailboxImapSyncState(mailbox_account_id=account.id, folder="INBOX", last_imap_uid="100")
+        db.add(state)
+        db.commit()
+        service = HubMailboxImapSyncService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        service._new_uids = lambda **_kwargs: (("101", "102"), None)
+        service.importer._fetch_message = lambda **kwargs: (kwargs["uid"].encode(), "")
+        service.importer._parse_message = lambda **kwargs: kwargs["raw_message"].decode()
+
+        def store(*, parsed):
+            if parsed == "101":
+                raise DataError("INSERT", None, Exception("too large"))
+            return "imported", 0, 0
+
+        service.importer._store_message = store
+        summary = service.sync_once(folders=("INBOX",))
+        db.refresh(state)
+        failure = db.scalar(select(HubMailboxImapSyncFailure))
+        assert summary.checked == 2
+        assert summary.imported == 1
+        assert summary.failed == 1
+        assert state.last_imap_uid == "102"
+        assert failure is not None
+        assert failure.imap_uid == "101"
+        assert len(service.list_failed_messages()) == 1
+
+        service.importer._store_message = lambda **_kwargs: ("imported", 0, 0)
+        assert service.retry_failed_message(failure.id) is True
+        assert service.list_failed_messages() == ()
 
 
 def test_imap_idle_waits_for_an_inbox_change_then_ends_the_session(monkeypatch):

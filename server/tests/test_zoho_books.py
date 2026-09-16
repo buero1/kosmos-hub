@@ -198,7 +198,7 @@ def test_books_reuses_a_valid_access_token_for_multiple_api_reads(monkeypatch):
         assert refresh_calls == [True]
 
 
-def test_books_reads_recent_invoice_ids_and_the_available_invoice_pdf(monkeypatch):
+def test_books_reads_recent_invoice_ids_and_available_document_pdfs(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -231,9 +231,11 @@ def test_books_reads_recent_invoice_ids_and_the_available_invoice_pdf(monkeypatc
         assert service.list_recent_invoice_ids(limit=100) == ("9001", "9002")
         assert service.get_invoice(invoice_id="9001")["invoice_number"] == "RE-1"
         assert service.download_invoice_pdf(invoice_id="9001").content == b"%PDF-1.7"
+        assert service.download_sales_order_pdf(sales_order_id="7001").content == b"%PDF-1.7"
         assert "organization_id=books-org-1" in captured_paths[0]
         assert "sort_column=date" in captured_paths[0]
         assert "accept=pdf" in captured_paths[-1]
+        assert any(path.startswith("/books/v3/salesorders/7001?") for path in captured_paths)
 
 
 def test_books_reads_all_invoice_ids_across_pages_without_duplicates(monkeypatch):

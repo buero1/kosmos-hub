@@ -1,28 +1,29 @@
 <article class="card customer-detail-panel finance-positions-panel" data-finance-position-editor{% if finance_positions_form_id %} data-finance-position-form="{{ finance_positions_form_id }}" data-customer-edit-position-editor data-customer-edit-form="{{ finance_positions_form_id }}" hidden{% endif %}>
   <div class="customer-detail-panel-heading">
     <div>
-      <p class="eyebrow">Repeater</p>
+      <p class="eyebrow">Angebote</p>
       <h3>Positionen</h3>
-      <p class="subtle">Artikel, Menge, Tarif, USt. und Betrag werden wie auf dem Angebot zeilenweise geführt.</p>
     </div>
+    {% if finance_position_preset_library_key %}<div class="finance-position-preset-open-actions"><button class="button button-secondary button-variant-1" type="button" data-finance-position-preset-open="load">Laden</button><button class="button button-secondary button-variant-1" type="button" data-finance-position-preset-open="save">Speichern</button></div>{% endif %}
   </div>
   <div class="table-scroll">
     <table class="finance-positions-table">
-      <thead><tr><th>Artikeldetails</th><th>Menge</th><th>Tarif</th><th>USt.</th><th>Betrag netto</th><th class="finance-position-action-heading"><span class="visually-hidden">Aktion</span></th></tr></thead>
+      <thead><tr><th class="finance-position-drag-heading"><span class="visually-hidden">Reihenfolge</span></th><th>Artikeldetails</th><th>Menge</th><th>Tarif</th><th>USt.</th><th class="finance-position-net-heading">Netto</th><th class="finance-position-action-heading"><span class="visually-hidden">Aktion</span></th></tr></thead>
       <tbody data-finance-position-rows>
         {% for row in line_rows %}
           <tr data-finance-position-row>
+            <td class="finance-position-drag-cell"><span class="finance-position-drag-handle" title="Position verschieben" data-finance-position-drag-handle draggable="true" aria-hidden="true"></span></td>
             <td class="finance-position-details">
               <input type="hidden" name="offer_line__{{ loop.index0 }}__article_id" value="{{ row.article_id }}" data-finance-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
-              <input type="search" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+              <input type="search" name="offer_line__{{ loop.index0 }}__name" value="{{ row.name }}" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" role="combobox" aria-label="Artikel suchen" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="finance-article-search-options" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
               <input type="hidden" name="offer_line__{{ loop.index0 }}__sku" value="{{ row.sku }}" data-finance-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
               <textarea name="offer_line__{{ loop.index0 }}__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>{{ row.description }}</textarea>
             </td>
-            <td><input type="text" name="offer_line__{{ loop.index0 }}__quantity" value="{{ row.quantity | finance_decimal }}" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="offer_line__{{ loop.index0 }}__unit" value="{{ row.unit }}" placeholder="Einheit" data-finance-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+            <td><input type="text" name="offer_line__{{ loop.index0 }}__quantity" value="{{ row.quantity | finance_decimal }}" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-unit">Einheit<select name="offer_line__{{ loop.index0 }}__unit" data-finance-line-field="unit" required{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value=""{% if row.unit not in ('Monatlich', 'Einmalig', 'Jährlich') %} selected{% endif %} disabled>Auswählen</option><option value="Monatlich"{% if row.unit == 'Monatlich' %} selected{% endif %}>Monatlich</option><option value="Einmalig"{% if row.unit == 'Einmalig' %} selected{% endif %}>Einmalig</option><option value="Jährlich"{% if row.unit == 'Jährlich' %} selected{% endif %}>Jährlich</option></select></label></td>
             <td><input type="text" name="offer_line__{{ loop.index0 }}__unit_price" value="{{ row.unit_price | finance_decimal }}" inputmode="decimal" data-finance-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="offer_line__{{ loop.index0 }}__discount_percent" value="{{ row.discount_percent | finance_decimal }}" inputmode="decimal" data-finance-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
             <td><select name="offer_line__{{ loop.index0 }}__tax_rate" data-finance-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0"{% if row.tax_rate == '0' %} selected{% endif %}>0 %</option><option value="7"{% if row.tax_rate == '7' %} selected{% endif %}>7 %</option><option value="19"{% if row.tax_rate == '19' %} selected{% endif %}>19 %</option></select></td>
             <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
-            <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
+            <td class="finance-position-actions"><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button><button class="finance-position-insert" type="button" title="Neue Position direkt darunter" aria-label="Neue Position direkt darunter" data-finance-position-insert>+</button></td>
           </tr>
         {% endfor %}
       </tbody>
@@ -40,17 +41,18 @@
   <datalist id="finance-offer-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form | finance_decimal }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
   <template data-finance-position-template>
     <tr data-finance-position-row>
+      <td class="finance-position-drag-cell"><span class="finance-position-drag-handle" title="Position verschieben" data-finance-position-drag-handle draggable="true" aria-hidden="true"></span></td>
       <td class="finance-position-details">
         <input type="hidden" name="offer_line__INDEX__article_id" data-finance-line-article-id{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
-        <input type="search" name="offer_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" list="finance-offer-article-suggestions" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
+        <input type="search" name="offer_line__INDEX__name" placeholder="Artikel suchen oder frei schreiben" autocomplete="off" role="combobox" aria-label="Artikel suchen" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="finance-article-search-options" data-finance-line-field="name" data-finance-article-search{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
         <input type="hidden" name="offer_line__INDEX__sku" data-finance-line-field="sku"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}>
         <textarea name="offer_line__INDEX__description" rows="2" placeholder="Beschreibung" data-finance-line-field="description"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></textarea>
       </td>
-      <td><input type="text" name="offer_line__INDEX__quantity" value="1,00" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><input type="text" name="offer_line__INDEX__unit" placeholder="Einheit" data-finance-line-field="unit"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></td>
+      <td><input type="text" name="offer_line__INDEX__quantity" value="1,00" inputmode="decimal" data-finance-line-field="quantity"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-unit">Einheit<select name="offer_line__INDEX__unit" data-finance-line-field="unit" required{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="" selected disabled>Auswählen</option><option value="Monatlich">Monatlich</option><option value="Einmalig">Einmalig</option><option value="Jährlich">Jährlich</option></select></label></td>
       <td><input type="text" name="offer_line__INDEX__unit_price" inputmode="decimal" data-finance-line-field="unit_price"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><label class="finance-position-discount">Rabatt %<input type="text" name="offer_line__INDEX__discount_percent" value="0,00" inputmode="decimal" data-finance-line-field="discount_percent"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}></label></td>
       <td><select name="offer_line__INDEX__tax_rate" data-finance-line-field="tax_rate"{% if finance_positions_form_id %} form="{{ finance_positions_form_id }}"{% endif %}><option value="0">0 %</option><option value="7">7 %</option><option value="19" selected>19 %</option></select></td>
       <td class="finance-position-amount" data-finance-line-amount>0,00 EUR</td>
-      <td><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button></td>
+      <td class="finance-position-actions"><button class="finance-position-remove" type="button" title="Position entfernen" aria-label="Position entfernen" data-finance-position-remove>&times;</button><button class="finance-position-insert" type="button" title="Neue Position direkt darunter" aria-label="Neue Position direkt darunter" data-finance-position-insert>+</button></td>
     </tr>
   </template>
 </article>
@@ -92,26 +94,10 @@
       editor.querySelector('[data-finance-total="tax"]').textContent = formatMoney(sums.tax, currency);
       editor.querySelector('[data-finance-total="total"]').textContent = formatMoney(sums.net + sums.tax, currency);
     }
-    function selectArticle(row, option) {
-      var search = row.querySelector('[data-finance-article-search]');
-      row.querySelector('[data-finance-line-article-id]').value = option.dataset.articleId;
-      search.value = option.dataset.name;
-      [['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price']].forEach(function (pair) {
-        var field = row.querySelector('[data-finance-line-field="' + pair[0] + '"]');
-        if (field) { field.value = option.dataset[pair[1]] || ''; }
-      });
-      var tax = row.querySelector('[data-finance-line-field="tax_rate"]');
-      if (tax) { tax.value = option.dataset.tax || '19'; }
-    }
     function bindRow(editor, row) {
       row.addEventListener('input', function () { updateTotals(editor); });
       row.querySelectorAll('[data-finance-line-field="quantity"], [data-finance-line-field="unit_price"], [data-finance-line-field="discount_percent"]').forEach(function (field) {
         field.addEventListener('blur', function () { field.value = decimalText(field.value); updateTotals(editor); });
-      });
-      row.querySelector('[data-finance-article-search]').addEventListener('input', function (event) {
-        var option = Array.prototype.find.call(document.getElementById('finance-offer-article-suggestions').options, function (candidate) { return candidate.value === event.target.value; });
-        if (option) { selectArticle(row, option); } else { row.querySelector('[data-finance-line-article-id]').value = ''; row.querySelector('[data-finance-line-field="sku"]').value = ''; }
-        updateTotals(editor);
       });
       row.querySelector('[data-finance-position-remove]').addEventListener('click', function () { row.remove(); updateTotals(editor); });
     }
@@ -119,30 +105,131 @@
       var rows = editor.querySelector('[data-finance-position-rows]');
       var template = editor.querySelector('[data-finance-position-template]');
       var nextIndex = rows.querySelectorAll('[data-finance-position-row]').length;
+      function reindexRows() {
+        rows.querySelectorAll('[data-finance-position-row]').forEach(function (row, index) {
+          row.querySelectorAll('[name]').forEach(function (field) {
+            field.name = field.name.replace(/offer_line__\d+__/, 'offer_line__' + index + '__');
+          });
+        });
+      }
+      function currentLines() {
+        return Array.prototype.map.call(rows.querySelectorAll('[data-finance-position-row]'), function (row) {
+          function value(selector) { var field = row.querySelector(selector); return field ? field.value : ''; }
+          return {
+            article_id: value('[data-finance-line-article-id]'),
+            name: value('[data-finance-line-field="name"]'),
+            sku: value('[data-finance-line-field="sku"]'),
+            description: value('[data-finance-line-field="description"]'),
+            quantity: value('[data-finance-line-field="quantity"]'),
+            unit: value('[data-finance-line-field="unit"]'),
+            unit_price: value('[data-finance-line-field="unit_price"]'),
+            discount_percent: value('[data-finance-line-field="discount_percent"]'),
+            tax_rate: value('[data-finance-line-field="tax_rate"]')
+          };
+        });
+      }
+      function captureRowPositions() {
+        var positions = new Map();
+        rows.querySelectorAll('[data-finance-position-row]').forEach(function (row) {
+          positions.set(row, row.getBoundingClientRect().top);
+        });
+        return positions;
+      }
+      function animateRowPositions(previousPositions) {
+        rows.querySelectorAll('[data-finance-position-row]').forEach(function (row) {
+          var previousTop = previousPositions.get(row);
+          if (typeof previousTop !== 'number') { return; }
+          var offset = previousTop - row.getBoundingClientRect().top;
+          if (!offset || typeof row.animate !== 'function') { return; }
+          row.animate(
+            [{ transform: 'translateY(' + offset + 'px)' }, { transform: 'translateY(0)' }],
+            { duration: 150, easing: 'ease-out' }
+          );
+        });
+      }
       rows.querySelectorAll('[data-finance-position-row]').forEach(function (row) { bindRow(editor, row); });
-      editor.querySelector('[data-finance-position-add]').addEventListener('click', function () {
+      var draggedRow = null;
+      rows.addEventListener('dragstart', function (event) {
+        var handle = event.target.closest('[data-finance-position-drag-handle]');
+        if (!handle) { event.preventDefault(); return; }
+        draggedRow = handle.closest('[data-finance-position-row]');
+        if (!draggedRow) { event.preventDefault(); return; }
+        draggedRow.classList.add('finance-position-sortable-chosen', 'finance-position-sortable-ghost', 'finance-position-sortable-drag');
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', 'finance-position');
+        }
+      });
+      rows.addEventListener('dragover', function (event) {
+        if (!draggedRow) { return; }
+        event.preventDefault();
+        if (event.dataTransfer) { event.dataTransfer.dropEffect = 'move'; }
+        var targetRow = event.target.closest('[data-finance-position-row]');
+        if (!targetRow || targetRow === draggedRow || targetRow.parentElement !== rows) { return; }
+        var bounds = targetRow.getBoundingClientRect();
+        var insertAfter = event.clientY > bounds.top + (bounds.height / 2);
+        var alreadyPlaced = insertAfter ? targetRow.nextElementSibling === draggedRow : draggedRow.nextElementSibling === targetRow;
+        if (alreadyPlaced) { return; }
+        var previousPositions = captureRowPositions();
+        rows.insertBefore(draggedRow, insertAfter ? targetRow.nextElementSibling : targetRow);
+        animateRowPositions(previousPositions);
+        if (event.clientY < 100) { window.scrollBy(0, -10); }
+        else if (event.clientY > window.innerHeight - 100) { window.scrollBy(0, 10); }
+      });
+      rows.addEventListener('drop', function (event) { if (draggedRow) { event.preventDefault(); } });
+      rows.addEventListener('dragend', function () {
+        if (!draggedRow) { return; }
+        draggedRow.classList.remove('finance-position-sortable-chosen', 'finance-position-sortable-ghost', 'finance-position-sortable-drag');
+        draggedRow = null;
+        reindexRows();
+        updateTotals(editor);
+      });
+      function appendRow(values, afterRow) {
         var fragment = template.content.cloneNode(true);
         fragment.querySelectorAll('[name]').forEach(function (element) { element.name = element.name.replace(/INDEX/g, String(nextIndex)); });
         var row = fragment.querySelector('[data-finance-position-row]');
-        rows.appendChild(fragment); bindRow(editor, row); nextIndex += 1; updateTotals(editor);
+        if (values) {
+          row.querySelector('[data-finance-line-article-id]').value = values.article_id || '';
+          ['name', 'sku', 'description', 'quantity', 'unit', 'unit_price', 'discount_percent', 'tax_rate'].forEach(function (key) {
+            var field = row.querySelector('[data-finance-line-field="' + key + '"]');
+            if (!field) { return; }
+            var value = values[key] || '';
+            field.value = ['quantity', 'unit_price', 'discount_percent'].indexOf(key) >= 0 ? decimalText(value) : value;
+          });
+        }
+        rows.insertBefore(fragment, afterRow && afterRow.parentElement === rows ? afterRow.nextElementSibling : null);
+        bindRow(editor, row); nextIndex += 1; reindexRows(); updateTotals(editor);
+      }
+      var editSnapshot = null;
+      editor.addEventListener('finance:position-edit-start', function () { editSnapshot = currentLines(); });
+      editor.addEventListener('finance:position-edit-cancel', function () {
+        if (!editSnapshot) { return; }
+        rows.innerHTML = ''; nextIndex = 0;
+        editSnapshot.forEach(function (line) { appendRow(line); });
+        editSnapshot = null;
+        reindexRows(); updateTotals(editor);
+      });
+      rows.addEventListener('click', function (event) {
+        var insertButton = event.target.closest('[data-finance-position-insert]');
+        if (!insertButton) { return; }
+        var sourceRow = insertButton.closest('[data-finance-position-row]');
+        if (sourceRow) { appendRow(null, sourceRow); }
+      });
+      editor.querySelector('[data-finance-position-add]').addEventListener('click', function () { appendRow(null); });
+      editor.addEventListener('finance:position-preset-load', function (event) {
+        var lines = event.detail && Array.isArray(event.detail.lines) ? event.detail.lines : [];
+        if (!lines.length) { return; }
+        rows.innerHTML = ''; nextIndex = 0;
+        lines.forEach(function (line) { appendRow(line); });
+        reindexRows();
+        updateTotals(editor);
       });
       var form = editorForm(editor);
       if (!form) { return; }
       var currency = form.querySelector('select[name="offer_field__currency"]');
       if (currency) { currency.addEventListener('change', function () { updateTotals(editor); }); }
-      var customer = form.querySelector('[data-finance-customer]');
-      var contact = form.querySelector('[data-finance-contact]');
-      function filterContacts() {
-        if (!customer || !contact) { return; }
-        Array.prototype.forEach.call(contact.options, function (option) {
-          if (!option.dataset.customerId) { return; }
-          var available = !customer.value || option.dataset.customerId === customer.value;
-          option.hidden = !available; option.disabled = !available;
-          if (!available && option.selected) { contact.value = ''; }
-        });
-      }
-      if (customer) { customer.addEventListener('change', filterContacts); filterContacts(); }
       updateTotals(editor);
     });
   }());
 </script>
+{% include "partials/finance_article_search_script.html" %}

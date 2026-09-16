@@ -1,0 +1,28 @@
+<script>
+  (function () {
+    document.querySelectorAll('[data-finance-document-form]').forEach(function (form) {
+      var invoiceDate = form.querySelector('[name="document_field__invoice_date"]');
+      var terms = form.querySelector('[name="document_field__payment_terms"]');
+      var dueDate = form.querySelector('[name="document_field__due_date"]');
+      if (!invoiceDate || !terms || !dueDate) return;
+      function expectedDueDate() {
+        var days = terms.value === 'due_on_receipt' ? 0 : /^\d+_days$/.test(terms.value) ? Number(terms.value.split('_')[0]) : null;
+        if (days === null || !invoiceDate.value) return null;
+        var date = new Date(invoiceDate.value + 'T00:00:00Z');
+        if (Number.isNaN(date.getTime())) return null;
+        date.setUTCDate(date.getUTCDate() + days);
+        return date.toISOString().slice(0, 10);
+      }
+      function calculateDueDate() {
+        var expected = expectedDueDate();
+        if (expected !== null) dueDate.value = expected;
+      }
+      terms.addEventListener('change', calculateDueDate);
+      invoiceDate.addEventListener('change', calculateDueDate);
+      dueDate.addEventListener('change', function () {
+        var expected = expectedDueDate();
+        if (expected !== null && dueDate.value !== expected) terms.value = '';
+      });
+    });
+  }());
+</script>

@@ -1,14 +1,17 @@
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.api.routes import web
 from app.api.routes.web import _next_task_due_date
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.customer_activity import CustomerCallActivity, CustomerTaskActivity
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_user import HubUser
 from app.services.customer_activities import CALL_REMINDER_OPTIONS, CALL_TIME_OPTIONS, CustomerActivityError, CustomerActivityService, suggested_call_start
@@ -45,6 +48,84 @@ def test_new_task_default_is_the_next_calendar_day():
 
     assert _next_task_due_date(datetime(2026, 9, 8, 0, 1, tzinfo=berlin)) == date(2026, 9, 9)
     assert _next_task_due_date(datetime(2026, 12, 31, 23, 59, tzinfo=berlin)) == date(2027, 1, 1)
+
+
+def test_activity_permalink_targets_the_exact_customer_entry_or_calendar_event():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Test-Kunde", is_visible=True)
+        linked_task = CustomerTaskActivity(customer=customer, name="Prüfen", due_at=datetime(2026, 9, 14, 9))
+        unlinked_call = CustomerCallActivity(
+            name="Rückruf",
+            starts_at=datetime(2026, 9, 13, 23, 30),
+            ends_at=datetime(2026, 9, 14, 0),
+            duration_minutes=30,
+        )
+        db.add_all([linked_task, unlinked_call])
+        db.flush()
+
+        task_response = web.customer_activity_permalink("task", linked_task.id, None, db)
+        call_response = web.customer_activity_permalink("call", unlinked_call.id, None, db)
+
+        assert task_response.headers["location"] == f"/customers/{customer.id}#task-{linked_task.id}"
+        assert call_response.headers["location"] == f"/calendar?week=2026-09-14#call-{unlinked_call.id}"
+
+
+def test_activity_permalink_targets_exist_in_templates():
+    customer_template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+    calendar_template = Path("app/templates/calendar.html").read_text(encoding="utf-8")
+
+    assert 'id="call-{{ call.id }}"' in customer_template
+    assert 'id="task-{{ task.id }}"' in customer_template
+    assert 'id="meeting-{{ meeting.id }}"' in customer_template
+    assert 'id="{{ event.kind }}-{{ event.id }}"' in calendar_template
+    web.templates.env.get_template("customer_activity_standalone.html")
+
+
+def test_global_task_entry_uses_calendar_form_and_saves_to_customer(monkeypatch):
+    template = Path("app/templates/base.html").read_text(encoding="utf-8")
+    quick_access = Path("app/static/hub-quick-access.js").read_text(encoding="utf-8")
+    assert 'href="/calendar?create=task"' in template
+    assert 'kind !== "task"' in quick_access
+    monkeypatch.setattr(web, "require_csrf", lambda request, token: None)
+    monkeypatch.setattr(web, "_require_hub_admin", lambda request: SimpleNamespace(username="hub-admin"))
+    monkeypatch.setattr(web, "write_audit_log", lambda *args, **kwargs: None)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Test-Kunde", is_visible=True)
+        db.add(customer)
+        db.flush()
+        response = web.schedule_calendar_activity(
+            request=None,
+            db=db,
+            customer_id=str(customer.id),
+            activity_kind="task",
+            name="Angebot prüfen",
+            status="planned",
+            direction="outbound",
+            start_date="",
+            start_time="",
+            due_date="2026-09-16",
+            due_time="09:00",
+            duration_minutes="60",
+            reminder_channels=[],
+            reminder_minutes_before=[],
+            reminder_channel="popup",
+            task_reminder_minutes_before="0",
+            description="",
+            week="2026-09-14",
+            csrf_token="",
+        )
+        task = db.scalar(select(CustomerTaskActivity))
+        assert task is not None
+        assert task.name == "Angebot prüfen"
+        assert task.customer_id == customer.id
+        assert response.status_code == 303
+        assert response.headers["location"].startswith(f"/customers/{customer.id}?")
 
 
 def test_suggested_call_start_skips_a_slot_with_less_than_ten_minutes_remaining_at_any_time():

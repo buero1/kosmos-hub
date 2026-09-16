@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,70 @@ def _site(*, site_id: int, domain: str, customer_id: int | None = None) -> Site:
 
 def _service(db: Session) -> CustomerDirectoryService:
     return CustomerDirectoryService(db=db, cipher=SecretCipher("a" * 32))
+
+
+def test_hub_customer_can_be_created_listed_and_edited_without_zoho():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = _service(db)
+        customer = service.create_hub_customer(submitted_values={
+            "customer_field__customer_name": "  Atelier Beispiel  ",
+            "customer_field__account_status": "Neu",
+            "customer_field__website": "https://www.atelier-beispiel.de/",
+            "customer_field__phone": "+49 89 12345",
+            "customer_field__billing_city": "München",
+        })
+        db.commit()
+
+        assert customer.zoho_id is None
+        assert customer.website_domain == "atelier-beispiel.de"
+        assert [entry.customer.id for entry in service.list_entries(query="Atelier")] == [customer.id]
+        detail = service.get_detail(customer_id=customer.id)
+        assert detail is not None
+        assert detail.entry.account_status == "Neu"
+        assert {field.key for field in detail.editable_profile_fields} >= {
+            "customer_name", "account_status", "website", "billing_city",
+        }
+        assert "Atelier Beispiel" in SecretCipher("a" * 32).decrypt(customer.encrypted_profile_json)
+
+        service.update_hub_customer(customer_id=customer.id, submitted_values={
+            "customer_field__customer_name": "Atelier Neu",
+            "customer_field__account_status": "Aktuell",
+            "customer_field__website": "https://atelier-neu.de",
+            "customer_field__billing_city": "Dachau",
+        })
+        db.commit()
+
+        assert customer.name == "Atelier Neu"
+        assert customer.zoho_status == "Aktuell"
+        assert customer.website_domain == "atelier-neu.de"
+        assert any(field.label == "Rechnungsadresse - Stadt" and field.value == "Dachau" for field in service.get_detail(customer_id=customer.id).profile_fields)
+
+
+def test_hub_customer_validation_does_not_modify_imported_customers():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = _service(db)
+        with pytest.raises(ValueError, match="Kundennamen"):
+            service.create_hub_customer(submitted_values={"customer_field__account_status": "Neu"})
+        with pytest.raises(ValueError, match="Kundenstatus"):
+            service.create_hub_customer(submitted_values={
+                "customer_field__customer_name": "Test",
+                "customer_field__account_status": "falsch",
+            })
+        imported = Customer(name="Zoho-Kunde", zoho_id="zoho-123")
+        db.add(imported)
+        db.flush()
+        with pytest.raises(ValueError, match="nicht im Hub verwaltet"):
+            service.update_hub_customer(customer_id=imported.id, submitted_values={
+                "customer_field__customer_name": "Unerwünscht",
+                "customer_field__account_status": "Neu",
+            })
+        assert imported.name == "Zoho-Kunde"
 
 
 def test_customer_detail_lists_only_cases_linked_to_the_customer():
@@ -153,6 +218,31 @@ def test_customer_detail_template_uses_secure_wordpress_shortcut_and_case_drawer
     assert "data-customer-case-delete-dialog" in template
     assert '@router.get("/customers/{customer_id}/cases/{case_id}/compose"' in routes
     assert '@router.post("/customers/{customer_id}/cases/{case_id}/delete"' in routes
+
+
+def test_customer_detail_template_links_finance_records_and_limits_long_lists():
+    template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+
+    for tab in ("orders", "invoices", "recurring-invoices", "reminders", "offers"):
+        assert f'id="customer-communications-tab-{tab}"' in template
+        assert f'id="customer-communications-panel-{tab}"' in template
+    assert 'href="/finance/{{ module_key }}/{{ record.id }}"' in template
+    assert "loop.index > 10" in template
+    assert "Mehr anzeigen..." in template
+
+
+def test_customer_detail_create_links_keep_the_customer_relation():
+    template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+
+    expected_links = (
+        "/cases/new?customer_id={{ detail.entry.customer.id }}",
+        "/finance/orders/new?customer_id={{ detail.entry.customer.id }}",
+        "/finance/invoices/new?customer_id={{ detail.entry.customer.id }}",
+        "/finance/recurring-invoices/new?customer_id={{ detail.entry.customer.id }}",
+        "/finance/offers/new?customer_id={{ detail.entry.customer.id }}",
+    )
+    for link in expected_links:
+        assert f'href="{link}"' in template
 
 
 def test_customer_directory_rejects_non_matching_or_ambiguous_sites():

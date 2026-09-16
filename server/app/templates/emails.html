@@ -141,6 +141,19 @@
     </div>
   </section>
 
+  {% if mailbox_sync_warnings or mailbox_sync_failures %}
+    <div class="notice notice-error" role="alert">
+      <strong>Postfachabruf benötigt Aufmerksamkeit.</strong>
+      {% for address, reason in mailbox_sync_warnings %}
+        <span>{{ address }}: {{ reason }}.</span>
+      {% endfor %}
+      {% if mailbox_sync_failures %}
+        <span>{{ mailbox_sync_failures | length }} Nachricht(en) konnten nicht übernommen werden; weitere Nachrichten werden trotzdem abgerufen.</span>
+      {% endif %}
+      <a href="/account#account-mailbox">Details und erneuten Import im Account öffnen</a>
+    </div>
+  {% endif %}
+
   {% if email_state and email_message %}
     <p class="notice {% if email_state == 'error' %}notice-error{% endif %}">{{ email_message }}</p>
   {% endif %}

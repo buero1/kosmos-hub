@@ -120,6 +120,32 @@ def test_mailbox_header_actions_align_the_template_link_with_new_email_button():
     assert ".mailbox-header-actions .button { margin: 0; }" in mailbox_template
 
 
+def test_account_mailbox_groups_settings_in_zoho_style_disclosures():
+    template = Path("app/templates/account.html").read_text(encoding="utf-8")
+    mcp_section = template[template.index('id="account-mcp"'):template.index('id="account-desktop-notifier"')]
+    mailbox_section = template[template.index('id="account-mailbox"'):template.index('id="account-openai"')]
+
+    summaries = [
+        "Postfächer",
+        "Synchronisierung",
+        "Warnungen zum Postfachabruf",
+        "Fehlgeschlagene Nachrichten",
+        "E-Mail-Editor",
+        "E-Mail-Signatur",
+        "Gesperrte Absender",
+    ]
+    for summary in summaries:
+        assert f"<summary>{summary}</summary>" in mailbox_section
+    assert mailbox_section.count("account-details zoho-area account-mailbox-area") == len(summaries)
+    assert mailbox_section.index("Automatischer E-Mail-Abruf") < mailbox_section.index("Gesperrte Absender")
+    assert mailbox_section.index("E-Mail-Signatur") < mailbox_section.index("Gesperrte Absender")
+    assert "Automatischer E-Mail-Abruf" not in mcp_section
+    assert '"[data-account-section] > details.account-details, [data-account-disclosure-group] > details.account-details"' in template
+    assert "candidate.parentElement === disclosure.parentElement" in template
+    assert "candidate.open = false;" in template
+    assert "window.KosmosEmailEditors.refresh(content);" in template
+
+
 def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

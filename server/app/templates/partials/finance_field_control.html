@@ -1,29 +1,62 @@
 {% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article", link_options=(), selected_link_id=None) %}
+  {% if field.key == "custom_interval" %}
+  <div class="customer-field-control finance-recurring-custom-control" data-recurring-custom-field{% if not value %} hidden{% endif %}>
+    <span>{{ field.label }} <small>erforderlich</small></span>
+    <div class="finance-recurring-custom-inputs">
+      <input type="number" name="{{ field_prefix }}_field__custom_interval_count" value="{{ value.split(':')[0] if ':' in value else '' }}" min="1" max="9999" step="1" inputmode="numeric" aria-label="Anzahl"{% if value %} required{% endif %}>
+      <select name="{{ field_prefix }}_field__custom_interval_unit" aria-label="Zeiteinheit"{% if value %} required{% endif %}>
+        <option value="">Auswählen</option>
+        {% for unit, label in (("day", "Tag(e)"), ("week", "Woche(n)"), ("month", "Monat(e)"), ("year", "Jahr(e)")) %}<option value="{{ unit }}"{% if ':' in value and value.split(':')[1] == unit %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  {% elif field.key == "payment_due" %}
+  <div class="customer-field-control finance-recurring-payment-control" data-recurring-payment-due>
+    <span>{{ field.label }}</span>
+    <div class="finance-recurring-custom-inputs">
+      <input type="number" name="{{ field_prefix }}_field__payment_due_count" value="{{ value.split(':')[0] if ':' in value else '' }}" min="0" max="9999" step="1" inputmode="numeric" aria-label="Zahlungsziel Anzahl"{% if value %} required{% endif %}>
+      <select name="{{ field_prefix }}_field__payment_due_unit" aria-label="Zahlungsziel Zeiteinheit"{% if value %} required{% endif %}>
+        <option value="">Auswählen</option>
+        {% for unit, label in (("day", "Tag(e)"), ("week", "Woche(n)"), ("year", "Jahr(e)")) %}<option value="{{ unit }}"{% if ':' in value and value.split(':')[1] == unit %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  {% elif field.key == "customer" %}
+  {% set selected_customer = customers | selectattr("id", "equalto", selected_customer_id) | first | default(none) %}
+  <div class="customer-field-control finance-customer-search" data-finance-customer-search>
+    <span id="finance-customer-label-{{ field_prefix }}">{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+    <div class="finance-customer-combobox">
+      <input type="search" value="{{ selected_customer.name if selected_customer else '' }}" placeholder="Kunden suchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="finance-customer-options-{{ field_prefix }}" aria-labelledby="finance-customer-label-{{ field_prefix }}" data-finance-customer-input{% if field.required %} required{% endif %}>
+      <input type="hidden" name="customer_id" value="{{ selected_customer_id or '' }}" data-finance-customer>
+      <div id="finance-customer-options-{{ field_prefix }}" class="finance-customer-options" role="listbox" aria-label="Kunden auswählen" hidden>
+        {% for customer in customers %}<button type="button" class="finance-customer-option" role="option" data-finance-customer-option data-customer-id="{{ customer.id }}" aria-selected="{{ 'true' if customer.id == selected_customer_id else 'false' }}">{{ customer.name }}</button>{% endfor %}
+        <p class="finance-customer-empty" data-finance-customer-empty hidden>Keine Kunden gefunden.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
   <label class="customer-field-control">
     <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
     {% if field.read_only %}
       <input type="text" value="{{ value or 'Wird automatisch vergeben' }}" readonly>
-    {% elif field.key == "customer" %}
-      <select name="customer_id" data-finance-customer{% if field.required %} required{% endif %}>
-        <option value="">Kunden auswählen</option>
-        {% for customer in customers %}<option value="{{ customer.id }}"{% if customer.id == selected_customer_id %} selected{% endif %}>{{ customer.name }}</option>{% endfor %}
-      </select>
     {% elif field.key == "contact" %}
-      <select name="contact_id" data-finance-contact>
-        <option value="">Keinen Ansprechpartner verknüpfen</option>
+      <select name="contact_id" data-finance-contact{% if field.required %} required{% endif %}>
+        <option value="">{{ "Ansprechpartner auswählen" if field.required else "Keinen Ansprechpartner verknüpfen" }}</option>
         {% for contact in contacts %}<option value="{{ contact.id }}" data-customer-id="{{ contact.customer_id }}"{% if contact.id == selected_contact_id %} selected{% endif %}>{{ contact.name }} · {{ contact.customer_name }}</option>{% endfor %}
       </select>
-    {% elif field.key in ("linked_offer", "linked_order") %}
-      <select name="linked_record_id" data-finance-linked-record>
-        <option value="">Keinen Beleg verknüpfen</option>
+    {% elif field.key in ("linked_offer", "linked_order", "linked_invoice") %}
+      <select name="linked_record_id" data-finance-linked-record{% if field.required %} required{% endif %}>
+        <option value="">{{ "Rechnung auswählen" if field.key == "linked_invoice" else "Keinen Beleg verknüpfen" }}</option>
         {% for record in link_options %}<option value="{{ record.id }}" data-customer-id="{{ record.customer_id or '' }}"{% if record.id == selected_link_id %} selected{% endif %}>{{ record.label }}</option>{% endfor %}
       </select>
     {% elif field.display_type == "Auswahlliste" %}
-      <select name="{% if field.key in ('customer', 'contact') %}{{ field.key }}_id{% else %}{{ field_prefix }}_field__{{ field.key }}{% endif %}"{% if field.required %} required{% endif %}>
+      <select name="{% if field.key in ('customer', 'contact') %}{{ field.key }}_id{% else %}{{ field_prefix }}_field__{{ field.key }}{% endif %}"{% if field.key == 'interval_unit' %} data-recurring-interval{% endif %}{% if field.required %} required{% endif %}>
         <option value="">Auswählen</option>
         {% for option_value, option_label in field.options %}<option value="{{ option_value }}"{% if value == option_value %} selected{% endif %}>{{ option_label }}</option>{% endfor %}
       </select>
     {% elif field.display_type == "Waehrung" %}
+      <input type="number" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}" min="0" step="0.01" inputmode="decimal"{% if field.required %} required{% endif %}>
+    {% elif field.display_type == "Dezimalzahl" %}
       <input type="number" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}" min="0" step="0.01" inputmode="decimal"{% if field.required %} required{% endif %}>
     {% elif field.display_type == "Datum" %}
       <input type="date" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
@@ -35,4 +68,5 @@
       <input type="text" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
     {% endif %}
   </label>
+  {% endif %}
 {% endmacro %}

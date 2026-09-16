@@ -37,6 +37,15 @@ from app.services.hub_mailbox_transport import (
     HubMailboxTransportInlineImage,
     HubMailboxTransportService,
 )
+from app.services.hub_spam_senders import HubSpamSenderService
+from app.services.template_placeholders import (
+    CONTACT_PLACEHOLDERS,
+    CUSTOMER_PLACEHOLDERS,
+    EMAIL_TEMPLATE_CONTEXT_KEYS,
+    contact_greeting,
+)
+from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 from app.services.zoho_crm import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZohoCrmError, ZohoCrmService
 
 
@@ -269,6 +278,7 @@ class CustomerCommunicationEmailTemplate:
     module: str
     category: str
     compiler_mode: str
+    context_module: str = "general"
 
 
 @dataclass(frozen=True)
@@ -279,6 +289,7 @@ class CustomerCommunicationEmailTemplateDetail:
     content: str
     unresolved_placeholders: tuple[str, ...]
     compiler_mode: str
+    context_module: str = "general"
 
 
 @dataclass(frozen=True)
@@ -556,6 +567,7 @@ class CustomerCommunicationService:
                     module=template.module,
                     category=category,
                     compiler_mode=self._email_compiler_mode(payload),
+                    context_module=self._email_template_context_module(template=template, payload=payload),
                 )
             )
         return tuple(sorted(templates, key=lambda item: (item.module.casefold(), item.name.casefold())))
@@ -571,7 +583,9 @@ class CustomerCommunicationService:
         template = self._stored_email_template(template_id)
         payload = self._payload(template.encrypted_payload_json)
         name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
-        recipient = next((item for item in self._recipients_for_customer(customer) if item.key == recipient_key), None)
+        recipient = next((item for item in self._recipients_for_customer(
+            customer, include_account_email=not recipient_key.startswith("contact:")
+        ) if item.key == recipient_key), None)
         if recipient is None:
             recipient = next(iter(self._recipients_for_customer(customer)), None)
         context = self._email_template_context(customer=customer, recipient=recipient)
@@ -598,6 +612,7 @@ class CustomerCommunicationService:
             content=content,
             unresolved_placeholders=tuple(sorted({*subject_placeholders, *content_placeholders})),
             compiler_mode=self._email_compiler_mode(payload),
+            context_module=self._email_template_context_module(template=template, payload=payload),
         )
 
     def get_email_template_preview(
@@ -631,6 +646,44 @@ class CustomerCommunicationService:
             content=content,
             unresolved_placeholders=tuple(sorted({*subject_placeholders, *content_placeholders})),
             compiler_mode=self._email_compiler_mode(payload),
+            context_module=self._email_template_context_module(template=template, payload=payload),
+        )
+
+    def render_invoice_email_template(
+        self,
+        *,
+        template_id: str,
+        customer_id: int,
+        recipient: CustomerCommunicationRecipient,
+        invoice_values: dict[str, str],
+    ) -> CustomerCommunicationEmailTemplateDetail:
+        """Resolve the approved invoice template against a Hub customer and contact."""
+        template = self._stored_email_template(template_id)
+        payload = self._payload(template.encrypted_payload_json)
+        customer = self._require_customer(customer_id)
+        context = self._email_template_context(customer=customer, recipient=recipient)
+        for key, value in invoice_values.items():
+            context[self._normalized_template_key(key)] = value
+        subject, subject_unresolved = self._resolve_template_placeholders(
+            self._text(payload.get("subject")) or "", context=context, html=False,
+        )
+        content, content_unresolved = self._resolve_template_placeholders(
+            self._sanitized_email_content(
+                self._text(payload.get("content")) or "", allow_template_href_placeholders=True,
+            ),
+            context=context,
+            html=True,
+            html_replacements=self._template_html_replacements(),
+        )
+        unresolved = tuple(sorted({*subject_unresolved, *content_unresolved}))
+        return CustomerCommunicationEmailTemplateDetail(
+            id=template.zoho_template_id,
+            name=self._text(payload.get("name")) or "",
+            subject=subject,
+            content=self._template_compose_content(payload, content),
+            unresolved_placeholders=unresolved,
+            compiler_mode=self._email_compiler_mode(payload),
+            context_module=self._email_template_context_module(template=template, payload=payload),
         )
 
     def get_email_template_source(
@@ -652,6 +705,7 @@ class CustomerCommunicationService:
             ),
             unresolved_placeholders=(),
             compiler_mode=self._email_compiler_mode(payload),
+            context_module=self._email_template_context_module(template=template, payload=payload),
         )
 
     def update_email_template(
@@ -661,6 +715,7 @@ class CustomerCommunicationService:
         name: str,
         subject: str,
         content: str,
+        context_module: str = "",
     ) -> CustomerCommunicationEmailTemplateDetail:
         """Persist a Hub-managed edit without changing the source template in Zoho."""
         template = self._stored_email_template(template_id)
@@ -671,6 +726,9 @@ class CustomerCommunicationService:
             "content": self._sanitized_email_content(content, allow_template_href_placeholders=True),
             "compiler_stylesheet": EmailHtmlCompiler.sanitize_stylesheet(content),
             "hub_edited_at": datetime.now(UTC).isoformat(),
+            "hub_context_module": self._required_email_template_context(
+                context_module or self._email_template_context_module(template=template, payload=payload)
+            ),
         })
         template.encrypted_payload_json = self._encrypt_payload(payload)
         self.db.flush()
@@ -694,6 +752,7 @@ class CustomerCommunicationService:
             "hub_cloned_from": source.zoho_template_id,
             # A clone still contains a Zoho document and must keep its proven markup.
             "email_compiler_mode": self._email_compiler_mode(payload),
+            "hub_context_module": self._email_template_context_module(template=source, payload=payload),
         })
         self.db.add(
             ZohoEmailTemplate(
@@ -1068,7 +1127,9 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle eine aktuell von Zoho erlaubte Absenderadresse aus.")
-        recipient = next((item for item in self._recipients_for_customer(customer) if item.key == recipient_key), None)
+        recipient = next((item for item in self._recipients_for_customer(
+            customer, include_account_email=not recipient_key.startswith("contact:")
+        ) if item.key == recipient_key), None)
         if recipient is None:
             raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
         if reply_to_email_id is not None and forward_from_email_id is not None:
@@ -1194,7 +1255,9 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
-        recipient = next((item for item in self._recipients_for_customer(customer) if item.key == recipient_key), None)
+        recipient = next((item for item in self._recipients_for_customer(
+            customer, include_account_email=not recipient_key.startswith("contact:")
+        ) if item.key == recipient_key), None)
         if recipient is None:
             raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
         if reply_to_email_id is not None and forward_from_email_id is not None:
@@ -1834,12 +1897,16 @@ class CustomerCommunicationService:
         email = known_emails.get(key)
         created = email is None
         if email is None:
+            direction = self._email_direction(record)
             email = CustomerZohoEmail(
                 customer=customer,
                 zoho_message_id=message_id,
                 source="zoho",
-                direction=self._email_direction(record),
-                is_unread=mark_new_emails_unread and self._email_direction(record) == "inbound",
+                direction=direction,
+                mailbox_state="spam" if HubSpamSenderService(db=self.db).is_blocked(
+                    direction=direction, payload=record
+                ) else "active",
+                is_unread=mark_new_emails_unread and direction == "inbound",
                 sync_status="synced",
                 encrypted_payload_json="",
                 encrypted_header_json="",
@@ -2309,9 +2376,27 @@ class CustomerCommunicationService:
             "Accounts.Account_Name",
             "Customer.Name",
         )
+        settings = get_settings()
+        for key, value in {
+            "Company.Name": settings.finance_company_name,
+            "Company.Street": settings.finance_company_street,
+            "Company.PostalCode": settings.finance_company_postal_code,
+            "Company.City": settings.finance_company_city,
+            "Company.Phone": settings.finance_company_phone,
+            "Company.Email": settings.finance_company_email,
+            "Company.Iban": settings.finance_company_iban,
+            "Company.Bic": settings.finance_company_bic,
+            "Company.TaxId": settings.finance_company_tax_id,
+        }.items():
+            add(value, key)
         add(customer.zoho_id, "id", "Accounts.id", "Account.id", "Customer.id", "Customer.Id")
         profile = self._payload(customer.encrypted_profile_json)
         fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
+        customer_labels = {field.key: field.label for field in ZOHO_ACCOUNT_FIELDS}
+        for placeholder in CUSTOMER_PLACEHOLDERS:
+            if placeholder.profile_key:
+                label = customer_labels.get(placeholder.profile_key, "")
+                add(fields.get(label) or fields.get(_CUSTOMER_FIELD_LABEL_ALIASES.get(label, "")), placeholder.token[2:-1])
         aliases_by_label = {
             "Eintrag-ID": ("id", "Accounts.id", "Account.id"),
             "Update-Datum": ("Dialfire_WV_Datum", "Accounts.Dialfire_WV_Datum"),
@@ -2336,6 +2421,19 @@ class CustomerCommunicationService:
             if contact is not None:
                 contact_profile = self._payload(contact.encrypted_profile_json)
                 contact_fields = contact_profile.get("fields") if isinstance(contact_profile.get("fields"), dict) else {}
+                contact_labels = {field.key: field.label for field in ZOHO_CONTACT_FIELDS}
+                for placeholder in CONTACT_PLACEHOLDERS:
+                    if placeholder.profile_key:
+                        add(contact_fields.get(contact_labels.get(placeholder.profile_key, "")), placeholder.token[2:-1])
+                add(
+                    contact_greeting(
+                        name=recipient.name,
+                        salutation=self._text(contact_fields.get("Anrede")) or "",
+                        last_name=self._text(contact_fields.get("Nachname")) or "",
+                        letter_salutation=self._text(contact_fields.get("Briefanrede")) or "",
+                    ),
+                    "Contact.Greeting",
+                )
                 for label, value in contact_fields.items():
                     if not isinstance(label, str):
                         continue
@@ -2395,10 +2493,10 @@ class CustomerCommunicationService:
 
     def _template_html_replacements(self) -> dict[str, str]:
         """Return Hub-authored HTML that is safe to inject into a template body."""
+        signature = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
         return {
-            self._normalized_template_key("userSignature"): EmailComposerSettingsService(
-                db=self.db,
-            ).get_runtime_settings().signature_html,
+            self._normalized_template_key("userSignature"): signature,
+            self._normalized_template_key("Company.EmailSignature"): signature,
         }
 
     def _encrypt_payload(self, payload: dict[str, object]) -> str:
@@ -2445,6 +2543,47 @@ class CustomerCommunicationService:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", normalized):
             raise ValueError("Wähle eine gültige Zoho-E-Mail-Vorlage aus.")
         return normalized
+
+    @staticmethod
+    def _required_email_template_context(value: str) -> str:
+        normalized = value.strip().casefold()
+        if normalized not in EMAIL_TEMPLATE_CONTEXT_KEYS:
+            raise ValueError("Bitte ein gültiges Kontextmodul für die E-Mail-Vorlage auswählen.")
+        return normalized
+
+    @classmethod
+    def _email_template_context_module(cls, *, template: ZohoEmailTemplate, payload: dict[str, object]) -> str:
+        stored = cls._text(payload.get("hub_context_module")) or ""
+        if stored.casefold() in EMAIL_TEMPLATE_CONTEXT_KEYS:
+            return stored.casefold()
+        source = " ".join((
+            cls._text(payload.get("name")) or "",
+            cls._text(payload.get("subject")) or "",
+            cls._text(payload.get("content")) or "",
+        )).casefold()
+        for namespace, context in (
+            ("recurringinvoice", "recurring-invoices"),
+            ("dunning", "dunnings"),
+            ("invoice", "invoices"),
+            ("order", "orders"),
+            ("offer", "offers"),
+            ("lead", "leads"),
+            ("case", "cases"),
+            ("task", "tasks"),
+            ("call", "calls"),
+            ("meeting", "meetings"),
+            ("site", "sites"),
+        ):
+            if f"${{{namespace}." in source or f"{{{{{namespace}." in source:
+                return context
+        module = (template.module or "").strip().casefold().replace("_", "")
+        return {
+            "leads": "leads",
+            "cases": "cases",
+            "quotes": "offers",
+            "salesorders": "orders",
+            "invoices": "invoices",
+        }.get(module, "customers" if module in {"accounts", "contacts"} else "general")
 
     @classmethod
     def _sanitized_email_content(

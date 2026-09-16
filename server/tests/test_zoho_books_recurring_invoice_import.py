@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
@@ -54,6 +55,13 @@ class FakeBooksRecurringInvoiceReader:
                 "description": "Zusätzlicher Speicherplatz",
                 "quantity": 2,
                 "rate": "10",
+                "tax_percentage": 19,
+            }, {
+                "name": "",
+                "description": "Website Paket Basic",
+                "quantity": 1,
+                "unit": "monatlich",
+                "rate": "25",
                 "tax_percentage": 19,
             }],
         }
@@ -140,12 +148,15 @@ def test_recurring_invoice_full_import_is_idempotent_and_keeps_schedule_and_line
         assert invoice is not None
         assert invoice.customer_id == customer.id
         assert invoice.contact_id == contact.id
+        assert invoice.hub_next_run_on == date(2026, 12, 1)
         assert invoice.lines[0].article_id == article.id
         values = json.loads(cipher.decrypt(invoice.encrypted_fields_json))
         assert values["interval_unit"] == "quarter"
         assert values["interval_count"] == "2"
         assert values["automatic_creation"] == "false"
         assert values["payment_terms"] == "7_days"
+        assert values["payment_due_count"] == "7"
+        assert values["payment_due_unit"] == "day"
         assert values["late_fee"] == "9.00"
         assert values["system_payment_complete"] == "true"
 
@@ -154,10 +165,17 @@ def test_recurring_invoice_full_import_is_idempotent_and_keeps_schedule_and_line
             document_id=invoice.id,
         )
         assert detail is not None
+        assert next(field.value for field in detail.fields if field.key == "payment_due") == "7 Tage"
         assert detail.lines[0].discount_percent == "5.00"
         assert detail.lines[1].name == "Zusätzlicher Speicherplatz"
         assert detail.lines[1].description == ""
+        assert detail.lines[1].unit == "Monatlich"
+        assert detail.lines[2].name == "Website Paket Basic"
+        assert detail.lines[2].description == ""
+        assert detail.lines[2].unit == "Monatlich"
 
+        invoice.hub_next_run_on = date(2027, 6, 1)
+        db.commit()
         second_status, second_started = service.start_all(requested_by="books-admin")
         db.commit()
         assert second_started is True
@@ -167,6 +185,8 @@ def test_recurring_invoice_full_import_is_idempotent_and_keeps_schedule_and_line
         assert db.scalars(
             select(HubFinanceRecurringInvoice).where(HubFinanceRecurringInvoice.zoho_books_id == "7001")
         ).all() == [invoice]
+        assert invoice.hub_next_run_on == date(2027, 6, 1)
+        assert json.loads(cipher.decrypt(invoice.encrypted_fields_json))["next_invoice_date"] == "2027-06-01"
         assert service.status().updated_invoices == 1
 
 

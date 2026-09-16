@@ -1,10 +1,17 @@
 {% set is_calendar_activity_composer = activity_composer_mode|default("customer") == "calendar" %}
+{% set is_lead_activity_composer = activity_composer_mode|default("customer") == "lead" %}
 {% if is_calendar_activity_composer %}
   {% set customer_call_create_action = "/calendar/activities" %}
   {% set customer_task_create_action = "/calendar/activities" %}
   {% set customer_meeting_create_action = "/calendar/activities" %}
   {% set customer_call_default_name = "Anruf mit" %}
   {% set customer_meeting_default_name = "Neues Meeting mit" %}
+{% elif is_lead_activity_composer %}
+  {% set customer_call_create_action = "/leads/" ~ detail.lead.id ~ "/activities/calls" %}
+  {% set customer_task_create_action = "/leads/" ~ detail.lead.id ~ "/activities/tasks" %}
+  {% set customer_meeting_create_action = "/leads/" ~ detail.lead.id ~ "/activities/meetings" %}
+  {% set customer_call_default_name = "Anruf mit " ~ detail.name %}
+  {% set customer_meeting_default_name = "Neues Meeting mit " ~ detail.name %}
 {% else %}
   {% set customer_call_create_action = "/customers/" ~ detail.entry.customer.id ~ "/activities/calls" %}
   {% set customer_task_create_action = "/customers/" ~ detail.entry.customer.id ~ "/activities/tasks" %}
@@ -19,12 +26,14 @@
         <option value="">Kunde auswählen</option>
         {% for customer in calendar_customers %}<option value="{{ customer.id }}">{{ customer.name }}</option>{% endfor %}
       </select>
+    {% elif is_lead_activity_composer %}
+      <input value="Lead · {{ detail.name }}" readonly aria-label="Bezieht sich auf Lead {{ detail.name }}">
     {% else %}
       <input value="Kunde · {{ detail.entry.customer.name }}" readonly aria-label="Bezieht sich auf Kunde {{ detail.entry.customer.name }}">
     {% endif %}
   </label>
 {%- endmacro %}
-<div class="activity-compose-layer" data-customer-activity-compose data-activity-composer-mode="{{ is_calendar_activity_composer and 'calendar' or 'customer' }}" hidden>
+<div class="activity-compose-layer" data-customer-activity-compose data-activity-composer-mode="{{ 'calendar' if is_calendar_activity_composer else 'lead' if is_lead_activity_composer else 'customer' }}" hidden>
   <button class="activity-compose-backdrop" type="button" data-customer-activity-compose-close aria-label="Aktivitätsmaske schließen"></button>
   <aside class="activity-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-activity-compose-title" aria-hidden="true" data-customer-activity-compose-drawer tabindex="-1">
     <div class="email-compose-header">
@@ -129,7 +138,7 @@
             {% for value, label in call_reminder_channel_options %}<option value="{{ value }}"{% if value == task_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
           </select>
           <label class="visually-hidden" for="customer-task-reminder-minutes">Zeitpunkt der Erinnerung</label>
-          <select id="customer-task-reminder-minutes" name="reminder_minutes_before">
+          <select id="customer-task-reminder-minutes" name="{{ 'task_reminder_minutes_before' if is_calendar_activity_composer else 'reminder_minutes_before' }}">
             {% for minutes in call_reminder_options %}<option value="{{ minutes }}"{% if minutes == task_defaults.reminder_minutes_before %} selected{% endif %}>{% if minutes == 0 %}0 Minuten vorher{% else %}{{ minutes }} Min. vorher{% endif %}</option>{% endfor %}
           </select>
         </div>

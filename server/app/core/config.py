@@ -30,6 +30,19 @@ class Settings(BaseSettings):
     # separated without requiring write access to the deployment's data root.
     finance_invoice_pdf_storage_dir: str = "data/email-attachments/finance-invoice-pdfs"
     finance_invoice_pdf_import_min_free_bytes: int = Field(default=1024 * 1024 * 1024, ge=0)
+    finance_generated_pdf_storage_dir: str = "data/email-attachments/finance-generated-pdfs"
+    recurring_invoice_generation_enabled: bool = True
+    recurring_invoice_poll_interval_seconds: int = Field(default=300, ge=60, le=3600)
+    finance_company_name: str = "Kosmos Medien"
+    finance_company_street: str = "Rupert-Mayer-Str. 44"
+    finance_company_postal_code: str = "81379"
+    finance_company_city: str = "München"
+    finance_company_country_code: str = "DE"
+    finance_company_phone: str = "+49 (0) 89 740 49 485"
+    finance_company_email: str = "info@kosmos-medien.de"
+    finance_company_iban: str = "DE67 7004 0048 0790 0038 00"
+    finance_company_bic: str = "COBADEFFXXX"
+    finance_company_tax_id: str = "DE231222930"
 
     @property
     def auto_verify_domain_list(self) -> list[str]:

@@ -1056,6 +1056,45 @@ def test_customer_communications_resolves_visible_contact_field_placeholders():
         assert template.unresolved_placeholders == ()
 
 
+def test_customer_communications_resolves_canonical_linked_and_global_placeholders():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_email_templates()
+        signature = "<p>Mit freundlichen Grüßen</p>"
+        EmailComposerSettingsService(db=db).configure_signature(signature_html=signature)
+        service.update_email_template(
+            template_id="zoho-template-1",
+            name="Kanonische Felder",
+            subject="Für ${Contact.Name} bei ${Customer.Name}",
+            content=(
+                "<p>${Contact.Greeting}, ${Contact.FirstName} ${Contact.LastName}<br>"
+                "${Contact.Email}<br>${Customer.Website}</p>${Company.EmailSignature}"
+            ),
+        )
+        recipient = next(item for item in service.list_contact_recipients(customer_id=customer.id) if item.key.startswith("contact:"))
+        rendered = service.get_email_template(
+            customer_id=customer.id,
+            template_id="zoho-template-1",
+            recipient_key=recipient.key,
+        )
+
+        assert rendered.subject == "Für Anna Example bei Example Customer"
+        assert "Sehr geehrte Frau Example" in rendered.content
+        assert "Anna Example" in rendered.content
+        assert "anna@example.de" in rendered.content
+        assert "https://example-customer.de" in rendered.content
+        assert signature in rendered.content
+        assert rendered.unresolved_placeholders == ()
+
+
 def test_customer_communications_keeps_hub_template_edits_when_zoho_templates_are_synced():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -1146,6 +1185,41 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
         service.delete_email_template(template_id="zoho-template-1")
         service.sync_email_templates()
         assert [item.id for item in service.list_email_templates()] == ["zoho-template-2"]
+
+
+def test_customer_communications_persists_and_infers_email_template_context_modules():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_email_templates()
+        assert service.get_email_template_source(template_id="zoho-template-1").context_module == "customers"
+
+        edited = service.update_email_template(
+            template_id="zoho-template-1",
+            name="Mahnung senden",
+            subject="Mahnung ${Dunning.Number}",
+            content="<p>Rechnung ${Dunning.SourceInvoiceNumber}</p>",
+            context_module="dunnings",
+        )
+        assert edited.context_module == "dunnings"
+        cloned = service.clone_email_template(template_id="zoho-template-1", name="Mahnung senden Kopie")
+        assert cloned.context_module == "dunnings"
+
+        with pytest.raises(ValueError, match="Kontextmodul"):
+            service.update_email_template(
+                template_id="zoho-template-1",
+                name="Ungültig",
+                subject="Test",
+                content="<p>Test</p>",
+                context_module="unknown-module",
+            )
 
 
 def test_customer_communication_sync_deduplicates_one_message_linked_to_account_and_contact():

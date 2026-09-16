@@ -1,0 +1,132 @@
+<script>
+  (function () {
+    var searchSelector = '[data-finance-article-search], [data-finance-document-article-search]';
+    if (!document.querySelector(searchSelector) || document.getElementById('finance-article-search-options')) return;
+
+    var list = document.createElement('div');
+    list.id = 'finance-article-search-options';
+    list.className = 'finance-customer-options finance-article-options';
+    list.setAttribute('role', 'listbox');
+    list.setAttribute('aria-label', 'Artikel auswählen');
+    list.hidden = true;
+    document.body.appendChild(list);
+
+    var activeInput = null;
+    var matches = [];
+    var activeIndex = -1;
+    function normalize(value) {
+      return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('de');
+    }
+    function positionList() {
+      if (!activeInput || !activeInput.isConnected) { closeList(); return; }
+      var bounds = activeInput.getBoundingClientRect();
+      list.style.top = (bounds.bottom + window.scrollY + 5) + 'px';
+      list.style.left = (bounds.left + window.scrollX) + 'px';
+      list.style.width = bounds.width + 'px';
+    }
+    function closeList() {
+      list.hidden = true;
+      if (activeInput) {
+        activeInput.setAttribute('aria-expanded', 'false');
+        activeInput.removeAttribute('aria-activedescendant');
+      }
+      activeInput = null;
+      matches = [];
+      activeIndex = -1;
+    }
+    function showMatches(input) {
+      if (activeInput && activeInput !== input) closeList();
+      activeInput = input;
+      var editor = input.closest('[data-finance-position-editor], [data-finance-document-position-editor]');
+      var source = editor && editor.querySelector('datalist');
+      var query = normalize(input.value.trim());
+      matches = source ? Array.from(source.options).filter(function (option) {
+        return normalize(option.value).includes(query);
+      }).slice(0, 40) : [];
+      list.replaceChildren();
+      matches.forEach(function (option, index) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.id = 'finance-article-search-option-' + index;
+        button.className = 'finance-customer-option';
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', 'false');
+        button.dataset.articleIndex = String(index);
+        button.textContent = option.value;
+        list.appendChild(button);
+      });
+      if (!matches.length) {
+        var empty = document.createElement('p');
+        empty.className = 'finance-customer-empty';
+        empty.textContent = 'Keine Artikel gefunden. Freitext ist möglich.';
+        list.appendChild(empty);
+      }
+      activeIndex = -1;
+      input.removeAttribute('aria-activedescendant');
+      input.setAttribute('aria-expanded', 'true');
+      positionList();
+      list.hidden = false;
+    }
+    function setActive(index) {
+      activeIndex = index;
+      Array.from(list.querySelectorAll('[data-article-index]')).forEach(function (button, buttonIndex) {
+        var selected = buttonIndex === index;
+        button.classList.toggle('is-active', selected);
+        button.setAttribute('aria-selected', String(selected));
+      });
+      var selected = list.querySelector('[data-article-index="' + index + '"]');
+      if (selected) {
+        activeInput.setAttribute('aria-activedescendant', selected.id);
+        selected.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    function choose(index) {
+      var option = matches[index];
+      var row = activeInput && activeInput.closest('[data-finance-position-row], [data-finance-document-position-row]');
+      if (!option || !row) { closeList(); return; }
+      row.querySelector('[data-finance-line-article-id], [data-finance-document-line-article-id]').value = option.dataset.articleId;
+      activeInput.value = option.dataset.name;
+      [['sku', 'sku'], ['unit', 'unit'], ['unit_price', 'price'], ['tax_rate', 'tax']].forEach(function (pair) {
+        var field = row.querySelector('[data-finance-line-field="' + pair[0] + '"], [data-finance-document-line-field="' + pair[0] + '"]');
+        if (field) field.value = option.dataset[pair[1]] || (pair[0] === 'tax_rate' ? '19' : '');
+      });
+      row.dispatchEvent(new Event('input', { bubbles: true }));
+      closeList();
+    }
+    document.addEventListener('focusin', function (event) {
+      if (event.target.matches(searchSelector)) showMatches(event.target);
+      else if (activeInput && !list.contains(event.target)) closeList();
+    });
+    document.addEventListener('input', function (event) {
+      if (!event.target.matches(searchSelector)) return;
+      var row = event.target.closest('[data-finance-position-row], [data-finance-document-position-row]');
+      if (row) {
+        row.querySelector('[data-finance-line-article-id], [data-finance-document-line-article-id]').value = '';
+        row.querySelector('[data-finance-line-field="sku"], [data-finance-document-line-field="sku"]').value = '';
+      }
+      showMatches(event.target);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.target !== activeInput) return;
+      if (event.key === 'Escape') { closeList(); return; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (list.hidden) showMatches(activeInput);
+        if (matches.length) setActive(activeIndex < 0 ? (event.key === 'ArrowDown' ? 0 : matches.length - 1) : (activeIndex + (event.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length);
+      }
+      if (event.key === 'Enter' && !list.hidden && matches.length) {
+        event.preventDefault();
+        choose(activeIndex < 0 ? 0 : activeIndex);
+      }
+    });
+    list.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-article-index]');
+      if (button) choose(Number(button.dataset.articleIndex));
+    });
+    document.addEventListener('pointerdown', function (event) {
+      if (activeInput && event.target !== activeInput && !list.contains(event.target)) closeList();
+    });
+    document.addEventListener('scroll', function () { if (!list.hidden) positionList(); }, true);
+    window.addEventListener('resize', function () { if (!list.hidden) positionList(); });
+  }());
+</script>

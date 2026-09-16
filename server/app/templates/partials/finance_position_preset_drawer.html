@@ -1,0 +1,200 @@
+{% if finance_position_preset_library_key %}
+  <script type="application/json" data-finance-position-preset-data>{{ finance_position_presets_json | tojson }}</script>
+  <div class="pdf-template-edit-layer finance-position-preset-layer" data-finance-position-preset-layer data-library-key="{{ finance_position_preset_library_key }}" hidden>
+    <button class="pdf-template-edit-backdrop" type="button" aria-label="Vorlagen schließen" data-finance-position-preset-close></button>
+    <aside class="pdf-template-edit-drawer finance-position-preset-drawer" role="dialog" aria-modal="true" aria-labelledby="finance-position-preset-heading">
+      <header class="email-compose-header">
+        <div>
+          <p class="eyebrow">{{ finance_position_preset_library_label }}</p>
+          <h2 id="finance-position-preset-heading" data-finance-position-preset-heading>Vorlage laden</h2>
+          <p data-finance-position-preset-description>Gespeicherte Positionslisten in den aktuellen Beleg laden.</p>
+        </div>
+        <button class="email-compose-close" type="button" aria-label="Vorlagen schließen" title="Schließen" data-finance-position-preset-close>&times;</button>
+      </header>
+
+      <div class="finance-position-preset-content">
+        <p class="finance-position-preset-feedback" data-finance-position-preset-feedback hidden></p>
+
+        <section class="finance-position-preset-section" data-finance-position-preset-mode="load">
+          <label>
+            Vorlage
+            <select data-finance-position-preset-select>
+              <option value="">{% if finance_position_presets %}Vorlage auswählen{% else %}Noch keine Vorlagen gespeichert{% endif %}</option>
+              {% for preset in finance_position_presets %}<option value="{{ preset.id }}">{{ preset.name }} ({{ preset.line_count }} {{ "Position" if preset.line_count == 1 else "Positionen" }})</option>{% endfor %}
+            </select>
+          </label>
+          <div class="finance-position-preset-actions">
+            <button class="button button-variant-1" type="button" data-finance-position-preset-load disabled>Laden</button>
+            <button class="button button-danger button-variant-1" type="button" data-finance-position-preset-delete disabled>Entfernen</button>
+          </div>
+        </section>
+
+        <section class="finance-position-preset-section" data-finance-position-preset-mode="save" hidden>
+          <label>
+            Name
+            <input type="text" maxlength="255" placeholder="z. B. Website Paket Basic" data-finance-position-preset-name>
+          </label>
+          <button class="button button-variant-1" type="button" data-finance-position-preset-save>Aktuelle Positionen speichern</button>
+        </section>
+      </div>
+      <input type="hidden" value="{{ csrf_token }}" data-finance-position-preset-csrf>
+    </aside>
+  </div>
+  <script>
+    (function () {
+      var layer = document.querySelector('[data-finance-position-preset-layer]');
+      var dataNode = document.querySelector('[data-finance-position-preset-data]');
+      if (!layer || !dataNode) { return; }
+      var presets = [];
+      try { presets = JSON.parse(dataNode.textContent || '[]'); } catch (error) { presets = []; }
+      var select = layer.querySelector('[data-finance-position-preset-select]');
+      var loadButton = layer.querySelector('[data-finance-position-preset-load]');
+      var deleteButton = layer.querySelector('[data-finance-position-preset-delete]');
+      var saveButton = layer.querySelector('[data-finance-position-preset-save]');
+      var nameInput = layer.querySelector('[data-finance-position-preset-name]');
+      var feedback = layer.querySelector('[data-finance-position-preset-feedback]');
+      var heading = layer.querySelector('[data-finance-position-preset-heading]');
+      var description = layer.querySelector('[data-finance-position-preset-description]');
+      var modeSections = layer.querySelectorAll('[data-finance-position-preset-mode]');
+      var csrf = layer.querySelector('[data-finance-position-preset-csrf]').value;
+      var libraryKey = layer.dataset.libraryKey;
+
+      function selectedPreset() {
+        var id = Number(select.value || 0);
+        return presets.find(function (preset) { return Number(preset.id) === id; }) || null;
+      }
+      function updateActions() {
+        var hasSelection = Boolean(selectedPreset());
+        loadButton.disabled = !hasSelection;
+        deleteButton.disabled = !hasSelection;
+      }
+      function showFeedback(message, isError) {
+        feedback.textContent = message;
+        feedback.classList.toggle('is-error', Boolean(isError));
+        feedback.hidden = false;
+      }
+      function clearFeedback() { feedback.hidden = true; feedback.textContent = ''; feedback.classList.remove('is-error'); }
+      function setMode(mode) {
+        var activeMode = mode === 'save' ? 'save' : 'load';
+        modeSections.forEach(function (section) { section.hidden = section.dataset.financePositionPresetMode !== activeMode; });
+        heading.textContent = activeMode === 'save' ? 'Vorlage speichern' : 'Vorlage laden';
+        description.textContent = activeMode === 'save'
+          ? 'Die aktuellen Positionen als wiederverwendbares Paket speichern.'
+          : 'Gespeicherte Positionslisten in den aktuellen Beleg laden.';
+        layer.dataset.mode = activeMode;
+        return activeMode;
+      }
+      function openDrawer(mode) {
+        clearFeedback();
+        var activeMode = setMode(mode);
+        layer.hidden = false;
+        document.body.classList.add('finance-position-preset-open');
+        window.requestAnimationFrame(function () {
+          layer.classList.add('is-open');
+          (activeMode === 'save' ? nameInput : select).focus();
+        });
+      }
+      function closeDrawer() {
+        layer.classList.remove('is-open');
+        document.body.classList.remove('finance-position-preset-open');
+        window.setTimeout(function () { if (!layer.classList.contains('is-open')) { layer.hidden = true; } }, 230);
+      }
+      function fieldValue(row, selector) {
+        var field = row.querySelector(selector);
+        return field ? String(field.value || '').trim() : '';
+      }
+      function collectLines() {
+        var editor = document.querySelector('[data-finance-position-editor], [data-finance-document-position-editor]');
+        if (!editor) { return []; }
+        var offerMode = editor.hasAttribute('data-finance-position-editor');
+        var rowSelector = offerMode ? '[data-finance-position-row]' : '[data-finance-document-position-row]';
+        var fieldPrefix = offerMode ? 'data-finance-line-field' : 'data-finance-document-line-field';
+        var articleSelector = offerMode ? '[data-finance-line-article-id]' : '[data-finance-document-line-article-id]';
+        return Array.prototype.map.call(editor.querySelectorAll(rowSelector), function (row) {
+          var value = function (key) { return fieldValue(row, '[' + fieldPrefix + '="' + key + '"]'); };
+          return {
+            article_id: fieldValue(row, articleSelector),
+            name: value('name'),
+            sku: value('sku'),
+            description: value('description'),
+            quantity: value('quantity') || '1',
+            unit: value('unit'),
+            unit_price: value('unit_price') || '0',
+            discount_percent: value('discount_percent') || '0',
+            tax_rate: value('tax_rate') || '19'
+          };
+        }).filter(function (line) { return Boolean(line.name); });
+      }
+      async function post(url, fields) {
+        var body = new FormData();
+        Object.keys(fields).forEach(function (key) { body.append(key, fields[key]); });
+        var response = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' }, body: body });
+        var result;
+        try { result = await response.json(); } catch (error) { result = {}; }
+        if (!response.ok) { throw new Error(result.error || 'Die Aktion konnte nicht ausgeführt werden.'); }
+        return result;
+      }
+      function addPresetOption(preset) {
+        var option = document.createElement('option');
+        option.value = String(preset.id);
+        option.textContent = preset.name + ' (' + preset.line_count + ' ' + (preset.line_count === 1 ? 'Position' : 'Positionen') + ')';
+        select.appendChild(option);
+        select.value = option.value;
+        select.options[0].textContent = 'Vorlage auswählen';
+        updateActions();
+      }
+
+      document.querySelectorAll('[data-finance-position-preset-open]').forEach(function (button) {
+        button.addEventListener('click', function () { openDrawer(button.dataset.financePositionPresetOpen); });
+      });
+      layer.querySelectorAll('[data-finance-position-preset-close]').forEach(function (button) { button.addEventListener('click', closeDrawer); });
+      select.addEventListener('change', updateActions);
+      document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && !layer.hidden) { closeDrawer(); } });
+
+      saveButton.addEventListener('click', async function () {
+        clearFeedback();
+        var lines = collectLines();
+        if (!nameInput.value.trim()) { showFeedback('Bitte einen Namen für die Vorlage eingeben.', true); nameInput.focus(); return; }
+        if (!lines.length) { showFeedback('Es gibt noch keine ausgefüllte Position zum Speichern.', true); return; }
+        saveButton.disabled = true;
+        try {
+          var result = await post('/finance/position-presets', { csrf_token: csrf, library_key: libraryKey, name: nameInput.value, lines_json: JSON.stringify(lines) });
+          presets.push(result.preset);
+          addPresetOption(result.preset);
+          nameInput.value = '';
+          showFeedback('Die Vorlage wurde gespeichert.', false);
+        } catch (error) { showFeedback(error.message, true); }
+        finally { saveButton.disabled = false; }
+      });
+
+      loadButton.addEventListener('click', function () {
+        clearFeedback();
+        var preset = selectedPreset();
+        var editor = document.querySelector('[data-finance-position-editor], [data-finance-document-position-editor]');
+        if (!preset || !editor) { return; }
+        var editOpener = document.querySelector('[data-customer-edit-open]');
+        if (editOpener && editor.hidden) { editOpener.click(); }
+        editor.dispatchEvent(new CustomEvent('finance:position-preset-load', { detail: { lines: preset.lines } }));
+        closeDrawer();
+        window.setTimeout(function () { editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 250);
+      });
+
+      deleteButton.addEventListener('click', async function () {
+        clearFeedback();
+        var preset = selectedPreset();
+        if (!preset || !window.confirm('Vorlage "' + preset.name + '" entfernen?')) { return; }
+        deleteButton.disabled = true;
+        try {
+          await post('/finance/position-presets/' + preset.id + '/delete', { csrf_token: csrf, library_key: libraryKey });
+          presets = presets.filter(function (entry) { return Number(entry.id) !== Number(preset.id); });
+          select.querySelector('option[value="' + preset.id + '"]').remove();
+          select.value = '';
+          select.options[0].textContent = presets.length ? 'Vorlage auswählen' : 'Noch keine Vorlagen gespeichert';
+          showFeedback('Die Vorlage wurde entfernt.', false);
+        } catch (error) { showFeedback(error.message, true); }
+        finally { updateActions(); }
+      });
+      updateActions();
+    }());
+  </script>
+{% endif %}

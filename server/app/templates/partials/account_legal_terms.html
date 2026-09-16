@@ -1,0 +1,67 @@
+<section id="account-legal-terms" class="account-panel account-panel-wide account-section account-legal-terms" data-account-section data-legal-terms-root>
+  <div class="legal-terms-heading">
+    <div>
+      <p class="eyebrow">Rechtstexte</p>
+      <h3>AGBs</h3>
+      <p class="subtle">Pflege mehrere AGB-Fassungen zentral. Angebots- und Auftragsvorlagen können anschließend eine dieser AGBs verwenden.</p>
+    </div>
+    {% if selected_legal_terms %}<span class="status-pill">Version {{ selected_legal_terms.version }}</span>{% endif %}
+  </div>
+
+  {% if request.query_params.get("legal_terms_state") %}
+    <p class="notice-success">
+      {% if request.query_params.get("legal_terms_state") == "created" %}Die AGB wurde angelegt.
+      {% elif request.query_params.get("legal_terms_state") == "duplicated" %}Die AGB wurde dupliziert.
+      {% elif request.query_params.get("legal_terms_state") == "deleted" %}Die AGB wurde gelöscht.
+      {% else %}Die AGB wurde als neue Version gespeichert.{% endif %}
+    </p>
+  {% endif %}
+
+  <form class="legal-terms-create-form" method="post" action="/account/legal-terms">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Neue AGB<input name="name" placeholder="z. B. Standard-AGB Websites" maxlength="255" required></label>
+    <button class="button button-secondary" type="submit">Neu anlegen</button>
+  </form>
+
+  <nav class="legal-terms-tabs" aria-label="Gespeicherte AGBs">
+    {% for legal_item in legal_terms %}
+      <a href="/account?legal_terms={{ legal_item.id }}#account-legal-terms"{% if selected_legal_terms and selected_legal_terms.id == legal_item.id %} aria-current="page"{% endif %}>
+        <strong>{{ legal_item.name }}</strong>
+        <span>Version {{ legal_item.version }}</span>
+      </a>
+    {% endfor %}
+  </nav>
+
+  {% if selected_legal_terms %}
+    <div class="legal-terms-editor-heading">
+      <div>
+        <p class="eyebrow">Ausgewählte AGB</p>
+        <h4>{{ selected_legal_terms.name }}</h4>
+      </div>
+      <p class="subtle">Beim Speichern erhalten verknüpfte Angebots- und Auftragsvorlagen automatisch einen neuen Versionsstand.</p>
+    </div>
+    <form class="legal-terms-editor-form" method="post" action="/account/legal-terms/{{ selected_legal_terms.id }}" data-legal-terms-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Bezeichnung<input name="name" value="{{ selected_legal_terms.name }}" maxlength="255" required></label>
+      <label>AGB-Inhalt
+        <div class="email-rich-editor legal-terms-rich-editor" data-email-rich-editor>
+          <textarea class="email-rich-editor-content" aria-label="AGB-Inhalt" data-email-compose-content>{{ selected_legal_terms.content_html }}</textarea>
+        </div>
+        <textarea name="content_html" hidden data-email-compose-content-value>{{ selected_legal_terms.content_html }}</textarea>
+      </label>
+      <div class="legal-terms-editor-actions">
+        <button class="button" type="submit">AGB speichern</button>
+      </div>
+    </form>
+    <div class="legal-terms-secondary-actions">
+      <form method="post" action="/account/legal-terms/{{ selected_legal_terms.id }}/duplicate">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-secondary" type="submit">Duplizieren</button>
+      </form>
+      <form method="post" action="/account/legal-terms/{{ selected_legal_terms.id }}/delete" onsubmit="return window.confirm('Diese AGB wirklich löschen?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button button-secondary legal-terms-delete" type="submit">Löschen</button>
+      </form>
+    </div>
+  {% endif %}
+</section>

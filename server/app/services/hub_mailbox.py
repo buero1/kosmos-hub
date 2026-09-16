@@ -34,6 +34,7 @@ from app.services.hub_mailbox_transport import (
     HubMailboxTransportInlineImage,
     HubMailboxTransportService,
 )
+from app.services.hub_spam_senders import HubSpamSenderService
 
 
 MAILBOX_FOLDERS = frozenset({"inbox", "sent", "drafts", "unassigned", "trash", "spam"})
@@ -290,6 +291,7 @@ class HubMailboxService:
                 self.communications.attachment_storage.remove(storage_key)
             return len(selected_emails)
 
+        spam_senders = HubSpamSenderService(db=self.db)
         for email in selected_emails:
             if action == "mark_read":
                 email.is_unread = False
@@ -304,8 +306,11 @@ class HubMailboxService:
             elif action == "move_trash":
                 email.mailbox_state = "trash"
             elif action == "move_spam":
+                spam_senders.block(direction=email.direction, payload=self._payload(email.encrypted_payload_json))
                 email.mailbox_state = "spam"
             elif action == "restore":
+                if email.mailbox_state == "spam":
+                    spam_senders.unblock(direction=email.direction, payload=self._payload(email.encrypted_payload_json))
                 email.mailbox_state = _ACTIVE_MAILBOX_STATE
         self.db.flush()
         return len(linked_by_id) + len(unassigned_by_id)

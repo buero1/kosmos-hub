@@ -17,12 +17,30 @@ from app.models.module_layout import ModuleLayout
 from app.models.site import Site
 from app.services.hub_cases import HubCaseListEntry, HubCaseService
 from app.services.module_layouts import ModuleLayoutService
+from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
-from app.services.zoho_crm import ZohoCrmService
+from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmService
 
 
 CUSTOMER_FIELDS_LAYOUT_KEY = "customer-fields"
 CONTACT_FIELDS_LAYOUT_KEY = "contact-fields"
+HUB_CUSTOMER_FIELD_KEYS = (
+    "customer_name",
+    "account_status",
+    "website",
+    "phone",
+    "industry",
+    "billing_street",
+    "billing_postal_code",
+    "billing_city",
+    "billing_state",
+    "billing_country",
+    "important_info",
+)
+_HUB_CUSTOMER_FIELDS = tuple(
+    next(field for field in ZOHO_ACCOUNT_FIELDS if field.key == key)
+    for key in HUB_CUSTOMER_FIELD_KEYS
+)
 
 
 @dataclass(frozen=True)
@@ -321,6 +339,79 @@ class CustomerDirectoryService:
         if contact is None:
             return None
         return self._build_contact_detail(contact)
+
+    def create_hub_customer(self, *, submitted_values: dict[str, str]) -> Customer:
+        values = self._hub_customer_values(submitted_values)
+        customer = Customer(
+            name=values["customer_name"],
+            zoho_status=values["account_status"],
+            is_visible=True,
+            website_domain=ZohoCrmService.normalize_website_domain(values["website"]),
+            encrypted_profile_json=self.cipher.encrypt(json.dumps(self._hub_customer_profile(values), ensure_ascii=False)),
+        )
+        self.db.add(customer)
+        self.db.flush()
+        return customer
+
+    def update_hub_customer(self, *, customer_id: int, submitted_values: dict[str, str]) -> Customer:
+        customer = self.db.get(Customer, customer_id)
+        if customer is None:
+            raise ValueError("Der Kunde wurde nicht gefunden.")
+        if customer.zoho_id or self._profile_data(customer).get("source") != "hub-customers":
+            raise ValueError("Dieser Kunde wird nicht im Hub verwaltet.")
+        values = self._hub_customer_values(submitted_values)
+        customer.name = values["customer_name"]
+        customer.zoho_status = values["account_status"]
+        customer.website_domain = ZohoCrmService.normalize_website_domain(values["website"])
+        customer.encrypted_profile_json = self.cipher.encrypt(json.dumps(self._hub_customer_profile(values), ensure_ascii=False))
+        self.db.flush()
+        return customer
+
+    @staticmethod
+    def _hub_customer_values(submitted_values: dict[str, str]) -> dict[str, str]:
+        values = {
+            key: submitted_values.get(f"customer_field__{key}", "").strip()
+            for key in HUB_CUSTOMER_FIELD_KEYS
+        }
+        if not values["customer_name"]:
+            raise ValueError("Bitte einen Kundennamen eingeben.")
+        if len(values["customer_name"]) > 255:
+            raise ValueError("Der Kundenname darf höchstens 255 Zeichen lang sein.")
+        if values["account_status"] not in ZOHO_RELEVANT_ACCOUNT_STATUSES:
+            raise ValueError("Bitte einen gültigen Kundenstatus auswählen.")
+        if any(len(value) > (5000 if key == "important_info" else 255) for key, value in values.items()):
+            raise ValueError("Ein Kundenfeld ist zu lang.")
+        website = values["website"]
+        if website and (
+            "://" in website and not website.startswith(("http://", "https://"))
+            or not (domain := ZohoCrmService.normalize_website_domain(website))
+            or "." not in domain
+            or " " in domain
+        ):
+            raise ValueError("Bitte eine gültige Website-Adresse angeben.")
+        return values
+
+    @staticmethod
+    def _hub_customer_profile(values: dict[str, str]) -> dict[str, object]:
+        metadata: dict[str, dict[str, object]] = {
+            field.key: {
+                "label": field.label,
+                "display_type": "Einzelzeile" if field.key == "industry" else field.display_type,
+                "editable": True,
+            }
+            for field in _HUB_CUSTOMER_FIELDS
+        }
+        metadata["account_status"]["pick_list_values"] = [
+            {"value": status, "label": status} for status in ZOHO_RELEVANT_ACCOUNT_STATUSES
+        ]
+        metadata["source"] = {"label": "Quelle", "display_type": "Einzelzeile", "editable": False}
+        return {
+            "source": "hub-customers",
+            "schema_version": 2,
+            "fields": {field.label: values[field.key] or None for field in _HUB_CUSTOMER_FIELDS} | {"Quelle": "Hub"},
+            "field_metadata": metadata,
+            "subforms": {},
+        }
 
     def create_hub_contact(
         self,

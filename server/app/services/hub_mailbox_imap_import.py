@@ -25,6 +25,7 @@ from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.email_attachment_storage import EmailAttachmentStorageError
 
 
@@ -36,6 +37,10 @@ _MAX_MESSAGE_BYTES = 100 * 1024 * 1024
 
 class HubMailboxImapImportError(ValueError):
     """A safe error raised while selecting or importing Mittwald mail."""
+
+
+class HubMailboxImapMessageError(HubMailboxImapImportError):
+    """A deterministic error limited to one IMAP UID."""
 
 
 @dataclass(frozen=True)
@@ -234,6 +239,9 @@ class HubMailboxImapImportService:
             return "skipped", 0, 0
 
         matched_customers = self._matched_customers(parsed.payload)
+        mailbox_state = "spam" if HubSpamSenderService(db=self.db).is_blocked(
+            direction=str(parsed.payload["direction"]), payload=parsed.payload
+        ) else "active"
         stored_keys: list[str] = []
         try:
             if matched_customers:
@@ -243,6 +251,7 @@ class HubMailboxImapImportService:
                         zoho_message_id=parsed.identity,
                         source="mittwald-imap",
                         direction=str(parsed.payload["direction"]),
+                        mailbox_state=mailbox_state,
                         is_unread=parsed.is_unread,
                         encrypted_payload_json=self.communications._encrypt_payload(parsed.payload),
                         encrypted_header_json=self.communications._encrypt_email_list_header(parsed.payload),
@@ -256,6 +265,7 @@ class HubMailboxImapImportService:
                 email = HubMailboxEmail(
                     source="mittwald-imap",
                     direction=str(parsed.payload["direction"]),
+                    mailbox_state=mailbox_state,
                     is_unread=parsed.is_unread,
                     fingerprint=fingerprint,
                     encrypted_payload_json=self.communications._encrypt_payload(parsed.payload),
@@ -278,20 +288,25 @@ class HubMailboxImapImportService:
         attachments: tuple[_ParsedAttachment, ...],
     ) -> list[str]:
         stored_keys: list[str] = []
-        for attachment in attachments:
-            storage_key = self.communications.attachment_storage.store(attachment.content)
-            stored_keys.append(storage_key)
-            self.db.add(
-                CustomerEmailAttachment(
-                    email_id=email.id,
-                    source="mittwald-imap",
-                    source_attachment_id=attachment.id,
-                    storage_key=storage_key,
-                    content_type=attachment.content_type[:128] or "application/octet-stream",
-                    byte_size=len(attachment.content),
-                    stored_at=datetime.now(UTC),
+        try:
+            for attachment in attachments:
+                storage_key = self.communications.attachment_storage.store(attachment.content)
+                stored_keys.append(storage_key)
+                self.db.add(
+                    CustomerEmailAttachment(
+                        email_id=email.id,
+                        source="mittwald-imap",
+                        source_attachment_id=attachment.id,
+                        storage_key=storage_key,
+                        content_type=attachment.content_type[:128] or "application/octet-stream",
+                        byte_size=len(attachment.content),
+                        stored_at=datetime.now(UTC),
+                    )
                 )
-            )
+        except Exception:
+            for storage_key in stored_keys:
+                self.communications.attachment_storage.remove(storage_key)
+            raise
         return stored_keys
 
     def _store_unassigned_attachments(
@@ -301,20 +316,25 @@ class HubMailboxImapImportService:
         attachments: tuple[_ParsedAttachment, ...],
     ) -> list[str]:
         stored_keys: list[str] = []
-        for attachment in attachments:
-            storage_key = self.communications.attachment_storage.store(attachment.content)
-            stored_keys.append(storage_key)
-            self.db.add(
-                HubMailboxAttachment(
-                    email_id=email.id,
-                    source="mittwald-imap",
-                    source_attachment_id=attachment.id,
-                    storage_key=storage_key,
-                    content_type=attachment.content_type[:128] or "application/octet-stream",
-                    byte_size=len(attachment.content),
-                    stored_at=datetime.now(UTC),
+        try:
+            for attachment in attachments:
+                storage_key = self.communications.attachment_storage.store(attachment.content)
+                stored_keys.append(storage_key)
+                self.db.add(
+                    HubMailboxAttachment(
+                        email_id=email.id,
+                        source="mittwald-imap",
+                        source_attachment_id=attachment.id,
+                        storage_key=storage_key,
+                        content_type=attachment.content_type[:128] or "application/octet-stream",
+                        byte_size=len(attachment.content),
+                        stored_at=datetime.now(UTC),
+                    )
                 )
-            )
+        except Exception:
+            for storage_key in stored_keys:
+                self.communications.attachment_storage.remove(storage_key)
+            raise
         return stored_keys
 
     def _matched_customers(self, payload: dict[str, object]) -> list[Customer]:
@@ -357,16 +377,18 @@ class HubMailboxImapImportService:
             if status != "OK":
                 raise HubMailboxImapImportError(f"Der IMAP-Ordner {folder} konnte nicht geöffnet werden.")
             status, data = imap.uid("FETCH", uid, "(RFC822 FLAGS)")
-            if status != "OK" or not data:
+            if status != "OK":
                 raise HubMailboxImapImportError("Die ausgewählte E-Mail ist im Mittwald-Postfach nicht mehr verfügbar.")
+            if not data:
+                raise HubMailboxImapMessageError("Die ausgewählte E-Mail ist im Mittwald-Postfach nicht mehr verfügbar.")
         raw_message = next(
             (part[1] for part in data if isinstance(part, tuple) and len(part) > 1 and isinstance(part[1], bytes)),
             None,
         )
         if not raw_message:
-            raise HubMailboxImapImportError("Mittwald hat für die ausgewählte E-Mail keinen Inhalt geliefert.")
+            raise HubMailboxImapMessageError("Mittwald hat für die ausgewählte E-Mail keinen Inhalt geliefert.")
         if len(raw_message) > _MAX_MESSAGE_BYTES:
-            raise HubMailboxImapImportError("Eine E-Mail ist größer als 100 MB und wurde nicht importiert.")
+            raise HubMailboxImapMessageError("Eine E-Mail ist größer als 100 MB und wurde nicht importiert.")
         response = b" ".join(part[0] for part in data if isinstance(part, tuple) and isinstance(part[0], bytes))
         return raw_message, response.decode("ascii", errors="ignore")
 

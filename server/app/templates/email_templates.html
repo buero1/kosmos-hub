@@ -38,7 +38,8 @@
     .template-management-editor-viewport[data-template-editor-view="mobile"] .template-management-editor-canvas { width: 24.375rem; min-width: 0; max-width: 100%; }
     .template-management-editor-viewport .email-rich-editor { min-width: 0; }
     .template-management-editor .email-rich-editor-content { min-height: 22rem; }
-    .template-management-actions { display: flex; justify-content: end; gap: 0.55rem; }
+    .template-management-actions { display: flex; align-items: center; justify-content: end; gap: 0.55rem; }
+    .template-management-actions .button { margin: 0; }
     @media (max-width: 760px) {
       .template-management-header { align-items: start; flex-direction: column; }
       .template-management-picker { height: calc(100vh - 8rem); min-height: 30rem; padding: 1rem; }
@@ -96,6 +97,11 @@
             </div>
             <textarea name="content" hidden data-email-compose-content-value>{{ selected_template.content }}</textarea>
           </label>
+          {% set placeholder_options = template_placeholders %}
+          {% set placeholder_picker_id = "email-template-placeholder-results" %}
+          {% set placeholder_context_options = email_template_contexts %}
+          {% set placeholder_selected_context = selected_template.context_module %}
+          {% include "partials/template_placeholder_picker.html" %}
           <div class="template-management-actions">
             <a class="button button-secondary" href="/email-templates">Abbrechen</a>
             <button class="button" type="submit">Vorlage speichern</button>

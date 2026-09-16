@@ -4,7 +4,254 @@
   <section>
     {% if created %}<p class="notice-success">{{ module.singular }} wurde im Hub angelegt.</p>{% endif %}
     {% if deleted %}<p class="notice-success">{{ module.singular }} wurde im Hub gelöscht.</p>{% endif %}
-    <div class="section-heading"><div><p class="eyebrow">Finance</p><h2>{{ module.label }}</h2></div><div class="communication-heading-actions"><a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a></div></div>
-    <article class="card customer-detail-panel"><div class="table-scroll"><table class="finance-directory-table"><thead><tr><th>{% if module.number_attribute %}{{ "Auftragsnummer" if module.key == "orders" else "Rechnungsnummer" }}{% else %}Bezeichnung{% endif %}</th><th>Status</th><th>Kunde</th><th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% else %}Nächstes Rechnungsdatum{% endif %}</th><th>Gesamt</th></tr></thead><tbody>{% for entry in entries %}<tr><td><a href="/finance/{{ module.key }}/{{ entry.document.id }}">{{ entry.identifier }}</a></td><td>{{ entry.status }}</td><td>{% if entry.document.customer %}<a href="/customers/{{ entry.document.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td><td>{{ entry.document_date }}</td><td>{{ entry.total_gross }}</td></tr>{% else %}<tr><td colspan="5">Noch keine {{ module.label|lower }} vorhanden.</td></tr>{% endfor %}</tbody></table></div></article>
+    <div class="section-heading">
+      <div><p class="eyebrow">Finance</p><h2>{{ module.label }}</h2></div>
+      <div class="communication-heading-actions">
+        {% if invoice_page %}
+          <button type="button" class="button button-secondary" data-invoice-email-review-open disabled>E-Mail senden</button>
+          <button type="button" class="button button-secondary finance-invoice-pending-action" disabled title="Folgt im nächsten Schritt">Massenaktualisierung</button>
+        {% endif %}
+        <a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a>
+      </div>
+    </div>
+    <article class="card customer-detail-panel">
+      <div class="table-scroll">
+        <table class="finance-directory-table{% if invoice_page %} finance-invoice-directory-table{% endif %}">
+          <thead><tr>
+            {% if invoice_page %}<th class="finance-invoice-select-cell"><input type="checkbox" data-invoice-select-page aria-label="Alle Rechnungen auf dieser Seite auswählen" title="Alle Rechnungen auf dieser Seite auswählen" {% if not entries %}disabled{% endif %}></th>{% endif %}
+            <th>{% if module.number_attribute %}{% if module.key == "orders" %}Auftragsnummer{% elif module.key == "invoices" %}Rechnungsnummer{% else %}Mahnungsnummer{% endif %}{% else %}Bezeichnung{% endif %}</th>
+            <th>Status</th>
+            <th>Kunde</th>
+            <th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% elif module.key == "dunnings" %}Mahnungsdatum{% else %}Nächstes Rechnungsdatum{% endif %}</th>
+            <th>Gesamt</th>
+          </tr></thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr>
+                {% if invoice_page %}<td class="finance-invoice-select-cell"><input type="checkbox" data-invoice-select="{{ entry.document.id }}" aria-label="Rechnung {{ entry.identifier }} auswählen" title="Umschalt: Bereich wählen oder abwählen; Strg: einzeln wählen oder abwählen"></td>{% endif %}
+                <td><a href="/finance/{{ module.key }}/{{ entry.document.id }}">{{ entry.identifier }}</a></td>
+                <td>{{ entry.status }}</td>
+                <td>{% if entry.document.customer %}<a href="/customers/{{ entry.document.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td>
+                <td>{{ entry.document_date }}</td>
+                <td>{{ entry.total_gross }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="{{ 6 if invoice_page else 5 }}">Noch keine {{ module.label|lower }} vorhanden.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if invoice_page %}
+        <div class="finance-invoice-list-footer">
+          <div class="finance-invoice-selection-status" aria-live="polite">
+            <span data-invoice-selection-count>0 Rechnungen ausgewählt</span>
+            <button type="button" class="button button-secondary" data-invoice-clear-selection hidden>Auswahl aufheben</button>
+          </div>
+          <span class="finance-invoice-page-summary">{% if invoice_page.total_count %}{{ (invoice_page.page - 1) * 100 + 1 }}–{{ (invoice_page.page - 1) * 100 + entries|length }} von {{ invoice_page.total_count }}{% else %}0 Rechnungen{% endif %}</span>
+          {% if invoice_page.page_count > 1 %}
+            <nav class="finance-invoice-pagination" aria-label="Rechnungsseiten">
+              {% if invoice_page.page > 1 %}<a class="button button-secondary" href="?page={{ invoice_page.page - 1 }}" rel="prev">Zurück</a>{% endif %}
+              {% if invoice_page_links|first > 1 %}<a class="button button-secondary" href="?page=1">1</a>{% if invoice_page_links|first > 2 %}<span aria-hidden="true">…</span>{% endif %}{% endif %}
+              {% for number in invoice_page_links %}<a class="button {{ 'button-variant-1' if number == invoice_page.page else 'button-secondary' }}" href="?page={{ number }}" {% if number == invoice_page.page %}aria-current="page"{% endif %}>{{ number }}</a>{% endfor %}
+              {% if invoice_page_links|last < invoice_page.page_count %}{% if invoice_page_links|last < invoice_page.page_count - 1 %}<span aria-hidden="true">…</span>{% endif %}<a class="button button-secondary" href="?page={{ invoice_page.page_count }}">{{ invoice_page.page_count }}</a>{% endif %}
+              {% if invoice_page.page < invoice_page.page_count %}<a class="button button-secondary" href="?page={{ invoice_page.page + 1 }}" rel="next">Weiter</a>{% endif %}
+            </nav>
+          {% endif %}
+        </div>
+      {% endif %}
+    </article>
+    {% if invoice_page %}
+      <dialog class="finance-invoice-review-dialog" data-invoice-email-dialog aria-labelledby="invoice-email-review-heading">
+        <div class="finance-invoice-review-heading">
+          <div><p class="eyebrow">RECHNUNGEN</p><h3 id="invoice-email-review-heading">E-Mail-Versand prüfen</h3></div>
+          <button type="button" class="button button-secondary" data-invoice-email-close aria-label="Schließen">×</button>
+        </div>
+        <p class="subtle">Vorlage: <strong data-invoice-email-template>Rechnungen senden</strong> · Absender: <strong data-invoice-email-sender>info@kosmos-medien.de</strong></p>
+        <p data-invoice-email-message role="status" aria-live="polite">Die ausgewählten Rechnungen werden geprüft.</p>
+        <div class="table-scroll finance-invoice-review-scroll">
+          <table class="finance-directory-table"><thead><tr><th>Rechnung</th><th>Kunde</th><th>Ansprechpartner</th><th>E-Mail-Adresse</th><th>PDF / Prüfung</th></tr></thead>
+            <tbody data-invoice-email-rows></tbody>
+          </table>
+        </div>
+        <div class="finance-invoice-review-actions">
+          <button type="button" class="button button-secondary" data-invoice-email-close>Abbrechen</button>
+          <button type="button" class="button button-variant-1" data-invoice-email-confirm disabled>Jetzt E-Mails senden</button>
+        </div>
+      </dialog>
+      <style>
+        .finance-invoice-review-dialog { width: min(900px, calc(100vw - 2rem)); max-height: min(85vh, 820px); padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--panel); color: var(--ink); box-shadow: 0 18px 70px #172d3b40; }
+        .finance-invoice-review-dialog::backdrop { background: #172d3b88; backdrop-filter: blur(3px); }
+        .finance-invoice-review-heading, .finance-invoice-review-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+        .finance-invoice-review-heading h3 { margin: 0; }
+        .finance-invoice-review-heading .eyebrow { margin-bottom: .25rem; }
+        .finance-invoice-review-scroll { max-height: 52vh; overflow: auto; margin: 1rem 0; }
+        .finance-invoice-review-scroll table { width: 100%; }
+        .finance-invoice-review-scroll td, .finance-invoice-review-scroll th { vertical-align: top; overflow-wrap: anywhere; }
+        .finance-invoice-review-scroll tr.is-blocked td:last-child { color: #a4442f; font-weight: 700; }
+        .finance-invoice-review-actions { justify-content: flex-end; padding-top: .75rem; border-top: 1px solid var(--border); }
+        @media (max-width: 620px) { .finance-invoice-review-dialog { padding: .75rem; } .finance-invoice-review-scroll table { min-width: 700px; } }
+      </style>
+    {% endif %}
   </section>
+  {% if invoice_page %}
+    <script>
+      (function () {
+        var storageKey = "finance-invoice-selection-v1";
+        var checkboxes = Array.from(document.querySelectorAll("[data-invoice-select]"));
+        var pageCheckbox = document.querySelector("[data-invoice-select-page]");
+        var count = document.querySelector("[data-invoice-selection-count]");
+        var clearButton = document.querySelector("[data-invoice-clear-selection]");
+        var emailButton = document.querySelector("[data-invoice-email-review-open]");
+        var dialog = document.querySelector("[data-invoice-email-dialog]");
+        var reviewRows = dialog.querySelector("[data-invoice-email-rows]");
+        var reviewMessage = dialog.querySelector("[data-invoice-email-message]");
+        var confirmButton = dialog.querySelector("[data-invoice-email-confirm]");
+        var reviewToken = "";
+        var csrfToken = {{ csrf_token | tojson }};
+        var selected;
+        var navigation = performance.getEntriesByType("navigation")[0];
+        if (navigation && navigation.type === "reload") {
+          try { sessionStorage.removeItem(storageKey); } catch (error) { /* No stored selection to clear. */ }
+        }
+        try {
+          var stored = JSON.parse(sessionStorage.getItem(storageKey) || "[]");
+          selected = new Set(Array.isArray(stored) ? stored.filter(function (id) { return /^\d+$/.test(String(id)); }).map(String) : []);
+        } catch (error) {
+          selected = new Set();
+        }
+        var lastIndex = null;
+
+        function render() {
+          checkboxes.forEach(function (checkbox) { checkbox.checked = selected.has(checkbox.dataset.invoiceSelect); });
+          var selectedOnPage = checkboxes.filter(function (checkbox) { return checkbox.checked; }).length;
+          pageCheckbox.checked = checkboxes.length > 0 && selectedOnPage === checkboxes.length;
+          pageCheckbox.indeterminate = selectedOnPage > 0 && selectedOnPage < checkboxes.length;
+          count.textContent = selected.size.toLocaleString("de-DE") + (selected.size === 1 ? " Rechnung ausgewählt" : " Rechnungen ausgewählt");
+          clearButton.hidden = selected.size === 0;
+          emailButton.disabled = selected.size === 0;
+        }
+
+        function save() {
+          try { sessionStorage.setItem(storageKey, JSON.stringify(Array.from(selected))); } catch (error) { /* Selection remains available until navigation. */ }
+          render();
+        }
+
+        checkboxes.forEach(function (checkbox, index) {
+          checkbox.addEventListener("click", function (event) {
+            var first = event.shiftKey && lastIndex !== null ? Math.min(lastIndex, index) : index;
+            var last = event.shiftKey && lastIndex !== null ? Math.max(lastIndex, index) : index;
+            for (var offset = first; offset <= last; offset += 1) {
+              var id = checkboxes[offset].dataset.invoiceSelect;
+              if (checkbox.checked) { selected.add(id); } else { selected.delete(id); }
+            }
+            lastIndex = index;
+            save();
+          });
+        });
+
+        pageCheckbox.addEventListener("change", function () {
+          checkboxes.forEach(function (checkbox) {
+            var id = checkbox.dataset.invoiceSelect;
+            if (pageCheckbox.checked) { selected.add(id); } else { selected.delete(id); }
+          });
+          lastIndex = null;
+          save();
+        });
+
+        clearButton.addEventListener("click", function () {
+          selected.clear();
+          lastIndex = null;
+          save();
+        });
+
+        function showMessage(message, error) {
+          reviewMessage.textContent = message;
+          reviewMessage.className = error ? "notice-error" : "subtle";
+        }
+
+        function fillRows(rows) {
+          reviewRows.replaceChildren();
+          rows.forEach(function (row) {
+            var tr = document.createElement("tr");
+            tr.dataset.invoiceEmailId = String(row.invoice_id);
+            if (row.issue) { tr.classList.add("is-blocked"); }
+            [row.number, row.customer, row.contact, row.email, row.issue || row.pdf].forEach(function (value) {
+              var td = document.createElement("td");
+              td.textContent = value || "-";
+              tr.appendChild(td);
+            });
+            reviewRows.appendChild(tr);
+          });
+        }
+
+        async function requestJson(url, body) {
+          var options = body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ csrf_token: csrfToken }, body)) } : {};
+          var response = await fetch(url, options);
+          var payload = await response.json();
+          if (!response.ok) { throw new Error(payload.error || payload.detail || "Die Anfrage ist fehlgeschlagen."); }
+          return payload;
+        }
+
+        emailButton.addEventListener("click", async function () {
+          reviewToken = "";
+          confirmButton.disabled = true;
+          reviewRows.replaceChildren();
+          showMessage("Die ausgewählten Rechnungen werden geprüft.", false);
+          dialog.showModal();
+          try {
+            var review = await requestJson("/finance/invoices/email-review", { ids: Array.from(selected).map(Number) });
+            fillRows(review.rows);
+            dialog.querySelector("[data-invoice-email-template]").textContent = review.template;
+            dialog.querySelector("[data-invoice-email-sender]").textContent = review.sender;
+            reviewToken = review.review_token;
+            var blocked = review.rows.filter(function (row) { return row.issue; }).length;
+            showMessage(blocked ? blocked + " Rechnung(en) können nicht versendet werden. Bitte die Angaben korrigieren oder abwählen und erneut prüfen." : review.rows.length + " E-Mail(s) werden mit jeweils einer ZUGFeRD-PDF gesendet. Bitte Empfänger sorgfältig prüfen.", blocked > 0);
+            confirmButton.textContent = "Jetzt " + review.rows.length + " E-Mail(s) senden";
+            confirmButton.disabled = !reviewToken;
+          } catch (error) { showMessage(error.message, true); }
+        });
+
+        dialog.querySelectorAll("[data-invoice-email-close]").forEach(function (button) {
+          button.addEventListener("click", function () { dialog.close(); });
+        });
+
+        async function pollBatch(batchId) {
+          try {
+            var result = await requestJson("/finance/invoices/email-batches/" + batchId);
+            var byId = new Map(result.items.map(function (item) { return [String(item.invoice_id), item]; }));
+            reviewRows.querySelectorAll("tr").forEach(function (tr) {
+              var item = byId.get(tr.dataset.invoiceEmailId);
+              if (item) { tr.lastElementChild.textContent = ({ queued: "Wartet", running: "Wird gesendet", sending: "Wird gesendet", sent: "Gesendet", failed: "Fehlgeschlagen", uncertain: "Status unklar" })[item.status] + (item.error ? ": " + item.error : ""); }
+            });
+            var sent = result.items.filter(function (item) { return item.status === "sent"; }).length;
+            var finished = result.status === "completed" || result.status === "interrupted";
+            showMessage(finished ? sent + " von " + result.items.length + " E-Mails gesendet. Bitte fehlgeschlagene oder unklare Einträge prüfen." : sent + " von " + result.items.length + " E-Mails gesendet. Versand läuft …", result.status === "interrupted");
+            if (!finished) { setTimeout(function () { pollBatch(batchId); }, 2000); }
+            else {
+              dialog.querySelectorAll("[data-invoice-email-close]").forEach(function (button) { button.disabled = false; });
+              result.items.forEach(function (item) { if (item.status === "sent") { selected.delete(String(item.invoice_id)); } });
+              save();
+            }
+          } catch (error) { showMessage("Status konnte nicht geladen werden: " + error.message + ". Die Versandrunde läuft unabhängig davon weiter.", true); }
+        }
+
+        confirmButton.addEventListener("click", async function () {
+          if (!reviewToken) { return; }
+          confirmButton.disabled = true;
+          dialog.querySelectorAll("[data-invoice-email-close]").forEach(function (button) { button.disabled = true; });
+          showMessage("Versandrunde wird angelegt …", false);
+          try {
+            var result = await requestJson("/finance/invoices/email-confirm", { review_token: reviewToken });
+            reviewToken = "";
+            pollBatch(result.batch_id);
+          } catch (error) {
+            showMessage(error.message, true);
+            dialog.querySelectorAll("[data-invoice-email-close]").forEach(function (button) { button.disabled = false; });
+          }
+        });
+
+        render();
+      }());
+    </script>
+  {% endif %}
 {% endblock %}

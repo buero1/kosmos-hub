@@ -17,6 +17,7 @@ class HubFinanceOffer(TimestampMixin, Base):
     offer_number: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("customer_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
+    pdf_template_id: Mapped[int | None] = mapped_column(ForeignKey("hub_pdf_templates.id", ondelete="SET NULL"), nullable=True, index=True)
     zoho_books_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
     encrypted_fields_json: Mapped[str] = mapped_column(Text(), nullable=False)
     zoho_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -24,6 +25,7 @@ class HubFinanceOffer(TimestampMixin, Base):
 
     customer = relationship("Customer")
     contact = relationship("CustomerContact")
+    pdf_template = relationship("HubPdfTemplate")
     lines = relationship(
         "HubFinanceOfferLine",
         back_populates="offer",

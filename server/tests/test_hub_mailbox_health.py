@@ -8,6 +8,7 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
+from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.models.hub_user import HubUser
 from app.services.hub_mailbox import MAILBOX_HEALTH_ALERT_SOURCE
 from app.services.hub_mailbox_health import HubMailboxHealthService
@@ -30,7 +31,10 @@ def test_inbox_health_alert_is_sent_once_after_three_consecutive_failures(monkey
 
     with Session(engine) as db:
         account = _configured_account(cipher)
-        admin = HubUser(username="admin", password_hash="hash", reminder_email="admin@example.de")
+        admin = HubUser(
+            username="admin", password_hash="hash",
+            reminder_email="info@kosmos-medien.de", mailbox_alert_email="admin@example.de",
+        )
         db.add_all([account, admin])
         db.flush()
         state = HubMailboxImapSyncState(
@@ -71,7 +75,7 @@ def test_inbox_health_alerts_after_five_minutes_without_a_success(monkeypatch):
 
     with Session(engine) as db:
         account = _configured_account(cipher)
-        admin = HubUser(username="admin", password_hash="hash", reminder_email="admin@example.de")
+        admin = HubUser(username="admin", password_hash="hash", mailbox_alert_email="admin@example.de")
         db.add_all([account, admin])
         db.flush()
         state = HubMailboxImapSyncState(
@@ -94,3 +98,50 @@ def test_inbox_health_alerts_after_five_minutes_without_a_success(monkeypatch):
 
         assert summary.alerts_created == 1
         assert summary.emails_sent == 1
+
+
+def test_pending_message_failure_is_alerted_once_even_when_sync_resumes(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    with Session(engine) as db:
+        account = _configured_account(cipher)
+        db.add_all([
+            account,
+            HubUser(username="admin", password_hash="hash", mailbox_alert_email="admin@example.de"),
+        ])
+        db.flush()
+        db.add_all([
+            HubMailboxImapSyncState(
+                mailbox_account_id=account.id, folder="INBOX", last_success_at=datetime.now(UTC),
+            ),
+            HubMailboxImapSyncFailure(
+                mailbox_account_id=account.id, folder="INBOX", imap_uid="46194",
+                error="Nachricht überschreitet eine Datenbank-Feldgröße.", last_failed_at=datetime.now(UTC),
+            ),
+        ])
+        db.commit()
+        sent = []
+        monkeypatch.setattr(
+            "app.services.hub_mailbox_health.HubMailboxService.send_direct_email",
+            lambda _self, **kwargs: sent.append(kwargs) or SimpleNamespace(id=1),
+        )
+        service = HubMailboxHealthService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        assert service.notify_unhealthy_inboxes().emails_sent == 1
+        assert service.notify_unhealthy_inboxes().emails_sent == 0
+        assert len(sent) == 1
+        assert "46194" in sent[0]["content"]
+
+
+def test_monitored_address_cannot_receive_its_own_alert():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    with Session(engine) as db:
+        db.add_all([
+            _configured_account(cipher),
+            HubUser(username="admin", password_hash="hash", mailbox_alert_email="info@kosmos-medien.de"),
+        ])
+        db.commit()
+        service = HubMailboxHealthService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        assert service._recipient_emails() == ()

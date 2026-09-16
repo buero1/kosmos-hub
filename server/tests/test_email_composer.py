@@ -1,9 +1,13 @@
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.core.security import SecretCipher
 from app.db.base import Base
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.email_compose_images import EmailComposeImageService
 from app.services.email_composer_settings import EmailComposerSettingsError, EmailComposerSettingsService
 
 
@@ -66,3 +70,30 @@ def test_mail_composer_allows_only_hub_local_image_paths():
     assert content == f'<img src="/emails/compose/images/{token}" alt="Logo">'
     with pytest.raises(ValueError, match="Nachricht darf nicht leer"):
         CustomerCommunicationService._sanitized_email_content('<img src="file:///private/logo.png">')
+
+
+def test_compose_images_can_be_embedded_for_offline_pdf_rendering(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    token = "a" * 32
+    loads: list[str] = []
+
+    with Session(engine) as db:
+        service = EmailComposeImageService(db=db, cipher=SecretCipher("a" * 32))
+
+        def load_image(*, token: str):
+            loads.append(token)
+            return SimpleNamespace(content_type="image/png"), b"logo-bytes"
+
+        monkeypatch.setattr(service, "load_image", load_image)
+        content = (
+            f'<img src="/emails/compose/images/{token}" alt="Logo">'
+            f'<img src="/emails/compose/images/{token}" alt="Logo erneut">'
+            '<img src="https://example.test/external.png" alt="Extern">'
+        )
+
+        embedded = service.embed_local_images(content)
+
+    assert embedded.count('src="data:image/png;base64,bG9nby1ieXRlcw=="') == 2
+    assert 'src="https://example.test/external.png"' in embedded
+    assert loads == [token]

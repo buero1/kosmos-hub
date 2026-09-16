@@ -1,0 +1,7 @@
+CREATE TABLE hub_spam_senders (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  email_address VARCHAR(320) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_hub_spam_senders_email_address (email_address)
+);

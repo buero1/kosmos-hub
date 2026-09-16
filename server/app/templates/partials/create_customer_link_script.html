@@ -1,0 +1,36 @@
+<script>
+  (function () {
+    document.querySelectorAll('[data-create-customer-link-panel]').forEach(function (panel) {
+      var form = document.getElementById(panel.dataset.createCustomerLinkForm);
+      var customerField = form && form.querySelector('[name="customer_id"]');
+      var link = panel.querySelector('[data-create-customer-link]');
+      var empty = panel.querySelector('[data-create-customer-link-empty]');
+      if (!customerField || !link || !empty) return;
+
+      function customerName(customerId) {
+        if (customerField.tagName === 'SELECT') {
+          var selectedOption = customerField.selectedOptions[0];
+          return selectedOption && selectedOption.value ? selectedOption.textContent.trim() : '';
+        }
+        var options = form.querySelectorAll('[data-finance-customer-option]');
+        for (var index = 0; index < options.length; index += 1) {
+          if (options[index].dataset.customerId === customerId) return options[index].textContent.trim();
+        }
+        return '';
+      }
+
+      function updateLink() {
+        var customerId = customerField.value;
+        var name = customerName(customerId);
+        var isLinked = Boolean(customerId && name);
+        link.hidden = !isLinked;
+        empty.hidden = isLinked;
+        link.href = isLinked ? '/customers/' + customerId : '';
+        link.textContent = isLinked ? name : '';
+      }
+
+      customerField.addEventListener('change', updateLink);
+      updateLink();
+    });
+  }());
+</script>
