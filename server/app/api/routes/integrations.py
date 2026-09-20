@@ -64,6 +64,7 @@ class CallAppClosurePayload(BaseModel):
     occurred_at: datetime
     result: str = Field(default="Lead erstellt", max_length=1000)
     notes: str = Field(default="", max_length=30_000)
+    manual_note: str = Field(default="", max_length=20_000)
     lead: CallAppLeadPayload
     campaign: CallAppCampaignPayload
     call: CallAppCallPayload | None = None
@@ -129,46 +130,24 @@ def receive_closure(
             field_values=fields,
         )
         note_id = None
-        if payload.notes.strip():
+        note_sections = [
+            f"{label}:\n{text.strip()}"
+            for label, text in (("System Kommentar", payload.notes), ("Manuelle Notiz", payload.manual_note))
+            if text.strip()
+        ]
+        if note_sections:
             note = HubLeadNoteService(db=db, cipher=get_secret_cipher()).upsert_external_note(
                 lead_id=lead.id,
                 source_system=source_system,
                 source_external_id=payload.closure_id,
                 actor=actor,
                 title="Gesprächsnotiz",
-                content=payload.notes,
-                occurred_at=payload.occurred_at,
+                content="\n\n".join(note_sections),
             )
             note_id = note.id
 
-        call_id = None
+        # Legacy clients may still supply a call, but only the follow-up is imported.
         activities = CustomerActivityService(db=db)
-        if payload.call is not None:
-            call_description = "\n".join(
-                part
-                for part in (
-                    f"Kampagne: {payload.campaign.name}" if payload.campaign.name else "",
-                    f"Assistant: {payload.call.assistant}" if payload.call.assistant else "",
-                    f"Ergebnis: {payload.result}" if payload.result else "",
-                    payload.notes.strip(),
-                )
-                if part
-            )
-            call = activities.upsert_external_call(
-                lead_id=lead.id,
-                source_system=source_system,
-                source_external_id=payload.call.id,
-                actor=actor,
-                name=f"CallApp-Anruf · {payload.lead.company or payload.lead.last_name or payload.lead.id}"[:255],
-                status="completed",
-                direction=payload.call.direction,
-                starts_at=payload.call.started_at,
-                duration_seconds=payload.call.duration_seconds,
-                description=call_description,
-                recording_url=str(payload.call.recording_url or ""),
-                transcript_url=str(payload.call.transcript_url or ""),
-            )
-            call_id = call.id
 
         follow_up_id = None
         if payload.follow_up is not None:
@@ -182,7 +161,7 @@ def receive_closure(
                 direction="outbound",
                 starts_at=payload.follow_up.starts_at,
                 duration_seconds=30 * 60,
-                description=f"Wiedervorlage aus CallApp · Kampagne: {payload.campaign.name}".strip(),
+                description=payload.manual_note.strip() or f"Wiedervorlage aus CallApp · Kampagne: {payload.campaign.name}".strip(),
             )
             follow_up_id = follow_up.id
     except (HubLeadError, HubLeadNoteError, CustomerActivityError) as exc:
@@ -206,7 +185,7 @@ def receive_closure(
         "lead_id": str(lead.id),
         "lead_url": f"{base_url}/leads/{lead.id}",
         "note_id": str(note_id) if note_id is not None else None,
-        "call_id": str(call_id) if call_id is not None else None,
+        "call_id": None,
         "follow_up_id": str(follow_up_id) if follow_up_id is not None else None,
     }
 
