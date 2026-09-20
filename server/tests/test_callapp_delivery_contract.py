@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -120,3 +122,57 @@ def test_manual_note_without_comment_or_follow_up_is_saved(monkeypatch):
         assert db.scalar(select(CustomerCallActivity)) is None
         view = HubLeadNoteService(db=db, cipher=cipher)._view(db.scalar(select(HubLeadNote)))
         assert view.content == "Manuelle Notiz:\nManual only"
+
+
+@pytest.mark.parametrize(("industry", "stored_industry"), [
+    ("Cafés", "Cafes"),
+    ("Cafe\u0301s", "Cafes"),
+    (" CAFÉS ", "Cafes"),
+    ("Cafes", "Cafes"),
+    ("Bäckereien", "Bäckereien"),
+    ("Ba\u0308ckereien", "Bäckereien"),
+    ("", ""),
+])
+def test_delivery_matches_industry_spelling_without_changing_free_text(monkeypatch, industry, stored_industry):
+    cipher = SecretCipher("a" * 32)
+    monkeypatch.setattr(integrations, "get_secret_cipher", lambda: cipher)
+    monkeypatch.setattr(integrations, "get_settings", lambda: SimpleNamespace(public_base_url="https://hub.example"))
+    monkeypatch.setattr(integrations, "_integration_actor", lambda _: ("integration:callapp:test", None))
+    monkeypatch.setattr(integrations, "write_audit_log", lambda *args, **kwargs: None)
+    payload = integrations.CallAppClosurePayload.model_validate({
+        "closure_id": "industry-test", "occurred_at": "2026-09-18T12:20:55+02:00",
+        "notes": "Über Cafés gesprochen.", "manual_note": "Rückruf für René.",
+        "lead": {"id": "industry-test", "company": "Café René", "industry": industry},
+        "campaign": {"id": "campaign"},
+    })
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        result = integrations.receive_closure(payload, None, db)
+        db.expire_all()
+        fields = HubLeadService(db=db, cipher=cipher)._profile(db.get(HubLead, int(result["lead_id"])))["fields"]
+        assert fields["industry"] == stored_industry
+        assert fields["company"] == "Café René"
+        note = HubLeadNoteService(db=db, cipher=cipher)._view(db.scalar(select(HubLeadNote)))
+        assert note.content == "System Kommentar:\nÜber Cafés gesprochen.\n\nManuelle Notiz:\nRückruf für René."
+
+
+def test_delivery_rejects_unknown_industry_without_partial_records(monkeypatch):
+    monkeypatch.setattr(integrations, "get_secret_cipher", lambda: SecretCipher("a" * 32))
+    monkeypatch.setattr(integrations, "_integration_actor", lambda _: ("integration:callapp:test", None))
+    payload = integrations.CallAppClosurePayload.model_validate({
+        "closure_id": "unknown-industry", "occurred_at": "2026-09-18T12:20:55+02:00",
+        "notes": "System text", "manual_note": "Manual text",
+        "lead": {"id": "unknown-industry", "industry": "No such industry"},
+        "campaign": {"id": "campaign"},
+    })
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        with pytest.raises(HTTPException) as error:
+            integrations.receive_closure(payload, None, db)
+        assert error.value.status_code == 400
+        assert error.value.detail == "Die Auswahl für Branche ist ungültig."
+        assert db.scalar(select(HubLead)) is None
+        assert db.scalar(select(HubLeadNote)) is None
+        assert db.scalar(select(CustomerCallActivity)) is None

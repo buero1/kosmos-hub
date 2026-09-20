@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
+import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, HttpUrl
@@ -15,6 +16,7 @@ from app.models.customer_activity import CustomerCallActivity, CustomerMeetingAc
 from app.services.audit import write_audit_log
 from app.services.customer_activities import CustomerActivityError, CustomerActivityService
 from app.services.hub_lead_notes import HubLeadNoteError, HubLeadNoteService
+from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS
 from app.services.hub_leads import HubLeadError, HubLeadService
 
 
@@ -83,6 +85,25 @@ def _source_system(payload: CallAppClosurePayload) -> str:
     return f"callapp:{payload.instance_id}"[:96]
 
 
+def _normalize_callapp_industry(value: str) -> str:
+    value = value.strip()
+    options = next(field.options for field in HUB_LEAD_FIELDS if field.key == "industry")
+    if not value or any(value == option for option, _label in options):
+        return value
+
+    def spelling_key(text: str) -> str:
+        return "".join(
+            char for char in unicodedata.normalize("NFD", text.casefold())
+            if not unicodedata.combining(char)
+        )
+
+    key = spelling_key(value)
+    matches = {option for option, _label in options if spelling_key(option) == key}
+    # Map spelling variants (e.g. Cafés -> Cafes) only to one known Hub value.
+    # Unknown or ambiguous values still go through the usual validation.
+    return next(iter(matches)) if len(matches) == 1 else value
+
+
 def _utc_naive(value: datetime) -> datetime:
     return value.astimezone(UTC).replace(tzinfo=None) if value.tzinfo is not None else value
 
@@ -112,7 +133,7 @@ def receive_closure(
         "postal_code": payload.lead.postal_code,
         "city": payload.lead.city,
         "country": payload.lead.country,
-        "industry": payload.lead.industry,
+        "industry": _normalize_callapp_industry(payload.lead.industry),
         "homepage": payload.lead.homepage_state,
         "dialfire_campaign_name": payload.campaign.name,
         "source": payload.campaign.source or "CallApp",
