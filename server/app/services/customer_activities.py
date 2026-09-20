@@ -412,6 +412,8 @@ class CustomerActivityService:
         description: str = "",
         recording_url: str = "",
         transcript_url: str = "",
+        reminder_channels: list[str] | None = None,
+        reminder_minutes_before: list[str] | None = None,
     ) -> CustomerCallActivity:
         if self.db.get(HubLead, lead_id) is None:
             raise CustomerActivityError("Der Lead wurde nicht gefunden.")
@@ -425,6 +427,8 @@ class CustomerActivityService:
         normalized_start = starts_at.astimezone(UTC).replace(tzinfo=None) if starts_at.tzinfo is not None else starts_at
         normalized_duration = max(0, min(int(duration_seconds or 0), 24 * 60 * 60))
         stored_duration_minutes = max(1, math.ceil(normalized_duration / 60))
+        parsed_reminders = self._parse_reminders(reminder_channels or [], reminder_minutes_before or [])
+        primary_reminder = parsed_reminders[0] if parsed_reminders else None
         call = self.db.scalar(
             select(CustomerCallActivity).where(
                 CustomerCallActivity.source_system == normalized_source,
@@ -448,13 +452,13 @@ class CustomerActivityService:
         call.ends_at = normalized_start + timedelta(seconds=normalized_duration)
         call.duration_seconds = normalized_duration
         call.duration_minutes = stored_duration_minutes
-        call.reminder_channel = "none"
-        call.reminder_minutes_before = None
+        call.reminder_channel = primary_reminder.channel if primary_reminder else "none"
+        call.reminder_minutes_before = primary_reminder.minutes_before if primary_reminder else None
         call.description = description.strip()[:20_000] or None
         call.created_by_username = actor.strip()[:64] or "integration:callapp"
         call.recording_url = recording_url.strip()[:4000] or None
         call.transcript_url = transcript_url.strip()[:4000] or None
-        call.reminders = []
+        call.reminders = self._reminder_models(parsed_reminders)
         self.db.flush()
         return call
 

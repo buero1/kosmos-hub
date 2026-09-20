@@ -121,7 +121,6 @@ def receive_closure(
         "lead_result": "Offen",
         "condition": "Option 1",
         "created_at_source": payload.occurred_at.isoformat(),
-        "dialfire_comment": payload.notes,
     }
     try:
         lead, created = HubLeadService(db=db, cipher=get_secret_cipher()).upsert_external_lead(
@@ -155,12 +154,14 @@ def receive_closure(
                 lead_id=lead.id,
                 source_system=source_system,
                 source_external_id=f"{payload.closure_id}:follow-up",
-                actor=actor,
+                actor=user.username,
                 name=payload.follow_up.subject,
                 status="planned",
                 direction="outbound",
                 starts_at=payload.follow_up.starts_at,
                 duration_seconds=30 * 60,
+                reminder_channels=["popup"],
+                reminder_minutes_before=["0"],
                 description=payload.manual_note.strip() or f"Wiedervorlage aus CallApp · Kampagne: {payload.campaign.name}".strip(),
             )
             follow_up_id = follow_up.id
