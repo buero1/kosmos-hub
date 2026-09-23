@@ -35,3 +35,37 @@ Validation:
 - `php tools/test-bridge-identity.php`
 - `python -m pytest -q tests/test_plugin_auto_updates.py tests/test_wordpress_shared_actions.py tests/test_wordpress_workbench_operations.py tests/test_hub_architecture_contracts.py`
 - `node tests/js/plugin_auto_updates.cjs` (Playwright available via NODE_PATH)
+
+## Release Verification (2026-09-23)
+
+- Hub release snapshot: `4fb8af3ae4d1324295d7bf51e4cf173f0dec9070`, branch
+  `release/plugin-auto-update-policy-20260923`. The isolated release snapshot
+  preserves the main working tree and includes the existing deployed baseline.
+  Comparison with production found only this feature's changes in shared app
+  files. No database migration or customer policy change was required.
+- Full app archive deployed; service and health endpoint healthy. Live admin
+  workbench renders the plugin inventory. A real browser selected Elementor and
+  Elementor Pro, opened confirmation, then cancelled with zero policy requests.
+- Bridge `bridge-v0.3.68` released by GitHub Actions to the existing public
+  update channel. All 18 package files match the Git release after newline
+  normalization. Release workflow including both PHP contract tests succeeded.
+- Dedicated test site 2 (`test-gasthofloewen.kosmos-medien.de`) was upgraded.
+  Signed reads/writes blocked the installed Content Kit plugin, confirmed the
+  persisted state, and restored the original disabled/unblocked policy.
+  No customer installation or customer auto-update policy was changed.
+- Architecture gate detected the initially unreviewed HTTP route, then passed
+  all 329 reviewed route contracts after the explicit ledger review.
+- The complete test run exposed seven stale agent fixtures using an invalid
+  model name and an obsolete tool-output representation. Fixtures now use the
+  configured model profile and decode both plain and cached content blocks;
+  production model validation was not relaxed. The affected file and policy/
+  architecture tests subsequently passed (57 tests).
+- Final complete Python rerun: 2006 passed, 6 skipped. Desktop/mobile browser
+  checks, both PHP contract suites and syntax checks of all plugin PHP files
+  also passed.
+
+Live checks are intentionally separate from ordinary tests:
+`tools/test-bridge-policy-live.cjs --install` upgrades only the dedicated test
+site; `tools/test-bridge-policy-live.py` verifies and restores its policy.
+`tools/plugin-policy-workbench-live.cjs` aborts policy POSTs and tests cancellation
+on the live Hub without changing any customer website.
