@@ -6,10 +6,45 @@
     .template-management-header h2 { margin: 0.18rem 0 0; }
     .template-management-picker { display: grid; grid-template-rows: auto minmax(0, 1fr); height: calc(100vh - 10rem); min-height: 30rem; max-height: 42rem; gap: 1.25rem; padding: 1.45rem; }
     .template-management-picker .email-template-library-layout { min-height: 0; }
-    .template-management-library-result { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--border); }
+    .template-management-folder-navigation { display: flex; min-height: 0; overflow-y: auto; flex-direction: column; align-items: stretch; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
+    .template-management-folder-navigation .email-template-library-categories { flex: 0 0 auto; overflow: visible; border-right: 0; background: transparent; }
+    .template-management-folder-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+    .template-management-folder-row:not(.is-empty) .email-template-library-category { grid-column: 1 / -1; }
+    .template-management-folder-delete-form { margin: 0; }
+    .template-management-folder-delete, .template-management-folder-create { display: grid; place-items: center; border: 0; border-radius: var(--control-v1-radius); background: transparent; color: var(--muted); cursor: pointer; }
+    .template-management-folder-delete { width: 2rem; min-width: 2rem; height: 2rem; margin: 0; padding: 0; }
+    .template-management-folder-delete:hover, .template-management-folder-delete:focus-visible { background: #f7e4e1; color: #8d2f2b; outline: none; }
+    .template-management-folder-delete svg { width: 0.9rem; height: 0.9rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .template-management-folder-create { width: calc(100% - 1.1rem); height: 2rem; margin: 0 0.55rem 0.55rem; padding: 0; border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--accent); font-size: 1.2rem; line-height: 1; }
+    .template-management-folder-create:hover, .template-management-folder-create:focus-visible { border-style: solid; background: var(--accent-soft); color: #075f4e; outline: none; }
+    .template-management-library-toolbar { display: grid; grid-template-columns: 2rem auto minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+    .template-management-library-select-all, .template-management-library-result-selection { display: grid; margin: 0; place-items: center; cursor: pointer; }
+    .template-management-library-select-all { width: 2rem; height: var(--control-v1-height); }
+    .template-management-library-select-all input, .template-management-library-result-selection input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--accent); cursor: pointer; }
+    .template-management-library-bulk-actions { position: relative; display: flex; align-items: center; gap: 0.35rem; }
+    .template-management-library-bulk-action { display: grid; width: 2rem; min-width: 2rem; height: 2rem; margin: 0; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); color: var(--ink); cursor: pointer; }
+    .template-management-library-bulk-action:hover:not(:disabled), .template-management-library-bulk-action:focus-visible:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: #075f4e; outline: none; }
+    .template-management-library-bulk-action.is-delete:hover:not(:disabled), .template-management-library-bulk-action.is-delete:focus-visible:not(:disabled) { border-color: #a43d38; background: #f7e4e1; color: #8d2f2b; }
+    .template-management-library-bulk-action:disabled { opacity: 0.35; cursor: not-allowed; }
+    .template-management-library-bulk-action svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+    .template-management-library-bulk-action.is-move svg { width: 1.35rem; height: 1.35rem; stroke-width: 0.45; }
+    .template-management-library-folder-picker { position: absolute; z-index: 50; top: calc(100% + 0.35rem); left: 0; display: grid; width: min(18rem, calc(100vw - 4rem)); max-height: 18rem; overflow-y: auto; margin: 0; padding: 0.3rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 0.45rem 1.2rem rgba(29, 42, 47, 0.2); }
+    .template-management-library-folder-picker[hidden] { display: none; }
+    .template-management-library-folder-picker button { width: 100%; margin: 0; padding: 0.5rem 0.65rem; border: 0; border-radius: calc(var(--control-v1-radius) - 2px); background: transparent; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
+    .template-management-library-folder-picker button:hover, .template-management-library-folder-picker button:focus-visible { background: var(--accent-soft); color: #075f4e; outline: none; }
+    .template-management-library-search { display: flex; justify-content: flex-end; margin: 0; }
+    .template-management-library-search input { width: min(100%, 22rem); margin: 0; }
+    .template-management-library-result { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--border); }
+    .template-management-library-result-selection { align-self: stretch; }
+    .template-management-library-result-selection input { opacity: 0; transition: opacity 120ms ease; }
+    .template-management-library-result:hover .template-management-library-result-selection input,
+    .template-management-library-result-selection input:checked,
+    .template-management-library-result-selection input:focus-visible { opacity: 1; }
     .template-management-library-result-main { width: 100%; margin: 0; padding: 0.62rem 0.72rem; border: 0; background: transparent; color: var(--ink); cursor: pointer; font: inherit; text-align: left; }
     .template-management-library-result-main:hover, .template-management-library-result-main:focus-visible { background: var(--accent-soft); outline: none; }
     .template-management-library-result-main strong, .template-management-library-result-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .template-management-library-result-main strong.is-translated { color: #167847; }
+    .template-management-library-result-main strong.is-reviewed { color: #c56818; }
     .template-management-library-result-main span { margin-top: 0.14rem; color: var(--muted); font-size: 0.78rem; }
     .template-management-library-result-actions { display: flex; gap: 0.35rem; padding: 0.4rem 0.55rem; }
     .template-management-library-result-action { display: grid; width: 2rem; min-width: 2rem; height: 2rem; margin: 0; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); color: var(--ink); cursor: pointer; }
@@ -19,11 +54,12 @@
     .template-management-editor-card { min-height: 42rem; padding: 0; }
     .template-management-editor { min-width: 0; padding: 1.35rem; }
     .template-management-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-    .template-management-editor-heading-copy { display: grid; gap: 0.7rem; }
+    .template-management-editor-heading-copy { display: grid; flex: 1 1 auto; min-width: 0; gap: 0.7rem; }
     .template-management-editor h3 { margin: 0; }
-    .template-management-name-field { display: block; width: min(100%, 46rem); }
+    .template-management-identity-fields { display: grid; grid-template-columns: minmax(18rem, 2fr) minmax(12rem, 1fr); gap: 0.75rem; width: min(100%, 58rem); }
+    .template-management-name-field, .template-management-folder-field { display: grid; min-width: 0; gap: 0.3rem; color: var(--muted); font-size: 0.8rem; }
     .template-management-name-field input { width: 100%; min-width: 0; margin: 0; font: 700 1.15rem/1.3 Georgia, "Times New Roman", serif; }
-    .template-management-legacy-note { margin: 0.72rem 0 0; color: var(--muted); font-size: 0.86rem; }
+    .template-management-folder-field select { width: 100%; min-width: 0; margin: 0; }
     .template-management-device-switch { display: inline-flex; flex: 0 0 auto; gap: 0.2rem; padding: 0.2rem; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); box-shadow: 0 0.2rem 0.55rem rgba(29, 42, 47, 0.08); }
     .template-management-device-switch button { display: inline-flex; align-items: center; gap: 0.32rem; height: 1.8rem; margin: 0; padding: 0 0.66rem; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
     .template-management-device-switch button:hover { color: var(--ink); background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
@@ -40,11 +76,17 @@
     .template-management-editor .email-rich-editor-content { min-height: 22rem; }
     .template-management-actions { display: flex; align-items: center; justify-content: end; gap: 0.55rem; }
     .template-management-actions .button { margin: 0; }
-    @media (max-width: 760px) {
+    @media (max-width: 780px) {
       .template-management-header { align-items: start; flex-direction: column; }
       .template-management-picker { height: calc(100vh - 8rem); min-height: 30rem; padding: 1rem; }
+      .template-management-folder-navigation { overflow-x: auto; overflow-y: hidden; flex-direction: row; align-items: flex-start; border-right: 0; border-bottom: 1px solid var(--border); }
+      .template-management-folder-navigation .email-template-library-categories { overflow: visible; border-bottom: 0; }
+      .template-management-folder-row { flex: 0 0 auto; }
+      .template-management-folder-create { width: 2rem; margin: 0.55rem 0.55rem 0.55rem 0; }
+      .template-management-library-search input { width: 100%; }
       .template-management-editor { padding: 1rem; }
       .template-management-editor-heading { align-items: flex-start; flex-direction: column; }
+      .template-management-identity-fields { grid-template-columns: 1fr; }
       .template-management-subject-field { grid-template-columns: 1fr; gap: 0.3rem; }
       .template-management-editor-viewport { padding: 0.55rem; }
     }
@@ -64,14 +106,21 @@
         {% if template_state == "error" %}<p class="notice-error">{{ template_message }}</p>{% endif %}
           <div class="template-management-editor-heading">
             <div class="template-management-editor-heading-copy">
-              <a class="button button-secondary" href="/email-templates">← Vorlagen wählen</a>
-              <label class="template-management-name-field" for="template-management-name">
-                <span class="visually-hidden">Vorlagenname</span>
-                <input id="template-management-name" form="template-management-form" name="name" maxlength="255" required value="{{ selected_template.name }}">
-              </label>
-            {% if selected_template.compiler_mode == "legacy" %}
-              <p class="template-management-legacy-note">Zoho-Originalvorlage: Der Hub-Kompatibilitätscompiler bleibt für diese Vorlage deaktiviert.</p>
-            {% endif %}
+              <a class="button button-secondary" href="{{ template_library_return_url }}">← Vorlagen wählen</a>
+              <div class="template-management-identity-fields">
+                <label class="template-management-name-field" for="template-management-name">
+                  <span>Vorlagenname</span>
+                  <input id="template-management-name" form="template-management-form" name="name" maxlength="255" required value="{{ selected_template.name }}">
+                </label>
+                <label class="template-management-folder-field" for="template-management-folder">
+                  <span>Vorlagenordner</span>
+                  <select id="template-management-folder" form="template-management-form" name="folder_name" required>
+                    {% for folder in template_folder_options %}
+                      <option value="{{ folder }}"{% if folder == selected_template_folder %} selected{% endif %}>{{ folder }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
           </div>
           <div class="template-management-device-switch" role="group" aria-label="Vorschauansicht">
             <button type="button" aria-pressed="true" data-template-editor-view-button="desktop">
@@ -86,6 +135,10 @@
         </div>
         <form id="template-management-form" method="post" action="/email-templates/{{ selected_template.id }}" data-template-management-form>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="return_folder" value="{{ template_return_folder }}">
+          <input type="hidden" name="return_search" value="{{ template_return_search }}">
+          <input type="hidden" name="return_scroll" value="{{ template_return_scroll }}">
+          <input type="hidden" name="return_focus" value="{{ template_return_focus }}">
           <label class="template-management-subject-field">Betreff<input name="subject" maxlength="500" required value="{{ selected_template.subject }}"></label>
           <label class="template-management-content-field">Inhalt
             <div class="template-management-editor-viewport" data-template-editor-viewport data-template-editor-view="desktop">
@@ -103,7 +156,7 @@
           {% set placeholder_selected_context = selected_template.context_module %}
           {% include "partials/template_placeholder_picker.html" %}
           <div class="template-management-actions">
-            <a class="button button-secondary" href="/email-templates">Abbrechen</a>
+            <a class="button button-secondary" href="{{ template_library_return_url }}">Abbrechen</a>
             <button class="button" type="submit">Vorlage speichern</button>
           </div>
         </form>
@@ -121,11 +174,42 @@
         </div>
       </div>
       <div class="email-template-library-layout">
-        <nav class="email-template-library-categories" aria-label="Vorlagenkategorien" data-template-library-categories></nav>
+        <div class="template-management-folder-navigation">
+          <nav class="email-template-library-categories" aria-label="Vorlagenordner" data-template-library-categories></nav>
+          <button class="template-management-folder-create" type="button" aria-label="Vorlagenordner anlegen" title="Vorlagenordner anlegen" data-template-folder-create>+</button>
+        </div>
         <div class="email-template-library-content">
-          <label>Vorlagen durchsuchen
-            <input class="control-variant-1" type="search" autocomplete="off" placeholder="Name, Betreff oder Kategorie" data-template-library-search>
-          </label>
+          <div class="template-management-library-toolbar">
+            <label class="template-management-library-select-all" title="Alle sichtbaren Vorlagen auswählen">
+              <input type="checkbox" aria-label="Alle sichtbaren Vorlagen auswählen" data-template-library-select-all>
+            </label>
+            <div class="template-management-library-bulk-actions">
+              <button class="template-management-library-bulk-action is-move" type="button" aria-label="Ausgewählte Vorlagen in Ordner verschieben" title="In Ordner verschieben" aria-haspopup="menu" aria-controls="template-bulk-folder-menu" aria-expanded="false" data-template-bulk-move disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linejoin="round">
+                    <path d="M5.0 10.35V10.15C5.0 9.4 5.6 8.8 6.35 8.8H9.55L11.15 7.0H14.18C14.7 7.0 15.18 7.25 15.45 7.7L16.2 9.0H18.3C19.08 9.0 19.7 9.62 19.7 10.4" stroke-linecap="butt"></path>
+                    <path d="M19.7 10.4V17.2C19.7 18.05 19.0 18.75 18.15 18.75H6.55C5.7 18.75 5.0 18.05 5.0 17.2V10.35" stroke-linecap="butt"></path>
+                    <path d="M8.25 13.15h2.85c2.0 0 3.32-.63 4.3-2.05" stroke-linecap="round"></path>
+                    <path d="M13.85 10.75 15.55 11.15 15.15 12.85" stroke-linecap="round"></path>
+                  </g>
+                </svg>
+              </button>
+              <button class="template-management-library-bulk-action is-delete" type="button" aria-label="Ausgewählte Vorlagen löschen" title="Ausgewählte Vorlagen löschen" data-template-bulk-delete disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></svg>
+              </button>
+              <form class="template-management-library-folder-picker" id="template-bulk-folder-menu" role="menu" method="post" action="/email-templates/bulk/move" data-template-bulk-move-form hidden>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="folder_name" value="" data-template-bulk-move-folder>
+                {% for folder_name in template_folder_options %}
+                  <button type="button" role="menuitem" data-template-bulk-folder="{{ folder_name }}">{{ folder_name }}</button>
+                {% endfor %}
+              </form>
+            </div>
+            <label class="template-management-library-search">
+              <span class="visually-hidden">Vorlage suchen</span>
+              <input class="control-variant-1" type="search" autocomplete="off" placeholder="Vorlage suchen" data-template-library-search>
+            </label>
+          </div>
           <div class="email-template-library-list" data-template-library-list></div>
         </div>
       </div>
@@ -158,14 +242,55 @@
         </div>
       </form>
     </dialog>
+    <dialog class="update-confirmation-dialog" data-template-bulk-delete-dialog aria-labelledby="template-bulk-delete-heading">
+      <form method="post" action="/email-templates/bulk/delete" data-template-bulk-delete-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="confirmation" value="confirmed">
+        <input type="hidden" name="return_folder" value="" data-template-bulk-delete-return-folder>
+        <h3 id="template-bulk-delete-heading">Ausgewählte Vorlagen löschen?</h3>
+        <p data-template-bulk-delete-message></p>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-template-bulk-delete-cancel>Abbrechen</button>
+          <button class="button" type="submit">Vorlagen löschen</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="update-confirmation-dialog" data-template-folder-dialog aria-labelledby="template-folder-heading">
+      <form method="post" action="/email-template-folders" data-template-folder-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <h3 id="template-folder-heading">Vorlagenordner anlegen</h3>
+        <label>Ordnername
+          <input name="name" maxlength="255" required data-template-folder-name>
+        </label>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-template-folder-cancel>Abbrechen</button>
+          <button class="button" type="submit">Ordner anlegen</button>
+        </div>
+      </form>
+    </dialog>
   {% endif %}
   <script>
     (function () {
       var templateLibraryTemplates = {{ template_library_templates|tojson }};
+      var templateLibraryFolders = {{ template_library_folders|tojson }};
       var templateLibrarySearch = document.querySelector('[data-template-library-search]');
+      var templateLibrarySelectAll = document.querySelector('[data-template-library-select-all]');
+      var templateBulkMoveButton = document.querySelector('[data-template-bulk-move]');
+      var templateBulkDeleteButton = document.querySelector('[data-template-bulk-delete]');
+      var templateBulkMoveForm = document.querySelector('[data-template-bulk-move-form]');
+      var templateBulkMoveFolder = document.querySelector('[data-template-bulk-move-folder]');
+      var templateBulkDeleteDialog = document.querySelector('[data-template-bulk-delete-dialog]');
+      var templateBulkDeleteForm = document.querySelector('[data-template-bulk-delete-form]');
+      var templateBulkDeleteMessage = document.querySelector('[data-template-bulk-delete-message]');
+      var templateBulkDeleteReturnFolder = document.querySelector('[data-template-bulk-delete-return-folder]');
       var templateLibraryCategories = document.querySelector('[data-template-library-categories]');
       var templateLibraryList = document.querySelector('[data-template-library-list]');
-      var templateLibraryCategory = '';
+      var templateLibraryCategory = {{ initial_template_folder|tojson }};
+      var templateLibraryInitialSearch = {{ initial_template_search|tojson }};
+      var templateLibraryInitialScroll = {{ initial_template_scroll|tojson }};
+      var templateLibraryInitialFocus = {{ initial_template_focus|tojson }};
+      var selectedTemplateLibraryIds = new Set();
+      var visibleTemplateLibraryTemplates = [];
       var templateCloneDialog = document.querySelector('[data-template-clone-dialog]');
       var templateCloneForm = document.querySelector('[data-template-clone-form]');
       var templateCloneName = document.querySelector('[data-template-clone-name]');
@@ -173,6 +298,9 @@
       var templateDeleteForm = document.querySelector('[data-template-delete-form]');
       var templateDeleteName = document.querySelector('[data-template-delete-name]');
       var templateDeleteConfirmation = document.querySelector('[data-template-delete-confirmation]');
+      var templateFolderDialog = document.querySelector('[data-template-folder-dialog]');
+      var templateFolderCreate = document.querySelector('[data-template-folder-create]');
+      var templateFolderName = document.querySelector('[data-template-folder-name]');
 
       function matchingTemplateLibraryTemplates(query) {
         var normalizedQuery = query.trim().toLowerCase();
@@ -185,41 +313,74 @@
       }
 
       function templateLibraryCategoriesList() {
-        return Array.from(new Set(templateLibraryTemplates.map(function (template) {
-          return template.category || template.module || 'Weitere Vorlagen';
-        })));
+        return templateLibraryFolders;
       }
 
       function renderTemplateLibraryCategories() {
         if (!templateLibraryCategories) return;
         var categories = templateLibraryCategoriesList();
-        if (!categories.includes(templateLibraryCategory)) {
-          templateLibraryCategory = categories[0] || '';
+        if (!categories.some(function (folder) { return folder.name === templateLibraryCategory; })) {
+          templateLibraryCategory = categories.length ? categories[0].name : '';
         }
         templateLibraryCategories.replaceChildren();
-        categories.forEach(function (category) {
+        categories.forEach(function (folder) {
+          var category = folder.name;
+          var templateCount = templateLibraryTemplates.filter(function (template) {
+            return (template.category || template.module || 'Weitere Vorlagen') === category;
+          }).length;
+          var row = document.createElement('div');
           var button = document.createElement('button');
           var name = document.createElement('span');
-          var count = document.createElement('small');
+          row.className = 'template-management-folder-row' + (templateCount === 0 ? ' is-empty' : '');
           button.type = 'button';
           button.className = 'email-template-library-category' + (category === templateLibraryCategory ? ' is-active' : '');
           name.textContent = category;
-          count.textContent = String(templateLibraryTemplates.filter(function (template) {
-            return (template.category || template.module || 'Weitere Vorlagen') === category;
-          }).length);
-          button.append(name, count);
+          button.append(name);
+          if (templateCount > 0) {
+            var count = document.createElement('small');
+            count.textContent = String(templateCount);
+            button.append(count);
+          }
           button.addEventListener('click', function () {
             templateLibraryCategory = category;
             if (templateLibrarySearch) templateLibrarySearch.value = '';
             renderTemplateLibraryCategories();
             renderTemplateLibrary();
+            if (templateLibraryList) templateLibraryList.scrollTop = 0;
           });
-          templateLibraryCategories.append(button);
+          row.append(button);
+          if (templateCount === 0) {
+            var deleteForm = document.createElement('form');
+            var csrf = document.createElement('input');
+            var remove = document.createElement('button');
+            deleteForm.method = 'post';
+            deleteForm.action = '/email-template-folders/' + encodeURIComponent(folder.id) + '/delete';
+            deleteForm.className = 'template-management-folder-delete-form';
+            csrf.type = 'hidden';
+            csrf.name = 'csrf_token';
+            csrf.value = {{ csrf_token|tojson }};
+            remove.type = 'submit';
+            remove.className = 'template-management-folder-delete';
+            remove.setAttribute('aria-label', 'Leeren Vorlagenordner löschen');
+            remove.title = 'Leeren Vorlagenordner löschen';
+            remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></svg>';
+            deleteForm.append(csrf, remove);
+            row.append(deleteForm);
+          }
+          templateLibraryCategories.append(row);
         });
       }
 
       function selectTemplateLibraryTemplate(template) {
-        window.location.assign('/email-templates?template=' + encodeURIComponent(template.id));
+        var parameters = new URLSearchParams();
+        parameters.set('template', template.id);
+        if (templateLibraryCategory) parameters.set('folder', templateLibraryCategory);
+        if (templateLibrarySearch && templateLibrarySearch.value.trim()) {
+          parameters.set('search', templateLibrarySearch.value.trim());
+        }
+        parameters.set('scroll', String(templateLibraryList ? templateLibraryList.scrollTop : 0));
+        parameters.set('focus', template.id);
+        window.location.assign('/email-templates?' + parameters.toString());
       }
 
       function openTemplateCloneDialog(template) {
@@ -257,8 +418,41 @@
         }
       }
 
+      function selectedTemplateIds() {
+        return Array.from(selectedTemplateLibraryIds);
+      }
+
+      function setBulkTemplateIds(form) {
+        if (!form) return;
+        form.querySelectorAll('[data-template-bulk-id]').forEach(function (input) { input.remove(); });
+        selectedTemplateIds().forEach(function (templateId) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'template_ids';
+          input.value = templateId;
+          input.setAttribute('data-template-bulk-id', '');
+          form.append(input);
+        });
+      }
+
+      function closeBulkFolderPicker() {
+        if (!templateBulkMoveForm || !templateBulkMoveButton) return;
+        templateBulkMoveForm.hidden = true;
+        templateBulkMoveButton.setAttribute('aria-expanded', 'false');
+        if (templateBulkMoveFolder) templateBulkMoveFolder.value = '';
+      }
+
+      function syncBulkActions() {
+        var selectedCount = selectedTemplateLibraryIds.size;
+        if (templateBulkMoveButton) templateBulkMoveButton.disabled = selectedCount === 0;
+        if (templateBulkDeleteButton) templateBulkDeleteButton.disabled = selectedCount === 0;
+        if (selectedCount === 0) closeBulkFolderPicker();
+      }
+
       function createTemplateLibraryResult(template) {
         var result = document.createElement('div');
+        var selection = document.createElement('label');
+        var checkbox = document.createElement('input');
         var open = document.createElement('button');
         var name = document.createElement('strong');
         var detail = document.createElement('span');
@@ -267,10 +461,28 @@
         var remove = document.createElement('button');
         result.className = 'template-management-library-result';
         result.setAttribute('role', 'option');
+        result.dataset.templateId = template.id;
+        selection.className = 'template-management-library-result-selection';
+        checkbox.type = 'checkbox';
+        checkbox.checked = selectedTemplateLibraryIds.has(template.id);
+        checkbox.setAttribute('aria-label', 'Vorlage auswählen: ' + template.name);
+        checkbox.addEventListener('change', function () {
+          if (checkbox.checked) selectedTemplateLibraryIds.add(template.id);
+          else selectedTemplateLibraryIds.delete(template.id);
+          syncTemplateLibrarySelectAll();
+        });
+        selection.append(checkbox);
         open.type = 'button';
         open.className = 'template-management-library-result-main';
         name.textContent = template.name;
-        detail.textContent = template.category + ' · ' + (template.subject || template.module) + (template.compiler_mode === 'legacy' ? ' · Zoho-Original' : '');
+        if (template.is_reviewed) {
+          name.classList.add('is-reviewed');
+          name.title = 'Inhalt und Hub-Platzhalter geprüft';
+        } else if (template.is_translated) {
+          name.classList.add('is-translated');
+          name.title = 'In ' + template.category + ' Hub übersetzt';
+        }
+        detail.textContent = template.category + ' · ' + (template.subject || template.module);
         open.append(name, detail);
         open.addEventListener('click', function () { selectTemplateLibraryTemplate(template); });
         actions.className = 'template-management-library-result-actions';
@@ -287,8 +499,21 @@
         remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"></path></svg>';
         remove.addEventListener('click', function () { openTemplateDeleteDialog(template); });
         actions.append(clone, remove);
-        result.append(open, actions);
+        result.append(selection, open, actions);
         return result;
+      }
+
+      function syncTemplateLibrarySelectAll() {
+        if (!templateLibrarySelectAll) return;
+        var selectedVisibleCount = visibleTemplateLibraryTemplates.filter(function (template) {
+          return selectedTemplateLibraryIds.has(template.id);
+        }).length;
+        templateLibrarySelectAll.disabled = visibleTemplateLibraryTemplates.length === 0;
+        templateLibrarySelectAll.checked = visibleTemplateLibraryTemplates.length > 0
+          && selectedVisibleCount === visibleTemplateLibraryTemplates.length;
+        templateLibrarySelectAll.indeterminate = selectedVisibleCount > 0
+          && selectedVisibleCount < visibleTemplateLibraryTemplates.length;
+        syncBulkActions();
       }
 
       function renderTemplateLibrary() {
@@ -300,6 +525,7 @@
           : templateLibraryTemplates.filter(function (template) {
               return (template.category || template.module || 'Weitere Vorlagen') === selectedCategory;
             });
+        visibleTemplateLibraryTemplates = templates;
         templateLibraryList.replaceChildren();
         if (templates.length) {
           var group = document.createElement('section');
@@ -316,10 +542,75 @@
           empty.textContent = 'Keine passende Vorlage gefunden.';
           templateLibraryList.append(empty);
         }
+        syncTemplateLibrarySelectAll();
       }
 
       if (templateLibrarySearch) {
-        templateLibrarySearch.addEventListener('input', renderTemplateLibrary);
+        templateLibrarySearch.value = templateLibraryInitialSearch;
+        templateLibrarySearch.addEventListener('input', function () {
+          renderTemplateLibrary();
+          if (templateLibraryList) templateLibraryList.scrollTop = 0;
+        });
+      }
+      if (templateLibrarySelectAll) {
+        templateLibrarySelectAll.addEventListener('change', function () {
+          visibleTemplateLibraryTemplates.forEach(function (template) {
+            if (templateLibrarySelectAll.checked) selectedTemplateLibraryIds.add(template.id);
+            else selectedTemplateLibraryIds.delete(template.id);
+          });
+          templateLibraryList.querySelectorAll('.template-management-library-result-selection input').forEach(function (checkbox) {
+            checkbox.checked = templateLibrarySelectAll.checked;
+          });
+          syncTemplateLibrarySelectAll();
+        });
+      }
+      if (templateBulkMoveButton && templateBulkMoveForm) {
+        templateBulkMoveButton.addEventListener('click', function () {
+          if (!templateBulkMoveForm.hidden) {
+            closeBulkFolderPicker();
+            return;
+          }
+          templateBulkMoveForm.hidden = false;
+          templateBulkMoveButton.setAttribute('aria-expanded', 'true');
+          var firstFolder = templateBulkMoveForm.querySelector('[data-template-bulk-folder]');
+          if (firstFolder) firstFolder.focus();
+        });
+      }
+      document.querySelectorAll('[data-template-bulk-folder]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          if (!templateBulkMoveForm || !templateBulkMoveFolder || selectedTemplateLibraryIds.size === 0) return;
+          templateBulkMoveFolder.value = button.getAttribute('data-template-bulk-folder') || '';
+          setBulkTemplateIds(templateBulkMoveForm);
+          templateBulkMoveForm.requestSubmit();
+        });
+      });
+      document.addEventListener('pointerdown', function (event) {
+        if (!templateBulkMoveForm || templateBulkMoveForm.hidden) return;
+        if (templateBulkMoveForm.contains(event.target) || (templateBulkMoveButton && templateBulkMoveButton.contains(event.target))) return;
+        closeBulkFolderPicker();
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape' || !templateBulkMoveForm || templateBulkMoveForm.hidden) return;
+        closeBulkFolderPicker();
+        if (templateBulkMoveButton) templateBulkMoveButton.focus();
+      });
+      if (templateBulkDeleteButton) {
+        templateBulkDeleteButton.addEventListener('click', function () {
+          if (!templateBulkDeleteDialog || !templateBulkDeleteForm || selectedTemplateLibraryIds.size === 0) return;
+          setBulkTemplateIds(templateBulkDeleteForm);
+          if (templateBulkDeleteMessage) {
+            var count = selectedTemplateLibraryIds.size;
+            templateBulkDeleteMessage.textContent = count === 1
+              ? '1 ausgewählte Vorlage wird aus dem Hub entfernt. Möchtest du wirklich fortfahren?'
+              : count + ' ausgewählte Vorlagen werden aus dem Hub entfernt. Möchtest du wirklich fortfahren?';
+          }
+          if (templateBulkDeleteReturnFolder) templateBulkDeleteReturnFolder.value = templateLibraryCategory;
+          if (typeof templateBulkDeleteDialog.showModal === 'function') {
+            templateBulkDeleteDialog.showModal();
+          } else {
+            templateBulkDeleteDialog.setAttribute('open', 'open');
+          }
+        });
       }
       document.querySelectorAll('[data-template-clone-cancel]').forEach(function (button) {
         button.addEventListener('click', function () { closeTemplateDialog(templateCloneDialog); });
@@ -327,8 +618,42 @@
       document.querySelectorAll('[data-template-delete-cancel]').forEach(function (button) {
         button.addEventListener('click', function () { closeTemplateDialog(templateDeleteDialog); });
       });
+      document.querySelectorAll('[data-template-bulk-delete-cancel]').forEach(function (button) {
+        button.addEventListener('click', function () { closeTemplateDialog(templateBulkDeleteDialog); });
+      });
+      if (templateFolderCreate) {
+        templateFolderCreate.addEventListener('click', function () {
+          if (!templateFolderDialog || !templateFolderName) return;
+          templateFolderName.value = '';
+          if (typeof templateFolderDialog.showModal === 'function') {
+            templateFolderDialog.showModal();
+          } else {
+            templateFolderDialog.setAttribute('open', 'open');
+          }
+          templateFolderName.focus();
+        });
+      }
+      document.querySelectorAll('[data-template-folder-cancel]').forEach(function (button) {
+        button.addEventListener('click', function () { closeTemplateDialog(templateFolderDialog); });
+      });
       renderTemplateLibraryCategories();
       renderTemplateLibrary();
+      if (templateLibraryList) {
+        window.requestAnimationFrame(function () {
+          if (templateLibraryInitialScroll !== null) {
+            templateLibraryList.scrollTop = templateLibraryInitialScroll;
+            return;
+          }
+          var focusedResult = Array.from(templateLibraryList.querySelectorAll('[data-template-id]')).find(function (result) {
+            return result.dataset.templateId === templateLibraryInitialFocus;
+          });
+          if (!focusedResult) return;
+          var listBounds = templateLibraryList.getBoundingClientRect();
+          var resultBounds = focusedResult.getBoundingClientRect();
+          templateLibraryList.scrollTop += resultBounds.top - listBounds.top
+            - ((templateLibraryList.clientHeight - resultBounds.height) / 2);
+        });
+      }
 
       var form = document.querySelector('[data-template-management-form]');
       var content = document.querySelector('[data-email-compose-content]');

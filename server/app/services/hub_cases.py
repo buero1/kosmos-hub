@@ -58,6 +58,7 @@ class HubCaseDetail:
     fields: tuple[HubCaseFieldValue, ...]
     status: str
     linked_emails: tuple["HubCaseLinkedEmail", ...]
+    show_more_index: int
 
 
 @dataclass(frozen=True)
@@ -169,19 +170,25 @@ class HubCaseService:
             return None
         values = self._values(case)
         fields = tuple(self._field_value(definition, case=case, values=values) for definition in HUB_CASE_FIELDS)
+        fields, show_more_index = self._field_display_layout(fields)
         return HubCaseDetail(
             case=case,
             case_number=self.case_number(case),
-            fields=self._field_display_layout(fields),
+            fields=fields,
             status=values.get("status") or "-",
             linked_emails=self._linked_emails(case),
+            show_more_index=show_more_index,
         )
 
-    def new_form_values(self) -> dict[str, str]:
-        return {
+    @classmethod
+    def new_form_values(cls, *, source_email: HubCaseEmailSource | None = None) -> dict[str, str]:
+        values = {
             "case_field__status": "Neu",
-            "case_field__created_time": self._now_form_value(),
+            "case_field__created_time": cls._now_form_value(),
         }
+        if source_email is not None:
+            values["case_field__case_origin"] = "E-Mail"
+        return values
 
     def create_case(
         self,
@@ -245,6 +252,25 @@ class HubCaseService:
         if case is None:
             return None
         return self._list_entries([case])[0]
+
+    def linked_cases_for_customer_emails(self, *, customer_id: int) -> dict[int, HubCaseListEntry]:
+        """Return case links for all stored emails of one customer in bounded queries."""
+        links = self.db.scalars(
+            select(HubCaseEmailLink)
+            .join(CustomerZohoEmail, HubCaseEmailLink.customer_email_id == CustomerZohoEmail.id)
+            .options(selectinload(HubCaseEmailLink.case).selectinload(HubCase.customer))
+            .where(CustomerZohoEmail.customer_id == customer_id)
+            .order_by(HubCaseEmailLink.created_at.desc(), HubCaseEmailLink.id.desc())
+        ).all()
+        cases_by_id = {link.case.id: link.case for link in links}
+        entries_by_case_id = {
+            entry.case.id: entry for entry in self._list_entries(list(cases_by_id.values()))
+        }
+        linked_cases: dict[int, HubCaseListEntry] = {}
+        for link in links:
+            if link.customer_email_id is not None:
+                linked_cases.setdefault(link.customer_email_id, entries_by_case_id[link.case_id])
+        return linked_cases
 
     def link_email(self, *, case_id: int, source_email_key: str) -> HubCaseEmailLink:
         """Attach one deliberately selected source email to a case, idempotently."""
@@ -348,6 +374,11 @@ class HubCaseService:
         source_email_key: str,
     ) -> tuple[CustomerZohoEmail | None, HubMailboxEmail | None]:
         key = source_email_key.strip()
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        actor = resolve_mailbox_actor()
+        if actor:
+            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(key)
         if key.startswith("linked-"):
             try:
                 customer_text, email_text = key.removeprefix("linked-").split("-", 1)
@@ -382,6 +413,12 @@ class HubCaseService:
         return tuple(available_views)
 
     def _linked_email_view(self, link: HubCaseEmailLink) -> HubCaseLinkedEmail | None:
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        actor = resolve_mailbox_actor()
+        email = link.customer_email or link.mailbox_email
+        if actor and (email is None or not HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).visible(email)):
+            return None
         if link.customer_email is not None:
             email = link.customer_email
             payload = self._payload(email.encrypted_payload_json)
@@ -572,13 +609,13 @@ class HubCaseService:
     def _field_display_layout(
         self,
         fields: tuple[HubCaseFieldValue, ...],
-    ) -> tuple[HubCaseFieldValue, ...]:
+    ) -> tuple[tuple[HubCaseFieldValue, ...], int]:
         fields_by_key = {field.key: field for field in fields}
-        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+        ordered_keys, show_more_index = ModuleLayoutService(db=self.db).ordered_keys_with_show_more(
             layout_key=CASE_FIELDS_LAYOUT_KEY,
             default_keys=tuple(fields_by_key),
         )
-        return tuple(fields_by_key[key] for key in ordered_keys)
+        return tuple(fields_by_key[key] for key in ordered_keys), show_more_index
 
     def _values(self, case: HubCase) -> dict[str, str]:
         try:
@@ -592,8 +629,9 @@ class HubCaseService:
     def _encrypt_values(self, values: dict[str, str]) -> str:
         return self.cipher.encrypt(json.dumps(values, ensure_ascii=False))
 
-    def _now_form_value(self) -> str:
-        return datetime.now(self._BERLIN).replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
+    @classmethod
+    def _now_form_value(cls) -> str:
+        return datetime.now(cls._BERLIN).replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
 
     @staticmethod
     def _selection_display(value: str) -> str:

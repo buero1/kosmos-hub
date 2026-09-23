@@ -11,12 +11,17 @@
     <form method="post" action="/emails/send" enctype="multipart/form-data" class="communication-form email-compose-form" data-global-mailbox-compose-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="template_id" value="" data-email-compose-template-id>
+      <input type="hidden" name="context_module" value="" data-email-compose-context-module>
+      <input type="hidden" name="context_record_id" value="" data-email-compose-context-record-id>
       <input type="hidden" name="draft_id" value="" data-email-compose-draft-id>
+      <input type="hidden" name="retained_attachment_ids" value="[]">
       <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
       <input type="hidden" name="forward_from_email_id" value="" data-email-compose-forward-from>
       <input type="hidden" name="recipient_key" value="" data-email-compose-recipient-key>
       <input type="hidden" name="recipient_customer_id" value="" data-email-compose-recipient-customer-id>
+      <input type="hidden" name="lead_id" value="" data-email-compose-lead-id>
       <input type="hidden" name="recipient_name" value="" data-email-compose-recipient-name>
+      <input type="hidden" name="dunning_id" value="" data-email-compose-dunning-id>
       <div class="email-compose-recipient-fields">
         <label>Absender
           <select name="sender_email" required data-global-mailbox-compose-sender disabled>
@@ -42,7 +47,7 @@
           <select data-email-compose-template hidden><option value="">Keine Vorlage verwenden</option></select>
         </label>
       </div>
-      <p class="subtle email-compose-template-status" data-email-compose-template-status>Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
+      <p class="subtle email-compose-template-status" data-email-compose-template-status role="status" aria-live="polite">Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
       <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
       <label>Nachricht
         <div class="email-editor-ai-shell">
@@ -76,6 +81,9 @@
         <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
       </div>
       <div class="email-compose-actions">
+        <label class="email-compose-schedule">Versand planen
+          <input name="scheduled_at" type="datetime-local" data-email-compose-scheduled-at>
+        </label>
         <button class="button button-secondary" type="button" data-global-mailbox-compose-save-draft>Entwurf speichern</button>
         <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
         <button class="button" type="submit" data-global-mailbox-compose-submit disabled>E-Mail senden</button>

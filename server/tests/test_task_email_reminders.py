@@ -41,6 +41,7 @@ def _prepared_reminder(db: Session, *, now: datetime) -> tuple[CustomerTaskActiv
         reminder_minutes_before=15,
         description="Kundin anrufen.",
         created_by_username=user.username,
+        assignee_user=user,
     )
     db.add(task)
     db.flush()
@@ -130,6 +131,7 @@ def test_missing_personal_address_blocks_email_reminder_creation():
             reminder_channel="email",
             reminder_minutes_before=0,
             created_by_username=user.username,
+            assignee_user=user,
         )
         db.add(task)
         db.flush()

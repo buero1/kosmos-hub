@@ -12,8 +12,10 @@ from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
+from app.models.hub_lead import HubLead
 from app.services.email_compose_images import EmailComposeImageService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
+from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, HubFinanceDocumentService
 from app.services.hub_finance_pdf_generation import HubFinancePdfError, HubFinancePdfService
 
@@ -42,6 +44,68 @@ def _invoice_values() -> dict[str, str]:
         "document_line__0__discount_percent": "10",
         "document_line__0__tax_rate": "19",
     }
+
+
+def _offer_values() -> dict[str, str]:
+    return {
+        "offer_field__status": "draft",
+        "offer_field__offer_date": "2026-09-17",
+        "offer_field__valid_until": "2026-10-17",
+        "offer_field__currency": "EUR",
+        "offer_line__0__name": "Website-Paket",
+        "offer_line__0__description": "Konzeption und Umsetzung",
+        "offer_line__0__quantity": "1",
+        "offer_line__0__unit": "Einmalig",
+        "offer_line__0__unit_price": "100",
+        "offer_line__0__discount_percent": "0",
+        "offer_line__0__tax_rate": "19",
+    }
+
+
+def test_offer_pdf_snapshot_uses_lead_recipient_and_address_fields():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        lead = HubLead(
+            encrypted_profile_json=cipher.encrypt(json.dumps({
+                "schema_version": 1,
+                "source": "hub",
+                "fields": {
+                    "salutation": "Frau",
+                    "first_name": "Lena",
+                    "last_name": "Leitner",
+                    "company": "Leitner Design",
+                    "email": "lena@example.com",
+                    "street": "Musterweg 7",
+                    "postal_code": "80331",
+                    "city": "München",
+                    "country": "Deutschland",
+                },
+                "subforms": {},
+            }))
+        )
+        db.add(lead)
+        db.flush()
+        offer = HubFinanceService(db=db, cipher=cipher).create_offer(
+            customer_id=None,
+            contact_id=None,
+            lead_id=lead.id,
+            submitted_values=_offer_values(),
+        )
+
+        snapshot = HubFinancePdfService(db=db, cipher=cipher)._snapshot(
+            document_type="offers",
+            document_id=offer.id,
+        )
+
+        assert snapshot.customer_name == "Leitner Design"
+        assert snapshot.contact_name == "Lena Leitner"
+        assert snapshot.billing_street == "Musterweg 7"
+        assert snapshot.billing_postal_code == "80331"
+        assert snapshot.billing_city == "München"
+        assert snapshot.contact_fields["email"] == "lena@example.com"
 
 
 def test_invoice_generation_uses_default_revision_and_embeds_xsd_valid_zugferd(monkeypatch):

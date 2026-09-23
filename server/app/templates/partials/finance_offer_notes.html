@@ -1,0 +1,27 @@
+<article class="card customer-detail-panel finance-offer-notes" id="finance-offer-notes">
+  <details data-offer-notes>
+    <summary><h3>Anmerkungen</h3></summary>
+    {% if detail is defined %}
+      <div class="finance-offer-notes-content" data-customer-edit-position-readonly data-customer-edit-form="{{ notes_form_id }}">{{ detail.notes_html | safe }}</div>
+    {% endif %}
+    <div{% if detail is defined %} data-customer-edit-position-editor data-customer-edit-form="{{ notes_form_id }}" hidden{% endif %} data-offer-notes-editor>
+      <label>
+        <span class="subtle">Anmerkungen unterhalb der Positionen in der Angebots-PDF</span>
+        <div class="email-rich-editor" data-email-rich-editor>
+          <textarea aria-label="Anmerkungen" data-email-compose-content>{{ notes_html }}</textarea>
+        </div>
+        <textarea name="offer_field__notes" form="{{ notes_form_id }}" hidden data-email-compose-content-value>{{ notes_html }}</textarea>
+      </label>
+    </div>
+  </details>
+</article>
+<style>
+  .finance-offer-notes summary { cursor: pointer; }
+  .finance-offer-notes summary h3 { display: inline; }
+  .finance-offer-notes details > div { margin-top: 1rem; }
+  .finance-offer-notes-content { overflow-wrap: anywhere; overflow-x: auto; }
+  .finance-offer-notes-content img { max-width: 100%; height: auto; }
+  .finance-offer-notes-content > :last-child { margin-bottom: 0; }
+  .finance-offer-notes [hidden] { display: none !important; }
+</style>
+<script src="/static/finance-offer-notes.js?v=1" defer></script>

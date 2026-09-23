@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}{{ module.label }} · Finance · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -12,6 +13,7 @@
           <button type="button" class="button button-secondary finance-invoice-pending-action" disabled title="Folgt im nächsten Schritt">Massenaktualisierung</button>
         {% endif %}
         <a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a>
+        {{ module_layout_menu(module.layout_key, module.singular) }}
       </div>
     </div>
     <article class="card customer-detail-panel">

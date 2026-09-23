@@ -18,6 +18,8 @@ from app.services.customer_activities import CustomerActivityError, CustomerActi
 from app.services.hub_lead_notes import HubLeadNoteError, HubLeadNoteService
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS
 from app.services.hub_leads import HubLeadError, HubLeadService
+from app.services.hub_calendar import busy_times
+from app.services.hub_operations import HubOperationService, HubOperationError
 
 
 router = APIRouter(prefix="/api/v1/integrations/callapp", tags=["callapp-integration"])
@@ -219,34 +221,8 @@ def list_busy_times(
     start: Annotated[datetime, Query()],
     end: Annotated[datetime, Query()],
 ):
-    _integration_actor(request)
-    start_value = _utc_naive(start)
-    end_value = _utc_naive(end)
-    if end_value <= start_value or end_value - start_value > timedelta(days=120):
-        raise HTTPException(status_code=400, detail="Ungültiger Zeitraum.")
-    calls = db.scalars(
-        select(CustomerCallActivity).where(
-            CustomerCallActivity.status == "planned",
-            CustomerCallActivity.starts_at < end_value,
-            CustomerCallActivity.ends_at > start_value,
-        )
-    ).all()
-    meetings = db.scalars(
-        select(CustomerMeetingActivity).where(
-            CustomerMeetingActivity.status == "planned",
-            CustomerMeetingActivity.starts_at.is_not(None),
-            CustomerMeetingActivity.ends_at.is_not(None),
-            CustomerMeetingActivity.starts_at < end_value,
-            CustomerMeetingActivity.ends_at > start_value,
-        )
-    ).all()
-    entries = [
-        {"kind": "call", "id": str(item.id), "start": item.starts_at.replace(tzinfo=UTC).isoformat(), "end": item.ends_at.replace(tzinfo=UTC).isoformat(), "title": item.name}
-        for item in calls
-    ] + [
-        {"kind": "meeting", "id": str(item.id), "start": item.starts_at.replace(tzinfo=UTC).isoformat(), "end": item.ends_at.replace(tzinfo=UTC).isoformat(), "title": item.name}
-        for item in meetings
-        if item.starts_at is not None and item.ends_at is not None
-    ]
-    entries.sort(key=lambda item: (item["start"], item["kind"], item["id"]))
-    return {"busy_times": entries}
+    _actor, user = _integration_actor(request)
+    try:
+        return {"busy_times": busy_times(HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username), start, end)}
+    except HubOperationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

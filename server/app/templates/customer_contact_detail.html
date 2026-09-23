@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/hub_data_panel.html" import hub_data_panel, hub_data_link with context %}
+{% from "partials/field_layout_break.html" import show_more_layout_item %}
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/contact_field_control.html" import contact_field_control %}
 {% macro contact_field_value(field) %}
@@ -38,29 +40,20 @@
           <button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="contact-fields">Abbrechen</button>
           <button class="button button-variant-1" type="submit" form="contact-fields-layout-form">Speichern</button>
         </div>
+      {% endif %}
         <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
           <summary class="detail-actions-menu-trigger" aria-label="Weitere Kontaktaktionen">&#8942;</summary>
           <div class="detail-actions-menu-popover">
             <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="contact" data-agent-context-key="{{ detail.contact.id }}">In Agent-Kontext aufnehmen</button>
-            {% if detail.contact.zoho_id and detail.customer %}
+            {% if can_sync_contacts and detail.contact.zoho_id and detail.customer %}
               <form method="post" action="/customers/{{ detail.customer.id }}/contacts/{{ detail.contact.id }}/sync">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
               </form>
             {% endif %}
-            <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-contact-delete-open>Kontakt löschen</button>
-            <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="contact-fields">Layout bearbeiten</button>
+            {% if can_delete_contacts %}<button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-contact-delete-open>Kontakt löschen</button>{% endif %}
           </div>
         </details>
-      {% endif %}
-      {% if not can_manage_contacts %}
-        <details class="detail-actions-menu" data-customer-actions-menu>
-          <summary class="detail-actions-menu-trigger" aria-label="Weitere Kontaktaktionen">&#8942;</summary>
-          <div class="detail-actions-menu-popover">
-            <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="contact" data-agent-context-key="{{ detail.contact.id }}">In Agent-Kontext aufnehmen</button>
-          </div>
-        </details>
-      {% endif %}
     {% endcall %}
 
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
@@ -71,7 +64,7 @@
         <article id="contact-fields" class="card customer-detail-panel" data-layout-editor="contact-fields">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Kontaktfelder</h3>
               <p class="subtle">Aktuelle Stammdaten und Kontaktwege.</p>
             </div>
@@ -128,7 +121,11 @@
             {% if can_manage_contacts and detail.display_profile_fields %}
               <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
                 <dl class="customer-fields-grid" data-layout-sortable>
-                  {% for field in detail.display_profile_fields %}
+                  {% for field in detail.summary_profile_fields %}
+                    <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
+                  {% endfor %}
+                  {{ show_more_layout_item() }}
+                  {% for field in detail.following_profile_fields %}
                     <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
                   {% endfor %}
                 </dl>
@@ -151,13 +148,7 @@
       </div>
 
       <aside class="customer-detail-side-column">
-        <article class="card customer-detail-panel">
-          <div class="customer-detail-panel-heading">
-            <div>
-              <p class="eyebrow">Hub-Daten</p>
-              <h3>Verknüpfung</h3>
-            </div>
-          </div>
+        {% call hub_data_panel(detail.contact) %}
           {% if not detail.contact.zoho_id and can_manage_contacts %}
             <form method="post" action="/contacts/{{ detail.contact.id }}/link" class="communication-form contact-link-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -172,21 +163,14 @@
               </label>
               <button class="button button-secondary button-variant-1" type="submit">Verknüpfung speichern</button>
             </form>
-          {% else %}
-            <dl class="customer-fields-grid">
-              <div><dt>Kunde</dt><dd>{% if detail.customer %}<a href="/customers/{{ detail.customer.id }}">{{ detail.customer.name }}</a>{% else %}-{% endif %}</dd></div>
-              <div><dt>{% if detail.contact.zoho_id %}Zoho Kontakt-ID{% else %}Quelle{% endif %}</dt><dd>{{ detail.contact.zoho_id or "Hub" }}</dd></div>
-              {% if detail.contact.zoho_id %}
-                <div><dt>Letzte Änderung in Zoho</dt><dd>{{ (detail.contact.zoho_modified_at or "-") | berlin_time }}</dd></div>
-                <div><dt>Letzte Synchronisierung</dt><dd>{{ (detail.contact.zoho_synced_at or "-") | berlin_time }}</dd></div>
-              {% endif %}
-            </dl>
+          {% elif detail.customer %}
+            <dl class="customer-fields-grid">{{ hub_data_link(detail.contact, 'customers', detail.customer.id, 'Kunde', detail.customer.name, '/customers/' ~ detail.customer.id) }}</dl>
           {% endif %}
-        </article>
+        {% endcall %}
       </aside>
     </div>
 
-    {% if can_manage_contacts %}
+    {% if can_delete_contacts %}
       <dialog class="update-confirmation-dialog" data-contact-delete-dialog aria-labelledby="contact-delete-heading">
         <form method="post" action="/contacts/{{ detail.contact.id }}/delete">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

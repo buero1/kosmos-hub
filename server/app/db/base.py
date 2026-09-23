@@ -1,6 +1,7 @@
 from app.models.audit_log import AuditLog
 from app.models.hub_activity_event import HubActivityEvent
 from app.models.ai_provider_config import AiProviderConfig
+from app.models.ai_usage import AiUsageRequest
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
@@ -16,15 +17,21 @@ from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
+from app.models.hub_wordpress_job import HubWordPressJob
+from app.models.hub_access_control import HubAccessRole, HubRecordAccessGrant, HubRecordAssignment, HubRolePermission, HubTeam
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
+from app.models.hub_email_template_folder import HubEmailTemplateFolder
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentConversationContext, HubAgentJob
 from app.models.hub_workflow import HubWorkflow
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.models.hub_email_address import HubEmailAddress
+from app.models.hub_scheduled_email import HubScheduledEmail, HubScheduledEmailAttachment
 from app.models.hub_spam_sender import HubSpamSender
 from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.hub_mailbox_permission import HubMailboxPermission, HubMailboxMembership
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
 from app.models.maintenance_run import MaintenanceRun, MaintenanceRunStep
@@ -72,6 +79,7 @@ __all__ = [
     "AuditLog",
     "HubActivityEvent",
     "AiProviderConfig",
+    "AiUsageRequest",
     "Base",
     "Customer",
     "CustomerEmailAttachment",
@@ -93,6 +101,7 @@ __all__ = [
     "HubAgentJob",
     "HubCase",
     "HubCaseEmailLink",
+    "HubEmailTemplateFolder",
     "HubLead",
     "HubLeadNote",
     "HubWorkflow",
@@ -100,11 +109,18 @@ __all__ = [
     "HubMailboxAccount",
     "HubMailboxAttachment",
     "HubMailboxEmail",
+    "HubScheduledEmail",
+    "HubScheduledEmailAttachment",
     "HubMailboxImapImport",
     "HubMailboxImapImportItem",
     "HubMailboxImapSyncState",
     "HubSetupToken",
     "HubUser",
+    "HubAccessRole",
+    "HubRecordAccessGrant",
+    "HubRecordAssignment",
+    "HubRolePermission",
+    "HubTeam",
     "MaintenanceRun",
     "MaintenanceRunStep",
     "ModuleLayout",
@@ -153,3 +169,4 @@ __all__ = [
     "ZohoEmailHistoryImport",
     "ZohoNoteHistoryImport",
 ]
+from app.models.hub_record_info import HubRecordInfo

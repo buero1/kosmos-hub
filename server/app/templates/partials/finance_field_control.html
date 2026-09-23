@@ -1,4 +1,4 @@
-{% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article", link_options=(), selected_link_id=None) %}
+{% macro finance_field_control(field, value="", customers=(), contacts=(), selected_customer_id=None, selected_contact_id=None, field_prefix="article", link_options=(), selected_link_id=None, leads=(), selected_lead_id=None, allow_leads=false) %}
   {% if field.key == "custom_interval" %}
   <div class="customer-field-control finance-recurring-custom-control" data-recurring-custom-field{% if not value %} hidden{% endif %}>
     <span>{{ field.label }} <small>erforderlich</small></span>
@@ -23,6 +23,22 @@
   </div>
   {% elif field.key == "customer" %}
   {% set selected_customer = customers | selectattr("id", "equalto", selected_customer_id) | first | default(none) %}
+  {% set selected_lead = leads | selectattr("id", "equalto", selected_lead_id) | first | default(none) %}
+  {% if allow_leads %}
+  <div class="customer-field-control finance-customer-search" data-finance-party-search>
+    <span id="finance-party-label-{{ field_prefix }}">{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+    <div class="finance-customer-combobox">
+      <input type="search" value="{% if selected_customer %}Kunde · {{ selected_customer.name }}{% elif selected_lead %}Lead · {{ selected_lead.label }}{% endif %}" placeholder="Kunden oder Leads suchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="finance-party-options-{{ field_prefix }}" aria-labelledby="finance-party-label-{{ field_prefix }}" data-finance-party-input{% if field.required %} required{% endif %}>
+      <input type="hidden" name="customer_id" value="{{ selected_customer_id or '' }}" data-finance-customer>
+      <input type="hidden" name="lead_id" value="{{ selected_lead_id or '' }}" data-finance-lead>
+      <div id="finance-party-options-{{ field_prefix }}" class="finance-customer-options" role="listbox" aria-label="Kunden oder Leads auswählen" hidden>
+        {% for customer in customers %}<button type="button" class="finance-customer-option" role="option" data-finance-party-option data-party-type="customer" data-party-id="{{ customer.id }}" data-party-label="{{ customer.name }}" aria-selected="{{ 'true' if customer.id == selected_customer_id else 'false' }}">Kunde · {{ customer.name }}</button>{% endfor %}
+        {% for lead in leads %}<button type="button" class="finance-customer-option" role="option" data-finance-party-option data-party-type="lead" data-party-id="{{ lead.id }}" data-party-label="{{ lead.name }}" aria-selected="{{ 'true' if lead.id == selected_lead_id else 'false' }}">Lead · {{ lead.label }}</button>{% endfor %}
+        <p class="finance-customer-empty" data-finance-party-empty hidden>Keine Kunden oder Leads gefunden.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
   <div class="customer-field-control finance-customer-search" data-finance-customer-search>
     <span id="finance-customer-label-{{ field_prefix }}">{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
     <div class="finance-customer-combobox">
@@ -34,13 +50,14 @@
       </div>
     </div>
   </div>
+  {% endif %}
   {% else %}
-  <label class="customer-field-control">
+  <label class="customer-field-control"{% if field.key == "contact" %} data-finance-contact-control{% if allow_leads and selected_lead_id %} hidden{% endif %}{% endif %}>
     <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
     {% if field.read_only %}
       <input type="text" value="{{ value or 'Wird automatisch vergeben' }}" readonly>
     {% elif field.key == "contact" %}
-      <select name="contact_id" data-finance-contact{% if field.required %} required{% endif %}>
+      <select name="contact_id" data-finance-contact{% if allow_leads and selected_lead_id %} disabled{% elif field.required %} required{% endif %}>
         <option value="">{{ "Ansprechpartner auswählen" if field.required else "Keinen Ansprechpartner verknüpfen" }}</option>
         {% for contact in contacts %}<option value="{{ contact.id }}" data-customer-id="{{ contact.customer_id }}"{% if contact.id == selected_contact_id %} selected{% endif %}>{{ contact.name }} · {{ contact.customer_name }}</option>{% endfor %}
       </select>

@@ -81,6 +81,7 @@
           };
           var timer;
           var redirectScheduled = false;
+          var pollPending = false;
 
           function value(selector) {
             return container.querySelector(selector);
@@ -170,6 +171,8 @@
           }
 
           function poll() {
+            if (pollPending) { return; }
+            pollPending = true;
             window.fetch(container.dataset.statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
               .then(function (response) {
                 if (!response.ok) { throw new Error("Refresh status could not be loaded."); }
@@ -178,7 +181,10 @@
               .then(render)
               .catch(function () {
                 setText("[data-refresh-summary]", "Die Live-Aktualisierung wird erneut versucht.");
-              });
+                var summary = value("[data-refresh-summary]");
+                if (summary) { summary.hidden = false; }
+              })
+              .finally(function () { pollPending = false; });
           }
 
           poll();
@@ -506,13 +512,21 @@
             }
           }
 
+          var pollPending = false;
           function poll() {
+            if (pollPending) { return; }
+            pollPending = true;
             window.fetch(container.dataset.statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
               .then(function (response) {
                 if (!response.ok) { throw new Error("Direct update status could not be loaded."); }
                 return response.json();
               })
-              .then(render);
+              .then(render)
+              .catch(function () {
+                var summary = value("[data-direct-batch-summary]");
+                if (summary) { summary.textContent = "Die Live-Aktualisierung wird erneut versucht."; }
+              })
+              .finally(function () { pollPending = false; });
           }
 
           poll();
@@ -693,13 +707,21 @@
             renderEvents(payload.events);
             if (payload.completed && timer) { window.clearInterval(timer); timer = undefined; }
           }
+          var pollPending = false;
           function poll() {
+            if (pollPending) { return; }
+            pollPending = true;
             window.fetch(container.dataset.statusUrl, { credentials: "same-origin", headers: { Accept: "application/json" } })
               .then(function (response) {
                 if (!response.ok) { throw new Error("Complete update status could not be loaded."); }
                 return response.json();
               })
-              .then(render);
+              .then(render)
+              .catch(function () {
+                var summary = value("[data-complete-site-update-summary]");
+                if (summary) { summary.textContent = "Die Live-Aktualisierung wird erneut versucht."; }
+              })
+              .finally(function () { pollPending = false; });
           }
           poll();
           timer = window.setInterval(poll, 2000);
@@ -714,6 +736,9 @@
               <option value="">Aktion auswählen</option>
               <option value="complete">Website vollständig aktualisieren</option>
               <option value="direct">Ausgewählte Updates ausführen</option>
+              {% if request.state.hub_user is defined and request.state.hub_user.role == 'admin' %}
+              <option value="auto-updates">Automatische Plugin-Updates verwalten</option>
+              {% endif %}
             </select>
           </label>
           <button class="button" type="button" disabled data-update-action-start>Starten</button>
@@ -737,6 +762,9 @@
             {% for selected_site_id in site_selector.selected_site_ids %}<input type="hidden" name="site_id" value="{{ selected_site_id }}">{% endfor %}
           </span>
         </form>
+        {% if request.state.hub_user is defined and request.state.hub_user.role == 'admin' %}
+          {% include "partials/plugin_auto_updates.html" %}
+        {% endif %}
       </section>
       <dialog class="update-confirmation-dialog" data-complete-site-update-confirmation aria-labelledby="complete-site-update-confirmation-heading">
         <form method="dialog">
@@ -987,8 +1015,12 @@
         if (!updateActionStart) { return; }
         updateActionStart.disabled = !action
           || (action === "complete" && !completeValid)
-          || (action === "direct" && directSelected === 0);
+          || (action === "direct" && directSelected === 0)
+          || (action === "auto-updates" && (!document.querySelector('[data-plugin-auto-updates] input[name="plugin_file"]:checked')
+            || !document.querySelector('[data-site-selector] input[name="site_id"]:checked')));
       }
+
+      document.addEventListener("plugin-auto-policy-change", syncUpdateActionLaunch);
 
       function syncCompleteSiteUpdateSelection() {
         var selected = completeSiteUpdateSelection();
@@ -1019,6 +1051,11 @@
       if (updateActionSelect && updateActionStart) {
         updateActionSelect.addEventListener("change", syncUpdateActionLaunch);
         updateActionStart.addEventListener("click", function () {
+          if (updateActionSelect.value === "auto-updates") {
+            var policyForm = document.querySelector("[data-plugin-auto-updates]");
+            if (policyForm) { policyForm.requestSubmit(); }
+            return;
+          }
           if (updateActionSelect.value === "complete") {
             if (completeSiteUpdateSelection().length !== 1 || !completeSiteUpdateDialog) { return; }
             if (completeSiteUpdateText) {

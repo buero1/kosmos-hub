@@ -149,8 +149,8 @@ class SiteUserService:
         username: str,
         email: str,
         password: str,
-        role: str,
-        display_name: str,
+        role: str = "subscriber",
+        display_name: str = "",
         actor: str,
         refresh_inventory: bool = True,
     ) -> dict[str, Any]:

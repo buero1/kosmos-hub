@@ -159,7 +159,7 @@ def test_recent_books_invoice_import_is_idempotent_and_stores_the_available_pdf(
         assert detail.lines[1].name == "Erweiterung Speicherplatz E-Mails auf 15 GB"
         assert detail.lines[1].description == ""
         assert detail.invoice_pdf is not None
-        assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "29,75 EUR"
+        assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "29,75 \u20ac"
 
         second_status, second_started = service.start(requested_by="books-admin")
         db.commit()

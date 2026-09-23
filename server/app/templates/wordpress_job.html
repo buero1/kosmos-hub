@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-heading">
+    <div><p class="eyebrow">WordPress</p><h2>Auftrag {{ job.job_id }}</h2></div>
+    <a class="button button-secondary" href="/wordpress/jobs/{{ job.job_id }}">Status aktualisieren</a>
+  </div>
+  <p>{{ job.operation }}</p>
+  <p role="status"><strong>{{ job.status }}</strong>: {{ job.message }}</p>
+  {% if job.can_cancel %}
+  <form method="post" action="/wordpress/jobs/{{ job.job_id }}/cancel">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button button-secondary" type="submit">Auftrag abbrechen</button>
+  </form>
+  {% endif %}
+  {% if job.runs %}
+  <h3>Wartungsfortschritt</h3>
+  <ul>{% for run in job.runs %}<li><a href="{{ run.href }}">Website {{ run.site_id }}</a>: {{ run.kind }} / {{ run.status }} (Lauf {{ run.run_id }})</li>{% endfor %}</ul>
+  {% endif %}
+  {% if job.deletion %}
+  <p><a href="{{ job.deletion.href }}">Benutzerloeschung {{ job.deletion.batch_id }} ansehen</a>: {{ job.deletion.status }}</p>
+  {% endif %}
+  {% if job.result is defined and job.result.get('plugin_auto_updates') %}
+  <h3>Plugin-Automatik: Ergebnisse</h3>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Website</th><th>Ergebnis</th><th>Plugins</th></tr></thead>
+    <tbody>{% for outcome in job.result.plugin_auto_updates %}
+      <tr><td><a href="/sites/{{ outcome.site_id }}">{{ outcome.domain }}</a></td>
+        <td>{{ {'succeeded': 'Erfolgreich geprüft', 'failed': 'Fehlgeschlagen', 'unsupported': 'Nicht unterstützt', 'unreachable': 'Nicht erreichbar', 'uncertain': 'Nicht bestätigt'}.get(outcome.status, outcome.status) }}<p class="subtle">{{ outcome.message }}</p></td>
+        <td>{% for plugin in outcome.plugins %}<p>{{ plugin.plugin_file }}: {{ plugin.message }}</p>{% endfor %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <p class="subtle">Bei unklarem Ergebnis zuerst Website und Wartungsprotokoll pr&uuml;fen. Den Auftrag nicht ungepr&uuml;ft erneut ausf&uuml;hren.</p>
+</section>
+{% if job.status in ['queued', 'running'] or (job.runs | selectattr('status', 'equalto', 'running') | list) or (job.deletion and job.deletion.status in ['queued', 'running']) %}
+<script>window.setTimeout(() => { if (!document.hidden) window.location.reload(); }, 10000);</script>
+{% endif %}
+{% endblock %}

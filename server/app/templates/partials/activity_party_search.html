@@ -1,0 +1,13 @@
+<div class="customer-field-control finance-customer-search" data-finance-party-search data-activity-party-search>
+  <span id="activity-party-label-{{ kind }}">Bezieht sich auf</span>
+  <div class="finance-customer-combobox">
+    <input type="search" placeholder="Kunde oder Lead suchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="activity-party-options-{{ kind }}" aria-labelledby="activity-party-label-{{ kind }}" data-finance-party-input>
+    <input type="hidden" name="customer_id" value="" data-finance-customer data-customer-activity-calendar-customer>
+    <input type="hidden" name="lead_id" value="" data-finance-lead>
+    <div id="activity-party-options-{{ kind }}" class="finance-customer-options" role="listbox" aria-label="Kunde oder Lead auswählen" hidden>
+      {% for customer in calendar_customers %}<button type="button" class="finance-customer-option" role="option" data-finance-party-option data-party-type="customer" data-party-id="{{ customer.id }}" data-party-label="{{ customer.name }}" aria-selected="false">Kunde · {{ customer.name }}</button>{% endfor %}
+      {% for lead in calendar_leads %}<button type="button" class="finance-customer-option" role="option" data-finance-party-option data-party-type="lead" data-party-id="{{ lead.lead.id }}" data-party-label="{{ lead.name }}" aria-selected="false">Lead · {{ lead.name }}{% if lead.company and lead.company != lead.name %} · {{ lead.company }}{% endif %}</button>{% endfor %}
+      <p class="finance-customer-empty" data-finance-party-empty hidden>Keine Kunden oder Leads gefunden.</p>
+    </div>
+  </div>
+</div>

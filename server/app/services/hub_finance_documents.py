@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
@@ -211,6 +211,7 @@ class FinanceDocumentDetail:
     fields: tuple[FinanceDocumentFieldValue, ...]
     lines: tuple[FinanceOfferLineView, ...]
     totals: FinanceOfferTotals
+    show_more_index: int
     billing_address: str = ""
     invoice_pdf: "FinanceInvoicePdfView | None" = None
     order_pdf: "FinanceOrderPdfView | None" = None
@@ -281,13 +282,16 @@ class HubFinanceDocumentService:
             reverse=True,
         ))
 
-    def list_invoice_page(self, *, page: int, page_size: int = 100) -> FinanceDocumentPage:
+    def list_invoice_page(self, *, page: int, page_size: int = 100, allowed_customer_ids: set[int] | None = None, include_orphans: bool = True) -> FinanceDocumentPage:
         if page_size < 1:
             raise ValueError("page_size must be positive")
         module = INVOICE_MODULE
-        rows = self.db.execute(
-            select(module.model.id, module.model.encrypted_fields_json, module.model.created_at)
-        ).all()
+        query = select(module.model.id, module.model.encrypted_fields_json, module.model.created_at)
+        if allowed_customer_ids is not None:
+            query = query.where(module.model.customer_id.in_(allowed_customer_ids))
+        if not include_orphans:
+            query = query.where(module.model.customer_id.is_not(None))
+        rows = self.db.execute(query).all()
         ordered_ids = [row.id for row in sorted(
             rows,
             key=lambda row: (
@@ -337,8 +341,9 @@ class HubFinanceDocumentService:
             )
         assert document is not None
         values = self._document_values(module=module, document=document)
-        lines = tuple(self._line_view(line) for line in document.lines)
-        totals = self._totals(lines)
+        currency = self._text(values.get("currency")) or "EUR"
+        lines = tuple(replace(self._line_view(line), currency=currency) for line in document.lines)
+        totals = replace(self._totals(lines), currency=currency)
         contact_name = self._contact_name(document.contact_id)
         identifier = self.identifier(module=module, document=document, values=values)
         link_label = self._link_label(module=module, document=document)
@@ -356,7 +361,7 @@ class HubFinanceDocumentService:
             enriched_values["modified_time"] = values.get("modified_time") or (document.updated_at.isoformat() if document.updated_at else "")
         if module.is_invoice:
             enriched_values["remaining_amount"] = self._decimal_string(self._remaining_amount(values=values, totals=totals))
-        fields = self._field_values(module=module, values=enriched_values)
+        fields, show_more_index = self._field_values_with_show_more(module=module, values=enriched_values)
         invoice_pdf = self._invoice_pdf_view(document.id) if module.is_invoice else None
         order_pdf = self._order_pdf_view(document.id) if module is ORDER_MODULE else None
         return FinanceDocumentDetail(
@@ -369,12 +374,14 @@ class HubFinanceDocumentService:
             fields=fields,
             lines=lines,
             totals=totals,
+            show_more_index=show_more_index,
             billing_address=self._text(values.get("billing_address")) if module.is_invoice or module.is_dunning else "",
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
         )
 
-    def new_form_values(self, *, module: FinanceDocumentModule) -> dict[str, str]:
+    @staticmethod
+    def new_form_values(*, module: FinanceDocumentModule) -> dict[str, str]:
         today = date.today().isoformat()
         values = {
             "document_field__status": "active" if module.is_recurring else "draft",
@@ -484,19 +491,19 @@ class HubFinanceDocumentService:
         self.db.flush()
         return document
 
-    def delete_document(self, *, module: FinanceDocumentModule, document_id: int) -> Any:
+    def delete_document(self, *, module: FinanceDocumentModule, document_id: int, after_commit=None) -> Any:
         document = self.db.get(module.model, document_id)
         if document is None:
             raise HubFinanceDocumentError(f"{module.singular} wurde nicht gefunden.")
         if module.is_invoice:
             pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == document.id))
             if pdf is not None:
-                FinanceInvoicePdfStorage(cipher=self.cipher).remove(pdf.storage_key)
+                self._remove_pdf_after_commit(FinanceInvoicePdfStorage(cipher=self.cipher), pdf.storage_key, after_commit)
                 self.db.delete(pdf)
         elif module is ORDER_MODULE:
             pdf = self.db.scalar(select(HubFinanceOrderPdf).where(HubFinanceOrderPdf.order_id == document.id))
             if pdf is not None:
-                FinanceInvoicePdfStorage(cipher=self.cipher).remove(pdf.storage_key)
+                self._remove_pdf_after_commit(FinanceInvoicePdfStorage(cipher=self.cipher), pdf.storage_key, after_commit)
                 self.db.delete(pdf)
         if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE):
             generated_pdf = self.db.scalar(
@@ -507,11 +514,18 @@ class HubFinanceDocumentService:
             )
             if generated_pdf is not None:
                 if generated_pdf.storage_key:
-                    FinanceGeneratedPdfStorage(cipher=self.cipher).remove(generated_pdf.storage_key)
+                    self._remove_pdf_after_commit(FinanceGeneratedPdfStorage(cipher=self.cipher), generated_pdf.storage_key, after_commit)
                 self.db.delete(generated_pdf)
         self.db.delete(document)
         self.db.flush()
         return document
+
+    @staticmethod
+    def _remove_pdf_after_commit(storage, storage_key, after_commit):
+        if after_commit is None:
+            storage.remove(storage_key)
+        else:
+            after_commit(f"delete-finance-pdf:{storage_key}", lambda: storage.remove(storage_key))
 
     def _pdf_template(self, *, module: FinanceDocumentModule, template_id: int | None):
         document_type = "invoices" if module.is_recurring else module.key
@@ -604,8 +618,22 @@ class HubFinanceDocumentService:
             values["next_invoice_date"] = document.hub_next_run_on.isoformat()
         return values
 
-    def _field_values(self, *, module: FinanceDocumentModule, values: dict[str, str]) -> tuple[FinanceDocumentFieldValue, ...]:
-        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+    def _field_values(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        values: dict[str, str],
+    ) -> tuple[FinanceDocumentFieldValue, ...]:
+        fields, _ = self._field_values_with_show_more(module=module, values=values)
+        return fields
+
+    def _field_values_with_show_more(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        values: dict[str, str],
+    ) -> tuple[tuple[FinanceDocumentFieldValue, ...], int]:
+        ordered_keys, show_more_index = ModuleLayoutService(db=self.db).ordered_keys_with_show_more(
             layout_key=module.layout_key,
             default_keys=tuple(field.key for field in module.fields),
         )
@@ -668,7 +696,7 @@ class HubFinanceDocumentService:
                 read_only=definition.read_only,
                 options=options,
             ))
-        return tuple(result)
+        return tuple(result), show_more_index
 
     def _submitted_fields(
         self,
@@ -773,8 +801,7 @@ class HubFinanceDocumentService:
         return (match.group(1), "day") if match else ("", "")
 
     def _replace_lines(self, *, module: FinanceDocumentModule, document: Any, submitted_values: dict[str, str]) -> None:
-        for line in tuple(document.lines):
-            self.db.delete(line)
+        document.lines.clear()
         self.db.flush()
         for index, values in enumerate(self._submitted_lines(submitted_values)):
             article_id = self._optional_id(values.pop("article_id", ""), "Artikel")
@@ -808,9 +835,7 @@ class HubFinanceDocumentService:
                 raise HubFinanceDocumentError("Jede Position benötigt eine Bezeichnung.")
             quantity = self._decimal_text(row.get("quantity"), "Position: Menge", minimum=Decimal("0.001"), places=_QUANTITY_STEP)
             unit = self._limited_text(row.get("unit"), "Position: Einheit")
-            if not unit:
-                raise HubFinanceDocumentError("Position: Einheit ist erforderlich.")
-            if unit not in FINANCE_POSITION_UNITS:
+            if unit and unit not in FINANCE_POSITION_UNITS:
                 raise HubFinanceDocumentError("Die Auswahl für Position: Einheit ist ungültig.")
             unit_price = self._decimal_text(row.get("unit_price"), "Position: Einzelpreis netto", minimum=Decimal("0"), places=_CENT)
             discount = self._decimal_text(row.get("discount_percent"), "Position: Rabatt", minimum=Decimal("0"), maximum=Decimal("100"), places=_CENT)

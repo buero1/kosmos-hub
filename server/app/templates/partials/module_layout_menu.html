@@ -1,0 +1,8 @@
+{% macro module_layout_menu(layout_key, module_label) -%}
+  <details class="detail-actions-menu">
+    <summary class="detail-actions-menu-trigger" aria-label="Weitere {{ module_label }}aktionen">&#8942;</summary>
+    <div class="detail-actions-menu-popover">
+      <a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/module-layouts/{{ layout_key }}">Layout bearbeiten</a>
+    </div>
+  </details>
+{%- endmacro %}

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -185,7 +186,10 @@ def test_editable_finance_positions_render_drag_handles_and_persisted_reindexing
     assert rendered.count(insert_attribute) == 3
     assert "appendRow(null, sourceRow)" in rendered
     assert "finance-position-unit" in rendered
-    assert "required" in rendered
+    unit_selects = re.findall(r'<select\b[^>]*data-finance-(?:document-)?line-field="unit"[^>]*>', rendered)
+    assert len(unit_selects) == 2
+    assert all("required" not in select for select in unit_selects)
+    assert '>Keine Einheit</option>' in rendered
     assert '>Monatlich</option>' in rendered
     assert '>Einmalig</option>' in rendered
     assert '>Jährlich</option>' in rendered

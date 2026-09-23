@@ -18,6 +18,7 @@ from app.models.hub_case import HubCase
 from app.models.hub_lead import HubLead
 from app.models.site import Site
 from app.services.customer_directory import CustomerDirectoryService
+from app.services.hub_access_control import HubAccessControlService
 
 
 MAX_RESULTS_PER_GROUP = 6
@@ -28,7 +29,34 @@ class HubGlobalSearchService:
         self.db = db
         self.cipher = cipher
 
-    def search(self, query: str, *, include_admin_modules: bool) -> list[dict[str, object]]:
+    def search_for_user(self, query: str, *, user, module: str = "") -> list[dict[str, object]]:
+        if user is None or not user.is_active:
+            return []
+        access = HubAccessControlService(db=self.db)
+        from app.services.hub_activity_responsibility import ActivityResponsibility, ACTIVITY_MODELS
+        policy = ActivityResponsibility(self.db, user)
+        activity_ids = {kind: {row.id for row in self.db.scalars(select(model)) if policy.visible(row)}
+                        for kind, model in ACTIVITY_MODELS.items() if kind != "task"} if policy.right("view") else {}
+        visible = {key for key, rights in access.module_access(user).items() if rights["view"]}
+        return self.search(
+            query, include_admin_modules=access.can(user, "customers", "manage"),
+            visible_modules=visible & {module} if module else visible,
+            allowed_record_ids={key: access.accessible_record_ids(user=user, module_key=key)
+                if key in visible else set() for key in ("customers", "leads")},
+            include_contact_phones="contacts" in visible,
+            allowed_activity_ids=activity_ids,
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        include_admin_modules: bool,
+        visible_modules: set[str] | None = None,
+        allowed_record_ids: dict[str, set[int] | None] | None = None,
+        include_contact_phones: bool = True,
+        allowed_activity_ids: dict[str, set[int]] | None = None,
+    ) -> list[dict[str, object]]:
         needle = query.strip()[:80]
         if len(needle) < 2:
             return []
@@ -36,13 +64,31 @@ class HubGlobalSearchService:
         pattern = self._like_pattern(needle)
         phone_forms = self._phone_forms(needle)
         groups: list[dict[str, object]] = []
-        self._add_group(groups, "customers", "Kunden", self._customers(pattern, phone_forms, include_sensitive=include_admin_modules))
-        if include_admin_modules:
-            self._add_group(groups, "contacts", "Kontakte", self._contacts(needle, phone_forms))
-            self._add_group(groups, "leads", "Leads", self._leads(needle, phone_forms))
-            self._add_group(groups, "cases", "Fälle", self._cases(needle, phone_forms))
-        self._add_group(groups, "sites", "Sites", self._sites(pattern))
-        self._add_group(groups, "calendar", "Kalender", self._calendar(pattern))
+        modules = visible_modules if visible_modules is not None else ({"customers", "contacts", "leads", "cases", "websites", "activities"} if include_admin_modules else {"customers", "websites", "activities"})
+        allowed = allowed_record_ids or {}
+        if "customers" in modules:
+            self._add_group(groups, "customers", "Kunden", self._customers(
+                pattern,
+                phone_forms,
+                include_sensitive=include_admin_modules,
+                allowed_ids=allowed.get("customers"),
+                include_contact_phones=include_contact_phones,
+            ))
+        if "contacts" in modules:
+            self._add_group(groups, "contacts", "Kontakte", self._contacts(
+                needle,
+                phone_forms,
+                allowed_ids=allowed.get("contacts"),
+                allowed_customer_ids=allowed.get("customers"),
+            ))
+        if "leads" in modules:
+            self._add_group(groups, "leads", "Leads", self._leads(needle, phone_forms, allowed_ids=allowed.get("leads")))
+        if "cases" in modules:
+            self._add_group(groups, "cases", "Fälle", self._cases(needle, phone_forms, allowed_ids=allowed.get("cases"), allowed_customer_ids=allowed.get("customers")))
+        if "websites" in modules:
+            self._add_group(groups, "sites", "Sites", self._sites(pattern, allowed_ids=allowed.get("websites"), allowed_customer_ids=allowed.get("customers")))
+        if "activities" in modules:
+            self._add_group(groups, "calendar", "Kalender", self._calendar(pattern, allowed_customer_ids=allowed.get("customers"), allowed_lead_ids=allowed.get("leads"), allowed_activity_ids=allowed_activity_ids))
         return groups
 
     @staticmethod
@@ -111,14 +157,17 @@ class HubGlobalSearchService:
         return ""
 
     def _customers(
-        self, pattern: str, phone_forms: tuple[str, ...], *, include_sensitive: bool,
+        self, pattern: str, phone_forms: tuple[str, ...], *, include_sensitive: bool, allowed_ids: set[int] | None = None,
+        include_contact_phones: bool = True,
     ) -> list[dict[str, str]]:
+        query = select(Customer.id, Customer.name, Customer.website_domain).where(
+            Customer.is_visible.is_(True),
+            or_(Customer.name.ilike(pattern, escape="\\"), Customer.website_domain.ilike(pattern, escape="\\")),
+        )
+        if allowed_ids is not None:
+            query = query.where(Customer.id.in_(allowed_ids))
         rows = self.db.execute(
-            select(Customer.id, Customer.name, Customer.website_domain)
-            .where(
-                Customer.is_visible.is_(True),
-                or_(Customer.name.ilike(pattern, escape="\\"), Customer.website_domain.ilike(pattern, escape="\\")),
-            )
+            query
             .order_by(Customer.name.asc(), Customer.id.asc())
             .limit(MAX_RESULTS_PER_GROUP)
         ).all()
@@ -130,9 +179,11 @@ class HubGlobalSearchService:
             return items
 
         phone_by_customer: dict[int, str] = {}
+        customer_query = select(Customer.id, Customer.name, Customer.website_domain, Customer.encrypted_profile_json).where(Customer.is_visible.is_(True))
+        if allowed_ids is not None:
+            customer_query = customer_query.where(Customer.id.in_(allowed_ids))
         customers = self.db.execute(
-            select(Customer.id, Customer.name, Customer.website_domain, Customer.encrypted_profile_json)
-            .where(Customer.is_visible.is_(True))
+            customer_query
             .order_by(Customer.name.asc(), Customer.id.asc())
         ).all()
         for customer_id, _name, _domain, encrypted in customers:
@@ -142,8 +193,13 @@ class HubGlobalSearchService:
                 )
                 if match:
                     phone_by_customer[customer_id] = match
+        contact_query = select(CustomerContact.customer_id, CustomerContact.encrypted_profile_json)
+        if not include_contact_phones:
+            contact_query = contact_query.where(CustomerContact.id.in_([]))
+        if allowed_ids is not None:
+            contact_query = contact_query.where(CustomerContact.customer_id.in_(allowed_ids))
         for customer_id, encrypted in self.db.execute(
-            select(CustomerContact.customer_id, CustomerContact.encrypted_profile_json)
+            contact_query
             .join(Customer, Customer.id == CustomerContact.customer_id)
             .where(Customer.is_visible.is_(True))
         ):
@@ -160,10 +216,22 @@ class HubGlobalSearchService:
                     break
         return items
 
-    def _contacts(self, query: str, phone_forms: tuple[str, ...]) -> list[dict[str, str]]:
+    def _contacts(
+        self,
+        query: str,
+        phone_forms: tuple[str, ...],
+        *,
+        allowed_ids: set[int] | None = None,
+        allowed_customer_ids: set[int] | None = None,
+    ) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
+        statement = select(CustomerContact.id, CustomerContact.encrypted_profile_json, Customer.name)
+        if allowed_ids is not None:
+            statement = statement.where(CustomerContact.id.in_(allowed_ids))
+        if allowed_customer_ids is not None:
+            statement = statement.where(or_(CustomerContact.customer_id.is_(None), CustomerContact.customer_id.in_(allowed_customer_ids)))
         rows = self.db.execute(
-            select(CustomerContact.id, CustomerContact.encrypted_profile_json, Customer.name)
+            statement
             .outerjoin(Customer, Customer.id == CustomerContact.customer_id)
             .order_by(CustomerContact.id.desc())
         )
@@ -186,12 +254,14 @@ class HubGlobalSearchService:
                 break
         return items
 
-    def _leads(self, query: str, phone_forms: tuple[str, ...]) -> list[dict[str, str]]:
+    def _leads(self, query: str, phone_forms: tuple[str, ...], *, allowed_ids: set[int] | None = None) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
         rows = self.db.execute(
             select(HubLead.id, HubLead.encrypted_profile_json).order_by(HubLead.id.desc())
         )
         for lead_id, encrypted in rows:
+            if allowed_ids is not None and lead_id not in allowed_ids:
+                continue
             profile = self._decrypt_dict(encrypted)
             fields = profile.get("fields")
             if not isinstance(fields, dict):
@@ -211,14 +281,19 @@ class HubGlobalSearchService:
                 break
         return items
 
-    def _cases(self, query: str, phone_forms: tuple[str, ...]) -> list[dict[str, str]]:
+    def _cases(self, query: str, phone_forms: tuple[str, ...], *, allowed_ids: set[int] | None = None, allowed_customer_ids: set[int] | None = None) -> list[dict[str, str]]:
         items: list[dict[str, str]] = []
+        statement = select(HubCase.id, HubCase.case_number, HubCase.encrypted_fields_json, Customer.name)
+        if allowed_customer_ids is not None:
+            statement = statement.where(or_(HubCase.customer_id.is_(None), HubCase.customer_id.in_(allowed_customer_ids)))
         rows = self.db.execute(
-            select(HubCase.id, HubCase.case_number, HubCase.encrypted_fields_json, Customer.name)
+            statement
             .outerjoin(Customer, Customer.id == HubCase.customer_id)
             .order_by(HubCase.id.desc())
         )
         for case_id, case_number, encrypted, customer_name in rows:
+            if allowed_ids is not None and case_id not in allowed_ids:
+                continue
             fields = self._decrypt_dict(encrypted)
             description = self._text(fields.get("description"))
             number = case_number or f"Fall {case_id}"
@@ -235,9 +310,14 @@ class HubGlobalSearchService:
                 break
         return items
 
-    def _sites(self, pattern: str) -> list[dict[str, str]]:
+    def _sites(self, pattern: str, *, allowed_ids: set[int] | None = None, allowed_customer_ids: set[int] | None = None) -> list[dict[str, str]]:
+        query = select(Site.id, Site.domain, Customer.name)
+        if allowed_ids is not None:
+            query = query.where(Site.id.in_(allowed_ids))
+        if allowed_customer_ids is not None:
+            query = query.where(or_(Site.customer_id.is_(None), Site.customer_id.in_(allowed_customer_ids)))
         rows = self.db.execute(
-            select(Site.id, Site.domain, Customer.name)
+            query
             .outerjoin(Customer, Customer.id == Site.customer_id)
             .where(Site.domain.ilike(pattern, escape="\\"))
             .order_by(Site.domain.asc(), Site.id.asc())
@@ -248,11 +328,18 @@ class HubGlobalSearchService:
             for site_id, domain, customer_name in rows
         ]
 
-    def _calendar(self, pattern: str) -> list[dict[str, str]]:
+    def _calendar(self, pattern: str, *, allowed_customer_ids: set[int] | None = None, allowed_lead_ids: set[int] | None = None, allowed_activity_ids=None) -> list[dict[str, str]]:
         events: list[tuple[datetime, dict[str, str]]] = []
         for model, kind in ((CustomerCallActivity, "Anruf"), (CustomerMeetingActivity, "Meeting")):
+            statement = select(model.name, model.starts_at, Customer.name)
+            if allowed_activity_ids is not None:
+                statement = statement.where(model.id.in_(allowed_activity_ids.get("call" if model is CustomerCallActivity else "meeting", set())))
+            if allowed_customer_ids is not None:
+                statement = statement.where(or_(model.customer_id.is_(None), model.customer_id.in_(allowed_customer_ids)))
+            if allowed_lead_ids is not None:
+                statement = statement.where(or_(model.lead_id.is_(None), model.lead_id.in_(allowed_lead_ids)))
             rows = self.db.execute(
-                select(model.name, model.starts_at, Customer.name)
+                statement
                 .outerjoin(Customer, Customer.id == model.customer_id)
                 .where(model.name.ilike(pattern, escape="\\"), model.starts_at.is_not(None))
                 .order_by(model.starts_at.desc())

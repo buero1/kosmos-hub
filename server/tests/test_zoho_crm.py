@@ -42,7 +42,7 @@ def test_zoho_callback_rejects_mismatched_state_without_an_internal_error(monkey
         state="different-state",
     )
 
-    assert response.headers["location"] == "/account?zoho=connect-failed"
+    assert response.headers["location"] == "/settings?zoho=connect-failed#account-zoho"
     assert recorded_errors == ["The Zoho connection state did not match. Start the connection again."]
 
 

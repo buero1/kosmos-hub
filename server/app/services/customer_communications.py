@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from app.core.mailbox_actor import with_mailbox_actor
+from app.services.hub_record_info import record_author
+
 import json
 import re
 import hashlib
@@ -25,6 +28,7 @@ from app.core.config import get_settings
 from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
+from app.models.hub_scheduled_email import HubScheduledEmail
 from app.models.customer_contact import CustomerContact
 from app.models.zoho_email_template import ZohoEmailTemplate
 from app.services.email_attachment_storage import EmailAttachmentStorage, EmailAttachmentStorageError
@@ -39,10 +43,11 @@ from app.services.hub_mailbox_transport import (
 )
 from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.template_placeholders import (
-    CONTACT_PLACEHOLDERS,
-    CUSTOMER_PLACEHOLDERS,
+    EMAIL_CONTACT_PLACEHOLDERS,
+    EMAIL_CUSTOMER_PLACEHOLDERS,
     EMAIL_TEMPLATE_CONTEXT_KEYS,
     contact_greeting,
+    company_template_values,
 )
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
@@ -279,6 +284,8 @@ class CustomerCommunicationEmailTemplate:
     category: str
     compiler_mode: str
     context_module: str = "general"
+    cloned_from: str = ""
+    content_reviewed: bool = False
 
 
 @dataclass(frozen=True)
@@ -290,6 +297,7 @@ class CustomerCommunicationEmailTemplateDetail:
     unresolved_placeholders: tuple[str, ...]
     compiler_mode: str
     context_module: str = "general"
+    template_context: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -358,6 +366,7 @@ class CustomerCommunicationEmailView:
     attachments: tuple[CustomerCommunicationAttachment, ...]
     can_load_content: bool
     last_error: str | None
+    mailbox_message: object | None = None
 
 
 @dataclass(frozen=True)
@@ -402,6 +411,8 @@ class CustomerCommunicationEmailHeaderSyncResult:
 class CustomerCommunicationActionResult:
     success: bool
     message: str
+    email_id: int | None = None
+    note_id: int | None = None
 
 
 class CustomerCommunicationService:
@@ -415,9 +426,13 @@ class CustomerCommunicationService:
         public_base_url: str,
         zoho_service: ZohoCrmService | None = None,
         attachment_storage: EmailAttachmentStorage | None = None,
+        actor: str | None = None,
     ):
         self.db = db
         self.cipher = cipher
+        self.public_base_url = public_base_url
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        self.actor = resolve_mailbox_actor(actor)
         settings = get_settings()
         self.attachment_storage = attachment_storage or EmailAttachmentStorage(
             root=settings.email_attachment_storage_dir,
@@ -430,7 +445,11 @@ class CustomerCommunicationService:
             public_base_url=public_base_url,
         )
 
-    def get_view(self, *, customer_id: int) -> CustomerCommunicationView:
+    def get_view(self, *, customer_id: int, actor: str | None = None) -> CustomerCommunicationView:
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        actor = resolve_mailbox_actor(actor or self.actor)
+        scope = HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor) if actor else None
         customer = self._require_customer(customer_id)
         notes = [self._note_view(note) for note in self.db.scalars(
             select(CustomerZohoNote)
@@ -441,7 +460,35 @@ class CustomerCommunicationService:
             select(CustomerZohoEmail)
             .where(CustomerZohoEmail.customer_id == customer.id)
             .order_by(CustomerZohoEmail.zoho_sent_at.desc(), CustomerZohoEmail.created_at.desc(), CustomerZohoEmail.id.desc())
-        ).all()]
+        ).all() if scope is None or scope.visible(email)]
+        emails.extend(
+            self._scheduled_email_view(email)
+            for email in self.db.scalars(
+                select(HubScheduledEmail)
+                .where(HubScheduledEmail.customer_id == customer.id)
+                .where(HubScheduledEmail.status.in_(("scheduled", "retrying", "sending", "failed")))
+                .order_by(HubScheduledEmail.scheduled_at.desc(), HubScheduledEmail.id.desc())
+            ).all() if scope is None or scope.visible(email)
+        )
+        from app.services.hub_mailbox import HubMailboxService
+        related = HubMailboxService(db=self.db, cipher=self.cipher, public_base_url=self.public_base_url, actor=actor)
+        native_ids = {email.id for email in emails if email.source != "scheduled"}
+        for message in related.related_messages(module="customers", record_id=customer_id):
+            if message.kind == "linked" and message.customer_id == customer_id and message.customer_email_id in native_ids:
+                continue
+            emails.append(CustomerCommunicationEmailView(
+                id=message.customer_email_id, subject=message.subject, sender=message.sender, recipients=message.recipients,
+                direction=message.direction, is_unread=message.is_unread, source="associated", sync_status="synced",
+                occurred_at=message.occurred_at, preview_html=message.preview_html, attachments=message.attachments,
+                can_load_content=False, last_error=message.last_error, mailbox_message=message,
+            ))
+        emails.sort(
+            key=lambda email: (
+                self._aware_utc(email.occurred_at) if email.occurred_at is not None else datetime.min.replace(tzinfo=UTC),
+                email.id,
+            ),
+            reverse=True,
+        )
         timestamps = [
             timestamp
             for timestamp in (
@@ -462,10 +509,46 @@ class CustomerCommunicationService:
             last_synced_at=last_synced_at,
         )
 
+    def get_dunning_email_views(self, *, dunning_id: int) -> tuple[CustomerCommunicationEmailView, ...]:
+        """Return only messages explicitly composed from one dunning."""
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        scope = HubMailboxAccess(db=self.db, cipher=self.cipher, actor=self.actor) if self.actor else None
+        emails = [
+            self._email_view(email)
+            for email in self.db.scalars(
+                select(CustomerZohoEmail)
+                .where(CustomerZohoEmail.dunning_id == dunning_id)
+                .order_by(
+                    CustomerZohoEmail.zoho_sent_at.desc(),
+                    CustomerZohoEmail.created_at.desc(),
+                    CustomerZohoEmail.id.desc(),
+                )
+            ).all() if scope is None or scope.visible(email)
+        ]
+        emails.extend(
+            self._scheduled_email_view(email)
+            for email in self.db.scalars(
+                select(HubScheduledEmail)
+                .where(HubScheduledEmail.dunning_id == dunning_id)
+                .where(HubScheduledEmail.status.in_(("scheduled", "retrying", "sending", "failed")))
+                .order_by(HubScheduledEmail.scheduled_at.desc(), HubScheduledEmail.id.desc())
+            ).all() if scope is None or scope.visible(email)
+        )
+        emails.sort(
+            key=lambda email: (
+                self._aware_utc(email.occurred_at)
+                if email.occurred_at is not None
+                else datetime.min.replace(tzinfo=UTC),
+                email.id,
+            ),
+            reverse=True,
+        )
+        return tuple(emails)
+
     def list_senders(self) -> tuple[CustomerCommunicationSender, ...]:
         """Use configured Mittwald addresses, retaining Zoho only for an unconfigured legacy install."""
-        mittwald_senders = HubMailboxTransportService(db=self.db, cipher=self.cipher).list_senders()
-        if mittwald_senders:
+        mittwald_senders = HubMailboxTransportService(db=self.db, cipher=self.cipher, actor=self.actor).list_senders()
+        if mittwald_senders or self.actor:
             return tuple(
                 CustomerCommunicationSender(name=sender.name, email=sender.email)
                 for sender in mittwald_senders
@@ -489,15 +572,16 @@ class CustomerCommunicationService:
 
     def list_recipients(self, *, customer_id: int) -> tuple[CustomerCommunicationRecipient, ...]:
         """List only the current customer's valid recipient addresses for the mailbox composer."""
-        customer = self._require_zoho_customer(customer_id)
+        customer = self._require_customer(customer_id)
         return tuple(self._recipients_for_customer(customer))
 
-    def list_contact_recipients(self, *, customer_id: int) -> tuple[CustomerCommunicationRecipient, ...]:
+    def list_contact_recipients(self, *, customer_id: int, allowed_contact_ids: set[int] | None = None) -> tuple[CustomerCommunicationRecipient, ...]:
         """List the linked contacts' individual email addresses for an empty customer composer."""
         customer = self._require_customer(customer_id)
-        return tuple(self._recipients_for_customer(customer, include_account_email=False))
+        return tuple(self._recipients_for_customer(customer, include_account_email=False, allowed_contact_ids=allowed_contact_ids))
 
-    def search_recipients(self, *, query: str, limit: int = 12) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
+    def search_recipients(self, *, query: str, limit: int = 12, allowed_customer_ids: set[int] | None = None,
+                          allowed_contact_ids: set[int] | None = None) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
         """Find known recipient addresses without sending a new request to Zoho."""
         normalized_query = " ".join(query.casefold().split())
         if len(normalized_query) < 2:
@@ -506,12 +590,12 @@ class CustomerCommunicationService:
         matches: list[CustomerCommunicationRecipientSearchMatch] = []
         for customer in self.db.scalars(
             select(Customer)
-            .where(Customer.zoho_id.is_not(None))
+            .where(Customer.id.in_(allowed_customer_ids) if allowed_customer_ids is not None else True)
             .order_by(Customer.name.asc(), Customer.id.asc())
         ).all():
             if not self._is_available_for_recipient_search(customer):
                 continue
-            for recipient in self._recipients_for_customer(customer):
+            for recipient in self._recipients_for_customer(customer, allowed_contact_ids=allowed_contact_ids):
                 searchable = " ".join((recipient.name, recipient.email, customer.name)).casefold()
                 if not all(token in searchable for token in tokens):
                     continue
@@ -568,6 +652,8 @@ class CustomerCommunicationService:
                     category=category,
                     compiler_mode=self._email_compiler_mode(payload),
                     context_module=self._email_template_context_module(template=template, payload=payload),
+                    cloned_from=self._text(payload.get("hub_cloned_from")) or "",
+                    content_reviewed=bool(self._text(payload.get("hub_content_reviewed_at"))),
                 )
             )
         return tuple(sorted(templates, key=lambda item: (item.module.casefold(), item.name.casefold())))
@@ -578,8 +664,9 @@ class CustomerCommunicationService:
         customer_id: int,
         template_id: str,
         recipient_key: str = "",
+        template_values: dict[str, object] | None = None,
     ) -> CustomerCommunicationEmailTemplateDetail:
-        customer = self._require_zoho_customer(customer_id)
+        customer = self._require_customer(customer_id)
         template = self._stored_email_template(template_id)
         payload = self._payload(template.encrypted_payload_json)
         name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
@@ -589,6 +676,10 @@ class CustomerCommunicationService:
         if recipient is None:
             recipient = next(iter(self._recipients_for_customer(customer)), None)
         context = self._email_template_context(customer=customer, recipient=recipient)
+        for key, value in (template_values or {}).items():
+            text = self._text(value)
+            if text:
+                context[self._normalized_template_key(key)] = text
         subject, subject_placeholders = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "",
             context=context,
@@ -619,14 +710,16 @@ class CustomerCommunicationService:
         self,
         *,
         template_id: str,
+        template_values: dict[str, object] | None = None,
     ) -> CustomerCommunicationEmailTemplateDetail:
-        """Load a local template before a customer contact has been selected."""
+        """Load a local template with explicitly resolved, authorized context."""
         template = self._stored_email_template(template_id)
         payload = self._payload(template.encrypted_payload_json)
         name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
+        context = {self._normalized_template_key(key): str(value) for key, value in (template_values or {}).items() if value not in (None, "")}
         subject, subject_placeholders = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "",
-            context={},
+            context=context,
             html=False,
         )
         content, content_placeholders = self._resolve_template_placeholders(
@@ -634,10 +727,11 @@ class CustomerCommunicationService:
                 self._text(payload.get("content")) or "",
                 allow_template_href_placeholders=True,
             ),
-            context={},
+            context=context,
             html=True,
             html_replacements=self._template_html_replacements(),
         )
+        content = self._sanitized_email_content(content)
         content = self._template_compose_content(payload, content)
         return CustomerCommunicationEmailTemplateDetail(
             id=template.zoho_template_id,
@@ -716,6 +810,8 @@ class CustomerCommunicationService:
         subject: str,
         content: str,
         context_module: str = "",
+        folder_name: str | None = None,
+        preserve_content: bool = False,
     ) -> CustomerCommunicationEmailTemplateDetail:
         """Persist a Hub-managed edit without changing the source template in Zoho."""
         template = self._stored_email_template(template_id)
@@ -723,13 +819,16 @@ class CustomerCommunicationService:
         payload.update({
             "name": self._required_text(name, "Vorlagenname", maximum=255),
             "subject": self._required_text(subject, "Betreff", maximum=500),
-            "content": self._sanitized_email_content(content, allow_template_href_placeholders=True),
-            "compiler_stylesheet": EmailHtmlCompiler.sanitize_stylesheet(content),
             "hub_edited_at": datetime.now(UTC).isoformat(),
             "hub_context_module": self._required_email_template_context(
                 context_module or self._email_template_context_module(template=template, payload=payload)
             ),
         })
+        if not preserve_content:
+            payload["content"] = self._sanitized_email_content(content, allow_template_href_placeholders=True)
+            payload["compiler_stylesheet"] = EmailHtmlCompiler.sanitize_stylesheet(content)
+        if folder_name is not None:
+            payload["folder_name"] = self._required_text(folder_name, "Vorlagenordner", maximum=255)
         template.encrypted_payload_json = self._encrypt_payload(payload)
         self.db.flush()
         return self.get_email_template_source(template_id=template.zoho_template_id)
@@ -769,17 +868,37 @@ class CustomerCommunicationService:
 
     def delete_email_template(self, *, template_id: str) -> None:
         """Hide a Zoho template locally or permanently remove a Hub-only clone."""
-        template = self._stored_email_template(template_id)
-        payload = self._payload(template.encrypted_payload_json)
-        if self._text(payload.get("hub_created_at")):
-            self.db.delete(template)
-            self.db.flush()
-            return
+        self.delete_email_templates(template_ids=(template_id,))
 
-        payload["hub_deleted_at"] = datetime.now(UTC).isoformat()
-        template.encrypted_payload_json = self._encrypt_payload(payload)
-        template.is_active = False
+    def move_email_templates(self, *, template_ids: tuple[str, ...], folder_name: str) -> int:
+        """Move active templates into one Hub folder without altering their content."""
+        normalized_ids = self._required_template_ids(template_ids)
+        destination = self._required_text(folder_name, "Vorlagenordner", maximum=255)
+        templates = tuple(self._stored_email_template(template_id) for template_id in normalized_ids)
+        moved_at = datetime.now(UTC).isoformat()
+        for template in templates:
+            payload = self._payload(template.encrypted_payload_json)
+            payload["folder_name"] = destination
+            payload["hub_edited_at"] = moved_at
+            template.encrypted_payload_json = self._encrypt_payload(payload)
         self.db.flush()
+        return len(templates)
+
+    def delete_email_templates(self, *, template_ids: tuple[str, ...]) -> int:
+        """Delete Hub templates in one validated batch."""
+        normalized_ids = self._required_template_ids(template_ids)
+        templates = tuple(self._stored_email_template(template_id) for template_id in normalized_ids)
+        deleted_at = datetime.now(UTC).isoformat()
+        for template in templates:
+            payload = self._payload(template.encrypted_payload_json)
+            if self._text(payload.get("hub_created_at")):
+                self.db.delete(template)
+                continue
+            payload["hub_deleted_at"] = deleted_at
+            template.encrypted_payload_json = self._encrypt_payload(payload)
+            template.is_active = False
+        self.db.flush()
+        return len(templates)
 
     def sync_email_templates(self) -> CustomerCommunicationEmailTemplateSyncResult:
         """Synchronize all Zoho email-template modules once for local composition."""
@@ -1000,12 +1119,9 @@ class CustomerCommunicationService:
         content: str,
     ) -> CustomerCommunicationActionResult:
         customer = self._require_zoho_customer(customer_id)
-        normalized_content = self._required_text(content, "Notiz", maximum=30_000)
-        normalized_title = (
-            self._required_text(title, "Titel", maximum=255)
-            if title.strip()
-            else self._note_title_from_content(normalized_content)
-        )
+        from app.services.hub_note_catalog import normalize_note
+        values = normalize_note(title=title, content=content, creating=True)
+        normalized_title, normalized_content = values["title"], values["content"]
         now = datetime.now(UTC)
         note = CustomerZohoNote(
             customer=customer,
@@ -1027,7 +1143,7 @@ class CustomerCommunicationService:
             note.sync_status = "failed"
             note.last_error = str(exc)[:1000]
             self.db.flush()
-            return CustomerCommunicationActionResult(False, "Notiz wurde im Hub gespeichert, konnte aber noch nicht an Zoho gesendet werden.")
+            return CustomerCommunicationActionResult(False, "Notiz wurde im Hub gespeichert, konnte aber noch nicht an Zoho gesendet werden.", note_id=note.id)
 
         note.zoho_note_id = self._text(created.get("id"))
         note.zoho_created_at = self._datetime(created.get("Created_Time")) or now
@@ -1036,7 +1152,7 @@ class CustomerCommunicationService:
         note.sync_status = "synced"
         note.last_error = None
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde an Zoho CRM übertragen.")
+        return CustomerCommunicationActionResult(True, "Notiz wurde an Zoho CRM übertragen.", note_id=note.id)
 
     def update_note(
         self,
@@ -1048,8 +1164,9 @@ class CustomerCommunicationService:
     ) -> CustomerCommunicationActionResult:
         customer = self._require_zoho_customer(customer_id)
         note = self._note_or_error(customer_id=customer.id, note_id=note_id)
-        normalized_title = self._required_text(title, "Titel", maximum=255)
-        normalized_content = self._required_text(content, "Notiz", maximum=30_000)
+        from app.services.hub_note_catalog import normalize_note
+        values = normalize_note(title=title, content=content)
+        normalized_title, normalized_content = values["title"], values["content"]
         now = datetime.now(UTC)
         if note.zoho_note_id:
             self.zoho_service.update_note(
@@ -1078,7 +1195,7 @@ class CustomerCommunicationService:
         note.sync_status = "synced"
         note.last_error = None
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde in Zoho CRM aktualisiert.")
+        return CustomerCommunicationActionResult(True, "Notiz wurde in Zoho CRM aktualisiert.", note_id=note.id)
 
     def delete_note(self, *, customer_id: int, note_id: int) -> CustomerCommunicationActionResult:
         customer = self._require_zoho_customer(customer_id)
@@ -1087,8 +1204,9 @@ class CustomerCommunicationService:
             self.zoho_service.delete_note(note_id=note.zoho_note_id)
         self.db.delete(note)
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde aus Zoho CRM gelöscht.")
+        return CustomerCommunicationActionResult(True, "Notiz wurde aus Zoho CRM gelöscht.", note_id=note.id)
 
+    @with_mailbox_actor
     def send_email(
         self,
         *,
@@ -1103,8 +1221,14 @@ class CustomerCommunicationService:
         cc_emails: str = "",
         forward_from_email_id: int | None = None,
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
+        message_id: str | None = None,
+        dunning_id: int | None = None,
     ) -> CustomerCommunicationActionResult:
-        mittwald_transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
+        from app.services.hub_mailbox_permissions import MailboxPermissions
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        acting = resolve_mailbox_actor(actor or self.actor)
+        MailboxPermissions(db=self.db, actor=acting).require_sender(sender_email, "send")
+        mittwald_transport = HubMailboxTransportService(db=self.db, cipher=self.cipher, actor=acting)
         if mittwald_transport.is_configured():
             return self._send_email_via_mittwald(
                 transport=mittwald_transport,
@@ -1119,6 +1243,8 @@ class CustomerCommunicationService:
                 cc_emails=cc_emails,
                 forward_from_email_id=forward_from_email_id,
                 attachments=attachments,
+                message_id=message_id,
+                dunning_id=dunning_id,
             )
         customer = self._require_zoho_customer(customer_id)
         sender = next(
@@ -1191,6 +1317,7 @@ class CustomerCommunicationService:
         }
         email = CustomerZohoEmail(
             customer=customer,
+            dunning_id=dunning_id,
             source="hub",
             direction="outbound",
             is_unread=False,
@@ -1222,14 +1349,18 @@ class CustomerCommunicationService:
             email.sync_status = "failed"
             email.last_error = str(exc)[:1000]
             self.db.flush()
-            return CustomerCommunicationActionResult(False, "E-Mail wurde nicht versendet. Der Entwurf bleibt verschlüsselt im Hub gespeichert.")
+            return CustomerCommunicationActionResult(
+                False,
+                "E-Mail wurde nicht versendet. Der Entwurf bleibt verschlüsselt im Hub gespeichert.",
+                email.id,
+            )
 
         email.zoho_message_id = self._text(sent.get("message_id")) or self._text(sent.get("id"))
         email.sync_status = "sent"
         email.zoho_synced_at = now
         email.last_error = None
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "E-Mail wurde über Zoho CRM versendet.")
+        return CustomerCommunicationActionResult(True, "E-Mail wurde über Zoho CRM versendet.", email.id)
 
     def _send_email_via_mittwald(
         self,
@@ -1246,6 +1377,8 @@ class CustomerCommunicationService:
         cc_emails: str,
         forward_from_email_id: int | None,
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
+        message_id: str | None,
+        dunning_id: int | None,
     ) -> CustomerCommunicationActionResult:
         """Send through Mittwald and save the exact outgoing message before IMAP sees Sent."""
         customer = self._require_customer(customer_id)
@@ -1319,6 +1452,7 @@ class CustomerCommunicationService:
         }
         email = CustomerZohoEmail(
             customer=customer,
+            dunning_id=dunning_id,
             source="hub",
             direction="outbound",
             is_unread=False,
@@ -1377,6 +1511,7 @@ class CustomerCommunicationService:
                     )
                     for image in inline_images
                 ),
+                message_id=message_id,
             )
         except (EmailAttachmentStorageError, EmailComposeImageError, HubMailboxTransportError, ValueError) as exc:
             email.sync_status = "failed"
@@ -1386,16 +1521,19 @@ class CustomerCommunicationService:
                 False,
                 f"E-Mail wurde nicht über Mittwald versendet: {email.last_error}. "
                 "Der Entwurf bleibt verschlüsselt im Hub gespeichert.",
+                email.id,
             )
 
         email.zoho_message_id = delivery.message_id
         email.sync_status = "sent"
         email.zoho_synced_at = delivery.sent_at
         email.last_error = None
+        from app.services.hub_email_associations import index_email
+        index_email(self.db, self.cipher, email)
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "E-Mail wurde über Mittwald versendet.")
+        return CustomerCommunicationActionResult(True, "E-Mail wurde über Mittwald versendet.", email.id)
 
-    def get_email_reply(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailReply:
+    def get_email_reply(self, *, customer_id: int, email_id: int, allow_fetch: bool = True) -> CustomerCommunicationEmailReply:
         """Build a safe reply context only for a known inbound Zoho email."""
         email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
         if email.direction != "inbound":
@@ -1403,7 +1541,7 @@ class CustomerCommunicationService:
         if not email.zoho_message_id:
             raise ValueError("Für diese E-Mail fehlt die Zoho-Nachrichten-ID.")
         customer = self._require_customer(customer_id)
-        payload, original_content = self._email_content_for_composer(email)
+        payload, original_content = self._email_content_for_composer(email, allow_fetch=allow_fetch)
         sender_addresses = self._email_addresses(payload.get("from"))
         if len(sender_addresses) != 1:
             raise ValueError("Der Absender dieser E-Mail ist nicht eindeutig.")
@@ -1449,10 +1587,10 @@ class CustomerCommunicationService:
             ),
         )
 
-    def get_email_forward(self, *, customer_id: int, email_id: int) -> CustomerCommunicationEmailForward:
+    def get_email_forward(self, *, customer_id: int, email_id: int, allow_fetch: bool = True) -> CustomerCommunicationEmailForward:
         """Prepare an editable forwarded copy, fetching its body only when needed."""
         email = self._require_customer_email(customer_id=customer_id, email_id=email_id)
-        payload, original_content = self._email_content_for_composer(email)
+        payload, original_content = self._email_content_for_composer(email, allow_fetch=allow_fetch)
         subject = self._text(payload.get("subject")) or "Ohne Betreff"
         if not re.match(r"^\s*fwd\s*:", subject, flags=re.IGNORECASE):
             subject = f"Fwd: {subject}"
@@ -1471,10 +1609,12 @@ class CustomerCommunicationService:
             raise ValueError("Die ursprüngliche E-Mail ist zu groß, um sie vollständig weiterzuleiten.")
         return CustomerCommunicationEmailForward(email_id=email.id, subject=subject[:500], content=content)
 
-    def _email_content_for_composer(self, email: CustomerZohoEmail) -> tuple[dict[str, object], str]:
+    def _email_content_for_composer(self, email: CustomerZohoEmail, *, allow_fetch: bool = True) -> tuple[dict[str, object], str]:
         """Load the original body on demand for explicit reply and forward actions."""
         payload = self._payload(email.encrypted_payload_json)
         original_content = self._text(payload.get("content"))
+        if original_content is None and not allow_fetch:
+            raise ValueError("Der Nachrichtentext ist noch nicht lokal gespeichert. Bitte die E-Mail zuerst im Hub laden.")
         if original_content is None:
             self._load_email_content_for_email(email, mark_as_read=False)
             payload = self._payload(email.encrypted_payload_json)
@@ -1602,6 +1742,7 @@ class CustomerCommunicationService:
         return "content" in self._payload(email.encrypted_payload_json)
 
     def load_email_content(self, *, customer_id: int, email_id: int) -> CustomerCommunicationActionResult:
+        self._require_customer_email(customer_id=customer_id, email_id=email_id)
         email = self.db.scalar(
             select(CustomerZohoEmail).where(
                 CustomerZohoEmail.id == email_id,
@@ -1610,6 +1751,9 @@ class CustomerCommunicationService:
         )
         if email is None:
             raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
+        if self.actor:
+            from app.services.hub_mailbox_access import HubMailboxAccess
+            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=self.actor).require(f"linked-{customer_id}-{email_id}")
         self._load_email_content_for_email(email, mark_as_read=True)
         return CustomerCommunicationActionResult(True, "E-Mail-Inhalt wurde verschlüsselt aus Zoho geladen.")
 
@@ -1636,6 +1780,11 @@ class CustomerCommunicationService:
         self.db.flush()
 
     def mark_email_read(self, *, customer_id: int, email_id: int) -> None:
+        self._require_customer_email(customer_id=customer_id, email_id=email_id)
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        actor = resolve_mailbox_actor(self.actor)
+        scope = HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor) if actor else None
         email = self.db.scalar(
             select(CustomerZohoEmail).where(
                 CustomerZohoEmail.id == email_id,
@@ -1655,7 +1804,8 @@ class CustomerCommunicationService:
                     )
                 ).all()
                 for mirrored_email in mirrored_emails:
-                    mirrored_email.is_unread = False
+                    if scope is None or scope.visible(mirrored_email):
+                        mirrored_email.is_unread = False
             else:
                 email.is_unread = False
             self.db.flush()
@@ -1666,7 +1816,9 @@ class CustomerCommunicationService:
         customer_id: int,
         email_id: int,
         attachment_id: str,
+        allow_fetch: bool = True,
     ) -> CustomerCommunicationAttachmentDownload:
+        self._require_customer_email(customer_id=customer_id, email_id=email_id)
         email = self.db.scalar(
             select(CustomerZohoEmail).where(
                 CustomerZohoEmail.id == email_id,
@@ -1691,7 +1843,7 @@ class CustomerCommunicationService:
                 content_type=stored_attachment.content_type,
                 filename=attachment.filename,
             )
-        if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
+        if not allow_fetch or not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
             raise ValueError("Für diese E-Mail liegt kein lokal gespeicherter Anhang vor.")
         return self._download_zoho_email_attachment(email=email, payload=payload, attachment=attachment)
 
@@ -1714,6 +1866,7 @@ class CustomerCommunicationService:
         attachment_id: str,
     ) -> CustomerEmailAttachment:
         """Download one Zoho attachment and atomically register its encrypted local copy."""
+        self._require_customer_email(customer_id=customer_id, email_id=email_id)
         email = self.db.scalar(
             select(CustomerZohoEmail).where(
                 CustomerZohoEmail.id == email_id,
@@ -1789,6 +1942,7 @@ class CustomerCommunicationService:
         email_id: int,
         source_url_hash: str,
     ) -> CustomerCommunicationCachedImage:
+        self._require_customer_email(customer_id=customer_id, email_id=email_id)
         if not re.fullmatch(r"[0-9a-f]{64}", source_url_hash):
             raise ValueError("Das angeforderte Bild ist ungültig.")
         email = self.db.scalar(
@@ -2011,7 +2165,7 @@ class CustomerCommunicationService:
             content=self._text(payload.get("Note_Content")) or self._text(payload.get("content")) or "",
             source=note.source,
             sync_status=note.sync_status,
-            author=note.created_by_username,
+            author=record_author(note, note.created_by_username),
             occurred_at=note.zoho_modified_at or note.zoho_created_at or note.created_at,
             last_error=note.last_error,
         )
@@ -2043,6 +2197,36 @@ class CustomerCommunicationService:
             can_load_content=content is None and bool(email.zoho_message_id and email.zoho_module and email.zoho_record_id),
             last_error=email.last_error,
         )
+
+    def _scheduled_email_view(self, email: HubScheduledEmail) -> CustomerCommunicationEmailView:
+        payload = self._payload(email.encrypted_payload_json)
+        content = self._text(payload.get("content"))
+        sender_email = self._text(payload.get("sender_email"))
+        recipient_email = self._text(payload.get("recipient_email"))
+        recipient_name = self._text(payload.get("recipient_name"))
+        return CustomerCommunicationEmailView(
+            id=-email.id,
+            subject=self._text(payload.get("subject")) or "Ohne Betreff",
+            sender=sender_email,
+            recipients=(
+                f"{recipient_name} <{recipient_email}>"
+                if recipient_name and recipient_name.casefold() != recipient_email.casefold()
+                else recipient_email
+            ),
+            direction="outbound",
+            is_unread=False,
+            source="scheduled",
+            sync_status=email.status,
+            occurred_at=email.scheduled_at,
+            preview_html=self._email_preview_document(content),
+            attachments=(),
+            can_load_content=False,
+            last_error=email.last_error,
+        )
+
+    @staticmethod
+    def _aware_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
     @classmethod
     def _email_preview_document(cls, content: str | None, *, image_url_prefix: str | None = None) -> str | None:
@@ -2266,6 +2450,7 @@ class CustomerCommunicationService:
         customer: Customer,
         *,
         include_account_email: bool = True,
+        allowed_contact_ids: set[int] | None = None,
     ) -> list[CustomerCommunicationRecipient]:
         recipients: list[CustomerCommunicationRecipient] = []
         seen: set[str] = set()
@@ -2294,6 +2479,7 @@ class CustomerCommunicationService:
             )
         for contact in self.db.scalars(
             select(CustomerContact).where(CustomerContact.customer_id == customer.id)
+            .where(CustomerContact.id.in_(allowed_contact_ids) if allowed_contact_ids is not None else True)
         ).all():
             contact_profile = self._payload(contact.encrypted_profile_json)
             contact_fields = contact_profile.get("fields") if isinstance(contact_profile.get("fields"), dict) else {}
@@ -2310,6 +2496,11 @@ class CustomerCommunicationService:
         return customer
 
     def _require_customer_email(self, *, customer_id: int, email_id: int) -> CustomerZohoEmail:
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_access import HubMailboxAccess
+        actor = resolve_mailbox_actor(self.actor)
+        if actor:
+            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(f"linked-{customer_id}-{email_id}")
         email = self.db.scalar(
             select(CustomerZohoEmail).where(
                 CustomerZohoEmail.id == email_id,
@@ -2376,24 +2567,13 @@ class CustomerCommunicationService:
             "Accounts.Account_Name",
             "Customer.Name",
         )
-        settings = get_settings()
-        for key, value in {
-            "Company.Name": settings.finance_company_name,
-            "Company.Street": settings.finance_company_street,
-            "Company.PostalCode": settings.finance_company_postal_code,
-            "Company.City": settings.finance_company_city,
-            "Company.Phone": settings.finance_company_phone,
-            "Company.Email": settings.finance_company_email,
-            "Company.Iban": settings.finance_company_iban,
-            "Company.Bic": settings.finance_company_bic,
-            "Company.TaxId": settings.finance_company_tax_id,
-        }.items():
+        for key, value in company_template_values().items():
             add(value, key)
         add(customer.zoho_id, "id", "Accounts.id", "Account.id", "Customer.id", "Customer.Id")
         profile = self._payload(customer.encrypted_profile_json)
         fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
         customer_labels = {field.key: field.label for field in ZOHO_ACCOUNT_FIELDS}
-        for placeholder in CUSTOMER_PLACEHOLDERS:
+        for placeholder in EMAIL_CUSTOMER_PLACEHOLDERS:
             if placeholder.profile_key:
                 label = customer_labels.get(placeholder.profile_key, "")
                 add(fields.get(label) or fields.get(_CUSTOMER_FIELD_LABEL_ALIASES.get(label, "")), placeholder.token[2:-1])
@@ -2422,7 +2602,7 @@ class CustomerCommunicationService:
                 contact_profile = self._payload(contact.encrypted_profile_json)
                 contact_fields = contact_profile.get("fields") if isinstance(contact_profile.get("fields"), dict) else {}
                 contact_labels = {field.key: field.label for field in ZOHO_CONTACT_FIELDS}
-                for placeholder in CONTACT_PLACEHOLDERS:
+                for placeholder in EMAIL_CONTACT_PLACEHOLDERS:
                     if placeholder.profile_key:
                         add(contact_fields.get(contact_labels.get(placeholder.profile_key, "")), placeholder.token[2:-1])
                 add(
@@ -2542,6 +2722,15 @@ class CustomerCommunicationService:
         normalized = value.strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", normalized):
             raise ValueError("Wähle eine gültige Zoho-E-Mail-Vorlage aus.")
+        return normalized
+
+    @classmethod
+    def _required_template_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(dict.fromkeys(cls._required_template_id(value) for value in values))
+        if not normalized:
+            raise ValueError("Wähle mindestens eine E-Mail-Vorlage aus.")
+        if len(normalized) > 500:
+            raise ValueError("Es können höchstens 500 E-Mail-Vorlagen gleichzeitig bearbeitet werden.")
         return normalized
 
     @staticmethod

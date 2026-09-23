@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% from "partials/hub_data_panel.html" import hub_data_panel, hub_data_link with context %}
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/case_field_control.html" import case_field_control %}
+{% from "partials/field_layout_break.html" import show_more_layout_item %}
 {% block title %}{{ detail.case_number if detail.case_number else "Fall" }} · Fälle · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -19,7 +21,6 @@
         <div class="detail-actions-menu-popover">
           <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="case" data-agent-context-key="{{ detail.case.id }}">In Agent-Kontext aufnehmen</button>
           <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-case-delete-open>Fall löschen</button>
-          <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="case-fields">Layout bearbeiten</button>
         </div>
       </details>
     {% endcall %}
@@ -38,29 +39,48 @@
             </div>
           </div>
           <section data-expandable-section>
-            <div data-expandable-content class="is-expanded">
-              <div data-customer-fields-readonly>
-                <dl class="customer-fields-grid">
-                  {% for field in detail.fields %}
-                    <div>
-                      <dt>{{ field.label }}</dt>
-                      <dd>
-                        {% if field.key == "customer_name" and detail.case.customer %}
-                          <a href="/customers/{{ detail.case.customer.id }}">{{ field.value }}</a>
-                        {% else %}
-                          {{ field.value or "-" }}
-                        {% endif %}
-                      </dd>
-                    </div>
-                  {% endfor %}
-                </dl>
+            <div data-customer-fields-readonly>
+              <dl class="customer-fields-grid customer-fields-grid-summary">
+                {% for field in detail.fields[:detail.show_more_index] %}
+                  <div>
+                    <dt>{{ field.label }}</dt>
+                    <dd>
+                      {% if field.key == "customer_name" and detail.case.customer %}
+                        <a href="/customers/{{ detail.case.customer.id }}">{{ field.value }}</a>
+                      {% else %}
+                        {{ field.value or "-" }}
+                      {% endif %}
+                    </dd>
+                  </div>
+                {% endfor %}
+              </dl>
+              <div data-expandable-content{% if detail.show_more_index < detail.fields|length %} data-expandable-start-collapsed data-expandable-more-label="Mehr anzeigen ..." hidden{% else %} class="is-expanded"{% endif %}>
+                {% if detail.show_more_index < detail.fields|length %}
+                  <dl class="customer-fields-grid customer-fields-grid-following">
+                    {% for field in detail.fields[detail.show_more_index:] %}
+                      <div>
+                        <dt>{{ field.label }}</dt>
+                        <dd>
+                          {% if field.key == "customer_name" and detail.case.customer %}
+                            <a href="/customers/{{ detail.case.customer.id }}">{{ field.value }}</a>
+                          {% else %}
+                            {{ field.value or "-" }}
+                          {% endif %}
+                        </dd>
+                      </div>
+                    {% endfor %}
+                  </dl>
+                {% endif %}
               </div>
+              {% if detail.show_more_index < detail.fields|length %}<button class="button button-secondary customer-expand-toggle customer-fields-expand-toggle" type="button" data-expandable-toggle hidden>Mehr anzeigen ...</button>{% endif %}
             </div>
             <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
               <dl class="customer-fields-grid" data-layout-sortable>
                 {% for field in detail.fields %}
+                  {% if loop.index0 == detail.show_more_index %}{{ show_more_layout_item() }}{% endif %}
                   <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>
                 {% endfor %}
+                {% if detail.show_more_index >= detail.fields|length %}{{ show_more_layout_item() }}{% endif %}
               </dl>
             </div>
             <form id="case-fields-layout-form" method="post" action="/cases/{{ detail.case.id }}/layout" data-layout-form hidden>
@@ -129,22 +149,9 @@
       </div>
 
       <aside class="customer-detail-side-column">
-        <article class="card customer-detail-panel">
-          <div class="customer-detail-panel-heading">
-            <div>
-              <p class="eyebrow">Hub-Daten</p>
-              <h3>Verknüpfung</h3>
-            </div>
-          </div>
-          <dl class="customer-fields-grid">
-            <div><dt>Kunde</dt><dd>{% if detail.case.customer %}<a href="/customers/{{ detail.case.customer.id }}">{{ detail.case.customer.name }}</a>{% else %}-{% endif %}</dd></div>
-            <div><dt>{% if detail.case.zoho_id %}Zoho Fall-ID{% else %}Quelle{% endif %}</dt><dd>{{ detail.case.zoho_id or "Hub" }}</dd></div>
-            {% if detail.case.zoho_id %}
-              <div><dt>Letzte Änderung in Zoho</dt><dd>{{ (detail.case.zoho_modified_at or "-") | berlin_time }}</dd></div>
-              <div><dt>Letzte Synchronisierung</dt><dd>{{ (detail.case.zoho_synced_at or "-") | berlin_time }}</dd></div>
-            {% endif %}
-          </dl>
-        </article>
+        {% call hub_data_panel(detail.case) %}
+          {% if detail.case.customer %}<dl class="customer-fields-grid">{{ hub_data_link(detail.case, 'customers', detail.case.customer_id, 'Kunde', detail.case.customer.name, '/customers/' ~ detail.case.customer_id) }}</dl>{% endif %}
+        {% endcall %}
       </aside>
     </div>
 

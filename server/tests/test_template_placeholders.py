@@ -1,5 +1,9 @@
 from app.core.templates import create_templates
+from app.services.hub_finance_document_field_catalog import DUNNING_FIELDS, INVOICE_FIELDS, ORDER_FIELDS, RECURRING_INVOICE_FIELDS
+from app.services.hub_finance_field_catalog import OFFER_FIELDS
 from app.services.template_placeholders import EMAIL_TEMPLATE_CONTEXTS, contact_greeting, email_placeholders, pdf_placeholders
+from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
 
 def test_picker_scopes_document_fields_and_keeps_linked_sources():
@@ -72,6 +76,45 @@ def test_email_placeholder_contexts_cover_all_hub_record_types():
     assert by_token["${Lead.FirstName}"].contexts == ("leads", "tasks", "calls", "meetings")
     assert by_token["${Invoice.Number}"].contexts == ("invoices", "dunnings")
     assert by_token["${Company.Name}"].contexts == ()
+
+
+def test_email_picker_contains_every_usable_catalog_field():
+    placeholders = email_placeholders()
+    profile_keys_by_group = {
+        group: {item.profile_key for item in placeholders if item.group == group and item.profile_key}
+        for group in ("Kunde", "Verknüpfter Kontakt")
+    }
+    assert profile_keys_by_group["Kunde"] == {
+        field.key for field in ZOHO_ACCOUNT_FIELDS if not field.sensitive and not field.subform_parent
+    }
+    assert profile_keys_by_group["Verknüpfter Kontakt"] == {field.key for field in ZOHO_CONTACT_FIELDS}
+
+    tokens = {item.token for item in placeholders}
+    assert "${Customer.WorkDomain}" in tokens
+    assert "${Contact.SecondaryEmail}" in tokens
+    assert "${Customer.DialfireApiToken}" not in tokens
+    assert "${Customer.Iban}" not in tokens
+
+    finance_fields_by_group = {
+        "Aktuelles Angebot": OFFER_FIELDS,
+        "Aktueller Auftrag": ORDER_FIELDS,
+        "Aktuelle Rechnung": INVOICE_FIELDS,
+        "Aktuelle Mahnung": DUNNING_FIELDS,
+        "Aktuelle periodische Rechnung": RECURRING_INVOICE_FIELDS,
+    }
+    for group, fields in finance_fields_by_group.items():
+        assert {item.profile_key for item in placeholders if item.group == group and item.profile_key} == {
+            field.key for field in fields
+        }
+    assert {
+        "${Offer.Reference}",
+        "${Order.CancellationPeriod}",
+        "${Invoice.RemainingAmount}",
+        "${Dunning.Currency}",
+        "${RecurringInvoice.CustomInterval}",
+    } <= tokens
+    assert "${Call.RecordingUrl}" in tokens
+    assert "${Site.BridgeVersion}" in tokens
 
 
 def test_contact_greeting_completes_partial_letter_salutation_and_has_neutral_fallback():

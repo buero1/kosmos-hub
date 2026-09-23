@@ -1,6 +1,7 @@
 """Persisted Hub-Agent conversations, turns and controlled actions."""
 
 from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -50,7 +51,7 @@ class HubAgentConversationContext(TimestampMixin, Base):
     )
     resource_type: Mapped[str] = mapped_column(String(48), nullable=False)
     resource_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    encrypted_snapshot_json: Mapped[str] = mapped_column(Text(), nullable=False)
+    encrypted_snapshot_json: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
 
     conversation = relationship("HubAgentConversation", back_populates="contexts")
 

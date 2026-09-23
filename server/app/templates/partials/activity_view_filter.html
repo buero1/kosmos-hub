@@ -1,0 +1,9 @@
+<form method="get" class="activity-view-filter">
+  {% if calendar_week_start is defined %}<input type="hidden" name="week" value="{{ calendar_week_start }}">{% endif %}
+  <label>Ansicht
+    <select name="view" onchange="this.form.requestSubmit()">
+      {% for key, label in activity_views|default(()) %}<option value="{{ key }}"{% if key == activity_view %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <noscript><button class="button" type="submit">Anzeigen</button></noscript>
+</form>

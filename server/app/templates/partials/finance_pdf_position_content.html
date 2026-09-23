@@ -1,0 +1,17 @@
+{% macro position_styles() -%}
+  .pdf-position-name, .pdf-position-description { white-space: pre-line; overflow-wrap: anywhere; }
+  .pdf-position-name + .pdf-position-description { margin-top: 0.6mm; }
+{%- endmacro %}
+
+{% macro position_content(source_key, value, description="", inline_description=false) -%}
+  {%- if source_key == "article_name" -%}
+    <div class="pdf-position-name">{{ value }}</div>
+    {%- if inline_description and description | default("", true) | trim -%}
+      <div class="pdf-position-description">{{ description }}</div>
+    {%- endif -%}
+  {%- elif source_key == "article_description" -%}
+    {%- if value | default("", true) | trim -%}<div class="pdf-position-description">{{ value }}</div>{%- endif -%}
+  {%- else -%}
+    {{ value }}
+  {%- endif -%}
+{%- endmacro %}

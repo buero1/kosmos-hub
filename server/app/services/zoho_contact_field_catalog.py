@@ -1,6 +1,6 @@
 """Reviewed Zoho Contact fields used for creation and synchronization."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -10,12 +10,15 @@ class ZohoContactField:
     api_name: str
     display_type: str
     required: bool = False
+    required_on_create: bool = False
+    options: tuple[tuple[str, str], ...] = ()
 
 
 # Account_Name is deliberately not part of this catalog. The Hub always derives
 # that link from the customer selected in the form, never from submitted text.
 ZOHO_CONTACT_FIELDS = (
-    ZohoContactField("salutation", "Anrede", "Salutation", "Auswahlliste"),
+    ZohoContactField("salutation", "Anrede", "Salutation", "Auswahlliste", required_on_create=True,
+                     options=(("Frau", "Frau"), ("Herr", "Herr"), ("Divers", "Divers"))),
     ZohoContactField("letter_salutation", "Briefanrede", "Briefanrede", "Einzelzeile"),
     ZohoContactField("first_name", "Vorname", "First_Name", "Einzelzeile"),
     ZohoContactField("last_name", "Nachname", "Last_Name", "Einzelzeile", required=True),
@@ -37,3 +40,7 @@ ZOHO_CONTACT_FIELDS = (
     ZohoContactField("customer_status", "Status Kunde", "Status_Kunde", "Einzelzeile"),
     ZohoContactField("tag", "Tag", "Tag", "Einzelzeile"),
 )
+
+
+def contact_fields(*, creating: bool = False) -> tuple[ZohoContactField, ...]:
+    return tuple(replace(field, required=field.required or (creating and field.required_on_create)) for field in ZOHO_CONTACT_FIELDS)

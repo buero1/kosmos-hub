@@ -12,6 +12,7 @@ from app.models.customer import Customer
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.customer_contact import CustomerContact
 from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.zoho_email_template import ZohoEmailTemplate
 from app.services.customer_communications import CustomerCommunicationAttachmentUpload, CustomerCommunicationService
 from app.services.email_attachment_storage import EmailAttachmentStorage
 from app.services.email_composer_settings import EmailComposerSettingsService
@@ -201,6 +202,7 @@ def _customer(cipher: SecretCipher) -> tuple[Customer, CustomerContact]:
                 {
                     "fields": {
                         "Kontakt-E-Mail": "accounts@example.de",
+                        "Arbeitsdomain": "https://work.example-customer.de",
                         "Update-Datum": "2026-09-02",
                         "Update-Notiz": "Bitte nachfassen",
                         "Webseite": "https://example-customer.de",
@@ -536,11 +538,23 @@ def test_customer_communications_stores_an_email_attachment_encrypted_and_reuses
         ]
 
 
-def test_customer_communications_create_notes_send_mail_and_load_bodies():
+def _authorize_operator(db, monkeypatch, *, mittwald=False):
+    from app.models.hub_user import HubUser
+    from app.services.hub_mailbox_transport import HubMailboxTransportService
+    from mailbox_fixture_helpers import mailbox_account
+    db.add(HubUser(username="operator", password_hash="x", role="admin"))
+    mailbox_account(db, SecretCipher("a" * 32), "team@example.de").display_name = "Hub Team"
+    db.flush()
+    if not mittwald:
+        monkeypatch.setattr(HubMailboxTransportService, "is_configured", lambda self: False)
+
+
+def test_customer_communications_create_notes_send_mail_and_load_bodies(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -674,11 +688,12 @@ def test_customer_communications_rejects_an_email_response_without_content():
             service.load_email_content(customer_id=customer.id, email_id=email.id)
 
 
-def test_customer_communications_replies_to_the_original_zoho_message():
+def test_customer_communications_replies_to_the_original_zoho_message(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -746,11 +761,12 @@ def test_customer_communications_replies_to_the_original_zoho_message():
         }
 
 
-def test_customer_communications_forwards_loaded_content_and_attachments():
+def test_customer_communications_forwards_loaded_content_and_attachments(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -805,11 +821,12 @@ def test_customer_communications_forwards_loaded_content_and_attachments():
         assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
 
 
-def test_customer_communications_sends_new_email_attachments():
+def test_customer_communications_sends_new_email_attachments(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -839,11 +856,12 @@ def test_customer_communications_sends_new_email_attachments():
         assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
 
 
-def test_customer_communications_sends_sanitized_rich_email_html():
+def test_customer_communications_sends_sanitized_rich_email_html(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -901,6 +919,7 @@ def test_customer_communications_compiles_hub_email_before_mittwald_delivery(mon
             )
 
         monkeypatch.setattr("app.services.customer_communications.HubMailboxTransportService.send", fake_send)
+        _authorize_operator(db, monkeypatch, mittwald=True)
         service = _service(db, FakeZohoCommunications())
         recipient = service.get_view(customer_id=customer.id).recipients[1]
 
@@ -929,11 +948,12 @@ def test_customer_communications_compiles_hub_email_before_mittwald_delivery(mon
         assert compiler["version"]
 
 
-def test_customer_communications_loads_and_sends_an_editable_zoho_email_template():
+def test_customer_communications_loads_and_sends_an_editable_zoho_email_template(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
     with Session(engine) as db:
+        _authorize_operator(db, monkeypatch)
         cipher = SecretCipher("a" * 32)
         customer, contact = _customer(cipher)
         db.add_all([customer, contact])
@@ -1008,6 +1028,7 @@ def test_customer_communications_resolves_visible_customer_field_placeholders_in
             content=(
                 '<p><a href="${Customer.Website}">Aktuelle Website</a><br>'
                 '<a href="${Accounts.Webseite}">Bestehende Vorlage</a><br>'
+                '<a href="${Customer.WorkDomain}">Arbeitsdomain</a><br>'
                 "${Customer.Update-Notiz}</p>"
             ),
         )
@@ -1016,6 +1037,7 @@ def test_customer_communications_resolves_visible_customer_field_placeholders_in
 
         assert template.subject == "Website für Example Customer"
         assert template.content.count('href="https://example-customer.de"') == 2
+        assert 'href="https://work.example-customer.de"' in template.content
         assert "Bitte nachfassen" in template.content
         assert template.unresolved_placeholders == ()
 
@@ -1038,7 +1060,7 @@ def test_customer_communications_resolves_visible_contact_field_placeholders():
             subject="Nachricht für ${Contact.Name}",
             content=(
                 "<p>${Contact.Briefanrede} ${Contact.Nachname},<br>"
-                "${Contact.E-Mail}<br>${Contacts.Last_Name}</p>"
+                "${Contact.E-Mail}<br>${Contact.SecondaryEmail}<br>${Contacts.Last_Name}</p>"
             ),
         )
         recipient = next(item for item in service.list_contact_recipients(customer_id=customer.id) if item.key.startswith("contact:"))
@@ -1052,6 +1074,7 @@ def test_customer_communications_resolves_visible_contact_field_placeholders():
         assert template.subject == "Nachricht für Anna Example"
         assert "Sehr geehrte Frau Example," in template.content
         assert "anna@example.de" in template.content
+        assert "anna.private@example.de" in template.content
         assert template.content.count("Example") == 2
         assert template.unresolved_placeholders == ()
 
@@ -1095,6 +1118,45 @@ def test_customer_communications_resolves_canonical_linked_and_global_placeholde
         assert rendered.unresolved_placeholders == ()
 
 
+def test_customer_communications_resolves_supplied_dunning_placeholders():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_email_templates()
+        service.update_email_template(
+            template_id="zoho-template-1",
+            name="Erneute Abbuchung",
+            subject="Mahnung ${Dunning.Number}",
+            content=(
+                "<p>Wir werden den noch ausstehenden Betrag von ${Dunning.GrossTotal} "
+                "am <strong>${Dunning.DueDate}</strong> erneut abbuchen.</p>"
+            ),
+            context_module="dunnings",
+        )
+
+        rendered = service.get_email_template(
+            customer_id=customer.id,
+            template_id="zoho-template-1",
+            template_values={
+                "Dunning.Number": "MAH-000002",
+                "Dunning.GrossTotal": "534,30 EUR",
+                "Dunning.DueDate": "30.09.2026",
+            },
+        )
+
+        assert rendered.subject == "Mahnung MAH-000002"
+        assert "534,30 EUR" in rendered.content
+        assert "<strong>30.09.2026</strong>" in rendered.content
+        assert rendered.unresolved_placeholders == ()
+
+
 def test_customer_communications_keeps_hub_template_edits_when_zoho_templates_are_synced():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -1121,6 +1183,31 @@ def test_customer_communications_keeps_hub_template_edits_when_zoho_templates_ar
         preview = service.get_email_template_preview(template_id="zoho-template-1")
         assert preview.name == "Eigene Statusvorlage"
         assert preview.content == "<p>Hallo ${Accounts.Account_Name}</p>"
+
+
+def test_customer_communications_moves_email_template_to_an_existing_folder():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_email_templates()
+        service.update_email_template(
+            template_id="zoho-template-1",
+            name="Statusvorlage",
+            subject="Aktueller Stand",
+            content="<p>Hallo</p>",
+            folder_name="Intern",
+        )
+
+        templates = {item.id: item for item in service.list_email_templates()}
+        assert templates["zoho-template-1"].category == "Intern"
+        assert templates["zoho-template-2"].category == "Kunden"
 
 
 def test_customer_communications_inserts_the_shared_signature_as_safe_html_in_templates():
@@ -1173,6 +1260,20 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
         assert cloned.id.startswith("hub-template-")
         assert cloned.name == "Statusvorlage_geklont"
         assert cloned.subject == "Aktueller Stand für ${Accounts.Account_Name}"
+        cloned_summary = next(item for item in service.list_email_templates() if item.id == cloned.id)
+        assert cloned_summary.cloned_from == "zoho-template-1"
+        assert not cloned_summary.content_reviewed
+
+        cloned_model = db.scalar(
+            select(ZohoEmailTemplate).where(ZohoEmailTemplate.zoho_template_id == cloned.id)
+        )
+        assert cloned_model is not None
+        cloned_payload = service._payload(cloned_model.encrypted_payload_json)
+        cloned_payload["hub_content_reviewed_at"] = "2026-09-16T12:00:00+00:00"
+        cloned_model.encrypted_payload_json = service._encrypt_payload(cloned_payload)
+        db.flush()
+        reviewed_summary = next(item for item in service.list_email_templates() if item.id == cloned.id)
+        assert reviewed_summary.content_reviewed
 
         service.sync_email_templates()
         assert {item.id for item in service.list_email_templates()} == {
@@ -1184,6 +1285,40 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
         service.delete_email_template(template_id=cloned.id)
         service.delete_email_template(template_id="zoho-template-1")
         service.sync_email_templates()
+        assert [item.id for item in service.list_email_templates()] == ["zoho-template-2"]
+
+
+def test_customer_communications_moves_and_deletes_email_templates_in_batches():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer, contact = _customer(cipher)
+        db.add_all([customer, contact])
+        db.commit()
+
+        service = _service(db, FakeZohoCommunications())
+        service.sync_email_templates()
+        cloned = service.clone_email_template(
+            template_id="zoho-template-1",
+            name="Statusvorlage Kopie",
+        )
+
+        moved = service.move_email_templates(
+            template_ids=("zoho-template-1", cloned.id, "zoho-template-1"),
+            folder_name="Intern",
+        )
+        templates = {item.id: item for item in service.list_email_templates()}
+
+        assert moved == 2
+        assert templates["zoho-template-1"].category == "Intern"
+        assert templates[cloned.id].category == "Intern"
+        assert templates["zoho-template-2"].category == "Kunden"
+
+        deleted = service.delete_email_templates(template_ids=("zoho-template-1", cloned.id))
+
+        assert deleted == 2
         assert [item.id for item in service.list_email_templates()] == ["zoho-template-2"]
 
 

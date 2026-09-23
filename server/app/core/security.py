@@ -11,7 +11,12 @@ from app.core.config import get_settings
 class SecretCipher:
     def __init__(self, secret_key: str):
         digest = hashlib.sha256(secret_key.encode("utf-8")).digest()
+        self._index_key = digest
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
+
+    def search_digest(self, namespace: str, value: str) -> str:
+        """Keyed lookup token, without storing searchable personal data in clear text."""
+        return hmac.new(self._index_key, (namespace + "\0" + value).encode("utf-8"), hashlib.sha256).hexdigest()
 
     def encrypt(self, value: str) -> str:
         return self._fernet.encrypt(value.encode("utf-8")).decode("utf-8")

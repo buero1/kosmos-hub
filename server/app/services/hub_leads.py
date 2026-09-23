@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,10 +14,12 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.models.hub_lead import HubLead
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS, HubLeadField, HubLeadSubform
+from app.services.hub_workflows import HubWorkflowService
 from app.services.module_layouts import ModuleLayoutService
 
 
 LEAD_FIELDS_LAYOUT_KEY = "lead-fields"
+_BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
 
 
 class HubLeadError(ValueError):
@@ -65,6 +69,7 @@ class HubLeadDetail:
     status: str
     fields: tuple[HubLeadFieldValue, ...]
     subforms: tuple[HubLeadSubformValue, ...]
+    show_more_index: int
 
 
 class HubLeadService:
@@ -76,8 +81,11 @@ class HubLeadService:
         self.db = db
         self.cipher = cipher
 
-    def list_leads(self) -> tuple[HubLeadListEntry, ...]:
-        entries = [(lead, self._profile(lead)) for lead in self.db.scalars(select(HubLead)).all()]
+    def list_leads(self, *, allowed_lead_ids: set[int] | None = None) -> tuple[HubLeadListEntry, ...]:
+        lead_query = select(HubLead)
+        if allowed_lead_ids is not None:
+            lead_query = lead_query.where(HubLead.id.in_(allowed_lead_ids))
+        entries = [(lead, self._profile(lead)) for lead in self.db.scalars(lead_query).all()]
         entries.sort(key=lambda item: self._sort_key(item[0], item[1]), reverse=True)
         return tuple(self._list_entry(lead, profile) for lead, profile in entries)
 
@@ -88,7 +96,7 @@ class HubLeadService:
         profile = self._profile(lead)
         values = self._fields(profile)
         default_keys = tuple(field.key for field in HUB_LEAD_FIELDS)
-        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+        ordered_keys, show_more_index = ModuleLayoutService(db=self.db).ordered_keys_with_show_more(
             layout_key=LEAD_FIELDS_LAYOUT_KEY,
             default_keys=default_keys,
         )
@@ -100,16 +108,23 @@ class HubLeadService:
             status=self._display_option(by_key["lead_status"], values.get("lead_status")) or "-",
             fields=fields,
             subforms=self._subform_values(profile),
+            show_more_index=show_more_index,
         )
 
-    def new_form_values(self) -> dict[str, str | tuple[str, ...]]:
+    @staticmethod
+    def new_form_values() -> dict[str, str | tuple[str, ...]]:
         return {"lead_field__lead_status": "Lead erstellt"}
 
     def create_lead(self, *, submitted_values: dict[str, object]) -> HubLead:
+        fields = self._submitted_fields(submitted_values, existing={})
+        HubWorkflowService(db=self.db).apply_lead_field_updates(
+            previous_values={},
+            updated_values=fields,
+        )
         profile = {
             "schema_version": 1,
             "source": "hub",
-            "fields": self._submitted_fields(submitted_values, existing={}),
+            "fields": fields,
             "subforms": self._submitted_subforms(submitted_values, existing={}),
         }
         lead = HubLead(encrypted_profile_json=self._encrypt(profile))
@@ -157,6 +172,10 @@ class HubLeadService:
             if definition.read_only:
                 continue
             updated[key] = self._normalize_value(definition, raw_value, existing.get(key))
+        HubWorkflowService(db=self.db).apply_lead_field_updates(
+            previous_values=existing,
+            updated_values=updated,
+        )
         profile["fields"] = updated
         profile.setdefault("subforms", {})
         lead.encrypted_profile_json = self._encrypt(profile)
@@ -168,16 +187,21 @@ class HubLeadService:
         if lead is None:
             raise HubLeadError("Der Lead wurde nicht gefunden.")
         profile = self._profile(lead)
-        profile["fields"] = self._submitted_fields(submitted_values, existing=self._fields(profile))
+        existing_fields = self._fields(profile)
+        updated_fields = self._submitted_fields(submitted_values, existing=existing_fields)
+        HubWorkflowService(db=self.db).apply_lead_field_updates(
+            previous_values=existing_fields,
+            updated_values=updated_fields,
+        )
+        profile["fields"] = updated_fields
         profile["subforms"] = self._submitted_subforms(submitted_values, existing=self._subforms(profile))
         lead.encrypted_profile_json = self._encrypt(profile)
         self.db.flush()
         return lead
 
     def delete_lead(self, *, lead_id: int) -> HubLead:
-        lead = self.db.get(HubLead, lead_id)
-        if lead is None:
-            raise HubLeadError("Der Lead wurde nicht gefunden.")
+        from app.services.hub_deletion import prepare_record_deletion
+        lead = prepare_record_deletion(self.db, self.cipher, kind="leads", record_id=lead_id)
         self.db.delete(lead)
         self.db.flush()
         return lead
@@ -215,6 +239,8 @@ class HubLeadService:
         else:
             form_value = self._text(raw_value)
             value = self._display_option(definition, form_value) or form_value
+            if definition.display_type == "DatumZeit":
+                value = self._format_date_time(value)
         return HubLeadFieldValue(
             key=definition.key,
             label=definition.label,
@@ -231,6 +257,8 @@ class HubLeadService:
         result: list[HubLeadSubformValue] = []
         for definition in HUB_LEAD_SUBFORMS:
             rows = stored.get(definition.key, [])
+            if definition.key == "lead_results":
+                rows = sorted(rows, key=self._lead_result_sort_key, reverse=True)
             visible_rows = tuple(
                 HubLeadSubformRow(
                     fields=tuple(self._field_value(field, row.get(field.key)) for field in definition.fields)
@@ -251,6 +279,9 @@ class HubLeadService:
             if definition.read_only:
                 values[definition.key] = existing.get(definition.key, "")
                 continue
+            if f"lead_field__{definition.key}" not in submitted_values and definition.key in existing:
+                values[definition.key] = existing[definition.key]
+                continue
             raw_value = submitted_values.get(f"lead_field__{definition.key}")
             values[definition.key] = self._normalize_value(definition, raw_value, existing.get(definition.key))
         return values
@@ -266,7 +297,7 @@ class HubLeadService:
                     continue
                 row = {
                     field.key: (
-                        existing_row.get(field.key, "") if field.read_only
+                        existing_row.get(field.key, "") if field.read_only or f"{prefix}__{field.key}" not in submitted_values
                         else self._normalize_value(field, submitted_values.get(f"{prefix}__{field.key}"), existing_row.get(field.key))
                     )
                     for field in definition.fields
@@ -308,6 +339,33 @@ class HubLeadService:
     def _display_option(definition: HubLeadField, value: object) -> str:
         text = HubLeadService._text(value)
         return next((label for option, label in definition.options if option == text), text)
+
+    @staticmethod
+    def _format_date_time(value: str) -> str:
+        if not value:
+            return value
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(_BERLIN_TIMEZONE)
+        return parsed.strftime("%d.%m.%Y %H:%M")
+
+    @staticmethod
+    def _lead_result_sort_key(row: object) -> tuple[int, float]:
+        if not isinstance(row, dict):
+            return (0, 0.0)
+        value = HubLeadService._text(row.get("lead_modified_at"))
+        if not value:
+            return (0, 0.0)
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return (1, 0.0)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (2, parsed.timestamp())
 
     @staticmethod
     def _name(values: dict[str, object]) -> str:

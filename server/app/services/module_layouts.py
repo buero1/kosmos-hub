@@ -19,6 +19,7 @@ class ModuleLayoutError(ValueError):
 class ModuleLayoutService:
     """Stores named global layouts while safely accommodating changed item sets."""
 
+    SHOW_MORE_ITEM_KEY = "__show_more__"
     _LAYOUT_KEY = re.compile(r"[a-z][a-z0-9-]{1,63}\Z")
     _MAX_ITEMS = 250
     _MAX_PAYLOAD_LENGTH = 25_000
@@ -27,11 +28,34 @@ class ModuleLayoutService:
         self.db = db
 
     def ordered_keys(self, *, layout_key: str, default_keys: tuple[str, ...]) -> tuple[str, ...]:
+        ordered_keys, _ = self.ordered_keys_with_show_more(
+            layout_key=layout_key,
+            default_keys=default_keys,
+        )
+        return ordered_keys
+
+    def ordered_keys_with_show_more(
+        self,
+        *,
+        layout_key: str,
+        default_keys: tuple[str, ...],
+        default_show_more_after: str | None = None,
+    ) -> tuple[tuple[str, ...], int]:
         self._validate_layout_key(layout_key)
         defaults = self._unique_keys(default_keys)
         layout = self.db.scalar(select(ModuleLayout).where(ModuleLayout.layout_key == layout_key))
         stored = self._stored_keys(layout.item_order_json) if layout is not None else ()
-        return self._merge_order(stored, defaults)
+        ordered = self._merge_order(stored, defaults)
+        if self.SHOW_MORE_ITEM_KEY in stored:
+            marker_position = stored.index(self.SHOW_MORE_ITEM_KEY)
+            default_set = set(defaults)
+            fields_before_marker = {key for key in stored[:marker_position] if key in default_set}
+            show_more_index = sum(key in fields_before_marker for key in ordered)
+        elif default_show_more_after in ordered:
+            show_more_index = ordered.index(default_show_more_after) + 1
+        else:
+            show_more_index = len(ordered)
+        return ordered, show_more_index
 
     def configure(
         self,
@@ -46,7 +70,13 @@ class ModuleLayoutService:
         self._validate_layout_key(layout_key)
         submitted = self._submitted_keys(item_order_json)
         allowed = self._unique_keys(allowed_keys)
-        if set(submitted) != set(allowed) or len(submitted) != len(allowed):
+        submitted_fields = tuple(key for key in submitted if key != self.SHOW_MORE_ITEM_KEY)
+        marker_count = submitted.count(self.SHOW_MORE_ITEM_KEY)
+        if (
+            marker_count > 1
+            or set(submitted_fields) != set(allowed)
+            or len(submitted_fields) != len(allowed)
+        ):
             raise ModuleLayoutError("The submitted layout does not match the available fields.")
 
         layout = self.db.scalar(select(ModuleLayout).where(ModuleLayout.layout_key == layout_key))

@@ -1,0 +1,2 @@
+<label><span>Vorname</span><input type="text" name="first_name" value="{{ account_user.first_name or '' if account_user is defined else '' }}" maxlength="100" autocomplete="given-name"></label>
+<label><span>Nachname</span><input type="text" name="last_name" value="{{ account_user.last_name or '' if account_user is defined else '' }}" maxlength="100" autocomplete="family-name"><small class="subtle">Dieser Name erscheint bei Aktivitäten und Änderungen. Ohne Namen wird der Anmeldename angezeigt.</small></label>

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.services.ai_provider import AiProviderConfigService
+from app.services.ai_usage import AiUsageError, AiUsageTrace, request_openai_json
 from app.services.assistant_tools import AssistantToolError, HubAssistantTools
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -44,13 +45,16 @@ class HubAssistantService:
         question: str,
         *,
         selected_site_ids: set[int] | None = None,
+        actor: str | None = None,
     ) -> AssistantAnswer:
         normalized_question = self._normalize_question(question)
         config, api_key = self.provider_service.get_enabled_openai_api_key()
+        self.usage_trace = AiUsageTrace(db=self.db, actor=actor, feature="wordpress-assistant")
         tools = HubAssistantTools(
             db=self.db,
             cipher=self.cipher,
             panel_site_ids=selected_site_ids,
+            actor=actor,
         )
 
         try:
@@ -170,20 +174,11 @@ class HubAssistantService:
             ),
             "input": input_items,
         }
-        encoded_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-        http_request = request.Request(
-            OPENAI_RESPONSES_URL,
-            data=encoded_payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
         try:
-            with request.urlopen(http_request, timeout=45) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+            response_payload = request_openai_json(api_key=api_key, payload=payload, timeout=45,
+                trace=getattr(self, "usage_trace", None))
+        except AiUsageError as exc:
+            raise AssistantError(str(exc)) from exc
         except error.HTTPError as exc:
             raise AssistantError(f"OpenAI request failed (HTTP {exc.code}).") from exc
         except error.URLError as exc:

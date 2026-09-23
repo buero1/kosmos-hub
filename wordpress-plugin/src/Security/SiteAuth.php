@@ -2,18 +2,28 @@
 namespace KosmosBridge\Security;
 
 use KosmosBridge\Options;
+use KosmosBridge\Registration\SecretStore;
 use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
 
 class SiteAuth {
 	const NONCE_TTL = 600;
+	private static $authenticated = false;
+
+	public static function is_authenticated() {
+		return self::$authenticated;
+	}
 
 	/**
 	 * @param \WP_REST_Request $request REST request.
 	 * @return true|WP_Error
 	 */
 	public static function authorize_request( $request ) {
+		self::$authenticated = false;
+		if ( ! SecretStore::ensure_identity() ) {
+			return new WP_Error( 'kosmos_bridge_identity_busy', 'Bridge identity initialization is pending.', array( 'status' => 503 ) );
+		}
 		$site_uuid    = (string) $request->get_header( 'x-kosmos-site-uuid' );
 		$timestamp    = (string) $request->get_header( 'x-kosmos-timestamp' );
 		$nonce        = (string) $request->get_header( 'x-kosmos-nonce' );
@@ -56,6 +66,7 @@ class SiteAuth {
 		}
 
 		set_transient( $nonce_key, 1, self::NONCE_TTL );
+		self::$authenticated = true;
 		return true;
 	}
 

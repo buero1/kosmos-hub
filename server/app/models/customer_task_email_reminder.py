@@ -7,15 +7,20 @@ from app.models.base import Base, TimestampMixin
 
 
 class CustomerTaskEmailReminder(TimestampMixin, Base):
-    """A durable, one-time internal email reminder for a customer task."""
+    """Durable internal activity reminders; task_id remains for existing task jobs."""
 
     __tablename__ = "customer_task_email_reminders"
     __table_args__ = (
         UniqueConstraint("task_id", name="uq_customer_task_email_reminders_task"),
+        Index("uq_activity_email_reminder", "activity_kind", "activity_id", "reminder_key", unique=True),
         Index("ix_customer_task_email_reminders_status_next_attempt", "status", "next_attempt_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    activity_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="task", server_default="task")
+    activity_id: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    reminder_key: Mapped[str] = mapped_column(String(64), nullable=False, default="primary", server_default="primary")
+    recipient_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True)
     task_id: Mapped[int | None] = mapped_column(
         ForeignKey("customer_task_activities.id", ondelete="SET NULL"),
         nullable=True,

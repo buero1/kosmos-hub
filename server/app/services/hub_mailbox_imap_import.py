@@ -225,20 +225,22 @@ class HubMailboxImapImportService:
         return "succeeded" if outcome == "imported" else "skipped"
 
     def _store_message(self, *, parsed: _ParsedMessage) -> tuple[str, int, int]:
-        """Keep one Mittwald message once, preferring existing Zoho data for the same Message-ID."""
-        existing_linked = self.db.scalar(
-            select(CustomerZohoEmail.id)
+        """Deduplicate one mailbox's delivery, not the message across all mailboxes."""
+        from app.services.hub_email_associations import index_email
+        existing_linked = self.db.scalars(
+            select(CustomerZohoEmail)
             .where(CustomerZohoEmail.zoho_message_id == parsed.identity)
-            .limit(1)
-        )
+        ).all()
         fingerprint = sha256(f"mittwald-imap:{parsed.identity}".encode("utf-8")).hexdigest()
-        existing_unassigned = self.db.scalar(
-            select(HubMailboxEmail.id).where(HubMailboxEmail.fingerprint == fingerprint).limit(1)
-        )
-        if existing_linked is not None or existing_unassigned is not None:
+        existing_unassigned = self.db.scalars(
+            select(HubMailboxEmail).where(HubMailboxEmail.fingerprint == fingerprint)
+        ).all()
+        if any(self._same_mailbox_copy(email, parsed) for email in (*existing_linked, *existing_unassigned)):
             return "skipped", 0, 0
 
-        matched_customers = self._matched_customers(parsed.payload)
+        # The historical customer table permits only one row per customer/Message-ID.
+        # Additional deliveries use the shared mailbox store and its CRM address index.
+        matched_customers = [] if existing_linked else self._matched_customers(parsed.payload)
         mailbox_state = "spam" if HubSpamSenderService(db=self.db).is_blocked(
             direction=str(parsed.payload["direction"]), payload=parsed.payload
         ) else "active"
@@ -261,6 +263,7 @@ class HubMailboxImapImportService:
                     self.db.add(email)
                     self.db.flush()
                     stored_keys.extend(self._store_linked_attachments(email=email, attachments=parsed.attachments))
+                    index_email(self.db, self.cipher, email)
             else:
                 email = HubMailboxEmail(
                     source="mittwald-imap",
@@ -274,12 +277,46 @@ class HubMailboxImapImportService:
                 self.db.add(email)
                 self.db.flush()
                 stored_keys.extend(self._store_unassigned_attachments(email=email, attachments=parsed.attachments))
+                index_email(self.db, self.cipher, email)
             self.db.flush()
         except Exception:
             for storage_key in stored_keys:
                 self.communications.attachment_storage.remove(storage_key)
             raise
         return "imported", len(parsed.attachments), sum(len(attachment.content) for attachment in parsed.attachments)
+
+    def _same_mailbox_copy(self, email, parsed: _ParsedMessage) -> bool:
+        from app.models.hub_mailbox_permission import HubMailboxMembership
+        from app.services.hub_email_associations import addresses
+        from app.services.hub_mailbox_permissions import membership_column
+
+        payload = self.communications._payload(email.encrypted_payload_json)
+        # Use the original delivery direction even if the user moved the UI entry.
+        direction = payload.get("direction") or (
+            "outbound" if email.source in {"hub-direct-send", "hub-task-reminder", "hub-mailbox-health-alert"}
+            else email.direction
+        )
+        if direction != parsed.payload["direction"]:
+            return False
+        mailbox = str(parsed.payload.get("mittwald_mailbox") or "").strip().casefold()
+        stored_mailbox = str(payload.get("mittwald_mailbox") or "").strip().casefold()
+        if stored_mailbox:
+            return stored_mailbox == mailbox
+
+        memberships = set(self.db.scalars(
+            select(HubMailboxAccount.email_address)
+            .join(HubMailboxMembership, HubMailboxMembership.mailbox_account_id == HubMailboxAccount.id)
+            .where(membership_column(email) == email.id)
+        ))
+        if memberships:
+            return mailbox in {value.casefold() for value in memberships}
+        # Old rows can lack persisted mailbox provenance. Only infer an unambiguous
+        # sender/recipient, never treat another mailbox's Message-ID as a duplicate.
+        source = (payload.get("from") or payload.get("sender") or payload.get("absender")) if direction == "outbound" else (
+            payload.get("to") or payload.get("empfaenger") or payload.get("recipient")
+        )
+        candidates = addresses(source)
+        return candidates == {mailbox} if mailbox else not candidates
 
     def _store_linked_attachments(
         self,
@@ -338,23 +375,11 @@ class HubMailboxImapImportService:
         return stored_keys
 
     def _matched_customers(self, payload: dict[str, object]) -> list[Customer]:
-        direction = payload.get("direction")
-        matching_values = payload.get("from") if direction == "inbound" else [payload.get("to"), payload.get("cc")]
-        addresses = set()
-        for value in matching_values if isinstance(matching_values, list) else [matching_values]:
-            addresses.update(self._addresses(value))
-        if not addresses:
-            for key in ("from", "to", "cc"):
-                addresses.update(self._addresses(payload.get(key)))
-        if not addresses:
-            return []
-
-        customers: list[Customer] = []
-        for customer in self.db.scalars(select(Customer).order_by(Customer.id.asc())).all():
-            customer_addresses = {recipient.email for recipient in self.communications._recipients_for_customer(customer)}
-            if customer_addresses.intersection(addresses):
-                customers.append(customer)
-        return customers
+        from app.services.hub_email_associations import EmailAssociationService
+        if not hasattr(self, "_associations"):
+            self._associations = EmailAssociationService(db=self.db, cipher=self.cipher)
+        ids = {link.id for link in self._associations.links(payload, payload.get("direction")) if link.module == "customers"}
+        return list(self.db.scalars(select(Customer).where(Customer.id.in_(ids)).order_by(Customer.id))) if ids else []
 
     def _list_uids(self, *, account: HubMailboxAccount, folder: str, since_date: date) -> tuple[str, ...]:
         with self._connected_imap(account) as imap:

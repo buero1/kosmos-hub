@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "partials/finance_pdf_position_content.html" import position_content, position_styles %}
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -40,6 +41,7 @@
     .positions th { padding: 2.5mm 2mm; background: #0baee4; color: #fff; font-size: 8pt; text-align: left; }
     .positions td { padding: 2.5mm 2mm; border-bottom: 0.2mm solid #c8d1d5; vertical-align: top; }
     .positions tr { break-inside: avoid; }
+    {{ position_styles() }}
     .align-center { text-align: center !important; }
     .align-right { text-align: right !important; }
     .totals { width: 68mm; margin: 4mm 0 6mm auto; border-collapse: collapse; }
@@ -48,6 +50,7 @@
     .totals td { text-align: right; font-weight: 700; }
     .totals .grand { background: #e6ebf6; font-size: 10.5pt; }
     .payment { margin: 0 0 7mm; break-inside: auto; }
+    .positions + .payment { margin-top: 5mm; }
     .legal { page: legal-page; break-before: page; }
     .footer { position: running(document-footer); width: 100%; margin: 0; padding: 3.5mm 4mm; background: #0baee4; color: #082c36; font-size: 7pt; }
     .legal-footer { position: running(legal-footer); }
@@ -65,15 +68,16 @@
   </div>
   <div class="intro">{{ blocks.intro | safe }}</div>
   <table class="positions">
+    {% set inline_description = not (columns | selectattr("source_key", "equalto", "article_description") | list) %}
     <thead><tr>{% for column in columns %}<th class="align-{{ column.alignment }}" style="width:{{ column.width }}%">{{ column.label }}</th>{% endfor %}</tr></thead>
-    <tbody>{% for row in rows %}<tr>{% for column in columns %}<td class="align-{{ column.alignment }}">{{ row[column.source_key] }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ columns|length }}">Keine Positionen vorhanden.</td></tr>{% endfor %}</tbody>
+    <tbody>{% for row in rows %}<tr>{% for column in columns %}<td class="align-{{ column.alignment }}">{{ position_content(column.source_key, row[column.source_key], row.article_description, inline_description) }}</td>{% endfor %}</tr>{% else %}<tr><td colspan="{{ columns|length }}">Keine Positionen vorhanden.</td></tr>{% endfor %}</tbody>
   </table>
-  <table class="totals">
+  {% if show_totals %}<table class="totals">
     <tr><th>Zwischensumme</th><td>{{ subtotal }}</td></tr>
     <tr><th>Rabatt</th><td>{{ discount }}</td></tr>
     <tr><th>USt.</th><td>{{ tax }}</td></tr>
     <tr class="grand"><th>Gesamt</th><td>{{ gross }}</td></tr>
-  </table>
+  </table>{% endif %}
   <div class="payment">{{ blocks.payment | safe }}</div>
   {% if has_legal %}<div class="legal">{{ blocks.legal | safe }}</div>{% endif %}
 </body>

@@ -32,6 +32,7 @@ def test_due_popup_reminders_are_materialized_and_can_be_snoozed_or_completed(mo
             ends_at=now + timedelta(minutes=30),
             duration_minutes=30,
             created_by_username=user.username,
+            assignee_user=user,
             reminders=[CustomerCallReminder(channel="popup", minutes_before=0, sort_order=0)],
         )
         meeting = CustomerMeetingActivity(
@@ -41,6 +42,7 @@ def test_due_popup_reminders_are_materialized_and_can_be_snoozed_or_completed(mo
             starts_at=now + timedelta(minutes=5),
             ends_at=now + timedelta(minutes=65),
             created_by_username=user.username,
+            assignee_user=user,
             reminders=[CustomerMeetingReminder(channel="popup", minutes_before=5, sort_order=0)],
         )
         db.add_all([call, meeting])
@@ -116,6 +118,7 @@ def test_unlinked_call_has_activity_link_but_no_related_link(monkeypatch):
             ends_at=now + timedelta(minutes=30),
             duration_minutes=30,
             created_by_username=user.username,
+            assignee_user=user,
             reminders=[CustomerCallReminder(channel="popup", minutes_before=0, sort_order=0)],
         )
         db.add_all([user, call])
@@ -148,6 +151,7 @@ def test_desktop_reminder_uses_current_task_customer_after_relink(monkeypatch):
             reminder_channel="popup",
             reminder_minutes_before=0,
             created_by_username=user.username,
+            assignee_user=user,
         )
         db.add(task)
         db.flush()
@@ -187,6 +191,7 @@ def test_desktop_reminders_can_be_snoozed_until_before_their_individual_starts(m
             ends_at=now + timedelta(minutes=70),
             duration_minutes=30,
             created_by_username=user.username,
+            assignee_user=user,
             reminders=[CustomerCallReminder(channel="popup", minutes_before=40, sort_order=0)],
         )
         db.add(call)

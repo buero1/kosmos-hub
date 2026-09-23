@@ -1,0 +1,21 @@
+{% set message = email.mailbox_message %}
+{% set source_base = '/customers/' ~ message.customer_id ~ '/communications/emails/' ~ message.customer_email_id if message.kind == 'linked' else '/emails/unassigned/' ~ message.customer_email_id %}
+<article class="communication-entry">
+  <div class="communication-entry-heading">
+    <strong>{{ message.subject }}</strong>
+    <span class="pill">{{ 'Eingang' if message.direction == 'inbound' else 'Ausgang' }}</span>
+    {% if message.is_unread %}<span class="pill">Neu</span>{% endif %}
+  </div>
+  <p class="subtle">{% if message.sender %}Von {{ message.sender }}{% endif %}{% if message.recipients %} · An {{ message.recipients }}{% endif %}{% if message.occurred_at %} · {{ message.occurred_at | berlin_time }}{% endif %}</p>
+  {% if message.preview_html %}
+    <details class="communication-content" data-email-preview data-email-unread="{{ 'true' if message.is_unread else 'false' }}" data-email-read-url="{{ source_base }}/read" data-email-read-csrf="{{ csrf_token }}">
+      <summary>E-Mail-Vorschau anzeigen</summary>
+      <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ message.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ message.preview_html }}"></iframe>
+    </details>
+  {% endif %}
+  {% if message.attachments %}
+    <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
+      {% for attachment in message.attachments %}<li><a href="{{ source_base }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}
+    </ul>
+  {% endif %}
+</article>

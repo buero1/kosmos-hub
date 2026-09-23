@@ -7,6 +7,7 @@ from app.models.hub_legal_terms import HubLegalTerms, HubLegalTermsRevision
 from app.models.hub_pdf_template import HubPdfTemplate, HubPdfTemplateRevision
 from app.models.hub_user import HubUser
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.hub_document_template_catalog import NAME_FIELD, NAME_MIN_LENGTH
 
 
 class HubLegalTermsError(ValueError):
@@ -45,8 +46,9 @@ class HubLegalTermsService:
         self._add_revision(legal_terms=legal_terms, actor_username="system")
         return legal_terms
 
-    def list_terms(self) -> tuple[HubLegalTerms, ...]:
-        self.ensure_default()
+    def list_terms(self, *, initialize: bool = True) -> tuple[HubLegalTerms, ...]:
+        if initialize:
+            self.ensure_default()
         return tuple(
             self.db.scalars(
                 select(HubLegalTerms)
@@ -197,7 +199,7 @@ class HubLegalTermsService:
     @staticmethod
     def _name(value: str) -> str:
         normalized = " ".join(value.split())
-        if not 3 <= len(normalized) <= 255:
+        if not NAME_MIN_LENGTH <= len(normalized) <= NAME_FIELD.max_length:
             raise HubLegalTermsError("Der AGB-Name muss zwischen 3 und 255 Zeichen lang sein.")
         return normalized
 

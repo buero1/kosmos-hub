@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from functools import wraps
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.routes import web
 from app.db.base import Base
 from app.models.site import Site, SiteStatus
+from app.models.hub_user import HubUser
 from app.services.customer_communications import CustomerCommunicationAttachmentDownload, CustomerCommunicationCachedImage
 from app.services.site_users import SiteUserService
 
@@ -28,14 +30,17 @@ def test_browser_orchestrated_user_actions_call_the_existing_verified_service_me
     monkeypatch.setattr(web, "require_csrf", lambda request, token: None)
     monkeypatch.setattr(web, "_require_hub_admin", lambda request: SimpleNamespace(username="kosmosadmin"))
 
+    @wraps(SiteUserService.create_user)
     def create_user(self, **kwargs):
         calls.append(("create", kwargs))
         return {"username": kwargs["username"]}
 
+    @wraps(SiteUserService.update_role)
     def update_role(self, **kwargs):
         calls.append(("role", kwargs))
         return {"username": "editor"}
 
+    @wraps(SiteUserService.update_password)
     def update_password(self, **kwargs):
         calls.append(("password", kwargs))
         return {"username": "editor"}
@@ -46,9 +51,10 @@ def test_browser_orchestrated_user_actions_call_the_existing_verified_service_me
 
     with Session(engine) as db:
         site = _site()
-        db.add(site)
+        user = HubUser(username="kosmosadmin", role="admin", password_hash="test-hash")
+        db.add_all([site, user])
         db.commit()
-        request = SimpleNamespace()
+        request = SimpleNamespace(state=SimpleNamespace(hub_user=user))
 
         create_outcome = web.create_user_on_one_site(
             request=request,
@@ -90,16 +96,14 @@ def test_customer_email_attachment_download_returns_a_non_cached_browser_downloa
     monkeypatch.setattr(web, "write_audit_log", lambda _db, **kwargs: calls.append(kwargs))
     monkeypatch.setattr(
         web,
-        "_customer_communication_service",
-        lambda _db: SimpleNamespace(
-            download_email_attachment=lambda **kwargs: (
-                calls.append(kwargs)
+        "download_shared_email_attachment",
+        lambda gateway, email_key, attachment_id, **kwargs: (
+                calls.append({"email_key": email_key, "attachment_id": attachment_id, **kwargs})
                 or CustomerCommunicationAttachmentDownload(
                     content=b"%PDF-test",
                     content_type="application/pdf",
                     filename="Angebot 2026.pdf",
                 )
-            )
         ),
     )
     db = SimpleNamespace(commit=lambda: calls.append({"committed": True}), rollback=lambda: None)
@@ -108,7 +112,7 @@ def test_customer_email_attachment_download_returns_a_non_cached_browser_downloa
         customer_id=73,
         email_id=9,
         attachment_id="zoho-attachment-1",
-        request=SimpleNamespace(),
+        request=SimpleNamespace(state=SimpleNamespace(hub_user=SimpleNamespace(username="kosmosadmin"))),
         db=db,
     )
 
@@ -116,7 +120,7 @@ def test_customer_email_attachment_download_returns_a_non_cached_browser_downloa
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''Angebot%202026.pdf"
     assert response.headers["x-content-type-options"] == "nosniff"
-    assert calls[0] == {"customer_id": 73, "email_id": 9, "attachment_id": "zoho-attachment-1"}
+    assert calls[0] == {"email_key": "linked-73-9", "attachment_id": "zoho-attachment-1", "allow_fetch": True}
 
 
 def test_customer_email_preview_image_returns_the_cached_private_image(monkeypatch):

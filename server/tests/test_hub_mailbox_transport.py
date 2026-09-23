@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
+import smtplib
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.db.base import Base
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.services.hub_mailbox_transport import (
     HubMailboxTransportAttachment,
+    HubMailboxTransportError,
     HubMailboxTransportInlineImage,
     HubMailboxTransportService,
 )
@@ -80,6 +83,73 @@ def test_mittwald_smtp_delivery_uses_the_configured_sender_and_builds_a_mime_mes
     assert message.get_body(preferencelist=("plain",)).get_content().strip() == "Hallo\n[Bild]"
     assert any(part.get_filename() == "angebot.txt" for part in message.walk())
     assert any(part.get("Content-ID") == "<hub-image-1@kosmos-hub>" for part in message.walk())
+
+
+@pytest.mark.parametrize(("stage", "failure", "expected"), [
+    ("send", smtplib.SMTPRecipientsRefused({"private@example.test": (550, b"5.1.1 private@example.test unknown")}),
+     "Empfängeradresse vom Mailserver abgelehnt. Bitte prüfen."),
+    ("send", smtplib.SMTPRecipientsRefused({"private@example.test": (550, b"5.7.1 policy refusal")}),
+     "Empfängeradresse vom Mailserver abgelehnt. Bitte prüfen."),
+    ("send", smtplib.SMTPRecipientsRefused({"private@example.test": (450, b"4.2.0 unavailable")}),
+     "Empfängeradresse vom Mailserver vorübergehend abgelehnt. Bitte später erneut versuchen."),
+    ("send", smtplib.SMTPRecipientsRefused({
+        "private@example.test": (550, b"5.1.1 unknown"), "cc@example.test": (450, b"4.2.0 unavailable"),
+    }), "Empfängeradressen vom Mailserver abgelehnt. Bitte prüfen."),
+    ("send", smtplib.SMTPRecipientsRefused({
+        "private@example.test": (450, b"4.2.0 unavailable"), "cc@example.test": (451, b"4.3.0 unavailable"),
+    }), "Empfängeradressen vom Mailserver vorübergehend abgelehnt. Bitte später erneut versuchen."),
+    ("login", smtplib.SMTPAuthenticationError(535, b"private credentials rejected"),
+     "Die SMTP-Anmeldung bei Mittwald wurde abgelehnt."),
+    ("connect", TimeoutError("private connection details"),
+     "Die E-Mail konnte nicht über Mittwald versendet werden. Bitte später erneut versuchen."),
+    ("send", smtplib.SMTPServerDisconnected("private connection details"),
+     "Die E-Mail konnte nicht über Mittwald versendet werden. Bitte später erneut versuchen."),
+    ("send", smtplib.SMTPSenderRefused(550, b"private sender rejected", "private@example.test"),
+     "Die E-Mail konnte nicht über Mittwald versendet werden. Bitte später erneut versuchen."),
+    ("send", smtplib.SMTPDataError(550, b"private message rejected"),
+     "Die E-Mail konnte nicht über Mittwald versendet werden. Bitte später erneut versuchen."),
+])
+def test_smtp_failure_message_uses_the_actual_failure_type(monkeypatch, caplog, stage, failure, expected):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    closed = []
+
+    class FailingSmtp:
+        def __init__(self, *_args, **_kwargs):
+            if stage == "connect":
+                raise failure
+
+        def login(self, *_args):
+            if stage == "login":
+                raise failure
+
+        def send_message(self, *_args, **_kwargs):
+            raise failure
+
+        def quit(self):
+            closed.append(True)
+
+    monkeypatch.setattr("app.services.hub_mailbox_transport.smtplib.SMTP_SSL", FailingSmtp)
+    with Session(engine) as db:
+        db.add(HubMailboxAccount(
+            email_address="info@kosmos.example", display_name="Kosmos", username="info@kosmos.example",
+            encrypted_password=cipher.encrypt("private-password"), verified_at=datetime.now(UTC),
+        ))
+        db.flush()
+        with pytest.raises(HubMailboxTransportError) as raised:
+            HubMailboxTransportService(db=db, cipher=cipher).send(
+                sender_email="info@kosmos.example", recipient_name="Private Recipient",
+                recipient_email="private@example.test", subject="private subject",
+                html_content="<p>private body</p>", cc_recipients=(), reply_to_message_id=None, attachments=(),
+            )
+    assert str(raised.value) == expected
+    assert raised.value.__cause__ is failure
+    assert closed == ([] if stage == "connect" else [True])
+    assert type(failure).__name__ in caplog.text
+    assert "smtp_codes=" in caplog.text
+    assert "private" not in caplog.text.lower()
+    assert "@" not in caplog.text
 
 
 def test_list_senders_prioritizes_the_standard_info_mailbox():

@@ -30,7 +30,9 @@ from app.services.email_compose_images import EmailComposeImageError, EmailCompo
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, ORDER_MODULE, HubFinanceDocumentService
+from app.services.hub_leads import HubLeadService
 from app.services.hub_pdf_templates import HubPdfTemplateError, HubPdfTemplateService
+from app.services.hub_offer_notes import OFFER_NOTES_TOKEN, sanitize_offer_notes
 from app.services.template_placeholders import DOCUMENT_NAMES, contact_greeting, profile_placeholders
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
@@ -100,6 +102,7 @@ class FinancePdfSnapshot:
     totals: Any
     customer_fields: dict[str, str] = field(default_factory=dict)
     contact_fields: dict[str, str] = field(default_factory=dict)
+    notes_html: str = ""
 
 
 class HubFinancePdfService:
@@ -322,6 +325,9 @@ class HubFinancePdfService:
         directory = CustomerDirectoryService(db=self.db, cipher=self.cipher)
         customer_detail = directory.get_detail(customer_id=document.customer_id) if document.customer_id is not None else None
         customer_address = self._customer_address(customer_detail)
+        lead_detail = None
+        if document_type == "offers" and getattr(document, "lead_id", None) is not None:
+            lead_detail = HubLeadService(db=self.db, cipher=self.cipher).get_detail(lead_id=document.lead_id)
         if document_type in {"invoices", "dunnings"} and getattr(detail, "billing_address", ""):
             customer_address = self._address_with_snapshot_fallback(
                 customer_address,
@@ -343,6 +349,39 @@ class HubFinancePdfService:
                     contact_labels.get(field.label, field.key): field.value or ""
                     for field in contact_detail.profile_fields
                 }
+        customer_name = document.customer.name if document.customer is not None else ""
+        contact_name = detail.contact_name
+        if lead_detail is not None:
+            lead_values = {
+                field.key: field.form_value
+                for field in lead_detail.fields
+                if isinstance(field.form_value, str)
+            }
+            customer_name = lead_values.get("company", "") or lead_detail.name
+            contact_name = lead_detail.name
+            customer_address = (
+                lead_values.get("street", ""),
+                lead_values.get("postal_code", ""),
+                lead_values.get("city", ""),
+                self._country_code(lead_values.get("country", "")),
+            )
+            customer_fields = {
+                "billing_street": customer_address[0],
+                "billing_postal_code": customer_address[1],
+                "billing_city": customer_address[2],
+                "phone": lead_values.get("phone", ""),
+                "website": lead_values.get("website", ""),
+            }
+            contact_fields = {
+                "salutation": lead_values.get("salutation", ""),
+                "first_name": lead_values.get("first_name", ""),
+                "last_name": lead_values.get("last_name", ""),
+                "email": lead_values.get("email", ""),
+                "phone": lead_values.get("phone", ""),
+                "mailing_street": customer_address[0],
+                "mailing_postal_code": customer_address[1],
+                "mailing_city": customer_address[2],
+            }
         return FinancePdfSnapshot(
             document_type=document_type,
             identifier=detail.offer_number if document_type == "offers" else detail.identifier,
@@ -354,8 +393,8 @@ class HubFinancePdfService:
             valid_until=valid_until,
             payment_terms=self._field_display_value(fields, "payment_terms"),
             currency=self._field_form_value(fields, "currency") or "EUR",
-            customer_name=document.customer.name if document.customer is not None else "",
-            contact_name=detail.contact_name,
+            customer_name=customer_name,
+            contact_name=contact_name,
             billing_street=customer_address[0],
             billing_postal_code=customer_address[1],
             billing_city=customer_address[2],
@@ -364,6 +403,7 @@ class HubFinancePdfService:
             totals=detail.totals,
             customer_fields=customer_fields,
             contact_fields=contact_fields,
+            notes_html=detail.notes_html if document_type == "offers" else "",
         )
 
     def _render_html(
@@ -439,15 +479,22 @@ class HubFinancePdfService:
         replacements["${Customer.BillingPostalCode}"] = snapshot.billing_postal_code
         replacements["${Customer.BillingCity}"] = snapshot.billing_city
         rendered_blocks: dict[str, str] = {}
+        # Resolve embedded greeting/field tokens once; record text is never markup.
+        notes_html = ""
+        if snapshot.document_type == "offers":
+            notes_html = sanitize_offer_notes(snapshot.notes_html)
+            notes_html = _PLACEHOLDER_PATTERN.sub(lambda match: escape(replacements.get(match.group(0), "") or ""), notes_html)
+            notes_html = sanitize_offer_notes(notes_html)
         blocks = content.get("blocks", {})
         for key, raw in blocks.items() if isinstance(blocks, dict) else ():
             if not isinstance(raw, dict) or not raw.get("is_visible", True):
                 rendered_blocks[str(key)] = ""
                 continue
             rendered = str(raw.get("content_html", ""))
-            for token, value in replacements.items():
-                rendered = rendered.replace(token, escape(value or ""))
-            rendered_blocks[str(key)] = _PLACEHOLDER_PATTERN.sub("", rendered)
+            rendered_blocks[str(key)] = _PLACEHOLDER_PATTERN.sub(
+                lambda match: notes_html if match.group(0) == OFFER_NOTES_TOKEN else escape(replacements.get(match.group(0), "") or ""),
+                rendered,
+            )
         rendered_legal_terms = legal_terms_html
         for token, value in replacements.items():
             rendered_legal_terms = rendered_legal_terms.replace(token, escape(value or ""))
@@ -463,6 +510,7 @@ class HubFinancePdfService:
         return _PDF_TEMPLATE_ENV.get_template("finance_generated_pdf.html").render(
             blocks=rendered_blocks,
             columns=visible_columns,
+            show_totals=positions.get("show_totals") is not False if isinstance(positions, dict) else True,
             rows=rows,
             currency=snapshot.currency,
             subtotal=self._money(snapshot.totals.subtotal_net, snapshot.currency),
@@ -698,7 +746,8 @@ class HubFinancePdfService:
     def _money(value: Decimal, currency: str) -> str:
         amount = value.quantize(_CENT, rounding=ROUND_HALF_UP)
         grouped = f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-        return f"{grouped} {currency}"
+        symbol = "\u20ac" if currency == "EUR" else currency
+        return f"{grouped} {symbol}"
 
     @staticmethod
     def _display_date(value: str) -> str:

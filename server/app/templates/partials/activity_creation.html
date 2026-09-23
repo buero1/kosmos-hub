@@ -1,0 +1,20 @@
+{% macro attributes(activity) -%}
+data-activity-id="{{ activity.id }}" data-activity-can-delete="{{ 'true' if activity.can_delete else 'false' }}"
+data-activity-created-by="{{ activity.created_by or 'Nicht bekannt' }}" data-activity-created-at="{{ activity.created_at | berlin_time_local }}"
+data-activity-assignee-id="{{ activity.assignee_user_id or '' }}" data-activity-assignee-name="{{ activity.assignee_name or 'Nicht zugeordnet' }}"
+data-activity-changed-by="{{ activity.changed_by or '' }}" data-activity-changed-at="{{ activity.changed_at | berlin_time_local }}"
+data-activity-completed-by="{{ activity.completed_by or '' }}" data-activity-completed-at="{{ activity.completed_at | berlin_time_local }}"
+data-activity-can-edit="{{ 'true' if activity.can_edit else 'false' }}" data-activity-can-assign="{{ 'true' if activity.can_assign else 'false' }}"
+{%- endmacro %}
+
+{% macro summary(activity) -%}
+<p class="subtle activity-creation-summary">Erstellt von {{ activity.created_by or 'Nicht bekannt' }} · {{ activity.created_at | berlin_time_local }}</p>
+<p class="subtle activity-creation-summary">Verantwortlich: {{ activity.assignee_name or 'Nicht zugeordnet' }}{% if activity.completed_at %} · Erledigt von {{ activity.completed_by }} · {{ activity.completed_at | berlin_time_local }}{% endif %}</p>
+{%- endmacro %}
+
+{% macro fields(author, created_at) -%}
+<dl class="activity-creation-fields">
+  <div><dt>Erstellt von</dt><dd>{{ author or 'Nicht bekannt' }}</dd></div>
+  <div><dt>Erstellt am</dt><dd>{{ created_at | berlin_time_local }}</dd></div>
+</dl>
+{%- endmacro %}

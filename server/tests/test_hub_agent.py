@@ -3,8 +3,10 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from mailbox_fixture_helpers import mailbox_account
 
 from app.core.security import SecretCipher
 from app.db.base import Base
@@ -16,11 +18,35 @@ from app.models.hub_agent import HubAgentAction, HubAgentConversation, HubAgentC
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
 from app.models.hub_mailbox_email import HubMailboxEmail
+from app.models.hub_lead import HubLead
+from app.models.hub_user import HubUser
 from app.models.site import Site
 from app.services.hub_agent import HubAgentEmailContext, HubAgentError, HubAgentService
+from app.services.hub_access_control import HubAccessControlService
+from app.services.hub_email_composition import normalize_reply_html
+from app.services.hub_operations import agent_operations
+
+
+@pytest.mark.parametrize("action_type", ["create_email_draft", "create_email_reply_draft", "emails.drafts.save"])
+def test_agent_rejects_legacy_and_ui_only_actions_at_planning_and_execution(action_type):
+    raw = {"action_type": action_type, "title": "Test", "details": "Test", "input": {}}
+    with pytest.raises(HubAgentError, match="nicht erlaubten"):
+        HubAgentService._normalize_action(raw)
+    service = object.__new__(HubAgentService)
+    with pytest.raises(HubAgentError, match="nicht unterstützt"):
+        service._execute_payload(action_type=action_type, payload=raw, actor="hub-admin")
+
+
+def test_agent_action_enum_is_exactly_the_enabled_registry():
+    tool = HubAgentService._proposal_tool_definition()
+    actions = tool["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"]
+    assert actions == sorted(operation.key for operation in agent_operations())
 
 
 def _add_action(db: Session, cipher: SecretCipher, *, action_type: str, input_values: dict[str, str]) -> HubAgentAction:
+    mailbox_account(db, cipher)
+    if db.scalar(select(HubUser).where(HubUser.username == "hub-admin")) is None:
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin", reminder_email="admin@example.test"))
     job = HubAgentJob(
         created_by_username="hub-admin",
         status="ready",
@@ -55,22 +81,22 @@ def test_hub_agent_executes_a_contact_task_and_draft_only_after_individual_appro
         contact_action = _add_action(
             db,
             cipher,
-            action_type="create_contact",
+            action_type="contacts.create",
             input_values={
                 "customer_name": "Test-Kunde",
-                "salutation": "Herr",
-                "first_name": "Max",
-                "last_name": "Mustermann",
-                "email": "max@example.test",
+                "contact_field__salutation": "Herr",
+                "contact_field__first_name": "Max",
+                "contact_field__last_name": "Mustermann",
+                "contact_field__email": "max@example.test",
             },
         )
         task_action = _add_action(
             db,
             cipher,
-            action_type="create_task",
+            action_type="activities.tasks.create",
             input_values={
                 "customer_name": "Test-Kunde",
-                "task_name": "Angebot vorbereiten",
+                "name": "Angebot vorbereiten",
                 "due_date": "2026-09-11",
                 "due_time": "09:00",
                 "reminder_channel": "popup",
@@ -80,13 +106,13 @@ def test_hub_agent_executes_a_contact_task_and_draft_only_after_individual_appro
         draft_action = _add_action(
             db,
             cipher,
-            action_type="create_email_draft",
+            action_type="emails.drafts.create",
             input_values={
-                "customer_name": "Test-Kunde",
+                "customer_id": str(customer.id),
                 "recipient_name": "Max Mustermann",
                 "recipient_email": "max@example.test",
-                "email_subject": "Ihr Angebot",
-                "email_html": "<p>Guten Tag Max,</p><p>Ihr Angebot folgt Ende der Woche.</p>",
+                "subject": "Ihr Angebot",
+                "content": "<p>Guten Tag Max,</p><p>Ihr Angebot folgt Ende der Woche.</p>",
             },
         )
 
@@ -120,10 +146,10 @@ def test_hub_agent_keeps_a_failed_action_for_review_without_creating_data():
         action = _add_action(
             db,
             cipher,
-            action_type="create_task",
+            action_type="activities.tasks.create",
             input_values={
                 "customer_name": "Nicht vorhanden",
-                "task_name": "Rückruf",
+                "name": "Rückruf",
                 "due_date": "2026-09-11",
                 "due_time": "09:00",
             },
@@ -132,7 +158,7 @@ def test_hub_agent_keeps_a_failed_action_for_review_without_creating_data():
         view = HubAgentService(db=db, cipher=cipher).execute_action(action_id=action.id, actor="hub-admin")
 
         assert view.status == "failed"
-        assert view.error == "Der Kunde „Nicht vorhanden“ konnte nicht eindeutig zugeordnet werden."
+        assert view.error == "Die Verknüpfung wurde nicht gefunden oder ist nicht eindeutig."
         assert db.scalars(select(CustomerTaskActivity)).all() == []
 
 
@@ -154,13 +180,13 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
                             "response": "Ich bereite beide Schritte zur Prüfung vor.",
                             "actions": [
                                 {
-                                    "action_type": "create_email_draft",
+                                    "action_type": "emails.drafts.create",
                                     "title": "E-Mail-Entwurf erstellen",
                                     "details": "Der Entwurf bleibt vor dem Versand prüfbar.",
                                     "input": {
                                         "recipient_email": "max@example.test",
-                                        "email_subject": "Angebot",
-                                        "email_html": "<p>Guten Tag</p>",
+                                        "subject": "Angebot",
+                                        "content": "<p>Guten Tag</p>",
                                     },
                                 }
                             ],
@@ -171,31 +197,27 @@ def test_hub_agent_requests_a_structured_plan_with_only_allowed_actions():
         }
 
     service._create_openai_response = fake_response
-    plan = service._create_plan(api_key="test-key", model="test-model", instruction="Bitte einen Entwurf vorbereiten.")
+    plan = service._create_plan(api_key="test-key", model="gpt-5.6-sol", instruction="Bitte einen Entwurf vorbereiten.")
 
-    assert plan["actions"][0]["action_type"] == "create_email_draft"
+    assert plan["actions"][0]["action_type"] == "emails.drafts.create"
     assert captured["api_key"] == "test-key"
     assert captured["payload"]["store"] is False
-    assert captured["payload"]["tool_choice"] == {"type": "function", "name": "propose_hub_actions"}
-    assert "create_email_reply_draft" in captured["payload"]["instructions"]
-    assert "ohne Rückfragen" in captured["payload"]["instructions"]
+    assert captured["payload"]["max_output_tokens"] >= 8_000
+    assert captured["payload"]["tool_choice"] == "required"
+    assert {tool["name"] for tool in captured["payload"]["tools"]} == {"propose_hub_actions", "hub_catalog_search", "hub_catalog_describe", "hub_read"}
+    instructions = captured["payload"]["instructions"]
+    assert "required=false bedeutet optional" in instructions
+    assert "Ein leerer Standard erfüllt kein Pflichtfeld" in instructions
+    assert "Wenn Angaben ohne Masken-Standard fehlen" not in instructions
+    from app.services.hub_agent_catalog import AgentCatalog
+    assert "offer_field__payment_terms" not in instructions
+    contract = AgentCatalog().describe(["finance.offers.create"])["definitions"][0]["fields"]
+    assert contract["offer_field__payment_terms"]["required"] is False
+    assert "default" not in contract["offer_field__payment_terms"]
+    assert contract["offer_field__status"]["required"] is True
+    assert contract["offer_field__status"]["default"] == "draft"
     assert captured["payload"]["tools"][0]["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"] == sorted(
-        {
-            "complete_call",
-            "complete_task",
-            "create_case_from_email",
-            "create_contact",
-            "create_customer_note",
-            "create_email_draft",
-            "create_task",
-            "delete_call",
-            "delete_task",
-            "link_email_to_case",
-            "create_email_reply_draft",
-            "schedule_call",
-            "update_call",
-            "update_task",
-        }
+        operation.key for operation in agent_operations()
     )
 
 
@@ -213,11 +235,11 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     emails_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
 
     assert "schwebenden Button unten rechts" in template
-    assert 'href="#agent-capabilities"' in template
+    assert 'href="#agent-overview"' in template
     assert 'href="#agent-email-ai-prompts"' in template
     assert "KI-Schnellaktionen" in template
     assert 'action="/agent/email-ai-prompts"' in template
-    assert "agent-capability-status-{{ capability.status }}" in template
+    assert "agent-capability-table" not in template
     assert '@router.post("/email-ai-prompts")' in route
     assert '@router.post("/chat/messages")' in route
     assert '@router.post("/chat/actions/{action_id}/execute")' in route
@@ -230,11 +252,9 @@ def test_hub_agent_rejects_unapproved_action_types_and_renders_the_controlled_ui
     assert '>Hub-Agent</a>' in base_template
     assert 'href="#agent-completed-chats"' in template
     assert 'href="#agent-deleted-chats"' in template
-    assert "function openAgentReplyDraftFromQuery()" in emails_template
-    assert "agent_reply_draft" in emails_template
-    assert "prepareMailboxDraftAction(draftButton)" in emails_template
-    assert "function openPreparedReplyDraft(payload)" in base_template
-    assert 'action.type === "create_email_reply_draft"' in base_template
+    assert "agent_reply_draft" not in emails_template
+    assert "function prepareMailboxDraftAction(button)" in emails_template
+    assert "openPreparedReplyDraft" not in base_template
 
 
 def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
@@ -244,6 +264,7 @@ def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
 
     with Session(engine) as db:
         customer = Customer(name="Kontext-Kunde", is_visible=True)
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
         db.add(customer)
         db.flush()
         service = HubAgentService(db=db, cipher=cipher)
@@ -289,12 +310,35 @@ def test_hub_agent_persists_context_in_a_user_conversation_and_closes_it():
         ]
 
 
+def test_new_chat_does_not_resume_or_remove_old_chat_or_its_context():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
+        customer = Customer(name="Old context", is_visible=True)
+        db.add(customer)
+        db.flush()
+        service = HubAgentService(db=db, cipher=SecretCipher("a" * 32))
+        old = service.start_conversation(actor="hub-admin")
+        service.add_context(actor="hub-admin", conversation_id=old.conversation_id,
+                            resource_type="customer", resource_key=str(customer.id))
+        fresh = service.start_conversation(actor="hub-admin")
+        assert fresh.conversation_id != old.conversation_id
+        assert fresh.jobs == () and fresh.contexts == ()
+        assert old.conversation_id in {item.id for item in fresh.conversations}
+        resumed = service.chat_view(actor="hub-admin", conversation_id=old.conversation_id)
+        assert resumed.conversation_id == old.conversation_id
+        assert resumed.contexts[0].label == "Kunde: Old context"
+    engine.dispose()
+
+
 def test_hub_agent_builds_a_current_customer_dossier_for_the_chat_context():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     cipher = SecretCipher("a" * 32)
 
     with Session(engine) as db:
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
         customer = Customer(
             name="Wissen-Kunde",
             is_visible=True,
@@ -401,7 +445,12 @@ def test_hub_agent_builds_a_current_customer_dossier_for_the_chat_context():
             create_if_missing=False,
         )
         dossier = "\n".join(service._conversation_prompt_contexts(active_conversation, exclude_email_key=""))
-
+        assert f"Kunden-ID: {customer.id}" in dossier
+        assert "nachladen" in dossier
+        assert "Bitte passen Sie die Startseite bis Freitag an." not in dossier
+        assert len(dossier) < 1000
+        # The full dossier is still available, but no longer eagerly sent on every turn.
+        dossier = service._customer_dossier_prompt(customer=customer, actor="hub-admin")
         assert "Telefon: 089 123456" in dossier
         assert "München" in dossier
         assert "Max Mustermann" in dossier
@@ -421,6 +470,7 @@ def test_hub_agent_uses_the_open_calendar_week_as_dynamic_context():
 
     with Session(engine) as db:
         customer = Customer(name="Kalender-Kunde", is_visible=True)
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
         db.add(customer)
         db.flush()
         db.add(
@@ -456,19 +506,89 @@ def test_hub_agent_uses_the_open_calendar_week_as_dynamic_context():
         assert "2026-09-08" in calendar_context
 
 
-def test_hub_agent_exposes_current_and_planned_capabilities_in_one_catalog():
-    capabilities = {capability.key: capability for capability in HubAgentService.capabilities()}
+def test_hub_agent_discovers_registered_operations_without_a_manual_capability_list():
+    tool = HubAgentService._proposal_tool_definition()
+    action_types = tool["parameters"]["properties"]["actions"]["items"]["properties"]["action_type"]["enum"]
 
-    assert capabilities["create_contact"].status == "available"
-    assert capabilities["create_task"].status == "available"
-    assert capabilities["create_email_draft"].status == "available"
-    assert capabilities["create_email_reply_draft"].status == "available"
-    assert capabilities["email_context"].status == "available"
-    assert capabilities["customer_dossier"].status == "available"
-    assert capabilities["case_management"].status == "available"
-    assert capabilities["customer_notes"].status == "available"
-    assert capabilities["calendar_management"].status == "available"
-    assert capabilities["automatic_email_delivery"].status == "disabled"
+    assert "finance.offers.create" in action_types
+    assert "activities.tasks.create" in action_types
+    assert "activities.meetings.create" in action_types
+    assert "create_task" not in action_types
+    assert "automatic_email_delivery" not in action_types
+
+
+def test_long_offer_plan_keeps_all_positions_and_materializes_form_defaults():
+    positions = {
+        f"offer_line__{index}__{key}": value
+        for index in range(21)
+        for key, value in (("name", f"Position {index + 1}"), ("unit_price", "10"))
+    }
+    plan = HubAgentService._normalize_plan({
+        "summary": "Angebot und Entwurf",
+        "response": "Beide Schritte sind vorbereitet.",
+        "actions": [
+            {"action_type": "finance.offers.create", "title": "Angebot", "details": "21 Positionen",
+             "input": {"lead_id": "1791", "offer_field__offer_date": "2026-09-19", **positions}},
+            {"action_type": "emails.drafts.create", "title": "E-Mail-Entwurf", "details": "PDF anhängen",
+             "input": {"recipient_email": "{{action.1.recipient_email}}",
+                       "attachment_ref": "{{action.1.artifact_ref}}", "subject": "Angebot",
+                       "content": "<p>Guten Tag</p>"}},
+        ],
+    })
+    offer = plan["actions"][0]["input"]
+    assert offer["offer_field__status"] == "draft"
+    assert offer["offer_field__valid_until"] == "2026-10-19"
+    assert offer["offer_line__20__name"] == "Position 21"
+    assert "offer_line__20__unit" not in offer
+    assert offer["offer_line__20__tax_rate"] == "19"
+    assert plan["actions"][1]["input"]["attachment_ref"] == "{{action.1.artifact_ref}}"
+
+
+def test_agent_lead_context_is_fresh_and_respects_record_access():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    with Session(engine) as db:
+        db.add_all([
+            HubUser(username="admin", password_hash="x", role="admin"),
+            HubUser(username="sales", password_hash="x", role="sales"),
+        ])
+        HubAccessControlService(db=db).ensure_defaults()
+        lead = HubLead(encrypted_profile_json=cipher.encrypt(json.dumps({
+            "schema_version": 1, "source": "hub",
+            "fields": {"first_name": "Lena", "last_name": "Leitner", "company": "Leitner Design",
+                       "email": "lena@example.test"}, "subforms": {},
+        })))
+        db.add(lead)
+        db.flush()
+        service = HubAgentService(db=db, cipher=cipher)
+        admin_chat = service.start_conversation(actor="admin")
+        service.add_context(
+            actor="admin", conversation_id=admin_chat.conversation_id,
+            resource_type="lead", resource_key=str(lead.id),
+        )
+        conversation = db.get(HubAgentConversation, admin_chat.conversation_id)
+        prompt = service._conversation_prompt_contexts(conversation, exclude_email_key="")[0]
+        assert f"Lead-ID: {lead.id}" in prompt
+        assert "lena@example.test" in prompt
+        lead.encrypted_profile_json = cipher.encrypt(json.dumps({
+            "schema_version": 1, "source": "hub",
+            "fields": {"first_name": "Lena", "last_name": "Leitner", "company": "Leitner Design",
+                       "email": "neu@example.test"}, "subforms": {},
+        }))
+        assert "neu@example.test" in service._conversation_prompt_contexts(conversation, exclude_email_key="")[0]
+        sales_chat = service.start_conversation(actor="sales")
+        try:
+            service.add_context(
+                actor="sales", conversation_id=sales_chat.conversation_id,
+                resource_type="lead", resource_key=str(lead.id),
+            )
+        except HubAgentError as exc:
+            assert "nicht verfügbar" in str(exc)
+        else:
+            raise AssertionError("Unassigned leads must not be exposed as agent context.")
+        db.get(HubUser, 1).is_active = False
+        assert service._conversation_prompt_contexts(conversation, exclude_email_key="") == ()
 
 
 def test_hub_agent_binds_case_actions_to_the_selected_email_context_only():
@@ -477,10 +597,10 @@ def test_hub_agent_binds_case_actions_to_the_selected_email_context_only():
         "response": "Ich bereite einen Fall vor.",
         "actions": [
             {
-                "action_type": "create_case_from_email",
+                "action_type": "cases.create",
                 "title": "Fall aus E-Mail anlegen",
                 "details": "Die E-Mail wird mit dem Fall verknüpft.",
-                "input": {"case_reason": "Änderungswunsch"},
+                "input": {"case_field__case_reason": "Änderungswunsch", "source_email_key": "linked-7-11"},
             }
         ],
     }
@@ -497,25 +617,25 @@ def test_hub_agent_binds_case_actions_to_the_selected_email_context_only():
 
     plan = HubAgentService._normalize_plan(raw_plan, email_context=context)
 
-    assert plan["actions"][0]["input"]["email_key"] == "linked-7-11"
+    assert plan["actions"][0]["input"]["source_email_key"] == "linked-7-11"
     try:
         HubAgentService._normalize_plan(raw_plan)
     except HubAgentError as exc:
-        assert "E-Mail als Kontext" in str(exc)
+        assert "ausgewählten E-Mails" in str(exc)
     else:
         raise AssertionError("Case actions must not be proposed without a selected email.")
 
 
-def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
+def test_hub_agent_reply_plan_uses_the_shared_contract_and_explicit_record_key():
     raw_plan = {
         "summary": "Antwort vorbereiten",
         "response": "Ich öffne den vorhandenen Antworteditor.",
         "actions": [
             {
-                "action_type": "create_email_reply_draft",
+                "action_type": "emails.drafts.reply",
                 "title": "Antwortentwurf erstellen",
                 "details": "Empfänger und Betreff werden aus der eingegangenen E-Mail übernommen.",
-                "input": {"email_html": "<p>Guten Tag,</p><p>vielen Dank.</p>"},
+                "input": {"email_key": "linked-7-11", "content": "<p>Guten Tag,</p><p>vielen Dank.</p>"},
             }
         ],
     }
@@ -533,15 +653,11 @@ def test_hub_agent_binds_reply_actions_to_the_selected_email_context_only():
     plan = HubAgentService._normalize_plan(raw_plan, email_context=context)
 
     assert plan["actions"][0]["input"] == {
-        "email_html": "<p>Guten Tag,</p><p>vielen Dank.</p>",
+        "content": "<p>Guten Tag,</p><p>vielen Dank.</p>",
         "email_key": "linked-7-11",
     }
-    try:
-        HubAgentService._normalize_plan(raw_plan)
-    except HubAgentError as exc:
-        assert "Antwort benötigt eine ausgewählte E-Mail" in str(exc)
-    else:
-        raise AssertionError("Reply actions must not be proposed without a selected email.")
+    # Keys can also come from authorized read tools, not only pinned contexts.
+    assert HubAgentService._normalize_plan(raw_plan)["actions"] == plan["actions"]
 
 
 def test_hub_agent_normalizes_reply_html_to_hub_typography_and_breaks():
@@ -550,8 +666,7 @@ def test_hub_agent_normalizes_reply_html_to_hub_typography_and_breaks():
     cipher = SecretCipher("a" * 32)
 
     with Session(engine) as db:
-        service = HubAgentService(db=db, cipher=cipher)
-        normalized = service._normalized_agent_reply_html(
+        normalized = normalize_reply_html(db,
             '<p style="font-family: Arial; font-size: 18px">Guten Tag <strong>Frau Beispiel</strong>,</p>'
             '<div style="line-height: 2">vielen Dank für Ihre Nachricht.</div>'
             "<p>Viele Grüße</p>"
@@ -613,11 +728,11 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
         create_action = _add_action(
             db,
             cipher,
-            action_type="create_case_from_email",
+            action_type="cases.create",
             input_values={
-                "email_key": context.key,
-                "case_reason": "Änderungswunsch",
-                "case_description": "Änderungswunsch aus der E-Mail.",
+                "source_email_key": context.key,
+                "case_field__case_reason": "Änderungswunsch",
+                "case_field__description": "Änderungswunsch aus der E-Mail.",
             },
         )
         created = service.execute_action(action_id=create_action.id, actor="hub-admin")
@@ -630,8 +745,8 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
         link_action = _add_action(
             db,
             cipher,
-            action_type="link_email_to_case",
-            input_values={"email_key": f"linked-{customer.id}-{second_email.id}", "case_number": case.case_number},
+            action_type="cases.link_email",
+            input_values={"source_email_key": f"linked-{customer.id}-{second_email.id}", "case_number": case.case_number},
         )
         linked = service.execute_action(action_id=link_action.id, actor="hub-admin")
         assert linked.status == "completed"
@@ -651,14 +766,14 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
         reply_action = _add_action(
             db,
             cipher,
-            action_type="create_email_reply_draft",
-            input_values={"email_key": context.key, "email_html": "<p>Guten Tag,</p><p>Vielen Dank für Ihre Nachricht.</p>"},
+            action_type="emails.drafts.reply",
+            input_values={"email_key": context.key, "content": "<p>Guten Tag,</p><p>Vielen Dank für Ihre Nachricht.</p>"},
         )
         reply = service.execute_action(action_id=reply_action.id, actor="hub-admin")
         draft = db.scalars(select(HubMailboxEmail).where(HubMailboxEmail.mailbox_state == "draft")).one()
         draft_payload = json.loads(cipher.decrypt(draft.encrypted_payload_json))
         assert reply.status == "completed"
-        assert reply.result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1"
+        assert reply.result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}"
         assert draft_payload["recipient_key"] == "contact-1"
         assert draft_payload["content"].startswith(
             '<span style="font-family: Verdana, Geneva, sans-serif; font-size: 12px; line-height: 1.1">'
@@ -667,12 +782,14 @@ def test_hub_agent_uses_selected_email_for_case_creation_linking_and_reply_draft
         assert "Bitte die Startseite ändern." in draft_payload["content"]
 
 
-def test_hub_agent_creates_a_reply_draft_immediately_without_an_execute_click(monkeypatch):
+def test_hub_agent_reply_draft_uses_normal_confirmation_without_sending(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     cipher = SecretCipher("a" * 32)
 
     with Session(engine) as db:
+        mailbox_account(db, cipher)
+        db.add(HubUser(username="hub-admin", role="admin", password_hash="x"))
         inbound = HubMailboxEmail(
             source="mittwald-imap",
             direction="inbound",
@@ -715,12 +832,12 @@ def test_hub_agent_creates_a_reply_draft_immediately_without_an_execute_click(mo
                 "response": "Ich habe einen Antwortentwurf vorbereitet.",
                 "actions": [
                     {
-                        "action_type": "create_email_reply_draft",
+                        "action_type": "emails.drafts.reply",
                         "title": "Antwortentwurf erstellen",
                         "details": "Der Entwurf wird nicht versendet.",
                         "input": {
                             "email_key": f"unassigned-{inbound.id}",
-                            "email_html": "<p>Guten Tag Frau Beispiel,</p><p>vielen Dank für Ihre Nachricht.</p>",
+                            "content": "<p>Guten Tag Frau Beispiel,</p><p>vielen Dank für Ihre Nachricht.</p>",
                         },
                     }
                 ],
@@ -733,10 +850,13 @@ def test_hub_agent_creates_a_reply_draft_immediately_without_an_execute_click(mo
             conversation_id=conversation.conversation_id,
         )
 
-        assert job.status == "completed"
-        assert job.actions[0].status == "completed"
+        assert job.status == "ready"
+        assert job.actions[0].status == "proposed"
+        assert db.scalars(select(HubMailboxEmail).where(HubMailboxEmail.mailbox_state == "draft")).all() == []
+        result = service.execute_action(action_id=job.actions[0].id, actor="hub-admin")
+        assert result.status == "completed"
         draft = db.scalars(select(HubMailboxEmail).where(HubMailboxEmail.mailbox_state == "draft")).one()
-        assert job.actions[0].result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}&agent_reply_draft=1"
+        assert result.result_href == f"/emails?folder=drafts&selected=unassigned-{draft.id}"
         draft_payload = json.loads(cipher.decrypt(draft.encrypted_payload_json))
         assert draft_payload["recipient_email"] == "frau@example.test"
         assert draft_payload["subject"] == "Re: Rückfrage zur Website"
@@ -755,7 +875,7 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
 
     def fake_create_note(self, **kwargs):
         noted_customers.append(kwargs)
-        return object()
+        return SimpleNamespace(success=True, message="Notiz gespeichert", note_id=1)
 
     monkeypatch.setattr("app.services.hub_agent.CustomerCommunicationService.create_note", fake_create_note)
 
@@ -768,10 +888,10 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         create_task = _add_action(
             db,
             cipher,
-            action_type="create_task",
+            action_type="activities.tasks.create",
             input_values={
                 "customer_name": customer.name,
-                "task_name": "Angebot prüfen",
+                "name": "Angebot prüfen",
                 "due_date": "2026-09-11",
                 "due_time": "09:00",
                 "reminder_channel": "popup",
@@ -783,8 +903,8 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         complete_task = _add_action(
             db,
             cipher,
-            action_type="complete_task",
-            input_values={"customer_name": customer.name, "target_task_name": "Angebot prüfen"},
+            action_type="activities.tasks.complete",
+            input_values={"customer_name": customer.name, "target_name": "Angebot prüfen"},
         )
         assert service.execute_action(action_id=complete_task.id, actor="hub-admin").status == "completed"
         assert db.scalars(select(CustomerTaskActivity)).one().status == "completed"
@@ -792,10 +912,10 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         adjustable_task = _add_action(
             db,
             cipher,
-            action_type="create_task",
+            action_type="activities.tasks.create",
             input_values={
                 "customer_name": customer.name,
-                "task_name": "Termin ändern",
+                "name": "Termin ändern",
                 "due_date": "2026-09-12",
                 "due_time": "09:00",
                 "reminder_channel": "popup",
@@ -806,11 +926,11 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         update_task = _add_action(
             db,
             cipher,
-            action_type="update_task",
+            action_type="activities.tasks.update",
             input_values={
                 "customer_name": customer.name,
-                "target_task_name": "Termin ändern",
-                "task_name": "Neuer Termin",
+                "target_name": "Termin ändern",
+                "name": "Neuer Termin",
                 "due_time": "11:00",
             },
         )
@@ -819,18 +939,18 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         delete_task = _add_action(
             db,
             cipher,
-            action_type="delete_task",
-            input_values={"customer_name": customer.name, "target_task_name": "Neuer Termin"},
+            action_type="activities.tasks.delete",
+            input_values={"customer_name": customer.name, "target_name": "Neuer Termin"},
         )
         assert service.execute_action(action_id=delete_task.id, actor="hub-admin").status == "completed"
 
         create_call = _add_action(
             db,
             cipher,
-            action_type="schedule_call",
+            action_type="activities.calls.create",
             input_values={
                 "customer_name": customer.name,
-                "call_name": "Rückruf",
+                "name": "Rückruf",
                 "start_date": "2026-09-12",
                 "start_time": "10:00",
                 "duration_minutes": "30",
@@ -843,10 +963,10 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         update_call = _add_action(
             db,
             cipher,
-            action_type="update_call",
+            action_type="activities.calls.update",
             input_values={
                 "customer_name": customer.name,
-                "target_call_name": "Rückruf",
+                "target_name": "Rückruf",
                 "start_time": "11:00",
             },
         )
@@ -856,8 +976,8 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         complete_call = _add_action(
             db,
             cipher,
-            action_type="complete_call",
-            input_values={"customer_name": customer.name, "target_call_name": "Rückruf"},
+            action_type="activities.calls.complete",
+            input_values={"customer_name": customer.name, "target_name": "Rückruf"},
         )
         assert service.execute_action(action_id=complete_call.id, actor="hub-admin").status == "completed"
         assert db.scalars(select(CustomerCallActivity)).one().status == "completed"
@@ -865,8 +985,8 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         delete_call = _add_action(
             db,
             cipher,
-            action_type="delete_call",
-            input_values={"customer_name": customer.name, "target_call_name": "Rückruf"},
+            action_type="activities.calls.delete",
+            input_values={"customer_name": customer.name, "target_name": "Rückruf"},
         )
         assert service.execute_action(action_id=delete_call.id, actor="hub-admin").status == "completed"
         assert db.scalars(select(CustomerCallActivity)).all() == []
@@ -874,8 +994,8 @@ def test_hub_agent_manages_tasks_calls_and_customer_notes(monkeypatch):
         note_action = _add_action(
             db,
             cipher,
-            action_type="create_customer_note",
-            input_values={"customer_name": customer.name, "note_title": "Rückruf", "note_content": "Rückruf wurde erledigt."},
+            action_type="customers.notes.create",
+            input_values={"customer_name": customer.name, "title": "Rückruf", "content": "Rückruf wurde erledigt."},
         )
         assert service.execute_action(action_id=note_action.id, actor="hub-admin").status == "completed"
         assert noted_customers == [

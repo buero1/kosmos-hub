@@ -1,0 +1,24 @@
+{% macro hub_data_panel(record) %}
+  {% set info = hub_record_info(record) %}
+  <article class="card customer-detail-panel hub-data-panel">
+    <div class="customer-detail-panel-heading"><div><p class="eyebrow">Hub-Daten</p><h3>Übersicht</h3></div></div>
+    {% set links = caller() if caller is defined else '' %}
+    {% if links | striptags | trim %}
+      <h4 class="hub-data-subheading">Verknüpfungen</h4>
+      <div class="hub-data-links">{{ links }}</div>
+    {% endif %}
+    <h4 class="hub-data-subheading">Erstellung und Änderung</h4>
+    <dl class="customer-fields-grid hub-data-metadata">
+      <div><dt>{{ info.created_label }}</dt><dd>{{ info.created_at | berlin_time_short if info.created_at else 'Nicht bekannt' }}</dd></div>
+      <div><dt>Erstellt von</dt><dd>{{ info.created_by }}</dd></div>
+      <div><dt>Letzte Änderung</dt><dd>{{ info.changed_at | berlin_time_short if info.changed_at else 'Nicht bekannt' }}</dd></div>
+      <div><dt>Geändert von</dt><dd>{{ info.changed_by }}</dd></div>
+    </dl>
+  </article>
+{% endmacro %}
+
+{% macro hub_data_link(owner, module, identifier, label, name, href) -%}
+  {% if identifier and hub_link_visible(owner, module, identifier) %}
+    <div><dt>{{ label }}</dt><dd><a href="{{ href }}">{{ name }}</a></dd></div>
+  {% endif %}
+{%- endmacro %}

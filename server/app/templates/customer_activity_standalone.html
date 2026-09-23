@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/activity_creation.html" import fields as creation_fields %}
 {% block title %}{{ activity.name }} · Aufgabe · kosmos-hub{% endblock %}
 {% block content %}
   <section class="card customer-detail-panel" aria-labelledby="activity-heading">
@@ -6,5 +7,13 @@
     <h1 id="activity-heading">{{ activity.name }}</h1>
     <p class="subtle">{% if activity.status == "planned" %}Geplant{% elif activity.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}{% if activity.due_at %} · {{ activity.due_at | berlin_time }}{% endif %}</p>
     {% if activity.description %}<p class="customer-activity-entry-description">{{ activity.description }}</p>{% endif %}
+    {% set info = hub_record_info(activity) %}
+    {{ creation_fields(info.created_by if info.created_by != 'Nicht bekannt' else activity.created_by_username, info.created_at) }}
+    <dl class="activity-creation-fields">
+      <div><dt>Verantwortlich</dt><dd>{{ activity.assignee_user.display_name if activity.assignee_user else 'Nicht zugeordnet' }}</dd></div>
+      <div><dt>Letzte Änderung</dt><dd>{{ info.changed_at | berlin_time_local }} · {{ info.changed_by }}</dd></div>
+      {% if activity.completed_at %}<div><dt>Erledigt am</dt><dd>{{ activity.completed_at | berlin_time_local }}</dd></div>
+      <div><dt>Erledigt von</dt><dd>{{ activity.completed_by_name or 'Nicht bekannt' }}</dd></div>{% endif %}
+    </dl>
   </section>
 {% endblock %}

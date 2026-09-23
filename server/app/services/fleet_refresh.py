@@ -285,6 +285,25 @@ class FleetRefreshService:
             db.commit()
             if run is None:
                 return None
+            if (run.result_json or {}).get("shared_contract"):
+                # Confirmed manual jobs must not outlive revoked user/site rights.
+                from app.services.hub_operations import HubOperationService, HubOperationError
+                from app.services.wordpress_workbench import require_admin
+                from app.services.hub_operation_websites import website_site
+                gateway = HubOperationService(db=db, cipher=get_secret_cipher(), actor=run.requested_by)
+                try:
+                    require_admin(gateway, "edit")
+                    targets = cls._target_site_ids(run.result_json)
+                    if not targets:
+                        raise HubOperationError("Explicit site selection required.")
+                    for site_id in targets:
+                        website_site(gateway, site_id, action="edit")
+                except HubOperationError:
+                    run.status = FleetRefreshRunStatus.failed.value
+                    run.error_message = "Prueflauf vor Fernzugriff abgewiesen: aktuelle Berechtigungen pruefen."
+                    run.completed_at = datetime.now(UTC)
+                    db.commit()
+                    return None
             return {
                 "run_id": run.id,
                 "mode": run.mode,

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.services.ai_assistant import OPENAI_RESPONSES_URL
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
+from app.services.ai_usage import AiUsageError, AiUsageTrace, request_openai_json
 from app.services.customer_communications import CustomerCommunicationService
 
 MAX_EMAIL_AI_INSTRUCTION_LENGTH = 1_000
@@ -97,10 +98,11 @@ class EmailAiRewriteService:
         self.cipher = cipher
         self.provider_service = AiProviderConfigService(db=db, cipher=cipher)
 
-    def rewrite(self, *, instruction: str, selected_html: str) -> EmailAiRewriteProposal:
+    def rewrite(self, *, instruction: str, selected_html: str, actor: str = "") -> EmailAiRewriteProposal:
         normalized_instruction = self._instruction(instruction)
         normalized_selection = self._selection(selected_html)
         config, api_key = self._provider_config()
+        self.usage_trace = AiUsageTrace(db=self.db, actor=actor, feature="email-rewrite")
         try:
             payload = self._create_openai_response(
                 api_key=api_key,
@@ -173,20 +175,11 @@ class EmailAiRewriteService:
                 }
             ],
         }
-        encoded_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-        http_request = request.Request(
-            OPENAI_RESPONSES_URL,
-            data=encoded_payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
         try:
-            with request.urlopen(http_request, timeout=45) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+            response_payload = request_openai_json(api_key=api_key, payload=payload, timeout=45,
+                trace=getattr(self, "usage_trace", None))
+        except AiUsageError as exc:
+            raise EmailAiRewriteError(str(exc)) from exc
         except error.HTTPError as exc:
             raise EmailAiRewriteError(f"OpenAI-Anfrage fehlgeschlagen (HTTP {exc.code}).") from exc
         except error.URLError as exc:

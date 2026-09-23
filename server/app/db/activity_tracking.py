@@ -9,7 +9,7 @@ from app.models.hub_activity_event import HubActivityEvent
 from app.services.hub_activity import current_activity_request
 
 
-_IGNORED_TABLES = {"request_nonces", "hub_setup_tokens"}
+_IGNORED_TABLES = {"request_nonces", "hub_setup_tokens", "hub_record_info"}
 _SENSITIVE_FIELD_PARTS = (
     "password", "secret", "token", "credential", "content", "body", "html", "payload",
     "attachment", "image", "storage", "raw", "encrypted", "digest", "key", "oauth", "pdf",

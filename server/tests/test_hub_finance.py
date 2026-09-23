@@ -9,6 +9,7 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
+from app.models.hub_lead import HubLead
 from app.models.hub_user import HubUser
 from app.services.hub_finance import (
     ARTICLE_FIELDS_LAYOUT_KEY,
@@ -51,6 +52,24 @@ def _article_values(**overrides: str) -> dict[str, str]:
     return values
 
 
+def _lead(db: Session, **fields: str) -> HubLead:
+    values = {
+        "first_name": "Lena",
+        "last_name": "Leitner",
+        "company": "Leitner Design",
+        "email": "lena@example.com",
+        **fields,
+    }
+    lead = HubLead(
+        encrypted_profile_json=SecretCipher("a" * 32).encrypt(
+            json.dumps({"schema_version": 1, "source": "hub", "fields": values, "subforms": {}})
+        )
+    )
+    db.add(lead)
+    db.flush()
+    return lead
+
+
 def _offer_values(*, article_id: int, **overrides: str) -> dict[str, str]:
     values = {
         "offer_field__status": "draft",
@@ -73,6 +92,14 @@ def _offer_values(*, article_id: int, **overrides: str) -> dict[str, str]:
     return values
 
 
+def test_new_offer_defaults_use_one_calendar_month_after_offer_date():
+    defaults = HubFinanceService.new_offer_values(offer_date="2024-01-31")
+    assert defaults["offer_field__status"] == "draft"
+    assert defaults["offer_field__currency"] == "EUR"
+    assert defaults["offer_field__valid_until"] == "2024-02-29"
+    assert HubFinanceService.new_offer_values(offer_date="2026-12-31")["offer_field__valid_until"] == "2027-01-31"
+
+
 def test_finance_article_uses_the_reviewed_catalog_and_keeps_data_encrypted():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -89,7 +116,7 @@ def test_finance_article_uses_the_reviewed_catalog_and_keeps_data_encrypted():
         assert detail is not None
         assert detail.name == "Monatsbeitrag Homepage"
         assert next(field.value for field in detail.fields if field.key == "tax_rate") == "19 %"
-        assert next(field.value for field in detail.fields if field.key == "net_price") == "49,99 EUR"
+        assert next(field.value for field in detail.fields if field.key == "net_price") == "49,99 \u20ac"
 
 
 def test_finance_offer_calculates_totals_and_snapshots_its_position_values():
@@ -121,7 +148,7 @@ def test_finance_offer_calculates_totals_and_snapshots_its_position_values():
         assert detail.totals.discount_total == Decimal("10.00")
         assert detail.totals.tax_total == Decimal("17.10")
         assert detail.totals.total_gross == Decimal("107.08")
-        assert _service(db).list_offers()[0].total_gross == "107,08 EUR"
+        assert _service(db).list_offers()[0].total_gross == "107,08 \u20ac"
 
 
 def test_customer_offer_list_contains_only_the_linked_customer():
@@ -151,8 +178,62 @@ def test_customer_offer_list_contains_only_the_linked_customer():
         assert [entry.offer.id for entry in entries] == [first_offer.id]
 
 
-@pytest.mark.parametrize("unit", ("", "Wöchentlich"))
-def test_finance_offer_requires_a_supported_position_unit(unit: str):
+def test_finance_offer_can_link_to_a_lead_without_customer_contact():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        lead = _lead(db)
+        article = _service(db).create_article(submitted_values=_article_values())
+        offer = _service(db).create_offer(
+            customer_id=None,
+            contact_id=None,
+            lead_id=lead.id,
+            submitted_values=_offer_values(article_id=article.id),
+        )
+        db.commit()
+
+        detail = _service(db).get_offer_detail(offer_id=offer.id)
+        assert detail is not None
+        assert offer.customer_id is None
+        assert offer.contact_id is None
+        assert offer.lead_id == lead.id
+        assert detail.linked_name == "Lena Leitner"
+        assert detail.linked_kind == "Lead"
+        assert detail.linked_href == f"/leads/{lead.id}"
+        assert detail.contact_name == "Lena Leitner"
+        assert [entry.offer.id for entry in _service(db).list_lead_offers(lead_id=lead.id)] == [offer.id]
+
+
+def test_finance_offer_requires_exactly_one_customer_or_lead():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        lead = _lead(db)
+        article = _service(db).create_article(submitted_values=_article_values())
+        values = _offer_values(article_id=article.id)
+
+        with pytest.raises(HubFinanceError, match="genau einen Kunden oder Lead"):
+            _service(db).create_offer(
+                customer_id=None,
+                contact_id=None,
+                lead_id=None,
+                submitted_values=values,
+            )
+        with pytest.raises(HubFinanceError, match="genau einen Kunden oder Lead"):
+            _service(db).create_offer(
+                customer_id=customer.id,
+                contact_id=_contact_id(db, customer),
+                lead_id=lead.id,
+                submitted_values=values,
+            )
+
+
+def test_finance_offer_allows_a_position_without_unit():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -161,8 +242,26 @@ def test_finance_offer_requires_a_supported_position_unit(unit: str):
         db.add(customer)
         db.flush()
         article = _service(db).create_article(submitted_values=_article_values())
-        values = _offer_values(article_id=article.id, offer_line__0__unit=unit)
+        values = _offer_values(article_id=article.id)
+        values.pop("offer_line__0__unit")
+        offer = _service(db).create_offer(
+            customer_id=customer.id, contact_id=_contact_id(db, customer), submitted_values=values,
+        )
+        detail = _service(db).get_offer_detail(offer_id=offer.id)
+        assert detail is not None
+        assert detail.lines[0].unit == ""
 
+
+def test_finance_offer_rejects_an_unsupported_position_unit():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        article = _service(db).create_article(submitted_values=_article_values())
+        values = _offer_values(article_id=article.id, offer_line__0__unit="Wöchentlich")
         with pytest.raises(HubFinanceError, match="Einheit"):
             _service(db).create_offer(customer_id=customer.id, contact_id=_contact_id(db, customer), submitted_values=values)
 

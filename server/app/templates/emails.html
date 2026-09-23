@@ -6,6 +6,10 @@
     .mailbox-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 0.55rem; }
     .mailbox-header-actions .button { margin: 0; }
     .mailbox-header h2 { margin: 0.18rem 0 0; }
+    .mailbox-account-picker { margin: 0.8rem 0 0; }
+    .mailbox-account-picker label { display: grid; gap: 0.25rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
+    .mailbox-account-picker select { width: min(24rem, 100%); max-width: 100%; margin: 0; }
+    @media (max-width: 780px) { .mailbox-header { flex-wrap: wrap; align-items: start; } .mailbox-header > div:first-child { min-width: 0; max-width: 100%; } }
     .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
     .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
     .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
@@ -38,7 +42,11 @@
     .mailbox-message-open p { margin: 0.28rem 0 0; color: var(--muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .mailbox-message time { color: var(--muted); font-size: 0.74rem; white-space: nowrap; }
     .mailbox-message.is-unread .mailbox-message-subject, .mailbox-message.is-unread time { color: #1d63b8; font-weight: 700; }
+    .mailbox-message.is-failed .mailbox-message-subject, .mailbox-message.is-failed time { color: #a93030; font-weight: 700; }
     .mailbox-message .pill { font-size: 0.7rem; }
+    .mailbox-message .pill.is-failed, .mailbox-planned-status.is-failed { border-color: #d99191; background: #fde7e7; color: #9d2424; }
+    .mailbox-planned-actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.85rem; }
+    .mailbox-planned-actions form { margin: 0; }
     .mailbox-reading-pane { min-width: 0; min-height: 0; padding: 1.25rem; overflow-y: auto; overscroll-behavior: contain; }
     .mailbox-reading-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "subject subject" "meta actions"; gap: 0.5rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
     .mailbox-reading-subject-row { grid-area: subject; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; width: 100%; }
@@ -85,6 +93,8 @@
     .mailbox-unassigned { margin-top: 1rem; padding: 1rem; border: 1px dashed var(--border); border-radius: var(--control-v1-radius); background: color-mix(in srgb, var(--accent-soft) 20%, var(--panel)); }
     .mailbox-unassigned h4 { margin: 0; }
     .mailbox-unassigned p { color: var(--muted); line-height: 1.5; }
+    .mailbox-draft-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .mailbox-draft-heading .button { margin: 0 0 0 auto; }
     .email-recipient-search { position: relative; }
     .email-recipient-search-results { position: absolute; z-index: 3; inset: calc(100% + 0.3rem) 0 auto; display: grid; max-height: 15rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--control-v1-radius); background: var(--panel); box-shadow: 0 0.75rem 1.5rem rgba(29, 42, 47, 0.16); }
     .email-recipient-search-results[hidden] { display: none; }
@@ -132,8 +142,20 @@
   </style>
   <section class="mailbox-header">
     <div>
-      <p class="eyebrow">Zoho CRM</p>
+      <p class="eyebrow">Kosmos Hub</p>
       <h2>E-Mail-Zentrale</h2>
+      <form method="get" action="/emails" class="mailbox-account-picker">
+        <input type="hidden" name="folder" value="{{ folder }}" data-mailbox-account-folder>
+        <label>Konto
+          <select name="account_id" data-mailbox-account aria-label="E-Mail-Konto">
+            {% if mailbox_accounts | default([]) | length != 1 %}<option value="">Alle freigegebenen Postfächer</option>{% endif %}
+            {% for account in mailbox_accounts | default([]) %}
+              <option value="{{ account.id }}" {% if mailbox_account_id == account.id %}selected{% endif %}>{{ account.email }}{% if not account.enabled %} (inaktiv){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <noscript><button class="button button-secondary" type="submit">Konto anzeigen</button></noscript>
+      </form>
     </div>
     <div class="mailbox-header-actions">
       <a class="button button-secondary" href="/email-templates">Vorlagen verwalten</a>
@@ -163,7 +185,7 @@
     <aside class="email-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="email-compose-title" aria-hidden="true" data-email-compose-drawer tabindex="-1">
       <div class="email-compose-header">
         <div>
-          <p class="eyebrow">Zoho CRM</p>
+          <p class="eyebrow">Kosmos Hub</p>
           <h2 id="email-compose-title">E-Mail erstellen</h2>
         </div>
         <button class="email-compose-close" type="button" data-email-compose-close aria-label="E-Mail-Maske schließen">×</button>
@@ -171,12 +193,19 @@
       <form method="post" action="/emails/send" enctype="multipart/form-data" class="communication-form email-compose-form" data-mailbox-compose-form data-mailbox-compose-main>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="template_id" value="" data-email-compose-template-id>
+        <input type="hidden" name="context_module" value="" data-email-compose-context-module>
+        <input type="hidden" name="context_record_id" value="" data-email-compose-context-record-id>
         <input type="hidden" name="draft_id" value="" data-email-compose-draft-id>
+        <input type="hidden" name="retained_attachment_ids" value="[]">
+        <input type="hidden" name="scheduled_email_id" value="" data-email-compose-scheduled-email-id>
+        <input type="hidden" name="mailbox_origin" value="1">
         <input type="hidden" name="reply_to_email_id" value="" data-email-compose-reply-to>
         <input type="hidden" name="forward_from_email_id" value="" data-email-compose-forward-from>
         <input type="hidden" name="recipient_key" value="" data-email-compose-recipient-key>
         <input type="hidden" name="recipient_customer_id" value="" data-email-compose-recipient-customer-id>
+        <input type="hidden" name="lead_id" value="" data-email-compose-lead-id>
         <input type="hidden" name="recipient_name" value="" data-email-compose-recipient-name>
+        <input type="hidden" name="dunning_id" value="" data-email-compose-dunning-id>
         <div class="email-compose-recipient-fields">
           <label>Absender
             <select name="sender_email" required data-mailbox-compose-sender disabled>
@@ -201,7 +230,7 @@
             <option value="">Keine Vorlage verwenden</option>
           </select>
         </label>
-        <p class="subtle email-compose-template-status" data-email-compose-template-status>Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
+        <p class="subtle email-compose-template-status" data-email-compose-template-status role="status" aria-live="polite">Absender wird geladen. Anschließend Kontakt oder E-Mail-Adresse eingeben.</p>
         <label>Betreff<input name="subject" maxlength="500" required data-email-compose-subject></label>
         <label>Nachricht
           <div class="email-editor-ai-shell">
@@ -235,6 +264,9 @@
           <ul class="email-compose-attachment-list" data-email-compose-attachment-list hidden></ul>
         </div>
         <div class="email-compose-actions">
+          <label class="email-compose-schedule">Versand planen
+            <input name="scheduled_at" type="datetime-local" data-email-compose-scheduled-at>
+          </label>
           <button class="button button-secondary" type="button" data-mailbox-compose-save-draft>Entwurf speichern</button>
           <button class="button button-secondary" type="button" data-email-compose-close>Abbrechen</button>
           <button class="button" type="submit" data-mailbox-compose-submit disabled>E-Mail senden</button>
@@ -244,7 +276,7 @@
         <div class="email-template-library-header">
           <button class="button button-secondary" type="button" data-mailbox-template-library-back>← Zurück</button>
           <div>
-            <p class="eyebrow">Zoho CRM</p>
+            <p class="eyebrow">Kosmos Hub</p>
             <h3>Vorlage wählen</h3>
           </div>
         </div>
@@ -276,13 +308,15 @@
   </div>
 
   <section class="card mailbox-shell" data-mailbox-shell>
+    {% set account_suffix = '&account_id=' ~ mailbox_account_id if mailbox_account_id else '' %}
     <nav class="mailbox-folders" aria-label="E-Mail-Ordner">
-      <a href="/emails?folder=inbox" data-mailbox-folder data-mailbox-folder-count="inbox"{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
-      <a href="/emails?folder=sent" data-mailbox-folder data-mailbox-folder-count="sent"{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
-      <a href="/emails?folder=drafts" data-mailbox-folder data-mailbox-folder-count="drafts"{% if folder == 'drafts' %} class="is-active"{% endif %}><span>Entwürfe</span><small>{{ mailbox.folder_counts.drafts }}</small></a>
-      <a href="/emails?folder=unassigned" data-mailbox-folder data-mailbox-folder-count="unassigned"{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
-      <a href="/emails?folder=trash" data-mailbox-folder data-mailbox-folder-count="trash"{% if folder == 'trash' %} class="is-active"{% endif %}><span>Papierkorb</span><small>{{ mailbox.folder_counts.trash }}</small></a>
-      <a href="/emails?folder=spam" data-mailbox-folder data-mailbox-folder-count="spam"{% if folder == 'spam' %} class="is-active"{% endif %}><span>Spam</span><small>{{ mailbox.folder_counts.spam }}</small></a>
+      <a href="/emails?folder=inbox{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="inbox"{% if folder == 'inbox' %} class="is-active"{% endif %}><span>Posteingang</span><small>{{ mailbox.folder_counts.inbox }}</small></a>
+      <a href="/emails?folder=drafts{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="drafts"{% if folder == 'drafts' %} class="is-active"{% endif %}><span>Entwürfe</span><small>{{ mailbox.folder_counts.drafts }}</small></a>
+      <a href="/emails?folder=planned{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="planned"{% if folder == 'planned' %} class="is-active"{% endif %}><span>Geplant</span><small>{{ mailbox.folder_counts.planned }}</small></a>
+      <a href="/emails?folder=sent{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="sent"{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
+      <a href="/emails?folder=unassigned{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="unassigned"{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
+      <a href="/emails?folder=trash{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="trash"{% if folder == 'trash' %} class="is-active"{% endif %}><span>Papierkorb</span><small>{{ mailbox.folder_counts.trash }}</small></a>
+      <a href="/emails?folder=spam{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="spam"{% if folder == 'spam' %} class="is-active"{% endif %}><span>Spam</span><small>{{ mailbox.folder_counts.spam }}</small></a>
     </nav>
 
     {% with messages=mailbox.messages, selected=mailbox.selected %}{% include "emails_message_list.html" %}{% include "emails_reading_pane.html" %}{% endwith %}
@@ -329,7 +363,7 @@
   <dialog class="update-confirmation-dialog" data-mailbox-case-delete-dialog aria-labelledby="mailbox-case-delete-heading">
     <div>
       <h3 id="mailbox-case-delete-heading">Fall im Hub löschen?</h3>
-      <p>Der Fall wird nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
+      <p>Der Fall, seine Aufgaben, Erinnerungen und E-Mail-Verknüpfungen werden endgültig gelöscht. Die E-Mails samt Anhängen und der Kunde bleiben erhalten. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
       <div class="dialog-actions">
         <button class="button button-secondary" type="button" data-mailbox-case-delete-cancel>Abbrechen</button>
         <button class="button button-danger" type="button" data-mailbox-case-delete-confirm>Fall löschen</button>
@@ -339,12 +373,18 @@
   <script>
     (function () {
       var shell = document.querySelector('[data-mailbox-shell]');
+      var mailboxAccountId = {{ (mailbox_account_id | default(none) or '') | string | tojson }};
+      function scopedMailboxUrl(value) {
+        var url = new URL(value, window.location.origin);
+        if (mailboxAccountId) url.searchParams.set('account_id', mailboxAccountId);
+        return url;
+      }
       var folderCache = new Map();
       var folderRequests = new Map();
       var folderSelections = new Map();
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
-      var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', drafts: 'Entwürfe', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
+      var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', drafts: 'Entwürfe', planned: 'Geplant', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
       var mailboxStatus = {
         folderCounts: {{ mailbox.folder_counts | tojson }},
         unreadCount: {{ unread_email_count | default(0) | tojson }}
@@ -363,8 +403,13 @@
       var mailboxComposerRecipient = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient]');
       var mailboxComposerRecipientKey = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient-key]');
       var mailboxComposerRecipientCustomerId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient-customer-id]');
+      var mailboxComposerLeadId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-lead-id]');
       var mailboxComposerRecipientName = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-recipient-name]');
+      var mailboxComposerDunningId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-dunning-id]');
+      var mailboxComposerContextModule = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-context-module]');
+      var mailboxComposerContextRecordId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-context-record-id]');
       var mailboxComposerDraftId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-draft-id]');
+      var mailboxComposerScheduledEmailId = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-scheduled-email-id]');
       var mailboxComposerReplyTo = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-reply-to]');
       var mailboxComposerForwardFrom = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-forward-from]');
       var mailboxComposerCcField = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-cc-field]');
@@ -389,6 +434,7 @@
       var mailboxComposerTemplateLibraryList = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-template-library-list]');
       var mailboxComposerStatus = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-template-status]');
       var mailboxComposerSubmit = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-submit]');
+      var mailboxComposerScheduledAt = mailboxComposer && mailboxComposer.querySelector('[data-email-compose-scheduled-at]');
       var mailboxComposerSaveDraft = mailboxComposer && mailboxComposer.querySelector('[data-mailbox-compose-save-draft]');
       var mailboxContextMenu = document.querySelector('[data-mailbox-context-menu]');
       var mailboxContextMenuHeading = mailboxContextMenu && mailboxContextMenu.querySelector('[data-mailbox-context-menu-heading]');
@@ -410,6 +456,7 @@
       var mailboxComposerNeedsNewEmailDefaults = false;
       var mailboxComposerTemplateRequest = 0;
       var mailboxComposerAttachments = [];
+      var mailboxComposerStoredAttachments = [];
       var mailboxComposerDraftTimer = 0;
        var mailboxComposerDraftSavePromise = null;
        var mailboxComposerDraftDirty = false;
@@ -577,14 +624,20 @@
         select.append(option);
       }
 
-      function setMailboxComposerStatus(message) {
-        if (mailboxComposerStatus) mailboxComposerStatus.textContent = message;
+      function setMailboxComposerStatus(message, isError) {
+        if (!mailboxComposerStatus) return;
+        mailboxComposerStatus.textContent = message;
+        mailboxComposerStatus.dataset.status = isError ? 'error' : 'info';
       }
 
       function updateMailboxComposerSubmit() {
         if (!mailboxComposerSubmit) return;
-        mailboxComposerSubmit.disabled = !(
+        mailboxComposerSubmit.textContent = mailboxComposerScheduledAt && mailboxComposerScheduledAt.value
+          ? 'E-Mail planen'
+          : 'E-Mail senden';
+        mailboxComposerSubmit.disabled = mailboxComposerSubmitting || !(
           mailboxComposerSender && mailboxComposerSender.value &&
+          mailboxComposerSender.selectedOptions[0].dataset.canSend === 'true' &&
           mailboxComposerRecipient && mailboxComposerRecipient.validity.valid
         );
       }
@@ -592,7 +645,7 @@
       function loadMailboxComposerOptions() {
         if (!mailboxComposer || mailboxComposerLoaded) return;
         setMailboxComposerStatus('Absender werden geladen ...');
-        window.fetch('/emails/compose/options', { credentials: 'same-origin' })
+        window.fetch(scopedMailboxUrl('/emails/compose/options'), { credentials: 'same-origin' })
           .then(function (response) {
             if (!response.ok) throw new Error('Die E-Mail-Maske konnte nicht vorbereitet werden.');
             return response.json();
@@ -603,6 +656,7 @@
               mailboxComposerOption(mailboxComposerSender, '', 'Absender auswählen');
               (payload.senders || []).forEach(function (sender) {
                 mailboxComposerOption(mailboxComposerSender, sender.email, sender.name + ' · ' + sender.email);
+                mailboxComposerSender.lastElementChild.dataset.canSend = String(sender.can_send === true);
               });
               mailboxComposerSender.disabled = !(payload.senders || []).length;
             }
@@ -629,7 +683,7 @@
             mailboxComposerLoaded = true;
             applyMailboxComposerNewEmailDefaults();
             if (payload.sender_error) {
-              setMailboxComposerStatus(payload.sender_error);
+              setMailboxComposerStatus(payload.sender_error, true);
             } else {
               setMailboxComposerStatus('Kontakt oder E-Mail-Adresse eingeben.');
             }
@@ -637,7 +691,7 @@
             applyMailboxComposerPendingAction();
           })
           .catch(function (error) {
-            setMailboxComposerStatus(error.message || 'Die E-Mail-Maske konnte nicht vorbereitet werden.');
+            setMailboxComposerStatus(error.message || 'Die E-Mail-Maske konnte nicht vorbereitet werden.', true);
           });
       }
 
@@ -657,32 +711,65 @@
 
       function clearMailboxComposerActionFields() {
         if (mailboxComposerDraftId) mailboxComposerDraftId.value = '';
+        if (mailboxComposerScheduledEmailId) mailboxComposerScheduledEmailId.value = '';
+        if (mailboxComposerDunningId) mailboxComposerDunningId.value = '';
+        mailboxComposerContextModule.value = '';
+        mailboxComposerContextRecordId.value = '';
+        if (mailboxComposerLeadId) mailboxComposerLeadId.value = '';
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = '';
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.value = '';
         if (mailboxComposerCc) mailboxComposerCc.value = '';
         if (mailboxComposerCcField) mailboxComposerCcField.hidden = true;
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.required = false;
+        if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.hidden = false;
+        mailboxComposerStoredAttachments = [];
         setMailboxComposerAttachments([]);
       }
 
       function setMailboxComposerAttachments(attachments) {
         mailboxComposerAttachments = attachments.slice();
+        window.KosmosEmailDraftAttachments.sync(mailboxComposerForm, mailboxComposerStoredAttachments);
         if (mailboxComposerAttachmentInput) {
           var transfer = new DataTransfer();
           mailboxComposerAttachments.forEach(function (attachment) { transfer.items.add(attachment); });
           mailboxComposerAttachmentInput.files = transfer.files;
         }
         if (mailboxComposerAttachmentSummary) {
-          mailboxComposerAttachmentSummary.textContent = mailboxComposerAttachments.length
-            ? mailboxComposerAttachments.length + (mailboxComposerAttachments.length === 1 ? ' Anhang ausgewählt' : ' Anhänge ausgewählt')
+          var attachmentCount = mailboxComposerStoredAttachments.length + mailboxComposerAttachments.length;
+          mailboxComposerAttachmentSummary.textContent = attachmentCount
+            ? attachmentCount + (attachmentCount === 1 ? ' Anhang' : ' Anhänge')
             : 'Keine Anhänge ausgewählt';
         }
         if (!mailboxComposerAttachmentList) return;
-        mailboxComposerAttachmentList.replaceChildren();
+        window.KosmosEmailDraftAttachments.clearList(mailboxComposerAttachmentList);
+        mailboxComposerStoredAttachments.forEach(function (attachment) {
+          var item = document.createElement('li');
+          var name = window.KosmosEmailDraftAttachments.storedLink(
+            attachment, mailboxComposerDraftId && mailboxComposerDraftId.value,
+            mailboxComposerScheduledEmailId && mailboxComposerScheduledEmailId.value
+          );
+          item.append(name);
+          if (!mailboxComposerScheduledEmailId || !mailboxComposerScheduledEmailId.value) {
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'email-compose-attachment-remove';
+            remove.setAttribute('aria-label', attachment.filename + ' entfernen');
+            remove.title = 'Anhang entfernen';
+            remove.innerHTML = '&times;';
+            remove.addEventListener('click', function () {
+              mailboxComposerStoredAttachments = mailboxComposerStoredAttachments.filter(function (item) { return item.id !== attachment.id; });
+              setMailboxComposerAttachments(mailboxComposerAttachments);
+              scheduleMailboxComposerDraftSave();
+            });
+            item.append(remove);
+          }
+          mailboxComposerAttachmentList.append(item);
+        });
         mailboxComposerAttachments.forEach(function (attachment, index) {
           var item = document.createElement('li');
-          var name = document.createElement('span');
+          var name = window.KosmosEmailDraftAttachments.localLink(attachment);
           var remove = document.createElement('button');
-          name.textContent = attachment.name;
           remove.type = 'button';
           remove.className = 'email-compose-attachment-remove';
           remove.setAttribute('aria-label', attachment.name + ' entfernen');
@@ -692,11 +779,12 @@
             setMailboxComposerAttachments(mailboxComposerAttachments.filter(function (_attachment, itemIndex) {
               return itemIndex !== index;
             }));
+            scheduleMailboxComposerDraftSave();
           });
           item.append(name, remove);
           mailboxComposerAttachmentList.append(item);
         });
-        mailboxComposerAttachmentList.hidden = !mailboxComposerAttachments.length;
+        mailboxComposerAttachmentList.hidden = !(mailboxComposerStoredAttachments.length + mailboxComposerAttachments.length);
       }
 
       function syncMailboxComposerContent() {
@@ -717,6 +805,8 @@
           (mailboxComposerCc && mailboxComposerCc.value.trim()) ||
           (mailboxComposerSubject && mailboxComposerSubject.value.trim()) ||
           messageText ||
+          mailboxComposerAttachments.length || mailboxComposerStoredAttachments.length ||
+          (mailboxComposerDraftId && mailboxComposerDraftId.value) ||
           (mailboxComposerTemplateId && mailboxComposerTemplateId.value)
         );
       }
@@ -735,6 +825,8 @@
        }
 
        function scheduleMailboxComposerDraftSave() {
+         if (mailboxComposerSubmitting) return;
+         if (mailboxComposerScheduledEmailId && mailboxComposerScheduledEmailId.value) return;
          if (!mailboxComposerHasDraftContent()) return;
          if (!mailboxComposerDraftStartedAt) mailboxComposerDraftStartedAt = Date.now();
          mailboxComposerDraftDirty = true;
@@ -790,6 +882,11 @@
           updateMailboxComposerSubmit();
         }
         if (mailboxComposerDraftId) mailboxComposerDraftId.value = action.draft_id || '';
+        if (mailboxComposerScheduledEmailId) mailboxComposerScheduledEmailId.value = action.scheduled_email_id || '';
+        if (mailboxComposerDunningId) mailboxComposerDunningId.value = action.dunning_id || '';
+        mailboxComposerContextModule.value = action.context_module || '';
+        mailboxComposerContextRecordId.value = action.context_record_id || '';
+        if (mailboxComposerLeadId) mailboxComposerLeadId.value = action.lead_id || '';
         if (mailboxComposerSender) {
           mailboxComposerSender.value = action.sender_email || mailboxComposerDefaultSenderEmail || (
             Array.from(mailboxComposerSender.options).find(function (option) { return option.value; }) || {}
@@ -797,6 +894,11 @@
         }
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = action.reply_to_email_id || '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = action.forward_from_email_id || '';
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.value = action.scheduled_at || '';
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.required = action.action === 'scheduled';
+        if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.hidden = action.action === 'scheduled';
+        mailboxComposerStoredAttachments = (action.action === 'scheduled' || action.action === 'draft') && Array.isArray(action.attachments) ? action.attachments : [];
+        setMailboxComposerAttachments([]);
         var ccEmails = Array.isArray(action.cc_emails)
           ? action.cc_emails.join(', ')
           : (action.cc_emails || '');
@@ -821,8 +923,13 @@
         } else if (mailboxComposerContentValue) {
           mailboxComposerContentValue.value = action.content || '';
         }
-        if (action.action === 'draft') {
-          setMailboxComposerStatus('Entwurf geladen. Änderungen können gespeichert oder über Mittwald versendet werden.');
+        if (action.action === 'scheduled') {
+          var storedAttachmentCount = Array.isArray(action.attachments) ? action.attachments.length : 0;
+          setMailboxComposerStatus(
+            'Geplante E-Mail geladen.' + (storedAttachmentCount ? ' ' + storedAttachmentCount + (storedAttachmentCount === 1 ? ' gespeicherter Anhang bleibt erhalten.' : ' gespeicherte Anhänge bleiben erhalten.') : '')
+          );
+        } else if (action.action === 'draft') {
+          setMailboxComposerStatus('Entwurf geladen. Gespeicherte Anhänge bleiben beim Versand erhalten.');
         } else if (action.action === 'reply_all') {
           setMailboxComposerStatus('Antwort an alle vorbereitet. CC kann vor dem Versand angepasst werden.');
         } else if (action.action === 'forward') {
@@ -874,21 +981,6 @@
           });
       }
 
-      function openAgentReplyDraftFromQuery() {
-        var url = new URL(window.location.href);
-        if (url.searchParams.get('agent_reply_draft') !== '1') return;
-        var selected = url.searchParams.get('selected') || '';
-        var draft = /^unassigned-(\d+)$/.exec(selected);
-        if (!draft) return;
-        url.searchParams.delete('agent_reply_draft');
-        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-        var draftButton = document.createElement('button');
-        draftButton.dataset.mailboxDraftId = draft[1];
-        window.setTimeout(function () {
-          prepareMailboxDraftAction(draftButton);
-        }, 0);
-      }
-
       function prepareMailboxDraftAction(button) {
         if (!mailboxComposerTrigger) return;
         var draftId = button.dataset.mailboxDraftId || '';
@@ -921,10 +1013,47 @@
           });
       }
 
-      openAgentReplyDraftFromQuery();
+      function prepareMailboxScheduledAction(button) {
+        if (!mailboxComposerTrigger) return;
+        var scheduledEmailId = button.dataset.mailboxScheduledEmailId || '';
+        if (!/^\d+$/.test(scheduledEmailId)) return;
+        beginMailboxComposerDraftSession();
+        if (mailboxComposerActionController) mailboxComposerActionController.abort();
+        mailboxComposerActionController = new AbortController();
+        button.disabled = true;
+        window.fetch('/emails/scheduled/' + encodeURIComponent(scheduledEmailId) + '/compose-context', {
+          credentials: 'same-origin',
+          signal: mailboxComposerActionController.signal
+        })
+          .then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+              if (!response.ok) throw new Error(payload.detail || 'Die geplante E-Mail konnte nicht geladen werden.');
+              return payload;
+            });
+          })
+          .then(function (payload) {
+            mailboxComposerPendingAction = payload;
+            mailboxComposerTrigger.click();
+            if (mailboxComposerLoaded) window.setTimeout(applyMailboxComposerPendingAction, 0);
+          })
+          .catch(function (error) {
+            if (error.name !== 'AbortError') window.alert(error.message || 'Die geplante E-Mail konnte nicht geladen werden.');
+          })
+          .finally(function () {
+            button.disabled = false;
+            mailboxComposerActionController = null;
+          });
+      }
+
 
       function saveMailboxDraft(options) {
         options = options || {};
+        if (mailboxComposerSubmitting) return Promise.resolve(false);
+        if (mailboxComposerScheduledEmailId && mailboxComposerScheduledEmailId.value) {
+          mailboxComposerDraftDirty = false;
+          clearMailboxComposerDraftTimer();
+          return Promise.resolve(false);
+        }
         if (!mailboxComposerForm || !mailboxComposerHasDraftContent()) {
           mailboxComposerDraftDirty = false;
           return Promise.resolve(false);
@@ -940,25 +1069,26 @@
         }
         clearMailboxComposerDraftTimer();
         mailboxComposerDraftDirty = false;
-        var formData = new FormData(mailboxComposerForm);
-        // Drafts retain text only; attachments are stored once the email is actually sent.
-        formData.delete('attachments');
+        var attachmentSnapshot = window.KosmosEmailDraftAttachments.capture(mailboxComposerForm, mailboxComposerAttachments);
         if (!options.automatic && mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = true;
         if (!options.quiet) setMailboxComposerStatus('Entwurf wird gespeichert ...');
-        var saving = window.fetch('/emails/drafts', {
+        var saving = window.fetch(scopedMailboxUrl('/emails/drafts'), {
           method: 'POST',
-          body: formData,
+          body: attachmentSnapshot.body,
           credentials: 'same-origin'
         })
           .then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (payload) {
-              if (!response.ok) throw new Error(payload.detail || 'Der Entwurf konnte nicht gespeichert werden.');
+              if (!response.ok || !payload.draft_id) throw new Error(payload.detail || 'Der Entwurf konnte nicht gespeichert werden.');
               return payload;
             });
           })
           .then(function (payload) {
             if (session !== mailboxComposerDraftSession) return true;
             if (mailboxComposerDraftId) mailboxComposerDraftId.value = String(payload.draft_id || '');
+            var attachmentState = window.KosmosEmailDraftAttachments.reconcile(attachmentSnapshot, mailboxComposerAttachments, mailboxComposerStoredAttachments, payload);
+            mailboxComposerStoredAttachments = attachmentState.stored;
+            setMailboxComposerAttachments(attachmentState.files);
             if (payload.folder_counts) {
               mailboxStatus.folderCounts = payload.folder_counts;
               updateMailboxFolderCounts(payload.folder_counts);
@@ -972,32 +1102,32 @@
             var list = document.querySelector('[data-mailbox-list]');
             if (list && (list.dataset.mailboxFolderName || '') === 'drafts') refreshCurrentMailboxFolder('drafts');
             if (!options.quiet) {
-              setMailboxComposerStatus(
-                mailboxComposerAttachments.length
-                  ? 'Entwurf gespeichert. Anhänge werden erst beim Versand über Mittwald übertragen.'
-                  : 'Entwurf gespeichert.'
-              );
+              setMailboxComposerStatus('Entwurf gespeichert.');
+            }
+            if (options.closeAfterSave && !mailboxComposerDraftDirty) {
+              mailboxComposer.dispatchEvent(new Event('email-compose-saved'));
             }
             return true;
           })
           .catch(function (error) {
             mailboxComposerDraftDirty = true;
             if (session === mailboxComposerDraftSession && !options.quiet) {
-              setMailboxComposerStatus(error.message || 'Der Entwurf konnte nicht gespeichert werden.');
+              setMailboxComposerStatus(error.message || 'Der Entwurf konnte nicht gespeichert werden.', true);
             }
             return false;
           });
         var completed = saving.finally(function () {
           if (mailboxComposerDraftSavePromise === completed) mailboxComposerDraftSavePromise = null;
-          if (!options.automatic && mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = false;
+          if (!options.automatic && mailboxComposerSaveDraft && !mailboxComposerSubmitting) mailboxComposerSaveDraft.disabled = false;
           if (mailboxComposerDraftDirty) scheduleMailboxComposerDraftSave();
         });
         mailboxComposerDraftSavePromise = completed;
         return completed;
       }
 
-       function persistMailboxComposerDraftOnClose() {
+      function persistMailboxComposerDraftOnClose() {
          if (!mailboxComposer || mailboxComposer.hidden) return;
+         if (mailboxComposerScheduledEmailId && mailboxComposerScheduledEmailId.value) return;
          var hasSavedDraft = Boolean(mailboxComposerDraftId && mailboxComposerDraftId.value);
          var autosaveIsDue = mailboxComposerDraftStartedAt && Date.now() - mailboxComposerDraftStartedAt >= 30000;
          if (!hasSavedDraft && !autosaveIsDue) return;
@@ -1005,22 +1135,34 @@
        }
 
       function submitMailboxComposerForm(event) {
+        if (event.defaultPrevented) return;
         syncMailboxComposerContent();
         event.preventDefault();
         if (mailboxComposerSubmitting) return;
         if (!mailboxComposerForm.reportValidity()) {
-          setMailboxComposerStatus('Bitte Absender, Empfänger und Betreff prüfen.');
+          setMailboxComposerStatus('Bitte Absender, Empfänger und Betreff prüfen.', true);
           return;
         }
         if (!mailboxComposerHasDraftContent()) {
-          setMailboxComposerStatus('Die E-Mail enthält noch keinen Inhalt.');
+          setMailboxComposerStatus('Die E-Mail enthält noch keinen Inhalt.', true);
           return;
         }
         mailboxComposerSubmitting = true;
         clearMailboxComposerDraftTimer();
         if (mailboxComposerSubmit) mailboxComposerSubmit.disabled = true;
-        // Delivery must not wait for an autosave request; an interrupted save must never block sending.
-        HTMLFormElement.prototype.submit.call(mailboxComposerForm);
+        if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = true;
+        setMailboxComposerStatus('E-Mail wird übermittelt ...');
+        return Promise.resolve(mailboxComposerDraftSavePromise).then(function () {
+          mailboxComposerForm.action = scopedMailboxUrl(mailboxComposerForm.action).toString();
+          return window.KosmosEmailDelivery.submit(mailboxComposerForm);
+        }).then(function (url) {
+          window.location.assign(url);
+        }).catch(function (error) {
+          mailboxComposerSubmitting = false;
+          if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = false;
+          updateMailboxComposerSubmit();
+          setMailboxComposerStatus(error.message, true);
+        });
       }
 
       function selectMailboxComposerRecipient(recipient) {
@@ -1157,11 +1299,16 @@
         mailboxComposerTemplateId.value = templateId;
         if (!templateId) return;
         var requestId = ++mailboxComposerTemplateRequest;
-        var baseUrl = mailboxComposer.dataset.emailTemplateUrl;
-        var isPreview = !baseUrl || !mailboxComposerRecipientKey.value;
-        var templateUrl = isPreview
-          ? '/emails/compose/templates/' + encodeURIComponent(templateId)
-          : baseUrl + '/' + encodeURIComponent(templateId) + '?recipient_key=' + encodeURIComponent(mailboxComposerRecipientKey.value);
+        var isPreview = !mailboxComposerRecipientKey.value && !mailboxComposerLeadId.value && !mailboxComposerContextRecordId.value;
+        var templateUrl = '/emails/compose/templates/' + encodeURIComponent(templateId) + '?' + new URLSearchParams({
+          recipient_key: mailboxComposerRecipientKey.value,
+          recipient_email: mailboxComposerRecipient.value,
+          customer_id: mailboxComposerRecipientCustomerId.value,
+          lead_id: mailboxComposerLeadId.value,
+          dunning_id: mailboxComposerDunningId.value,
+          context_module: mailboxComposerContextModule.value,
+          context_record_id: mailboxComposerContextRecordId.value
+        }).toString();
         setMailboxComposerStatus(isPreview ? 'Vorlage wird als Entwurf geladen ...' : 'Vorlage wird geladen ...');
         window.fetch(templateUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
           .then(function (response) {
@@ -1172,6 +1319,12 @@
           })
           .then(function (template) {
             if (requestId !== mailboxComposerTemplateRequest) return;
+            var resolved = template.template_context || {};
+            mailboxComposerContextModule.value = resolved.context_module || '';
+            mailboxComposerContextRecordId.value = resolved.context_record_id || '';
+            if (resolved.customer_id) mailboxComposerRecipientCustomerId.value = resolved.customer_id;
+            if (resolved.lead_id) mailboxComposerLeadId.value = resolved.lead_id;
+            if (resolved.recipient_key) mailboxComposerRecipientKey.value = resolved.recipient_key;
             if (mailboxComposerSubject) mailboxComposerSubject.value = template.subject || '';
             if (mailboxComposerContent) {
               if (window.KosmosEmailEditors) {
@@ -1194,7 +1347,7 @@
           })
           .catch(function (error) {
             if (requestId === mailboxComposerTemplateRequest) {
-              setMailboxComposerStatus(error.message || 'Die E-Mail-Vorlage konnte nicht geladen werden.');
+              setMailboxComposerStatus(error.message || 'Die E-Mail-Vorlage konnte nicht geladen werden.', true);
             }
           });
       }
@@ -1290,7 +1443,7 @@
           })
           .catch(function (error) {
             if (requestId !== mailboxComposerRecipientRequest) return;
-            if (error.name !== 'AbortError') setMailboxComposerStatus(error.message || 'Die Kontakte konnten nicht gesucht werden.');
+            if (error.name !== 'AbortError') setMailboxComposerStatus(error.message || 'Die Kontakte konnten nicht gesucht werden.', true);
           });
       }
 
@@ -1304,6 +1457,10 @@
         [mailboxComposerSender, mailboxComposerRecipient].filter(Boolean).forEach(function (control) {
           control.addEventListener('change', updateMailboxComposerSubmit);
         });
+      }
+      if (mailboxComposerScheduledAt) {
+        mailboxComposerScheduledAt.addEventListener('input', updateMailboxComposerSubmit);
+        mailboxComposerScheduledAt.addEventListener('change', updateMailboxComposerSubmit);
       }
       if (mailboxComposerRecipient) {
         mailboxComposerRecipient.addEventListener('input', function () {
@@ -1352,7 +1509,7 @@
         });
       }
       if (mailboxComposerSaveDraft) {
-        mailboxComposerSaveDraft.addEventListener('click', function () { saveMailboxDraft({ force: true }); });
+        mailboxComposerSaveDraft.addEventListener('click', function () { saveMailboxDraft({ force: true, closeAfterSave: true }); });
       }
       if (mailboxComposerForm) {
         mailboxComposerForm.addEventListener('submit', submitMailboxComposerForm);
@@ -1382,6 +1539,12 @@
         if (!button) return;
         event.preventDefault();
         prepareMailboxDraftAction(button);
+      });
+      document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-mailbox-scheduled-open]');
+        if (!button) return;
+        event.preventDefault();
+        prepareMailboxScheduledAction(button);
       });
       document.addEventListener('click', function (event) {
         if (event.target.closest('[data-mailbox-case-delete-cancel]')) {
@@ -1484,9 +1647,9 @@
           loadMessage(href, list, messageKey);
         });
         link.addEventListener('contextmenu', function (event) {
-          event.preventDefault();
           var list = link.closest('[data-mailbox-list]');
-          if (!list) return;
+          if (!list || (list.dataset.mailboxFolderName || '') === 'planned') return;
+          event.preventDefault();
           var marked = markedMailboxMessages(list);
           if (!marked.keys.has(link.dataset.mailboxKey)) {
             markMailboxMessages(list, link.dataset.mailboxKey);
@@ -1511,7 +1674,7 @@
       attachFolderListeners(document);
 
       function mailboxMessageUrl(list, messageKey) {
-        var url = new URL('/emails', window.location.origin);
+        var url = scopedMailboxUrl('/emails');
         url.searchParams.set('folder', list.dataset.mailboxFolderName || 'inbox');
         if (list.dataset.mailboxUnread === 'true') url.searchParams.set('unread', 'true');
         url.searchParams.set('selected', messageKey);
@@ -1519,11 +1682,11 @@
       }
 
       function mailboxFolderKey(folder, unread) {
-        return folder + ':' + (unread ? 'unread' : 'all');
+        return mailboxAccountId + ':' + folder + ':' + (unread ? 'unread' : 'all');
       }
 
       function mailboxFolderUrl(folder, unread) {
-        var url = new URL('/emails', window.location.origin);
+        var url = scopedMailboxUrl('/emails');
         url.searchParams.set('folder', folder);
         if (unread) url.searchParams.set('unread', 'true');
         return url.toString();
@@ -1640,7 +1803,7 @@
         parameters.set('csrf_token', csrfInput.value);
         parameters.set('action', action);
         messages.forEach(function (message) { parameters.append('keys', message.key); });
-        window.fetch('/emails/actions', {
+        window.fetch(scopedMailboxUrl('/emails/actions'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: parameters.toString(),
@@ -1810,6 +1973,7 @@
         if (markedMailboxMessages(list).keys.has(message.key)) item.classList.add('is-marked');
         if (list.dataset.mailboxSelectedKey === message.key) item.classList.add('is-selected');
         if (message.is_unread) item.classList.add('is-unread');
+        if (message.mailbox_state === 'failed') item.classList.add('is-failed');
         item.style.top = (index * parseFloat(getComputedStyle(list).getPropertyValue('--mailbox-row-height'))) + 'px';
 
         var link = document.createElement('a');
@@ -1838,7 +2002,9 @@
         subjectRow.append(subject);
         var trash = null;
         var isTrashFolder = (list.dataset.mailboxFolderName || 'inbox') === 'trash';
-        trash = document.createElement('button');
+        var isPlannedFolder = (list.dataset.mailboxFolderName || 'inbox') === 'planned';
+        if (!isPlannedFolder) trash = document.createElement('button');
+        if (trash) {
         trash.className = 'mailbox-message-trash';
         trash.type = 'button';
         trash.setAttribute('aria-label', isTrashFolder ? 'E-Mail endgültig löschen' : 'E-Mail in den Papierkorb verschieben');
@@ -1855,13 +2021,19 @@
           trash.disabled = true;
           moveMailboxMessageToTrash(list, message.key);
         });
+        }
         link.append(subjectRow);
 
         var context = document.createElement('p');
-        if (message.kind === 'unassigned' || message.kind === 'draft' || message.kind === 'direct' || message.kind === 'system') {
+        if (message.kind === 'unassigned' || message.kind === 'draft' || message.kind === 'direct' || message.kind === 'system' || message.kind === 'scheduled') {
           var badge = document.createElement('span');
           badge.className = 'pill';
-          badge.textContent = message.kind === 'draft' ? 'Entwurf' : message.kind === 'direct' ? 'Direkt versendet' : message.kind === 'system' ? 'System-Erinnerung' : 'Unbekannt';
+          if (message.kind === 'scheduled') {
+            badge.textContent = message.mailbox_state === 'failed' ? 'Fehlgeschlagen' : message.mailbox_state === 'retrying' ? 'Erneuter Versuch' : message.mailbox_state === 'sending' ? 'Wird gesendet' : 'Geplant';
+            if (message.mailbox_state === 'failed') badge.classList.add('is-failed');
+          } else {
+            badge.textContent = message.kind === 'draft' ? 'Entwurf' : message.kind === 'direct' ? 'Direkt versendet' : message.kind === 'system' ? 'System-Erinnerung' : 'Unbekannt';
+          }
           context.append(badge);
         } else {
           context.textContent = message.context;
@@ -2013,7 +2185,7 @@
         if (forceRefresh) folderCache.delete(cacheKey);
         if (folderCache.has(cacheKey)) return Promise.resolve(folderCache.get(cacheKey));
         if (folderRequests.has(cacheKey)) return folderRequests.get(cacheKey);
-        var listUrl = new URL('/emails/list', window.location.origin);
+        var listUrl = scopedMailboxUrl('/emails/list');
         listUrl.searchParams.set('folder', folder);
         if (unread) listUrl.searchParams.set('unread', 'true');
         var request = window.fetch(listUrl, { credentials: 'same-origin' })
@@ -2040,7 +2212,7 @@
         var list = document.querySelector('[data-mailbox-list]');
         if (!list) return;
         var activeFolder = list.dataset.mailboxFolderName || 'inbox';
-        var queue = ['inbox', 'sent', 'drafts', 'unassigned', 'trash', 'spam'].filter(function (folder) { return folder !== activeFolder; });
+        var queue = ['inbox', 'drafts', 'planned', 'sent', 'unassigned', 'trash', 'spam'].filter(function (folder) { return folder !== activeFolder; });
         function loadNextFolder() {
           var folder = queue.shift();
           if (!folder) return;
@@ -2098,7 +2270,7 @@
 
       function pollMailboxStatus() {
         if (document.visibilityState === 'hidden') return;
-        window.fetch('/emails/status', { credentials: 'same-origin' })
+        window.fetch(scopedMailboxUrl('/emails/status'), { credentials: 'same-origin' })
           .then(function (response) {
             if (!response.ok) throw new Error('Mailbox status response failed.');
             return response.json();
@@ -2124,6 +2296,16 @@
       }
 
       window.setInterval(pollMailboxStatus, 25_000);
+      var accountPicker = document.querySelector('[data-mailbox-account]');
+      if (accountPicker) accountPicker.addEventListener('change', function () {
+        if (mailboxComposer && mailboxComposer.classList.contains('is-open')) {
+          accountPicker.value = mailboxAccountId;
+          return;
+        }
+        var list = document.querySelector('[data-mailbox-list]');
+        accountPicker.form.querySelector('[data-mailbox-account-folder]').value = list ? list.dataset.mailboxFolderName : 'inbox';
+        accountPicker.form.requestSubmit();
+      });
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') pollMailboxStatus();
       });
@@ -2148,7 +2330,7 @@
       }
 
       function loadFolder(link) {
-        var targetUrl = new URL(link.href);
+        var targetUrl = scopedMailboxUrl(link.href);
         var folder = targetUrl.searchParams.get('folder') || 'inbox';
         var unread = targetUrl.searchParams.get('unread') === 'true';
         var currentList = document.querySelector('[data-mailbox-list]');

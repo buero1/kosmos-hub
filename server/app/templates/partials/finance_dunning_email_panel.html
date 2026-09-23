@@ -1,0 +1,55 @@
+<article id="dunning-emails" class="card customer-detail-panel">
+  <div class="customer-detail-panel-heading">
+    <div>
+      <p class="eyebrow">HUB-DATEN</p>
+      <h3>E-Mails</h3>
+    </div>
+    {% if can_create_dunning_email %}
+      <button
+        class="button button-variant-2"
+        type="button"
+        data-email-compose-open
+        data-email-compose-customer-id="{{ detail.document.customer_id }}"
+        data-email-compose-dunning-id="{{ detail.document.id }}"
+      >E-Mail schreiben</button>
+    {% endif %}
+  </div>
+  {% if email_state and email_message %}<p class="notice-{{ email_state }}">{{ email_message }}</p>{% endif %}
+  <div class="customer-section-expandable" data-expandable-section>
+    <div data-expandable-content>
+      {% for email in dunning_emails %}
+        <article class="communication-entry">
+          <div class="communication-entry-heading">
+            <strong>{{ email.subject }}</strong>
+            <span class="pill{% if email.source == 'scheduled' and email.sync_status == 'failed' %} pill-failed{% endif %}">
+              {% if email.source == "scheduled" and email.sync_status == "failed" %}Fehlgeschlagen{% elif email.source == "scheduled" %}Geplant{% elif email.direction == "inbound" %}Eingang{% else %}Ausgang{% endif %}
+            </span>
+          </div>
+          <p class="subtle">
+            {% if email.sender %}Von {{ email.sender }}{% endif %}
+            {% if email.sender and email.recipients %} · {% endif %}
+            {% if email.recipients %}An {{ email.recipients }}{% endif %}
+            {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
+          </p>
+          {% if email.preview_html %}
+            <details class="communication-content">
+              <summary>E-Mail-Vorschau anzeigen</summary>
+              <iframe class="communication-email-preview" title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" srcdoc="{{ email.preview_html }}"></iframe>
+            </details>
+          {% endif %}
+          {% if email.attachments and email.source != "scheduled" %}
+            <ul class="communication-attachments" aria-label="E-Mail-Anhänge">
+              {% for attachment in email.attachments %}
+                <li><a href="/customers/{{ detail.document.customer_id }}/communications/emails/{{ email.id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
+        </article>
+      {% else %}
+        <p class="subtle">Noch keine E-Mails mit dieser Mahnung verknüpft.</p>
+      {% endfor %}
+    </div>
+    <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
+  </div>
+</article>

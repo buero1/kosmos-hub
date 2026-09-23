@@ -245,6 +245,26 @@ def test_customer_detail_create_links_keep_the_customer_relation():
         assert f'href="{link}"' in template
 
 
+def test_customer_email_actions_only_offer_case_creation_aligned_to_the_right():
+    template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+    base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
+    routes = Path("app/api/routes/web.py").read_text(encoding="utf-8")
+
+    assert 'action="/cases/email-links"' not in template
+    assert "Fall zuordnen ..." not in template
+    assert "case-email-create-action" in template
+    assert "linked_cases_by_email_id.get(email.id)" in template
+    assert "Abgeschlossener Fall" in template
+    assert "Offener Fall" in template
+    assert 'data-customer-case-edit-open data-customer-case-id="{{ linked_case.case.id }}"' in template
+    assert ".case-email-create-action { margin-left: auto; }" in base_template
+    assert "button.customer-email-case-link.is-open" in base_template
+    assert ".customer-communication-tabs .field-tabs-list" in base_template
+    assert "flex-wrap: wrap;" in base_template
+    assert "overflow-wrap: anywhere;" in base_template
+    assert "linked_cases_for_customer_emails" in routes
+
+
 def test_customer_directory_rejects_non_matching_or_ambiguous_sites():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -525,7 +545,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Tel.",
             "Status",
             "Kunde Typ",
-            "Webseite",
+            "Website",
             "Arbeitsdomain-Login",
             "Rechnungsadresse - Straße",
             "PLZ Ort",
@@ -539,7 +559,7 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Tel.",
             "Status",
             "Kunde Typ",
-            "Webseite",
+            "Website",
             "Arbeitsdomain-Login",
             "Rechnungsadresse - Straße",
             "PLZ Ort",
@@ -704,7 +724,7 @@ def test_customer_directory_masks_sensitive_zoho_profile_values_for_admins_and_h
         admin_detail = _service(db).get_detail(customer_id=customer.id, include_sensitive=True)
 
         assert public_detail is not None
-        assert [field.label for field in public_detail.profile_fields] == ["Webseite"]
+        assert [field.label for field in public_detail.profile_fields] == ["Website"]
         assert admin_detail is not None
         iban = next(field for field in admin_detail.profile_fields if field.label == "IBAN")
         assert iban.value == "Geschützt"

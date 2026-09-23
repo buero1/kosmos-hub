@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     database_url: str
     public_base_url: str = "http://127.0.0.1:8000"
     auto_create_tables: bool = True
+    ai_agent_run_cost_limit_usd: float = Field(default=0.50, gt=0, le=100)
     auto_verify_domains: str = ""
     wordpress_bridge_min_version: str = "0.1.0"
     fleet_updates_auto_refresh: bool = True

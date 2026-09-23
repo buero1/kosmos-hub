@@ -14,6 +14,7 @@ from app.models.site import Site, SiteStatus
 from app.repositories.site_repository import SiteRepository
 from app.schemas.registration import RegistrationHeaders, RegistrationRequest, RegistrationResponse
 from app.services.audit import write_audit_log
+from app.services.site_customer_matching import SiteCustomerMatchingService, normalized_domain
 
 
 class SiteRegistrationService:
@@ -33,7 +34,7 @@ class SiteRegistrationService:
         headers: RegistrationHeaders,
         raw_body: bytes,
     ) -> RegistrationResponse:
-        site = self.repository.get_by_uuid(payload.site_uuid)
+        site = self.db.scalar(select(Site).where(Site.uuid == payload.site_uuid).with_for_update())
         adopted_preprovisioned_site = False
         if site is None:
             site = self._find_preprovisioned_site(str(payload.home_url))
@@ -46,6 +47,17 @@ class SiteRegistrationService:
             raw_body=raw_body,
             allow_bootstrap=adopted_preprovisioned_site,
         )
+
+        if site is not None and normalized_domain(site.domain) != normalized_domain(str(payload.home_url)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "code": "bridge_domain_changed",
+                "message": "This Bridge identity belongs to another domain. Register with a new identity.",
+            })
+        # The authenticated channel must stay on the registered domain as well.
+        if any(normalized_domain(str(url)) != normalized_domain(str(payload.home_url))
+               for url in (payload.site_url, payload.mcp_endpoint) if url):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="WordPress and Bridge endpoints must belong to the registered domain.")
 
         created = site is None
         if site is None:
@@ -96,6 +108,8 @@ class SiteRegistrationService:
                     detail="Stored site secret mismatch. Re-onboarding is required before rotating credentials.",
                 )
         connection.last_success_at = payload.registration_timestamp
+
+        SiteCustomerMatchingService(db=self.db, cipher=self.cipher).link(site)
 
         write_audit_log(
             self.db,

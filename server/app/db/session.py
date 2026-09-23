@@ -14,6 +14,10 @@ from app.db.activity_tracking import install_activity_tracking
 
 install_activity_tracking(SessionLocal)
 
+from app.db.record_info_tracking import install_record_info_tracking
+
+install_record_info_tracking(SessionLocal)
+
 
 def get_db() -> Generator[Session, None, None]:
     session = SessionLocal()

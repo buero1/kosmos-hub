@@ -18,7 +18,7 @@ def test_email_ai_rewrite_normalizes_ai_html_to_hub_email_markup():
 
 
 def test_email_ai_rewrite_requests_only_a_replacement_for_the_selected_fragment(monkeypatch):
-    service = EmailAiRewriteService(db=SimpleNamespace(), cipher=SimpleNamespace())
+    service = EmailAiRewriteService(db=SimpleNamespace(get_bind=lambda: None), cipher=SimpleNamespace())
     config = SimpleNamespace(model="test-model")
     requests: list[dict[str, object]] = []
     successes: list[object] = []

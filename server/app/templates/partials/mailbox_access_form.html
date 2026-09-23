@@ -1,0 +1,43 @@
+{% if mailbox_access is defined and mailbox_access.accounts %}
+<details class="account-details mailbox-access">
+  <summary>Postfachzugriff</summary>
+  {% if mailbox_subject_type == 'user' and account_user.role == 'admin' %}
+    <p class="subtle">Administratoren haben Zugriff auf alle Postfächer. Die technische Postfachverwaltung bleibt ausschließlich Administratoren vorbehalten.</p>
+  {% else %}
+  <form method="post" action="/account/access/mailboxes/{{ mailbox_subject_type }}/{{ mailbox_subject_id }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p class="subtle">{% if mailbox_subject_type == 'user' %}„Team erben“ übernimmt das gespeicherte Teamrecht. Eine persönliche Sperre hat Vorrang. Die effektiven Rechte berücksichtigen zusätzlich die Rolle und das Leserecht.{% else %}Die Freigaben gelten für Mitglieder dieses Teams. Ihre Rolle begrenzt weiterhin die erlaubten Aktionen.{% endif %}</p>
+    <div class="table-scroll">
+      <table class="access-matrix">
+        <thead><tr><th>Postfach</th>{% for action, label in mailbox_action_labels.items() %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for mailbox in mailbox_access.accounts %}
+          {% set grants = mailbox_access['users' if mailbox_subject_type == 'user' else 'teams'].get(mailbox_subject_id, {}).get(mailbox.id, {}) %}
+          <tr>
+            <th>{{ mailbox.email }}<input type="hidden" name="mailbox_id" value="{{ mailbox.id }}">{% if not mailbox.enabled or not mailbox.verified %}<br><small class="subtle">Versand nicht aktiv</small>{% endif %}</th>
+            {% for action, label in mailbox_action_labels.items() %}
+            <td>
+              {% if mailbox_subject_type == 'team' %}
+                <input type="checkbox" name="mailbox__{{ mailbox.id }}__{{ action }}" value="true" {% if grants.get(action) %}checked{% endif %} aria-label="{{ mailbox.email }}: {{ label }}">
+              {% else %}
+                {% set inherited = mailbox_access.teams.get(account_user.team_id, {}).get(mailbox.id, {}).get(action, false) %}
+                {% set effective = mailbox_access.effective.get(account_user.id, {}).get(mailbox.id, {}).get(action, false) %}
+                <select name="mailbox__{{ mailbox.id }}__{{ action }}" aria-label="{{ mailbox.email }}: {{ label }}">
+                  <option value="inherit" {% if grants.get(action) is none %}selected{% endif %}>Team erben ({{ 'Ja' if inherited else 'Nein' }})</option>
+                  <option value="true" {% if grants.get(action) is sameas true %}selected{% endif %}>Erlauben</option>
+                  <option value="false" {% if grants.get(action) is sameas false %}selected{% endif %}>Sperren</option>
+                </select>
+                <small class="subtle">Effektiv: {{ 'Ja' if effective else 'Nein' }}</small>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="button button-secondary" type="submit">Postfachzugriff speichern</button>
+  </form>
+  {% endif %}
+</details>
+{% endif %}

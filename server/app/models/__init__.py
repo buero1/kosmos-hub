@@ -1,6 +1,7 @@
 """Database models."""
 
 from app.models.ai_provider_config import AiProviderConfig
+from app.models.ai_usage import AiUsageRequest
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.email_compose_image import EmailComposeImage
@@ -10,6 +11,7 @@ from app.models.customer_activity import CustomerCallActivity, CustomerCallRemin
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.models.hub_scheduled_email import HubScheduledEmail, HubScheduledEmailAttachment
 from app.models.hub_spam_sender import HubSpamSender
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_imap_import import HubMailboxImapImport, HubMailboxImapImportItem
@@ -20,8 +22,10 @@ from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
+from app.models.hub_access_control import HubAccessRole, HubRecordAccessGrant, HubRecordAssignment, HubRolePermission, HubTeam
 from app.models.hub_case import HubCase
 from app.models.hub_case_email_link import HubCaseEmailLink
+from app.models.hub_email_template_folder import HubEmailTemplateFolder
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_email import HubLeadEmail
 from app.models.hub_lead_note import HubLeadNote
@@ -68,4 +72,4 @@ from app.models.zoho_books_recurring_invoice_import import (
     ZohoBooksRecurringInvoiceImportItem,
 )
 
-__all__ = ["AiProviderConfig", "CustomerActivityReminderNotification", "CustomerCallActivity", "CustomerCallReminder", "CustomerContact", "CustomerEmailAttachment", "CustomerMeetingActivity", "CustomerMeetingReminder", "CustomerTaskActivity", "CustomerTaskEmailReminder", "CustomerZohoEmail", "CustomerZohoEmailImage", "CustomerZohoNote", "EmailComposeImage", "EmailComposerSettings", "FleetRefreshRun", "FleetRefreshSettings", "FleetRefreshSiteResult", "HubAccessToken", "HubIntegrationToken", "HubAgentAction", "HubAgentJob", "HubCase", "HubCaseEmailLink", "HubDesktopDevice", "HubFinanceArticle", "HubFinanceDunning", "HubFinanceDunningLine", "HubFinanceGeneratedPdf", "HubFinanceInvoice", "HubFinanceInvoiceLine", "HubFinanceOffer", "HubFinanceOfferLine", "HubFinanceOrder", "HubFinanceOrderLine", "HubFinanceOrderPdf", "HubFinancePositionPreset", "HubFinanceRecurringInvoice", "HubFinanceRecurringInvoiceLine", "HubLead", "HubLeadEmail", "HubLeadNote", "HubLegalTerms", "HubLegalTermsRevision", "HubMailboxAccount", "HubMailboxAttachment", "HubMailboxEmail", "HubMailboxImapImport", "HubMailboxImapImportItem", "HubMailboxImapSyncFailure", "HubMailboxImapSyncState", "HubPdfTemplate", "HubPdfTemplateRevision", "HubSetupToken", "HubUser", "HubWorkflow", "MaintenanceRun", "MaintenanceRunStep", "ModuleLayout", "PluginInstallationPackage", "PluginOfficialVersion", "ProviderCredential", "SiteUserSnapshot", "StylingSettings", "UserDeletionBatch", "UserDeletionBatchItem", "ZohoBooksConnection", "ZohoBooksOrderImport", "ZohoBooksOrderImportItem", "ZohoBooksRecurringInvoiceImport", "ZohoBooksRecurringInvoiceImportItem", "ZohoConnection", "ZohoEmailAttachmentImport", "ZohoEmailAttachmentImportItem", "ZohoEmailContentImport", "ZohoEmailContentImportItem", "ZohoEmailTemplate", "ZohoEmailHistoryImport", "ZohoNoteHistoryImport", "ZohoEmailWorkflowWebhook"]
+__all__ = ["AiProviderConfig", "CustomerActivityReminderNotification", "CustomerCallActivity", "CustomerCallReminder", "CustomerContact", "CustomerEmailAttachment", "CustomerMeetingActivity", "CustomerMeetingReminder", "CustomerTaskActivity", "CustomerTaskEmailReminder", "CustomerZohoEmail", "CustomerZohoEmailImage", "CustomerZohoNote", "EmailComposeImage", "EmailComposerSettings", "FleetRefreshRun", "FleetRefreshSettings", "FleetRefreshSiteResult", "HubAccessToken", "HubIntegrationToken", "HubAgentAction", "HubAgentJob", "HubCase", "HubCaseEmailLink", "HubDesktopDevice", "HubEmailTemplateFolder", "HubFinanceArticle", "HubFinanceDunning", "HubFinanceDunningLine", "HubFinanceGeneratedPdf", "HubFinanceInvoice", "HubFinanceInvoiceLine", "HubFinanceOffer", "HubFinanceOfferLine", "HubFinanceOrder", "HubFinanceOrderLine", "HubFinanceOrderPdf", "HubFinancePositionPreset", "HubFinanceRecurringInvoice", "HubFinanceRecurringInvoiceLine", "HubLead", "HubLeadEmail", "HubLeadNote", "HubLegalTerms", "HubLegalTermsRevision", "HubMailboxAccount", "HubMailboxAttachment", "HubMailboxEmail", "HubMailboxImapImport", "HubMailboxImapImportItem", "HubMailboxImapSyncFailure", "HubMailboxImapSyncState", "HubPdfTemplate", "HubPdfTemplateRevision", "HubScheduledEmail", "HubScheduledEmailAttachment", "HubSetupToken", "HubUser", "HubWorkflow", "MaintenanceRun", "MaintenanceRunStep", "ModuleLayout", "PluginInstallationPackage", "PluginOfficialVersion", "ProviderCredential", "SiteUserSnapshot", "StylingSettings", "UserDeletionBatch", "UserDeletionBatchItem", "ZohoBooksConnection", "ZohoBooksOrderImport", "ZohoBooksOrderImportItem", "ZohoBooksRecurringInvoiceImport", "ZohoBooksRecurringInvoiceImportItem", "ZohoConnection", "ZohoEmailAttachmentImport", "ZohoEmailAttachmentImportItem", "ZohoEmailContentImport", "ZohoEmailContentImportItem", "ZohoEmailTemplate", "ZohoEmailHistoryImport", "ZohoNoteHistoryImport", "ZohoEmailWorkflowWebhook"]

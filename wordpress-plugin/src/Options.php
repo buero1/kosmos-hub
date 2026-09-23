@@ -6,19 +6,24 @@ defined( 'ABSPATH' ) || exit;
 class Options {
 	const SITE_UUID                 = 'kosmos_bridge_site_uuid';
 	const SITE_SECRET               = 'kosmos_bridge_site_secret';
+	const IDENTITY                  = 'kosmos_bridge_domain_identity';
 	const REGISTRATION_STATUS       = 'kosmos_bridge_registration_status';
 	const REGISTRATION_MESSAGE      = 'kosmos_bridge_registration_message';
 	const LAST_REGISTERED_AT        = 'kosmos_bridge_last_registered_at';
 	const LAST_SUCCESS_AT           = 'kosmos_bridge_last_success_at';
 	const LAST_REQUEST_ID           = 'kosmos_bridge_last_request_id';
 	const SERVER_BASE_URL           = 'kosmos_bridge_server_base_url';
-	const BRIDGE_VERSION            = '0.3.66';
+	const BRIDGE_VERSION            = '0.3.68';
 	const DEFAULT_SERVER_BASE_URL   = 'https://kosmos-hub.31-70-92-95.sslip.io';
 
 	/**
 	 * @return string
 	 */
 	public static function get_site_uuid() {
+		$identity = get_option( self::IDENTITY, array() );
+		if ( is_array( $identity ) && ! empty( $identity['uuid'] ) ) {
+			return (string) $identity['uuid'];
+		}
 		return (string) get_option( self::SITE_UUID, '' );
 	}
 
@@ -26,6 +31,10 @@ class Options {
 	 * @return string
 	 */
 	public static function get_site_secret() {
+		$identity = get_option( self::IDENTITY, array() );
+		if ( is_array( $identity ) && ! empty( $identity['secret'] ) ) {
+			return (string) $identity['secret'];
+		}
 		return (string) get_option( self::SITE_SECRET, '' );
 	}
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from calendar import monthrange
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from html import unescape
 import json
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -16,11 +19,14 @@ from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer, HubFinanceOfferLine
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
+from app.models.hub_lead import HubLead
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, FINANCE_POSITION_UNITS, OFFER_FIELDS, HubFinanceField
+from app.services.hub_leads import HubLeadService
 from app.services.module_layouts import ModuleLayoutService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_pdf_templates import HubPdfTemplateService
+from app.services.hub_offer_notes import sanitize_offer_notes
 
 
 ARTICLE_FIELDS_LAYOUT_KEY = "finance-article-fields"
@@ -64,6 +70,7 @@ class FinanceArticleDetail:
     article: HubFinanceArticle
     name: str
     fields: tuple[HubFinanceFieldValue, ...]
+    show_more_index: int
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,23 @@ class FinanceContactOption:
     name: str
     customer_id: int
     customer_name: str
+
+
+@dataclass(frozen=True)
+class FinanceLeadOption:
+    id: int
+    name: str
+    company: str
+    email: str
+
+    @property
+    def label(self) -> str:
+        details = [self.name]
+        if self.company and self.company != "-" and self.company.casefold() != self.name.casefold():
+            details.append(self.company)
+        if self.email and self.email != "-":
+            details.append(self.email)
+        return " · ".join(details)
 
 
 @dataclass(frozen=True)
@@ -89,10 +113,15 @@ class FinanceOfferLineView:
     amount_net: Decimal
     tax_amount: Decimal
     amount_gross: Decimal
+    currency: str = "EUR"
+
+    @property
+    def unit_price_display(self) -> str:
+        return HubFinanceService.format_money(HubFinanceService._money(self.unit_price), self.currency)
 
     @property
     def amount_net_display(self) -> str:
-        return HubFinanceService.format_money(self.amount_net)
+        return HubFinanceService.format_money(self.amount_net, self.currency)
 
 
 @dataclass(frozen=True)
@@ -101,22 +130,23 @@ class FinanceOfferTotals:
     discount_total: Decimal
     tax_total: Decimal
     total_gross: Decimal
+    currency: str = "EUR"
 
     @property
     def subtotal_net_display(self) -> str:
-        return HubFinanceService.format_money(self.subtotal_net)
+        return HubFinanceService.format_money(self.subtotal_net, self.currency)
 
     @property
     def discount_total_display(self) -> str:
-        return HubFinanceService.format_money(self.discount_total)
+        return HubFinanceService.format_money(self.discount_total, self.currency)
 
     @property
     def tax_total_display(self) -> str:
-        return HubFinanceService.format_money(self.tax_total)
+        return HubFinanceService.format_money(self.tax_total, self.currency)
 
     @property
     def total_gross_display(self) -> str:
-        return HubFinanceService.format_money(self.total_gross)
+        return HubFinanceService.format_money(self.total_gross, self.currency)
 
 
 @dataclass(frozen=True)
@@ -124,7 +154,9 @@ class FinanceOfferEntry:
     offer: HubFinanceOffer
     offer_number: str
     status: str
-    customer_name: str
+    linked_name: str
+    linked_kind: str
+    linked_href: str
     offer_date: str
     total_gross: str
     currency: str
@@ -135,10 +167,19 @@ class FinanceOfferDetail:
     offer: HubFinanceOffer
     offer_number: str
     status: str
+    linked_name: str
+    linked_kind: str
+    linked_href: str
     contact_name: str
     fields: tuple[HubFinanceFieldValue, ...]
     lines: tuple[FinanceOfferLineView, ...]
     totals: FinanceOfferTotals
+    show_more_index: int
+    notes_html: str = ""
+
+    @property
+    def header_fields(self) -> tuple[HubFinanceFieldValue, ...]:
+        return tuple(field for field in self.fields if field.key != "notes")
 
 
 class HubFinanceService:
@@ -175,14 +216,20 @@ class HubFinanceService:
         if article is None:
             return None
         values = self._values(article.encrypted_fields_json)
-        fields = self._field_values(
+        fields, show_more_index = self._field_values(
             definitions=ARTICLE_FIELDS,
             values=values,
             layout_key=ARTICLE_FIELDS_LAYOUT_KEY,
         )
-        return FinanceArticleDetail(article=article, name=self._text(values.get("name")) or "Artikel", fields=fields)
+        return FinanceArticleDetail(
+            article=article,
+            name=self._text(values.get("name")) or "Artikel",
+            fields=fields,
+            show_more_index=show_more_index,
+        )
 
-    def new_article_values(self) -> dict[str, str]:
+    @staticmethod
+    def new_article_values() -> dict[str, str]:
         return {
             "article_field__status": "active",
             "article_field__kind": "service",
@@ -214,15 +261,35 @@ class HubFinanceService:
 
     def list_offers(self) -> tuple[FinanceOfferEntry, ...]:
         offers = self.db.scalars(
-            select(HubFinanceOffer).options(selectinload(HubFinanceOffer.customer), selectinload(HubFinanceOffer.lines))
+            select(HubFinanceOffer).options(
+                selectinload(HubFinanceOffer.customer),
+                selectinload(HubFinanceOffer.lead),
+                selectinload(HubFinanceOffer.lines),
+            )
         ).all()
         return self._sorted_offer_entries(offers)
 
     def list_customer_offers(self, *, customer_id: int) -> tuple[FinanceOfferEntry, ...]:
         offers = self.db.scalars(
             select(HubFinanceOffer)
-            .options(selectinload(HubFinanceOffer.customer), selectinload(HubFinanceOffer.lines))
+            .options(
+                selectinload(HubFinanceOffer.customer),
+                selectinload(HubFinanceOffer.lead),
+                selectinload(HubFinanceOffer.lines),
+            )
             .where(HubFinanceOffer.customer_id == customer_id)
+        ).all()
+        return self._sorted_offer_entries(offers)
+
+    def list_lead_offers(self, *, lead_id: int) -> tuple[FinanceOfferEntry, ...]:
+        offers = self.db.scalars(
+            select(HubFinanceOffer)
+            .options(
+                selectinload(HubFinanceOffer.customer),
+                selectinload(HubFinanceOffer.lead),
+                selectinload(HubFinanceOffer.lines),
+            )
+            .where(HubFinanceOffer.lead_id == lead_id)
         ).all()
         return self._sorted_offer_entries(offers)
 
@@ -235,6 +302,7 @@ class HubFinanceService:
             select(HubFinanceOffer)
             .options(
                 selectinload(HubFinanceOffer.customer),
+                selectinload(HubFinanceOffer.lead),
                 selectinload(HubFinanceOffer.contact),
                 selectinload(HubFinanceOffer.lines).selectinload(HubFinanceOfferLine.article),
             )
@@ -243,31 +311,67 @@ class HubFinanceService:
         if offer is None:
             return None
         values = self._values(offer.encrypted_fields_json)
-        contact_name = self._contact_name(offer.contact_id)
+        lead_detail = self._lead_detail(offer.lead_id)
+        linked_name = offer.customer.name if offer.customer is not None else lead_detail.name if lead_detail is not None else ""
+        contact_name = self._contact_name(offer.contact_id) or (lead_detail.name if lead_detail is not None else "")
         enriched_values = {
             **values,
             "offer_number": self.offer_number(offer),
-            "customer": offer.customer.name if offer.customer is not None else "",
+            "customer": linked_name,
             "contact": contact_name,
         }
-        fields = self._field_values(definitions=OFFER_FIELDS, values=enriched_values, layout_key=OFFER_FIELDS_LAYOUT_KEY)
-        lines = tuple(self._line_view(line) for line in offer.lines)
+        fields, show_more_index = self._field_values(
+            definitions=tuple(field for field in OFFER_FIELDS if field.section == "fields"),
+            values=enriched_values,
+            layout_key=OFFER_FIELDS_LAYOUT_KEY,
+        )
+        currency = self._text(values.get("currency")) or "EUR"
+        notes_html = self.offer_notes(values)
+        fields += (HubFinanceFieldValue(key="notes", label="Anmerkungen", display_type="HTML",
+                                       value=unescape(re.sub(r"<[^>]+>", " ", notes_html)).strip(), form_value=notes_html),)
+        lines = tuple(replace(self._line_view(line), currency=currency) for line in offer.lines)
+        if offer.customer is not None:
+            linked_kind = "Kunde"
+            linked_href = f"/customers/{offer.customer.id}"
+        elif lead_detail is not None:
+            linked_kind = "Lead"
+            linked_href = f"/leads/{lead_detail.lead.id}"
+        else:
+            linked_kind = ""
+            linked_href = ""
         return FinanceOfferDetail(
             offer=offer,
             offer_number=self.offer_number(offer),
             status=self._display_option(self._field(OFFER_FIELDS, "status"), values.get("status")) or "-",
+            linked_name=linked_name or "-",
+            linked_kind=linked_kind,
+            linked_href=linked_href,
             contact_name=contact_name,
             fields=fields,
             lines=lines,
-            totals=self._totals(lines),
+            totals=replace(self._totals(lines), currency=currency),
+            show_more_index=show_more_index,
+            notes_html=notes_html,
         )
 
-    def new_offer_values(self) -> dict[str, str]:
-        today = date.today().isoformat()
+    def offer_notes(self, values: dict[str, str]) -> str:
+        value = values["notes"] if "notes" in values else HubPdfTemplateService(db=self.db).offer_notes_default()
+        return sanitize_offer_notes(value)
+
+    @staticmethod
+    def new_offer_values(*, offer_date: str | None = None) -> dict[str, str]:
+        today = date.today()
+        try:
+            selected_date = date.fromisoformat(offer_date) if offer_date else today
+        except ValueError:
+            selected_date = today
+        year = selected_date.year + (selected_date.month == 12)
+        month = selected_date.month % 12 + 1
+        valid_until = selected_date.replace(year=year, month=month, day=min(selected_date.day, monthrange(year, month)[1]))
         return {
             "offer_field__status": "draft",
-            "offer_field__offer_date": today,
-            "offer_field__valid_until": today,
+            "offer_field__offer_date": selected_date.isoformat(),
+            "offer_field__valid_until": valid_until.isoformat(),
             "offer_field__currency": "EUR",
             "offer_line__0__quantity": "1",
             "offer_line__0__tax_rate": "19",
@@ -279,15 +383,21 @@ class HubFinanceService:
         *,
         customer_id: int | None,
         contact_id: int | None,
+        lead_id: int | None = None,
         submitted_values: dict[str, str],
         pdf_template_id: int | None = None,
     ) -> HubFinanceOffer:
-        customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
+        customer, contact, lead = self._linked_party(
+            customer_id=customer_id,
+            contact_id=contact_id,
+            lead_id=lead_id,
+        )
         pdf_template = self._pdf_template(pdf_template_id)
         values = self._submitted_offer_values(submitted_values)
         offer = HubFinanceOffer(
             customer=customer,
             contact=contact,
+            lead=lead,
             pdf_template=pdf_template,
             encrypted_fields_json=self._encrypt(values),
         )
@@ -298,31 +408,82 @@ class HubFinanceService:
         self.db.flush()
         return offer
 
+    def duplicate_offer(self, *, offer_id: int, owner_user_id: int) -> HubFinanceOffer:
+        source = self.db.scalar(select(HubFinanceOffer).options(selectinload(HubFinanceOffer.lines)).where(HubFinanceOffer.id == offer_id))
+        if source is None:
+            raise HubFinanceError("Das Angebot wurde nicht gefunden.")
+        values = self._values(source.encrypted_fields_json)
+        values["notes"] = self.offer_notes(values)
+        copied_values = {field.key: values.get(field.key, "") for field in OFFER_FIELDS
+                         if not field.read_only and field.key not in {"customer", "contact"}}
+        copied_values["status"] = self.new_offer_values()["offer_field__status"]
+        # Temporary navigation metadata, removed by the first successful update.
+        # The persisted owner and empty relations, never this ID, authorize discard.
+        copied_values["_duplicate_source_offer_id"] = str(source.id)
+        # Copy stored snapshots, not current article defaults or the original PDF.
+        with self.db.begin_nested():
+            offer = HubFinanceOffer(
+                unassigned_owner_user_id=owner_user_id,
+                pdf_template_id=source.pdf_template_id,
+                encrypted_fields_json=self._encrypt(copied_values),
+                lines=[HubFinanceOfferLine(article_id=line.article_id, position_index=line.position_index,
+                        encrypted_fields_json=self._encrypt(self._values(line.encrypted_fields_json))) for line in source.lines],
+            )
+            self.db.add(offer)
+            self.db.flush()
+            offer.offer_number = f"ANG-{offer.id:06d}"
+            self.db.flush()
+        return offer
+
+    def discard_offer_copy(self, *, offer_id: int, actor_user_id: int, is_admin: bool = False, after_commit=None) -> int | None:
+        offer = self.db.scalar(select(HubFinanceOffer).where(HubFinanceOffer.id == offer_id)
+                               .with_for_update().execution_options(populate_existing=True))
+        if offer is None:
+            raise HubFinanceError("Die Angebotskopie wurde nicht gefunden.")
+        if (offer.unassigned_owner_user_id is None or offer.customer_id is not None
+                or offer.lead_id is not None or offer.contact_id is not None):
+            raise HubFinanceError("Das Angebot wurde bereits gespeichert und kann nicht mehr als Kopie verworfen werden.")
+        if not is_admin and offer.unassigned_owner_user_id != actor_user_id:
+            raise HubFinanceError("Diese Angebotskopie darf nicht verworfen werden.")
+        source_id = self._values(offer.encrypted_fields_json).get("_duplicate_source_offer_id", "")
+        self.delete_offer(offer_id=offer.id, after_commit=after_commit)
+        return int(source_id) if source_id.isdecimal() and int(source_id) > 0 else None
+
     def update_offer(
         self,
         *,
         offer_id: int,
         customer_id: int | None,
         contact_id: int | None,
+        lead_id: int | None = None,
         submitted_values: dict[str, str],
         pdf_template_id: int | None = None,
     ) -> HubFinanceOffer:
         offer = self.db.scalar(
             select(HubFinanceOffer).options(selectinload(HubFinanceOffer.lines)).where(HubFinanceOffer.id == offer_id)
+            .with_for_update().execution_options(populate_existing=True)
         )
         if offer is None:
             raise HubFinanceError("Das Angebot wurde nicht gefunden.")
-        customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
+        customer, contact, lead = self._linked_party(
+            customer_id=customer_id,
+            contact_id=contact_id,
+            lead_id=lead_id,
+        )
         pdf_template = self._pdf_template(pdf_template_id)
         offer.customer = customer
         offer.contact = contact
+        offer.lead = lead
+        offer.unassigned_owner_user_id = None
         offer.pdf_template = pdf_template
+        submitted_values = dict(submitted_values)
+        submitted_values.setdefault("offer_field__notes", self.offer_notes(self._values(offer.encrypted_fields_json)))
         offer.encrypted_fields_json = self._encrypt(self._submitted_offer_values(submitted_values))
         self._replace_lines(offer=offer, submitted_values=submitted_values)
         self.db.flush()
         return offer
 
-    def delete_offer(self, *, offer_id: int) -> HubFinanceOffer:
+    def delete_offer(self, *, offer_id: int, after_commit=None) -> HubFinanceOffer:
         offer = self.db.get(HubFinanceOffer, offer_id)
         if offer is None:
             raise HubFinanceError("Das Angebot wurde nicht gefunden.")
@@ -334,7 +495,12 @@ class HubFinanceService:
         )
         if generated_pdf is not None:
             if generated_pdf.storage_key:
-                FinanceGeneratedPdfStorage(cipher=self.cipher).remove(generated_pdf.storage_key)
+                storage = FinanceGeneratedPdfStorage(cipher=self.cipher)
+                storage_key = generated_pdf.storage_key
+                if after_commit is None:
+                    storage.remove(storage_key)
+                else:
+                    after_commit(f"delete-finance-pdf:{storage_key}", lambda: storage.remove(storage_key))
             self.db.delete(generated_pdf)
         self.db.delete(offer)
         self.db.flush()
@@ -362,6 +528,17 @@ class HubFinanceService:
             for entry in entries if entry.customer is not None
         )
 
+    def list_linkable_leads(self) -> tuple[FinanceLeadOption, ...]:
+        return tuple(
+            FinanceLeadOption(
+                id=entry.lead.id,
+                name=entry.name,
+                company=entry.company,
+                email=entry.email,
+            )
+            for entry in HubLeadService(db=self.db, cipher=self.cipher).list_leads()
+        )
+
     def article_options(self) -> tuple[FinanceArticleEntry, ...]:
         return self.list_articles()
 
@@ -373,7 +550,8 @@ class HubFinanceService:
     def format_money(value: Decimal, currency: str = "EUR") -> str:
         amount = value.quantize(_CENT, rounding=ROUND_HALF_UP)
         grouped = f"{amount:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-        return f"{grouped} {currency}".strip()
+        symbol = "\u20ac" if currency == "EUR" else currency
+        return f"{grouped} {symbol}".strip()
 
     @staticmethod
     def format_quantity(value: Decimal) -> str:
@@ -384,11 +562,26 @@ class HubFinanceService:
         values = self._values(offer.encrypted_fields_json)
         lines = tuple(self._line_view(line) for line in offer.lines)
         currency = self._text(values.get("currency")) or "EUR"
+        lead_detail = self._lead_detail(offer.lead_id)
+        if offer.customer is not None:
+            linked_name = offer.customer.name
+            linked_kind = "Kunde"
+            linked_href = f"/customers/{offer.customer.id}"
+        elif lead_detail is not None:
+            linked_name = lead_detail.name
+            linked_kind = "Lead"
+            linked_href = f"/leads/{lead_detail.lead.id}"
+        else:
+            linked_name = "-"
+            linked_kind = ""
+            linked_href = ""
         return FinanceOfferEntry(
             offer=offer,
             offer_number=self.offer_number(offer),
             status=self._display_option(self._field(OFFER_FIELDS, "status"), values.get("status")) or "-",
-            customer_name=offer.customer.name if offer.customer else "-",
+            linked_name=linked_name,
+            linked_kind=linked_kind,
+            linked_href=linked_href,
             offer_date=self._display_date(self._text(values.get("offer_date"))) or "-",
             total_gross=self.format_money(self._totals(lines).total_gross, currency),
             currency=currency,
@@ -408,8 +601,8 @@ class HubFinanceService:
         definitions: tuple[HubFinanceField, ...],
         values: dict[str, str],
         layout_key: str,
-    ) -> tuple[HubFinanceFieldValue, ...]:
-        ordered_keys = ModuleLayoutService(db=self.db).ordered_keys(
+    ) -> tuple[tuple[HubFinanceFieldValue, ...], int]:
+        ordered_keys, show_more_index = ModuleLayoutService(db=self.db).ordered_keys_with_show_more(
             layout_key=layout_key,
             default_keys=tuple(field.key for field in definitions),
         )
@@ -435,7 +628,7 @@ class HubFinanceService:
                 read_only=definition.read_only,
                 options=definition.options,
             ))
-        return tuple(fields)
+        return tuple(fields), show_more_index
 
     def _submitted_article_values(self, submitted_values: dict[str, str]) -> dict[str, str]:
         values: dict[str, str] = {}
@@ -450,11 +643,16 @@ class HubFinanceService:
         return values
 
     def _submitted_offer_values(self, submitted_values: dict[str, str]) -> dict[str, str]:
+        submitted_values = dict(submitted_values)
+        if "offer_field__notes" not in submitted_values:
+            submitted_values["offer_field__notes"] = self.offer_notes({})
         values: dict[str, str] = {}
         for definition in OFFER_FIELDS:
             if definition.read_only or definition.key in {"customer", "contact"}:
                 continue
             raw = self._limited_text(submitted_values.get(f"offer_field__{definition.key}"), definition.label)
+            if definition.display_type == "HTML":
+                raw = sanitize_offer_notes(raw)
             if definition.required and not raw:
                 raise HubFinanceError(f"{definition.label} ist erforderlich.")
             if definition.display_type == "Datum" and raw:
@@ -469,8 +667,7 @@ class HubFinanceService:
         return values
 
     def _replace_lines(self, *, offer: HubFinanceOffer, submitted_values: dict[str, str]) -> None:
-        for line in tuple(offer.lines):
-            self.db.delete(line)
+        offer.lines.clear()
         self.db.flush()
         for index, values in enumerate(self._submitted_lines(submitted_values)):
             article_id = self._optional_id(values.pop("article_id", ""), "Artikel")
@@ -504,9 +701,7 @@ class HubFinanceService:
                 raise HubFinanceError("Jede Position benötigt eine Bezeichnung.")
             quantity = self._decimal_text(row.get("quantity"), "Position: Menge", minimum=Decimal("0.001"), places=_QUANTITY_STEP)
             unit = self._limited_text(row.get("unit"), "Position: Einheit")
-            if not unit:
-                raise HubFinanceError("Position: Einheit ist erforderlich.")
-            if unit not in FINANCE_POSITION_UNITS:
+            if unit and unit not in FINANCE_POSITION_UNITS:
                 raise HubFinanceError("Die Auswahl für Position: Einheit ist ungültig.")
             unit_price = self._decimal_text(row.get("unit_price"), "Position: Einzelpreis netto", minimum=Decimal("0"), places=_CENT)
             discount = self._decimal_text(row.get("discount_percent"), "Position: Rabatt", minimum=Decimal("0"), maximum=Decimal("100"), places=_CENT)
@@ -527,9 +722,22 @@ class HubFinanceService:
             })
         return tuple(lines)
 
-    def _customer_and_contact(self, *, customer_id: int | None, contact_id: int | None) -> tuple[Customer, CustomerContact | None]:
-        if customer_id is None:
-            raise HubFinanceError("Kunde ist erforderlich.")
+    def _linked_party(
+        self,
+        *,
+        customer_id: int | None,
+        contact_id: int | None,
+        lead_id: int | None,
+    ) -> tuple[Customer | None, CustomerContact | None, HubLead | None]:
+        if (customer_id is None) == (lead_id is None):
+            raise HubFinanceError("Bitte genau einen Kunden oder Lead auswählen.")
+        if lead_id is not None:
+            lead = self.db.get(HubLead, lead_id)
+            if lead is None:
+                raise HubFinanceError("Der ausgewählte Lead ist nicht verfügbar.")
+            if contact_id is not None:
+                raise HubFinanceError("Ein Ansprechpartner kann nur mit einem Kunden verknüpft werden.")
+            return None, None, lead
         customer = self.db.get(Customer, customer_id)
         if customer is None:
             raise HubFinanceError("Der ausgewählte Kunde ist nicht verfügbar.")
@@ -538,7 +746,12 @@ class HubFinanceService:
         contact = self.db.get(CustomerContact, contact_id)
         if contact is None or contact.customer_id != customer.id:
             raise HubFinanceError("Der Ansprechpartner gehört nicht zum ausgewählten Kunden.")
-        return customer, contact
+        return customer, contact, None
+
+    def _lead_detail(self, lead_id: int | None):
+        if lead_id is None:
+            return None
+        return HubLeadService(db=self.db, cipher=self.cipher).get_detail(lead_id=lead_id)
 
     def _line_view(self, line: HubFinanceOfferLine) -> FinanceOfferLineView:
         values = self._values(line.encrypted_fields_json)

@@ -1,6 +1,10 @@
+{% set call_fields = activity_field_catalog("call") %}
+{% set task_fields = activity_field_catalog("task") %}
+{% set meeting_fields = activity_field_catalog("meeting") %}
 {% set is_calendar_activity_composer = activity_composer_mode|default("customer") == "calendar" %}
 {% set is_lead_activity_composer = activity_composer_mode|default("customer") == "lead" %}
-{% if is_calendar_activity_composer %}
+{% set is_directory_activity_composer = activity_composer_mode|default("customer") == "directory" %}
+{% if is_calendar_activity_composer or is_directory_activity_composer %}
   {% set customer_call_create_action = "/calendar/activities" %}
   {% set customer_task_create_action = "/calendar/activities" %}
   {% set customer_meeting_create_action = "/calendar/activities" %}
@@ -19,43 +23,68 @@
   {% set customer_call_default_name = "Anruf mit " ~ detail.entry.customer.name %}
   {% set customer_meeting_default_name = "Neues Meeting mit " ~ detail.entry.customer.name %}
 {% endif %}
-{% macro related_customer_field() -%}
-  <label>Bezieht sich auf
-    {% if is_calendar_activity_composer %}
-      <select name="customer_id" data-customer-activity-calendar-customer>
-        <option value="">Kunde auswählen</option>
-        {% for customer in calendar_customers %}<option value="{{ customer.id }}">{{ customer.name }}</option>{% endfor %}
-      </select>
+{% macro related_customer_field(kind) -%}
+  {% if is_calendar_activity_composer %}
+    {% include "partials/activity_party_search.html" %}
+  {% else %}
+  <div class="activity-compose-relation">
+    <span>Bezieht sich auf</span>
+    {% if is_directory_activity_composer %}
+      <a data-customer-activity-directory-relation hidden></a>
+      <span class="subtle" data-customer-activity-directory-relation-empty>Keine Verknüpfung</span>
     {% elif is_lead_activity_composer %}
-      <input value="Lead · {{ detail.name }}" readonly aria-label="Bezieht sich auf Lead {{ detail.name }}">
+      <a href="/leads/{{ detail.lead.id }}">Lead · {{ detail.name }}</a>
     {% else %}
-      <input value="Kunde · {{ detail.entry.customer.name }}" readonly aria-label="Bezieht sich auf Kunde {{ detail.entry.customer.name }}">
+      <a href="/customers/{{ detail.entry.customer.id }}">Kunde · {{ detail.entry.customer.name }}</a>
     {% endif %}
-  </label>
+  </div>
+  {% endif %}
 {%- endmacro %}
-<div class="activity-compose-layer" data-customer-activity-compose data-activity-composer-mode="{{ 'calendar' if is_calendar_activity_composer else 'lead' if is_lead_activity_composer else 'customer' }}" hidden>
+{% macro assignee_field() -%}
+<label>Verantwortlich *
+  <select name="assignee_user_id" required data-activity-assignee>
+    <option value="">Bitte zuordnen</option>
+    {% for person in activity_assignees|default(()) %}
+    <option value="{{ person.id }}"{% if person.id == activity_default_assignee %} selected{% endif %}>{{ person.name }}</option>
+    {% endfor %}
+  </select>
+</label>
+{%- endmacro %}
+{% macro delete_button(kind, label) -%}
+<button class="button button-danger" type="button" data-activity-delete-open data-activity-delete-kind="{{ kind }}" hidden>{{ label }} löschen</button>
+{%- endmacro %}
+<div class="activity-compose-layer" data-customer-activity-compose data-activity-composer-mode="{{ 'calendar' if is_calendar_activity_composer else 'directory' if is_directory_activity_composer else 'lead' if is_lead_activity_composer else 'customer' }}" hidden>
   <button class="activity-compose-backdrop" type="button" data-customer-activity-compose-close aria-label="Aktivitätsmaske schließen"></button>
   <aside class="activity-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-activity-compose-title" aria-hidden="true" data-customer-activity-compose-drawer tabindex="-1">
     <div class="email-compose-header">
       <div>
-        <p class="eyebrow">Zoho CRM</p>
+        <p class="eyebrow">Kosmos Hub</p>
         <h2 id="customer-activity-compose-title" data-customer-activity-compose-title>Anruf planen</h2>
       </div>
       <button class="email-compose-close" type="button" data-customer-activity-compose-close aria-label="Aktivitätsmaske schließen">×</button>
     </div>
+    <dl class="activity-creation-fields" data-activity-creation-fields hidden>
+      <div><dt>Erstellt von</dt><dd data-activity-creation-author></dd></div>
+      <div><dt>Erstellt am</dt><dd data-activity-creation-time></dd></div>
+      <div><dt>Geändert von</dt><dd data-activity-changed-author></dd></div>
+      <div><dt>Letzte Änderung</dt><dd data-activity-changed-time></dd></div>
+      <div data-activity-completion-row hidden><dt>Erledigt von</dt><dd data-activity-completion-author></dd></div>
+      <div data-activity-completion-row hidden><dt>Erledigt am</dt><dd data-activity-completion-time></dd></div>
+    </dl>
     <form method="post" class="communication-form activity-compose-form" action="{{ customer_call_create_action }}" data-customer-call-form data-customer-call-create-action="{{ customer_call_create_action }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="direction" value="outbound">
       {% if is_calendar_activity_composer %}<input type="hidden" name="activity_kind" value="call"><input type="hidden" name="week" value="{{ calendar_week_start }}">{% endif %}
-      <label>Name *
-        <input name="name" maxlength="255" required value="{{ customer_call_default_name }}" data-customer-call-name>
+      <label>{{ call_fields.name.label }}{% if call_fields.name.required %} *{% endif %}
+        <input name="name" maxlength="255" {% if call_fields.name.required %}required{% endif %} value="{{ customer_call_default_name }}" data-customer-call-name>
       </label>
-      <div class="activity-compose-two-columns">
+      <div class="activity-compose-status-row activity-compose-status-with-duration">
         <label>Status
           <select name="status">
-            {% for value, label in call_status_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            {% for value, label in call_fields.status.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
           </select>
         </label>
+        {{ delete_button("call", "Anruf") }}
         <label>Dauer
           <select name="duration_minutes" data-customer-call-duration>
             {% for minutes in call_duration_options %}<option value="{{ minutes }}"{% if minutes == call_defaults.duration_minutes %} selected{% endif %}>{{ minutes }} Min.</option>{% endfor %}
@@ -64,23 +93,24 @@
       </div>
       <fieldset class="activity-compose-datetime">
         <legend>Startdatum *</legend>
-        <input name="start_date" type="date" value="{{ call_defaults.start_date }}" required data-customer-call-start-date>
+        <input name="start_date" type="date" value="{{ call_defaults.start_date }}" {% if call_fields.start_date.required %}required{% endif %} data-customer-call-start-date>
         <div class="activity-time-picker" data-customer-call-time-picker>
-          <input name="start_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ call_defaults.start_time }}" placeholder="HH:MM" required autocomplete="off" aria-autocomplete="list" aria-controls="customer-call-time-options" aria-expanded="false" data-customer-call-start-time>
+          <input name="start_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ call_defaults.start_time }}" placeholder="HH:MM" {% if call_fields.start_time.required %}required{% endif %} autocomplete="off" aria-autocomplete="list" aria-controls="customer-call-time-options" aria-expanded="false" data-customer-call-start-time>
           <button class="activity-time-picker-toggle" type="button" aria-label="Zeit auswählen" title="Zeit auswählen" data-customer-call-time-toggle><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 8v4l2.8 1.8"/></svg></button>
           <div id="customer-call-time-options" class="activity-time-picker-options" role="listbox" data-customer-call-time-options hidden>
             {% for time_value in call_time_options %}<button type="button" role="option" data-customer-call-time-option="{{ time_value }}">{{ time_value }}</button>{% endfor %}
           </div>
         </div>
       </fieldset>
-      {{ related_customer_field() }}
+      {{ related_customer_field("call") }}
+      {{ assignee_field() }}
       <div class="activity-compose-reminder">
         <span>Erinnerung</span>
         <div class="activity-compose-reminder-list" data-customer-call-reminders>
           <div class="activity-compose-reminder-row" data-customer-call-reminder-row data-customer-call-reminder-primary>
             <label class="visually-hidden" for="customer-call-reminder-channel">Art der Erinnerung</label>
             <select id="customer-call-reminder-channel" name="reminder_channels" data-customer-call-reminder-channel>
-              {% for value, label in call_reminder_channel_options %}<option value="{{ value }}"{% if value == call_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              {% for value, label in call_fields.reminder_channels.options %}<option value="{{ value }}"{% if value == call_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
             <label class="visually-hidden" for="customer-call-reminder-minutes">Zeitpunkt der Erinnerung</label>
             <select id="customer-call-reminder-minutes" name="reminder_minutes_before" data-customer-call-reminder-minutes>
@@ -92,7 +122,7 @@
         <template data-customer-call-reminder-template>
           <div class="activity-compose-reminder-row" data-customer-call-reminder-row>
             <select name="reminder_channels" aria-label="Art der Erinnerung" data-customer-call-reminder-channel>
-              {% for value, label in call_reminder_channel_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+              {% for value, label in call_fields.reminder_channels.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
             </select>
             <select name="reminder_minutes_before" aria-label="Zeitpunkt der Erinnerung" data-customer-call-reminder-minutes>
               {% for minutes in call_reminder_options %}<option value="{{ minutes }}"{% if minutes == call_defaults.reminder_minutes_before %} selected{% endif %}>{% if minutes == 0 %}0 Minuten vorher{% else %}{{ minutes }} Min. vorher{% endif %}</option>{% endfor %}
@@ -110,32 +140,36 @@
     <form method="post" class="communication-form activity-compose-form" action="{{ customer_task_create_action }}" data-customer-task-form data-customer-task-create-action="{{ customer_task_create_action }}" hidden>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if is_calendar_activity_composer %}<input type="hidden" name="activity_kind" value="task"><input type="hidden" name="week" value="{{ calendar_week_start }}">{% endif %}
-      <label>Name *
-        <input name="name" maxlength="255" required value="" data-customer-task-name>
+      <label>{{ task_fields.name.label }}{% if task_fields.name.required %} *{% endif %}
+        <input name="name" maxlength="255" {% if task_fields.name.required %}required{% endif %} value="" data-customer-task-name>
       </label>
-      <label>Status
-        <select name="status">
-          {% for value, label in call_status_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
-        </select>
-      </label>
+      <div class="activity-compose-status-row">
+        <label>Status
+          <select name="status">
+            {% for value, label in task_fields.status.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        {{ delete_button("task", "Aufgabe") }}
+      </div>
       <fieldset class="activity-compose-datetime">
         <legend>Startdatum *</legend>
-        <input name="due_date" type="date" value="{{ task_defaults.due_date }}" required data-customer-task-due-date>
+        <input name="due_date" type="date" value="{{ task_defaults.due_date }}" {% if task_fields.due_date.required %}required{% endif %} data-customer-task-due-date>
         <div class="activity-time-picker" data-customer-task-time-picker>
-          <input name="due_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ task_defaults.due_time }}" placeholder="HH:MM" required autocomplete="off" aria-autocomplete="list" aria-controls="customer-task-time-options" aria-expanded="false" data-customer-task-due-time>
+          <input name="due_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ task_defaults.due_time }}" placeholder="HH:MM" {% if task_fields.due_time.required %}required{% endif %} autocomplete="off" aria-autocomplete="list" aria-controls="customer-task-time-options" aria-expanded="false" data-customer-task-due-time>
           <button class="activity-time-picker-toggle" type="button" aria-label="Zeit auswählen" title="Zeit auswählen" data-customer-task-time-toggle><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 8v4l2.8 1.8"/></svg></button>
           <div id="customer-task-time-options" class="activity-time-picker-options" role="listbox" data-customer-task-time-options hidden>
             {% for time_value in call_time_options %}<button type="button" role="option" data-customer-task-time-option="{{ time_value }}">{{ time_value }}</button>{% endfor %}
           </div>
         </div>
       </fieldset>
-      {{ related_customer_field() }}
+      {{ related_customer_field("task") }}
+      {{ assignee_field() }}
       <div class="activity-compose-reminder">
         <span>Erinnerung</span>
         <div class="activity-compose-reminder-row activity-compose-reminder-row-single">
           <label class="visually-hidden" for="customer-task-reminder-channel">Art der Erinnerung</label>
           <select id="customer-task-reminder-channel" name="reminder_channel">
-            {% for value, label in call_reminder_channel_options %}<option value="{{ value }}"{% if value == task_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            {% for value, label in task_fields.reminder_channel.options %}<option value="{{ value }}"{% if value == task_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
           </select>
           <label class="visually-hidden" for="customer-task-reminder-minutes">Zeitpunkt der Erinnerung</label>
           <select id="customer-task-reminder-minutes" name="{{ 'task_reminder_minutes_before' if is_calendar_activity_composer else 'reminder_minutes_before' }}">
@@ -152,15 +186,16 @@
     <form method="post" class="communication-form activity-compose-form" action="{{ customer_meeting_create_action }}" data-customer-meeting-form data-customer-meeting-create-action="{{ customer_meeting_create_action }}" hidden>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if is_calendar_activity_composer %}<input type="hidden" name="activity_kind" value="meeting"><input type="hidden" name="week" value="{{ calendar_week_start }}">{% endif %}
-      <label>Name *
-        <input name="name" maxlength="255" required value="{{ customer_meeting_default_name }}" data-customer-meeting-name>
+      <label>{{ meeting_fields.name.label }}{% if meeting_fields.name.required %} *{% endif %}
+        <input name="name" maxlength="255" {% if meeting_fields.name.required %}required{% endif %} value="{{ customer_meeting_default_name }}" data-customer-meeting-name>
       </label>
-      <div class="activity-compose-two-columns">
+      <div class="activity-compose-status-row activity-compose-status-with-duration">
         <label>Status
           <select name="status">
-            {% for value, label in call_status_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            {% for value, label in meeting_fields.status.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
           </select>
         </label>
+        {{ delete_button("meeting", "Meeting") }}
         <label>Dauer
           <select name="duration_minutes" data-customer-meeting-duration>
             {% for minutes in call_duration_options %}<option value="{{ minutes }}"{% if minutes == meeting_defaults.duration_minutes %} selected{% endif %}>{{ minutes }} Min.</option>{% endfor %}
@@ -169,9 +204,9 @@
       </div>
       <fieldset class="activity-compose-datetime">
         <legend>Startdatum *</legend>
-        <input name="start_date" type="date" value="{{ meeting_defaults.start_date }}" required data-customer-meeting-start-date>
+        <input name="start_date" type="date" value="{{ meeting_defaults.start_date }}" {% if meeting_fields.start_date.required %}required{% endif %} data-customer-meeting-start-date>
         <div class="activity-time-picker" data-customer-meeting-time-picker>
-          <input name="start_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ meeting_defaults.start_time }}" placeholder="HH:MM" required autocomplete="off" aria-autocomplete="list" aria-controls="customer-meeting-time-options" aria-expanded="false" data-customer-meeting-start-time>
+          <input name="start_time" type="text" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" value="{{ meeting_defaults.start_time }}" placeholder="HH:MM" {% if meeting_fields.start_time.required %}required{% endif %} autocomplete="off" aria-autocomplete="list" aria-controls="customer-meeting-time-options" aria-expanded="false" data-customer-meeting-start-time>
           <button class="activity-time-picker-toggle" type="button" aria-label="Zeit auswählen" title="Zeit auswählen" data-customer-meeting-time-toggle><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><path d="M12 8v4l2.8 1.8"/></svg></button>
           <div id="customer-meeting-time-options" class="activity-time-picker-options" role="listbox" data-customer-meeting-time-options hidden>
             {% for time_value in call_time_options %}<button type="button" role="option" data-customer-meeting-time-option="{{ time_value }}">{{ time_value }}</button>{% endfor %}
@@ -183,14 +218,15 @@
         <input type="date" value="{{ meeting_defaults.end_date }}" readonly aria-label="Enddatum" data-customer-meeting-end-date>
         <input type="text" value="{{ meeting_defaults.end_time }}" readonly aria-label="Endzeit" data-customer-meeting-end-time>
       </fieldset>
-      {{ related_customer_field() }}
+      {{ related_customer_field("meeting") }}
+      {{ assignee_field() }}
       <div class="activity-compose-reminder">
         <span>Erinnerung</span>
         <div class="activity-compose-reminder-list" data-customer-meeting-reminders>
           <div class="activity-compose-reminder-row" data-customer-meeting-reminder-row data-customer-meeting-reminder-primary>
             <label class="visually-hidden" for="customer-meeting-reminder-channel">Art der Erinnerung</label>
             <select id="customer-meeting-reminder-channel" name="reminder_channels" data-customer-meeting-reminder-channel>
-              {% for value, label in call_reminder_channel_options %}<option value="{{ value }}"{% if value == meeting_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              {% for value, label in meeting_fields.reminder_channels.options %}<option value="{{ value }}"{% if value == meeting_defaults.reminder_channel %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
             <label class="visually-hidden" for="customer-meeting-reminder-minutes">Zeitpunkt der Erinnerung</label>
             <select id="customer-meeting-reminder-minutes" name="reminder_minutes_before" data-customer-meeting-reminder-minutes>
@@ -202,7 +238,7 @@
         <template data-customer-meeting-reminder-template>
           <div class="activity-compose-reminder-row" data-customer-meeting-reminder-row>
             <select name="reminder_channels" aria-label="Art der Erinnerung" data-customer-meeting-reminder-channel>
-              {% for value, label in call_reminder_channel_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+              {% for value, label in meeting_fields.reminder_channels.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
             </select>
             <select name="reminder_minutes_before" aria-label="Zeitpunkt der Erinnerung" data-customer-meeting-reminder-minutes>
               {% for minutes in call_reminder_options %}<option value="{{ minutes }}"{% if minutes == meeting_defaults.reminder_minutes_before %} selected{% endif %}>{% if minutes == 0 %}0 Minuten vorher{% else %}{{ minutes }} Min. vorher{% endif %}</option>{% endfor %}
@@ -223,3 +259,14 @@
     </section>
   </aside>
 </div>
+<dialog class="update-confirmation-dialog" data-activity-panel-delete-dialog aria-labelledby="activity-panel-delete-heading" aria-describedby="activity-panel-delete-description">
+  <h3 id="activity-panel-delete-heading" data-activity-panel-delete-heading>Aktivität löschen?</h3>
+  <p id="activity-panel-delete-description"><strong data-activity-panel-delete-name></strong> wird endgültig gelöscht.</p>
+  <p>Zugehörige Erinnerungen werden entfernt und ausstehende Erinnerungs-E-Mails storniert.</p>
+  <p class="notice-error" role="alert" data-activity-panel-delete-error hidden></p>
+  <div class="dialog-actions">
+    <button class="button button-secondary" type="button" data-activity-panel-delete-cancel>Abbrechen</button>
+    <button class="button button-danger" type="button" data-activity-panel-delete-confirm>Endgültig löschen</button>
+  </div>
+</dialog>
+<script src="/static/activity-panel-delete.js?v=1" defer></script>

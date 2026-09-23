@@ -27,6 +27,17 @@ def test_account_user_management_uses_disclosure_tabs_in_the_management_card():
     assert 'data-account-user-edit-cancel' in section
 
 
+def test_admin_account_view_uses_user_management_instead_of_duplicate_security_content():
+    template = Path("app/templates/account.html").read_text(encoding="utf-8")
+
+    assert '{% if user.role != "admin" %}<a href="#account-security"' in template
+    assert '{% if user.role == "admin" %}<a href="#account-users" aria-current="page">Benutzer</a>{% endif %}' in template
+    assert '{% if user.role != "admin" %}\n    <form id="account-security"' in template
+    assert 'data-account-notice-section="{{ \'account-users\' if user.role == \'admin\' else \'account-security\' }}"' in template
+    assert 'const defaultSectionId = "{{ \'account-access\' if settings_page else (\'account-users\' if user.role == \'admin\' else \'account-security\') }}";' in template
+    assert 'requested || sections.find((section) => section.id === defaultSectionId)' in template
+
+
 def test_account_user_disclosures_share_the_exclusive_accordion_behavior():
     template = Path("app/templates/account.html").read_text(encoding="utf-8")
     styles = Path("app/templates/base.html").read_text(encoding="utf-8")

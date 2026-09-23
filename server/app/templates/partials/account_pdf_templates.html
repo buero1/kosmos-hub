@@ -1,3 +1,5 @@
+{% from "partials/finance_pdf_position_content.html" import position_content, position_styles %}
+<style>{{ position_styles() }}</style>
 {% macro edit_icon() -%}
   <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
 {%- endmacro %}
@@ -33,7 +35,7 @@
 
   <nav class="account-pdf-template-nav" aria-label="PDF-Vorlagenbereiche">
     {% for definition in pdf_template_types %}
-      <a href="/account?pdf_template_type={{ definition.key }}#account-pdf-templates"{% if definition.key == selected_pdf_template_type %} aria-current="page"{% endif %}>{{ definition.label }}</a>
+      <a href="/settings?pdf_template_type={{ definition.key }}#account-pdf-templates"{% if definition.key == selected_pdf_template_type %} aria-current="page"{% endif %}>{{ definition.label }}</a>
     {% endfor %}
   </nav>
 
@@ -47,14 +49,14 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="document_type" value="{{ definition.key }}">
         <label class="visually-hidden" for="pdf-template-new-name-{{ definition.key }}">Vorlagenname</label>
-        <input id="pdf-template-new-name-{{ definition.key }}" name="name" placeholder="Neue Vorlage benennen" maxlength="255" required>
+        <input id="pdf-template-new-name-{{ definition.key }}" name="name" placeholder="Neue Vorlage benennen" minlength="{{ document_template_name_min_length }}" maxlength="{{ document_template_name_field.max_length }}"{% if document_template_name_field.required %} required{% endif %}>
         <button class="button button-secondary" type="submit">Neu anlegen</button>
       </form>
     </div>
     <div class="pdf-template-library" aria-label="{{ definition.label }} Vorlagen">
       {% for template in pdf_templates_by_type[definition.key] %}
         <article class="pdf-template-library-item{% if selected_pdf_template and template.id == selected_pdf_template.template.id %} is-selected{% endif %}">
-          <a class="pdf-template-library-select" href="/account?pdf_template_type={{ definition.key }}&pdf_template={{ template.id }}#account-pdf-templates">
+          <a class="pdf-template-library-select" href="/settings?pdf_template_type={{ definition.key }}&pdf_template={{ template.id }}#account-pdf-templates">
             <strong>{{ template.name }}</strong>
             <span>Version {{ template.version }}{% if template.is_default %} · Standard{% endif %}</span>
           </a>
@@ -74,7 +76,7 @@
     <div class="pdf-template-editor-heading">
       <form class="pdf-template-rename-form" method="post" action="/account/pdf-templates/{{ selected_pdf_template.template.id }}/rename">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Vorlagenname<input name="name" value="{{ selected_pdf_template.template.name }}" maxlength="255" required></label>
+        <label>Vorlagenname<input name="name" value="{{ selected_pdf_template.template.name }}" minlength="{{ document_template_name_min_length }}" maxlength="{{ document_template_name_field.max_length }}"{% if document_template_name_field.required %} required{% endif %}></label>
         <button class="button button-secondary" type="submit">Namen speichern</button>
       </form>
       <p class="subtle">Klicke auf einen umrahmten Bereich oder sein Stift-Icon, um ihn rechts zu bearbeiten.</p>
@@ -104,17 +106,26 @@
         </div>
         {{ render_block("intro", "pdf-template-wide-block") }}
         <div class="pdf-template-editable-block pdf-template-position-preview" data-pdf-template-edit-positions>
+          {% set inline_description = not (selected_pdf_template.columns | selectattr("is_enabled") | selectattr("source_key", "equalto", "article_description") | list) %}
+          {% set sample_description = selected_pdf_template.columns | selectattr("source_key", "equalto", "article_description") | map(attribute="sample") | first | default("Website-Paket und laufende Betreuung") %}
           <button class="pdf-template-block-edit" type="button" aria-label="Positionstabelle bearbeiten" title="Positionstabelle bearbeiten" data-pdf-template-open-positions>{{ edit_icon() }}</button>
           <table>
             <colgroup>{% for column in selected_pdf_template.columns if column.is_enabled %}<col style="width:{{ column.width }}%">{% endfor %}</colgroup>
             <thead><tr>{% for column in selected_pdf_template.columns if column.is_enabled %}<th style="text-align:{{ column.alignment }}">{{ column.label }}</th>{% endfor %}</tr></thead>
             <tbody>
               {% for row_number in range(1, 5) %}
-                <tr>{% for column in selected_pdf_template.columns if column.is_enabled %}<td style="text-align:{{ column.alignment }}">{% if column.source_key == "position" %}{{ row_number }}{% elif row_number == 1 %}{{ column.sample }}{% elif column.source_key == "article_name" %}Beispielposition {{ row_number }}{% elif column.source_key == "quantity" %}1,00{% elif column.source_key == "line_total" or column.source_key == "unit_price" %}0,00 €{% else %}{{ column.sample }}{% endif %}</td>{% endfor %}</tr>
+                <tr>{% for column in selected_pdf_template.columns if column.is_enabled %}
+                  {% set value = column.sample %}
+                  {% if column.source_key == "position" %}{% set value = row_number %}
+                  {% elif row_number != 1 and column.source_key == "article_name" %}{% set value = "Beispielposition " ~ row_number %}
+                  {% elif row_number != 1 and column.source_key == "quantity" %}{% set value = "1,00" %}
+                  {% elif row_number != 1 and column.source_key in ("line_total", "unit_price") %}{% set value = "0,00 €" %}{% endif %}
+                  <td style="text-align:{{ column.alignment }}">{{ position_content(column.source_key, value, sample_description, inline_description) }}</td>
+                {% endfor %}</tr>
               {% endfor %}
             </tbody>
           </table>
-          <div class="pdf-template-preview-totals"><span>Netto</span><strong>448,99 €</strong><span>USt.</span><strong>85,31 €</strong><span>Gesamt</span><strong>534,30 €</strong></div>
+          {% if selected_pdf_template.show_totals %}<div class="pdf-template-preview-totals"><span>Netto</span><strong>448,99 €</strong><span>USt.</span><strong>85,31 €</strong><span>Gesamt</span><strong>534,30 €</strong></div>{% endif %}
         </div>
         {{ render_block("payment", "pdf-template-wide-block") }}
         <footer class="pdf-template-preview-footer">{{ render_block("footer", "pdf-template-wide-block") }}</footer>
@@ -156,6 +167,7 @@
 
         <form class="pdf-template-position-form" method="post" action="/account/pdf-templates/{{ selected_pdf_template.template.id }}/positions" data-pdf-template-position-form hidden>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="checkbox-label"><input type="checkbox" name="show_totals" value="true"{% if selected_pdf_template.show_totals %} checked{% endif %}> Summenbereich (Netto, USt., Gesamt) anzeigen</label>
           <p class="subtle">Aktiviere und ordne die Tabellenspalten. Die Breiten aller sichtbaren Spalten müssen zusammen 100 % ergeben.</p>
           <div class="pdf-template-column-total"><span>Sichtbare Spalten</span><strong data-pdf-template-column-count>0</strong><span>Gesamtbreite</span><strong data-pdf-template-width-total>0 %</strong></div>
           <div class="pdf-template-column-editor" data-pdf-template-column-editor>
@@ -175,7 +187,7 @@
               </article>
             {% endfor %}
           </div>
-          <div class="email-compose-actions"><button class="button button-secondary" type="button" data-pdf-template-edit-close>Abbrechen</button><button class="button" type="submit">Tabellenkopf speichern</button></div>
+          <div class="email-compose-actions"><button class="button button-secondary" type="button" data-pdf-template-edit-close>Abbrechen</button><button class="button" type="submit">Tabelle speichern</button></div>
         </form>
       </aside>
     </div>

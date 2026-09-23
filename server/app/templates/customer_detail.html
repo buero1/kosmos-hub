@@ -1,15 +1,19 @@
 {% extends "base.html" %}
+{% from "partials/activity_creation.html" import attributes as creation_attributes, summary as creation_summary %}
+{% from "partials/hub_data_panel.html" import hub_data_panel, hub_data_link with context %}
+{% from "partials/field_layout_break.html" import show_more_layout_item %}
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/site_domain.html" import wordpress_admin_quick_action with context %}
 {% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
 {% macro customer_profile_field_value(field) %}
-  {% if field.key == "website" and field.value %}
-    <a class="customer-field-url" href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
-  {% elif field.key == "work_domain_login" and field.value %}
+  {% set href = field.url_href %}
+  {% if field.key == "work_domain_login" and field.value %}
     {% if detail.wordpress_admin_site %}{{ wordpress_admin_quick_action(detail.wordpress_admin_site) }}{% endif %}
-    <span>{{ field.value }}</span>
+  {% endif %}
+  {% if href %}
+    <a class="customer-field-url" href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
   {% else %}
-    {{ field.value }}
+    {{ field.value or "–" }}
   {% endif %}
 {% endmacro %}
 {% macro communication_email_address(address, prefix="") %}
@@ -155,9 +159,9 @@
     <p class="subtle">{{ empty_message }}</p>
   {% endif %}
 {% endmacro %}
-{% macro customer_field_control(field, name) %}
+{% macro customer_field_control(field, name, label=none) %}
   <label class="customer-field-control">
-    <span>{{ field.label }}{% if field.sensitive %} <small>geschützt</small>{% endif %}</span>
+    <span>{{ label if label is not none else field.label }}{% if field.sensitive %} <small>geschützt</small>{% endif %}</span>
     {% if field.options %}
       <select name="{{ name }}">
         <option value=""></option>
@@ -173,6 +177,41 @@
       <input name="{{ name }}" value="{{ field.form_value }}"{% if field.sensitive %} type="password" autocomplete="new-password" placeholder="Unverändert lassen"{% elif field.display_type == "Telefon" %} type="tel"{% elif field.display_type == "URL" %} type="url"{% else %} type="text"{% endif %}>
     {% endif %}
   </label>
+{% endmacro %}
+{% macro customer_readonly_field_control(field, label=none) %}
+  <div class="customer-field-control customer-field-control-readonly">
+    <span>{{ label if label is not none else field.label }} <small>(nur Anzeige)</small></span>
+    <div>{{ customer_profile_field_value(field) }}</div>
+  </div>
+{% endmacro %}
+{% macro customer_profile_edit_grid(fields, following=false) %}
+  <div class="customer-field-editor-grid customer-profile-edit-grid{% if following %} customer-fields-grid-following{% endif %}">
+    {% for field in fields %}
+      <div class="customer-profile-edit-field" data-customer-field-key="{{ field.key }}">
+        {% if field.key == "hub_postal_city" %}
+          <fieldset class="customer-postal-city-control">
+            <legend>{{ field.label }}</legend>
+            <div class="customer-postal-city-inputs">
+              {% for key, label in [("billing_postal_code", "PLZ"), ("billing_city", "Ort")] %}
+                {% set part = detail.profile_fields | selectattr("key", "equalto", key) | first %}
+                {% if part is defined %}
+                  {% if part.editable %}
+                    {{ customer_field_control(part, "customer_field__" ~ part.key, label) }}
+                  {% else %}
+                    {{ customer_readonly_field_control(part, label) }}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+            </div>
+          </fieldset>
+        {% elif field.editable %}
+          {{ customer_field_control(field, "customer_field__" ~ field.key) }}
+        {% else %}
+          {{ customer_readonly_field_control(field) }}
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
 {% endmacro %}
 {% block content %}
   <section>
@@ -208,9 +247,6 @@
                   <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
                 </form>
               {% endif %}
-              {% if can_manage_customer_fields and detail.display_profile_fields %}
-                <button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-layout-edit-open="customer-fields">Layout bearbeiten</button>
-              {% endif %}
             </div>
           </details>
         {% endif %}
@@ -242,7 +278,7 @@
         <article id="customer-fields" class="card customer-detail-panel" data-layout-editor="customer-fields">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Kundenfelder</h3>
               <p class="subtle">Aktuelle Stammdaten und verknüpfte Hub-Informationen.</p>
             </div>
@@ -262,7 +298,7 @@
                 {% if detail.display_profile_fields %}
                   <dl class="customer-fields-grid customer-fields-grid-summary">
                     {% for field in detail.summary_profile_fields %}
-                      <div>
+                      <div data-customer-field-key="{{ field.key }}">
                         <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
                         <dd>{{ customer_profile_field_value(field) }}</dd>
                       </div>
@@ -274,7 +310,7 @@
                     {% if detail.following_profile_fields %}
                       <dl class="customer-fields-grid customer-fields-grid-following">
                         {% for field in detail.following_profile_fields %}
-                          <div>
+                          <div data-customer-field-key="{{ field.key }}">
                             <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
                             <dd>{{ customer_profile_field_value(field) }}</dd>
                           </div>
@@ -286,29 +322,6 @@
                       <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
                     </dl>
                   {% endif %}
-                  <div class="customer-system-details">
-                    <p class="eyebrow">Hub-Daten</p>
-                    <dl class="customer-fields-grid">
-                      <div><dt>Quelle</dt><dd>{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub" }}</dd></div>
-                      <div><dt>Website</dt><dd>{{ detail.entry.customer.website_domain or "-" }}</dd></div>
-                      {% if detail.entry.customer.zoho_id %}
-                        <div><dt>Zoho account ID</dt><dd>{{ detail.entry.customer.zoho_id }}</dd></div>
-                        <div><dt>Last changed in Zoho</dt><dd>{{ (detail.entry.customer.zoho_modified_at or "-") | berlin_time }}</dd></div>
-                        <div><dt>Last synchronized</dt><dd>{{ (detail.entry.customer.zoho_synced_at or "-") | berlin_time }}</dd></div>
-                      {% endif %}
-                    </dl>
-                    <p class="eyebrow customer-linked-sites-heading">Verknüpfte Hub-Websites</p>
-                    <div class="customer-linked-sites">
-                      {% for site in detail.entry.linked_sites %}
-                        <a href="/sites/{{ site.id }}">{{ site.domain }}</a>
-                      {% else %}
-                        <span class="subtle">Noch keine Hub-Website verknüpft.</span>
-                      {% endfor %}
-                    </div>
-                    {% if detail.entry.exact_match_candidate %}
-                      <p class="subtle">Exakte Zuordnung verfügbar: <a href="/sites/{{ detail.entry.exact_match_candidate.id }}">{{ detail.entry.exact_match_candidate.domain }}</a>.</p>
-                    {% endif %}
-                  </div>
                 </div>
                 {% if detail.following_profile_fields %}
                   <button class="button button-secondary customer-expand-toggle customer-fields-expand-toggle" type="button" data-expandable-toggle hidden>Mehr anzeigen ...</button>
@@ -335,10 +348,17 @@
             {% if can_manage_customer_fields and detail.display_profile_fields %}
               <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
                 <dl class="customer-fields-grid" data-layout-sortable>
-                  {% for field in detail.display_profile_fields %}
+                  {% for field in detail.summary_profile_fields %}
                     <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
                       <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
-                      <dd>{{ field.value }}</dd>
+                      <dd>{{ field.value or "–" }}</dd>
+                    </div>
+                  {% endfor %}
+                  {{ show_more_layout_item() }}
+                  {% for field in detail.following_profile_fields %}
+                    <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
+                      <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                      <dd>{{ field.value or "–" }}</dd>
                     </div>
                   {% endfor %}
                 </dl>
@@ -352,11 +372,10 @@
               <form id="customer-fields-form" method="post" action="/customers/{{ detail.entry.customer.id }}/fields" class="communication-form customer-field-editor" data-customer-field-editor hidden>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 {% if detail.editable_profile_fields %}
-                  <div class="customer-field-editor-grid">
-                    {% for field in detail.editable_profile_fields %}
-                      {{ customer_field_control(field, "customer_field__" ~ field.key) }}
-                    {% endfor %}
-                  </div>
+                  {{ customer_profile_edit_grid(detail.summary_profile_fields) }}
+                  {% if detail.following_profile_fields %}
+                    {{ customer_profile_edit_grid(detail.following_profile_fields, following=true) }}
+                  {% endif %}
                 {% endif %}
                 {% for subform in detail.subforms %}
                   <section class="customer-subform-editor">
@@ -390,26 +409,26 @@
           </div>
         </article>
 
-        <article class="card customer-detail-panel customer-communication-panel">
+        {% if can_view_emails or can_view_contacts or can_view_cases or can_view_finance %}<article class="card customer-detail-panel customer-communication-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Kommunikation</h3>
             </div>
           </div>
           <div class="field-tabs customer-communication-tabs" data-field-tabs>
             <div class="field-tabs-list" role="tablist" aria-label="Kundenkommunikation filtern">
-              <button id="customer-communications-tab-emails" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-emails" aria-selected="true" tabindex="0" data-field-tab="emails">E-Mails</button>
-              <button id="customer-communications-tab-contacts" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-contacts" aria-selected="false" tabindex="-1" data-field-tab="contacts">Kontakte</button>
-              <button id="customer-communications-tab-cases" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-cases" aria-selected="false" tabindex="-1" data-field-tab="cases">Fälle</button>
-              <button id="customer-communications-tab-orders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-orders" aria-selected="false" tabindex="-1" data-field-tab="orders">Aufträge</button>
+              {% if can_view_emails %}<button id="customer-communications-tab-emails" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-emails" aria-selected="{{ 'true' if active_customer_communication_tab == 'emails' else 'false' }}" tabindex="{{ '0' if active_customer_communication_tab == 'emails' else '-1' }}" data-field-tab="emails">E-Mails</button>{% endif %}
+              {% if can_view_contacts %}<button id="customer-communications-tab-contacts" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-contacts" aria-selected="{{ 'true' if active_customer_communication_tab == 'contacts' else 'false' }}" tabindex="{{ '0' if active_customer_communication_tab == 'contacts' else '-1' }}" data-field-tab="contacts">Kontakte</button>{% endif %}
+              {% if can_view_cases %}<button id="customer-communications-tab-cases" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-cases" aria-selected="{{ 'true' if active_customer_communication_tab == 'cases' else 'false' }}" tabindex="{{ '0' if active_customer_communication_tab == 'cases' else '-1' }}" data-field-tab="cases">Fälle</button>{% endif %}
+              {% if can_view_finance %}<button id="customer-communications-tab-orders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-orders" aria-selected="{{ 'true' if active_customer_communication_tab == 'orders' else 'false' }}" tabindex="{{ '0' if active_customer_communication_tab == 'orders' else '-1' }}" data-field-tab="orders">Aufträge</button>
               <button id="customer-communications-tab-invoices" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-invoices" aria-selected="false" tabindex="-1" data-field-tab="invoices">Rechnungen</button>
               <button id="customer-communications-tab-recurring-invoices" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-recurring-invoices" aria-selected="false" tabindex="-1" data-field-tab="recurring-invoices">Periodische Rechnungen</button>
               <button id="customer-communications-tab-reminders" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-reminders" aria-selected="false" tabindex="-1" data-field-tab="reminders">Mahnungen</button>
-              <button id="customer-communications-tab-offers" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-offers" aria-selected="false" tabindex="-1" data-field-tab="offers">Angebote</button>
+              <button id="customer-communications-tab-offers" class="field-tab" type="button" role="tab" aria-controls="customer-communications-panel-offers" aria-selected="false" tabindex="-1" data-field-tab="offers">Angebote</button>{% endif %}
             </div>
           </div>
-          <div id="customer-communications-panel-emails" role="tabpanel" aria-labelledby="customer-communications-tab-emails" data-field-tab-panel="emails">
+          {% if can_view_emails %}<div id="customer-communications-panel-emails" role="tabpanel" aria-labelledby="customer-communications-tab-emails" data-field-tab-panel="emails"{% if active_customer_communication_tab != 'emails' %} hidden{% endif %}>
             {% if can_manage_communications %}
               <div class="customer-communication-tab-actions">
                 <button class="button button-variant-2" type="button" data-email-compose-open data-email-compose-customer-id="{{ detail.entry.customer.id }}">E-Mail schreiben</button>
@@ -418,10 +437,11 @@
             <div class="customer-section-expandable" data-expandable-section>
               <div data-expandable-content>
                 {% for email in communication.emails %}
+                  {% if email.mailbox_message %}{% include "partials/associated_email_entry.html" %}{% else %}
                   <article class="communication-entry">
                     <div class="communication-entry-heading">
                       <strong>{{ email.subject }}</strong>
-                      <span class="pill">{% if email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
+                      <span class="pill{% if email.source == 'scheduled' and email.sync_status == 'failed' %} pill-failed{% endif %}">{% if email.source == "scheduled" and email.sync_status == "failed" %}Fehlgeschlagen{% elif email.source == "scheduled" %}Geplant{% elif email.direction == "inbound" %}Eingang{% elif email.direction == "outbound" %}Ausgang{% else %}E-Mail{% endif %}</span>
                       {% if email.is_unread %}<span class="pill">Neu</span>{% endif %}
                     </div>
                     <p class="subtle">
@@ -430,32 +450,26 @@
                       {% if email.recipients %}An {{ email.recipients }}{% endif %}
                       {% if email.occurred_at %} · {{ email.occurred_at | berlin_time }}{% endif %}
                     </p>
-                    {% if can_manage_communications %}
+                    {% if can_manage_communications and email.source != "scheduled" %}
+                      {% set linked_case = linked_cases_by_email_id.get(email.id) %}
                       <div class="case-email-actions">
                         <button class="button button-secondary button-variant-2 agent-context-action" type="button" data-agent-context-add data-agent-context-type="email" data-agent-context-key="linked-{{ detail.entry.customer.id }}-{{ email.id }}">In Agent-Kontext aufnehmen</button>
-                        <a class="button button-secondary button-variant-2" href="/cases/new?source_email_key=linked-{{ detail.entry.customer.id }}-{{ email.id }}">Fall anlegen</a>
-                        {% if detail.cases %}
-                          <form method="post" action="/cases/email-links">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                            <input type="hidden" name="source_email_key" value="linked-{{ detail.entry.customer.id }}-{{ email.id }}">
-                            <label class="visually-hidden" for="case-email-{{ email.id }}">Fall auswählen</label>
-                            <select id="case-email-{{ email.id }}" name="case_id" class="control-variant-2" required>
-                              <option value="">Fall zuordnen ...</option>
-                              {% for entry in detail.cases %}<option value="{{ entry.case.id }}">{{ entry.case_number }} · {{ entry.status }}</option>{% endfor %}
-                            </select>
-                            <button class="button button-secondary button-variant-2" type="submit">Zuordnen</button>
-                          </form>
+                        {% if can_view_cases and linked_case %}
+                          {% set linked_case_is_closed = linked_case.status | lower == "abgeschlossen" %}
+                          <button class="button button-secondary button-variant-2 case-email-create-action customer-email-case-link {{ 'is-closed' if linked_case_is_closed else 'is-open' }}" type="button" data-customer-case-edit-open data-customer-case-id="{{ linked_case.case.id }}" title="{{ linked_case.case_number }}">{{ "Abgeschlossener Fall" if linked_case_is_closed else "Offener Fall" }}</button>
+                        {% elif can_create_cases %}
+                          <a class="button button-secondary button-variant-2 case-email-create-action" href="/cases/new?source_email_key=linked-{{ detail.entry.customer.id }}-{{ email.id }}">Fall anlegen</a>
                         {% endif %}
                       </div>
                     {% endif %}
                     {% if email.preview_html %}
                       <details class="communication-content communication-content-with-actions" data-email-preview data-email-unread="{{ 'true' if email.is_unread else 'false' }}" data-email-read-url="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/read" data-email-read-csrf="{{ csrf_token }}">
                         <summary>E-Mail-Vorschau anzeigen</summary>
-                        {% if email.direction == "inbound" and can_manage_communications %}{{ communication_email_actions(email) }}{% endif %}
+                      {% if email.direction == "inbound" and can_manage_communications and email.source != "scheduled" %}{{ communication_email_actions(email) }}{% endif %}
                         <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe>
                       </details>
                     {% elif email.can_load_content and can_manage_communications %}
-                      {% if email.direction == "inbound" %}{{ communication_email_actions(email, true) }}{% endif %}
+                      {% if email.direction == "inbound" and email.source != "scheduled" %}{{ communication_email_actions(email, true) }}{% endif %}
                       <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/load">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button class="button button-secondary" type="submit">Nachricht laden</button>
@@ -472,26 +486,27 @@
                     {% endif %}
                     {% if email.last_error %}<p class="notice-warning">{{ email.last_error }}</p>{% endif %}
                   </article>
+                  {% endif %}
                 {% else %}
                   <p class="subtle">{% if detail.entry.customer.zoho_id %}Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.{% else %}Noch keine E-Mails gespeichert.{% endif %}</p>
                 {% endfor %}
               </div>
               <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
             </div>
-          </div>
-          <div id="customer-communications-panel-contacts" role="tabpanel" aria-labelledby="customer-communications-tab-contacts" data-field-tab-panel="contacts" hidden>
+          </div>{% endif %}
+          {% if can_view_contacts %}<div id="customer-communications-panel-contacts" role="tabpanel" aria-labelledby="customer-communications-tab-contacts" data-field-tab-panel="contacts"{% if active_customer_communication_tab != 'contacts' %} hidden{% endif %}>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Kontakte.</p>
-              {% if can_manage_customer_fields %}
+              {% if can_create_contacts %}
                 <a class="button button-secondary button-variant-2" href="/contacts/new?customer_id={{ detail.entry.customer.id }}">Kontakt anlegen</a>
               {% endif %}
             </div>
             {{ customer_contacts_table(detail.contacts, detail.entry.customer) }}
-          </div>
-          <div id="customer-communications-panel-cases" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases" hidden>
+          </div>{% endif %}
+          {% if can_view_cases %}<div id="customer-communications-panel-cases" role="tabpanel" aria-labelledby="customer-communications-tab-cases" data-field-tab-panel="cases"{% if active_customer_communication_tab != 'cases' %} hidden{% endif %}>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Fälle.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/cases/new?customer_id={{ detail.entry.customer.id }}">Fall anlegen</a>{% endif %}
+              {% if can_create_cases %}<a class="button button-secondary button-variant-2" href="/cases/new?customer_id={{ detail.entry.customer.id }}">Fall anlegen</a>{% endif %}
             </div>
             {% if detail.cases %}
               <div class="table-scroll">
@@ -514,52 +529,59 @@
             {% else %}
               <p class="subtle">Für diesen Kunden sind keine Fälle vorhanden.</p>
             {% endif %}
-          </div>
-          <div id="customer-communications-panel-orders" role="tabpanel" aria-labelledby="customer-communications-tab-orders" data-field-tab-panel="orders" hidden>
+          </div>{% endif %}
+          {% if can_view_finance %}<div id="customer-communications-panel-orders" role="tabpanel" aria-labelledby="customer-communications-tab-orders" data-field-tab-panel="orders"{% if active_customer_communication_tab != 'orders' %} hidden{% endif %}>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Aufträge.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/orders/new?customer_id={{ detail.entry.customer.id }}">Auftrag anlegen</a>{% endif %}
+              {% if can_create_finance %}<a class="button button-secondary button-variant-2" href="/finance/orders/new?customer_id={{ detail.entry.customer.id }}">Auftrag anlegen</a>{% endif %}
             </div>
             {{ customer_finance_table(customer_finance_orders, "orders", "Auftragsnummer", "Auftragsdatum", "Für diesen Kunden sind keine Aufträge vorhanden.") }}
           </div>
           <div id="customer-communications-panel-invoices" role="tabpanel" aria-labelledby="customer-communications-tab-invoices" data-field-tab-panel="invoices" hidden>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Rechnungen.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/invoices/new?customer_id={{ detail.entry.customer.id }}">Rechnung anlegen</a>{% endif %}
+              {% if can_create_finance %}<a class="button button-secondary button-variant-2" href="/finance/invoices/new?customer_id={{ detail.entry.customer.id }}">Rechnung anlegen</a>{% endif %}
             </div>
             {{ customer_finance_table(customer_finance_invoices, "invoices", "Rechnungsnummer", "Rechnungsdatum", "Für diesen Kunden sind keine Rechnungen vorhanden.") }}
           </div>
           <div id="customer-communications-panel-recurring-invoices" role="tabpanel" aria-labelledby="customer-communications-tab-recurring-invoices" data-field-tab-panel="recurring-invoices" hidden>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften periodischen Rechnungen.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/recurring-invoices/new?customer_id={{ detail.entry.customer.id }}">Periodische Rechnung anlegen</a>{% endif %}
+              {% if can_create_finance %}<a class="button button-secondary button-variant-2" href="/finance/recurring-invoices/new?customer_id={{ detail.entry.customer.id }}">Periodische Rechnung anlegen</a>{% endif %}
             </div>
             {{ customer_finance_table(customer_finance_recurring_invoices, "recurring-invoices", "Bezeichnung", "Nächstes Rechnungsdatum", "Für diesen Kunden sind keine periodischen Rechnungen vorhanden.") }}
           </div>
           <div id="customer-communications-panel-reminders" role="tabpanel" aria-labelledby="customer-communications-tab-reminders" data-field-tab-panel="reminders" hidden>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Mahnungen.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/dunnings/new?customer_id={{ detail.entry.customer.id }}">Mahnung anlegen</a>{% endif %}
+              {% if can_create_finance %}<a class="button button-secondary button-variant-2" href="/finance/dunnings/new?customer_id={{ detail.entry.customer.id }}">Mahnung anlegen</a>{% endif %}
             </div>
             {{ customer_finance_table(customer_finance_dunnings, "dunnings", "Mahnungsnummer", "Mahnungsdatum", "Für diesen Kunden sind keine Mahnungen vorhanden.") }}
           </div>
           <div id="customer-communications-panel-offers" role="tabpanel" aria-labelledby="customer-communications-tab-offers" data-field-tab-panel="offers" hidden>
             <div class="customer-communication-tab-heading">
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Angebote.</p>
-              {% if can_manage_customer_fields %}<a class="button button-secondary button-variant-2" href="/finance/offers/new?customer_id={{ detail.entry.customer.id }}">Angebot anlegen</a>{% endif %}
+              {% if can_create_finance %}<a class="button button-secondary button-variant-2" href="/finance/offers/new?customer_id={{ detail.entry.customer.id }}">Angebot anlegen</a>{% endif %}
             </div>
             {{ customer_finance_table(customer_finance_offers, "offers", "Angebotsnummer", "Angebotsdatum", "Für diesen Kunden sind keine Angebote vorhanden.") }}
-          </div>
-        </article>
+          </div>{% endif %}
+        </article>{% endif %}
 
       </div>
 
       <aside class="customer-detail-side-column">
-        {% if detail.entry.customer.zoho_id %}
-        <article class="card customer-detail-panel customer-notes-panel">
+        {% call hub_data_panel(detail.entry.customer) %}
+          {% if can_view_websites and detail.entry.linked_sites %}
+            <dl class="customer-fields-grid">{% for site in detail.entry.linked_sites %}
+              {{ hub_data_link(detail.entry.customer, 'websites', site.id, 'Website', site.domain, '/sites/' ~ site.id) }}
+            {% endfor %}</dl>
+          {% endif %}
+        {% endcall %}
+        {% if can_view_emails and detail.entry.customer.zoho_id %}
+        <article id="customer-notes" class="card customer-detail-panel customer-notes-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Notizen</h3>
               <p class="subtle">Notizen aus Zoho und aus dem Hub.</p>
             </div>
@@ -569,7 +591,7 @@
               <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
               <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/notes" class="communication-form" data-note-composer-form hidden>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <textarea name="content" rows="5" maxlength="30000" required aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
+                <textarea name="content" rows="5" maxlength="{{ note_field_catalog(true).content.maximum }}" {% if note_field_catalog(true).content.required %}required{% endif %} aria-label="Notiz" placeholder="Worum geht es bei dieser Anmerkung?" data-note-composer-content></textarea>
                 <div class="customer-note-composer-actions">
                   <button class="button button-secondary" type="button" data-note-composer-cancel>Abbrechen</button>
                   <button class="button" type="submit">Senden</button>
@@ -591,9 +613,7 @@
                       {% endif %}
                     </div>
                   </div>
-                  {% if note.author or note.occurred_at %}
-                    <p class="subtle">{% if note.author %}{{ note.author }}{% endif %}{% if note.author and note.occurred_at %} · {% endif %}{% if note.occurred_at %}{{ note.occurred_at | berlin_time }}{% endif %}</p>
-                  {% endif %}
+                  {% include "partials/note_metadata.html" %}
                   <p class="communication-note-content">{{ note.content }}</p>
                   {% if note.last_error %}<p class="notice-warning">{{ note.last_error }}</p>{% endif %}
                 </article>
@@ -609,8 +629,8 @@
               <form method="post" data-customer-note-edit-form>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <h3 id="customer-note-edit-heading">Notiz bearbeiten</h3>
-                <label>Titel<input name="title" maxlength="255" required data-customer-note-edit-title></label>
-                <label>Notiz<textarea name="content" rows="7" maxlength="30000" required data-customer-note-edit-content></textarea></label>
+                <label>Titel<input name="title" maxlength="{{ note_field_catalog(false).title.maximum }}" {% if note_field_catalog(false).title.required %}required{% endif %} data-customer-note-edit-title></label>
+                <label>Notiz<textarea name="content" rows="7" maxlength="{{ note_field_catalog(false).content.maximum }}" {% if note_field_catalog(false).content.required %}required{% endif %} data-customer-note-edit-content></textarea></label>
                 <div class="dialog-actions">
                   <button class="button button-secondary" type="button" data-customer-note-edit-cancel>Abbrechen</button>
                   <button class="button" type="submit">Änderungen speichern</button>
@@ -633,50 +653,51 @@
         </article>
         {% endif %}
 
-        <article id="customer-activities" class="card customer-detail-panel customer-activities-panel">
+        {% if can_view_activities %}<article id="customer-activities" class="card customer-detail-panel customer-activities-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">{{ "Zoho CRM" if detail.entry.customer.zoho_id else "Hub-Daten" }}</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Aktivitäten</h3>
             </div>
-            <div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
+            {% if can_create_activities %}<div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
               {{ customer_activity_action("Neuen Anruf anlegen", "call") }}
               {{ customer_activity_action("Neue Aufgabe anlegen", "task") }}
               {{ customer_activity_action("Neues Meeting anlegen", "meeting") }}
-            </div>
+            </div>{% endif %}
           </div>
           <div class="customer-activity-list">
             {% if activity_calls or activity_tasks or activity_meetings %}
               {% for call in activity_calls %}
-                <article id="call-{{ call.id }}" class="customer-activity-entry">
+                <article id="call-{{ call.id }}" class="customer-activity-entry" {{ creation_attributes(call) }}>
                   <div class="customer-activity-entry-heading">
                     <strong>{{ call.name }}</strong>
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if call.status == "planned" %}Geplant{% elif call.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Anrufaktionen">
                         {{ customer_agent_context_action("call", call.id, "Anruf") }}
-                        {% if call.status == "planned" %}{{ customer_call_entry_action(call, "complete") }}{% endif %}
-                        {{ customer_call_entry_action(call, "edit") }}
-                        {{ customer_call_entry_action(call, "delete") }}
+                        {% if can_edit_activities and call.can_edit and call.status == "planned" %}{{ customer_call_entry_action(call, "complete") }}{% endif %}
+                        {% if can_edit_activities and call.can_edit %}{{ customer_call_entry_action(call, "edit") }}{% endif %}
+                        {% if can_delete_activities and call.can_delete %}{{ customer_call_entry_action(call, "delete") }}{% endif %}
                       </div>
                     </div>
                   </div>
                   <p class="subtle">{% if call.direction == "outbound" %}Ausgehend{% else %}Eingehend{% endif %} · {{ call.starts_at | berlin_time }} · {{ call.duration_minutes }} Min.</p>
                   {% for reminder in call.reminders %}<p class="subtle">{% if reminder.channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ reminder.minutes_before }} Min. vorher</p>{% endfor %}
                   {% if call.description %}<p class="customer-activity-entry-description">{{ call.description }}</p>{% endif %}
+                  {{ creation_summary(call) }}
                 </article>
               {% endfor %}
               {% for task in activity_tasks %}
-                <article id="task-{{ task.id }}" class="customer-activity-entry">
+                <article id="task-{{ task.id }}" class="customer-activity-entry" {{ creation_attributes(task) }}>
                   <div class="customer-activity-entry-heading">
                     <strong>{{ task.name }}</strong>
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if task.status == "planned" %}Geplant{% elif task.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Aufgabenaktionen">
                         {{ customer_agent_context_action("task", task.id, "Aufgabe") }}
-                        {% if task.status == "planned" %}{{ customer_task_entry_action(task, "complete") }}{% endif %}
-                        {{ customer_task_entry_action(task, "edit") }}
-                        {{ customer_task_entry_action(task, "delete") }}
+                        {% if can_edit_activities and task.can_edit and task.status == "planned" %}{{ customer_task_entry_action(task, "complete") }}{% endif %}
+                        {% if can_edit_activities and task.can_edit %}{{ customer_task_entry_action(task, "edit") }}{% endif %}
+                        {% if can_delete_activities and task.can_delete %}{{ customer_task_entry_action(task, "delete") }}{% endif %}
                       </div>
                     </div>
                   </div>
@@ -684,31 +705,33 @@
                   {% if task.reminder_channel in ["popup", "email"] and task.reminder_minutes_before is not none %}<p class="subtle">{% if task.reminder_channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ task.reminder_minutes_before }} Min. vorher</p>{% endif %}
                   {% if task.email_reminder_status == "failed" %}<p class="notice-warning">E-Mail-Erinnerung konnte nicht versendet werden: {{ task.email_reminder_last_error or "Unbekannter Fehler" }}</p>{% endif %}
                   {% if task.description %}<p class="customer-activity-entry-description">{{ task.description }}</p>{% endif %}
+                  {{ creation_summary(task) }}
                 </article>
               {% endfor %}
               {% for meeting in activity_meetings %}
-                <article id="meeting-{{ meeting.id }}" class="customer-activity-entry">
+                <article id="meeting-{{ meeting.id }}" class="customer-activity-entry" {{ creation_attributes(meeting) }}>
                   <div class="customer-activity-entry-heading">
                     <strong>{{ meeting.name }}</strong>
                     <div class="customer-activity-entry-controls">
                       <span class="pill">{% if meeting.status == "planned" %}Geplant{% elif meeting.status == "completed" %}Abgeschlossen{% else %}Abgesagt{% endif %}</span>
                       <div class="customer-activity-entry-actions" role="group" aria-label="Meetingaktionen">
                         {{ customer_agent_context_action("meeting", meeting.id, "Meeting") }}
-                        {{ customer_meeting_entry_action(meeting, "edit") }}
-                        {{ customer_meeting_entry_action(meeting, "delete") }}
+                        {% if can_edit_activities and meeting.can_edit %}{{ customer_meeting_entry_action(meeting, "edit") }}{% endif %}
+                        {% if can_delete_activities and meeting.can_delete %}{{ customer_meeting_entry_action(meeting, "delete") }}{% endif %}
                       </div>
                     </div>
                   </div>
                   <p class="subtle">Meeting · {{ meeting.starts_at | berlin_time }} · {{ meeting.duration_minutes }} Min.</p>
                   {% for reminder in meeting.reminders %}<p class="subtle">{% if reminder.channel == "popup" %}Popup{% else %}E-Mail{% endif %} {{ reminder.minutes_before }} Min. vorher</p>{% endfor %}
                   {% if meeting.description %}<p class="customer-activity-entry-description">{{ meeting.description }}</p>{% endif %}
+                  {{ creation_summary(meeting) }}
                 </article>
               {% endfor %}
             {% else %}
               <p class="subtle customer-activity-empty">Noch keine Aktivitäten geplant.</p>
             {% endif %}
           </div>
-        </article>
+        </article>{% endif %}
 
         <dialog class="update-confirmation-dialog" data-customer-call-complete-dialog aria-labelledby="customer-call-complete-heading">
           <form method="post" data-customer-call-complete-form>
@@ -773,7 +796,7 @@
         <article class="card customer-detail-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Kontakte</h3>
               <p class="subtle">Alle derzeit mit diesem Kunden verknüpften Kontakte.</p>
             </div>
@@ -791,7 +814,7 @@
       </aside>
     </div>
   </section>
-  {% include "partials/customer_activity_composer.html" %}
+  {% if can_create_activities %}{% include "partials/customer_activity_composer.html" %}{% endif %}
   <div class="activity-compose-layer" data-customer-case-compose hidden>
     <button class="activity-compose-backdrop" type="button" data-customer-case-close aria-label="Fallmaske schließen"></button>
     <aside class="activity-compose-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-case-compose-title" aria-hidden="true" data-customer-case-compose-drawer tabindex="-1">
@@ -809,7 +832,7 @@
   <dialog class="update-confirmation-dialog" data-customer-case-delete-dialog aria-labelledby="customer-case-delete-heading">
     <div>
       <h3 id="customer-case-delete-heading">Fall im Hub löschen?</h3>
-      <p>Der Fall wird nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
+      <p>Der Fall, seine Aufgaben, Erinnerungen und E-Mail-Verknüpfungen werden endgültig gelöscht. Die E-Mails samt Anhängen und der Kunde bleiben erhalten. Ein vorhandener Zoho-Datensatz bleibt unverändert.</p>
       <div class="dialog-actions">
         <button class="button button-secondary" type="button" data-customer-case-delete-cancel>Abbrechen</button>
         <button class="button button-danger" type="button" data-customer-case-delete-confirm>Fall löschen</button>

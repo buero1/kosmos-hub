@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS hub_scheduled_emails (
+  id INT NOT NULL AUTO_INCREMENT,
+  customer_id INT NULL,
+  customer_email_id INT NULL,
+  mailbox_email_id INT NULL,
+  creator_username VARCHAR(64) NOT NULL,
+  encrypted_payload_json MEDIUMTEXT NOT NULL,
+  scheduled_at DATETIME NOT NULL,
+  next_attempt_at DATETIME NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'scheduled',
+  attempt_count INT NOT NULL DEFAULT 0,
+  last_error TEXT NULL,
+  locked_at DATETIME NULL,
+  sent_at DATETIME NULL,
+  message_id VARCHAR(255) NOT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  INDEX ix_hub_scheduled_emails_customer_id (customer_id),
+  INDEX ix_hub_scheduled_emails_status_next_attempt (status, next_attempt_at),
+  INDEX ix_hub_scheduled_emails_customer_status (customer_id, status, scheduled_at),
+  CONSTRAINT fk_hub_scheduled_emails_customer FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+  CONSTRAINT fk_hub_scheduled_emails_customer_email FOREIGN KEY (customer_email_id) REFERENCES customer_zoho_emails(id) ON DELETE SET NULL,
+  CONSTRAINT fk_hub_scheduled_emails_mailbox_email FOREIGN KEY (mailbox_email_id) REFERENCES hub_mailbox_emails(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS hub_scheduled_email_attachments (
+  id INT NOT NULL AUTO_INCREMENT,
+  scheduled_email_id INT NOT NULL,
+  filename VARCHAR(255) NOT NULL,
+  storage_key VARCHAR(96) NOT NULL,
+  content_type VARCHAR(128) NOT NULL DEFAULT 'application/octet-stream',
+  byte_size INT NOT NULL,
+  stored_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_hub_scheduled_email_attachments_storage_key (storage_key),
+  INDEX ix_hub_scheduled_email_attachments_email_id (scheduled_email_id),
+  CONSTRAINT fk_hub_scheduled_email_attachments_email FOREIGN KEY (scheduled_email_id) REFERENCES hub_scheduled_emails(id) ON DELETE CASCADE
+);

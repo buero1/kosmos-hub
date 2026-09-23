@@ -75,10 +75,17 @@ class RegistrationClient {
 		$data = json_decode( $raw, true );
 
 		if ( $code < 200 || $code >= 300 ) {
+			$detail = is_array( $data ) && isset( $data['detail'] ) ? $data['detail'] : $raw;
+			if ( 409 === $code && is_array( $detail ) && isset( $detail['code'] ) && 'bridge_domain_changed' === $detail['code'] ) {
+				return new WP_Error( 'bridge_domain_changed', 'The Bridge identity belongs to a different domain.' );
+			}
 			return new WP_Error(
 				'kosmos_bridge_registration_failed',
-				is_array( $data ) && isset( $data['detail'] ) ? (string) $data['detail'] : $raw
+				is_string( $detail ) ? $detail : 'The Hub rejected the registration.'
 			);
+		}
+		if ( ! is_array( $data ) || ! isset( $data['site_uuid'] ) || $data['site_uuid'] !== $payload['site_uuid'] ) {
+			return new WP_Error( 'kosmos_bridge_invalid_registration_response', 'The Hub did not confirm this Bridge identity.' );
 		}
 
 		return array(

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% from "partials/activity_creation.html" import attributes as creation_attributes %}
+{% block title %}{{ title }} · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Aktivitäten</p>
+        <h2>{{ title }}</h2>
+      </div>
+      <div class="communication-heading-actions">
+        {% if activity_can_create %}<a class="button button-variant-1" href="{{ create_href }}">{{ create_label }}</a>{% endif %}
+      </div>
+    </div>
+    {% if activity_state and activity_message %}<p class="notice-{{ activity_state }}" role="status">{{ activity_message }}</p>{% endif %}
+    <article class="card customer-detail-panel">
+      {% include "partials/activity_view_filter.html" %}
+      <div class="table-scroll">
+        <table class="finance-directory-table activity-directory-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Bezug</th>
+              <th>Status</th>
+              <th>Verantwortlich</th>
+              {% if activity_kind == "call" %}<th>Richtung</th>{% endif %}
+              <th>{{ "Fällig" if activity_kind == "task" else "Beginn" }}</th>
+              {% if activity_kind == "meeting" %}<th>Ende</th>{% endif %}
+              {% if activity_kind != "task" %}<th>Dauer</th>{% else %}<th>Erinnerung</th>{% endif %}
+              <th>Erstellt von</th>
+              <th>Erstellt am</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in entries %}
+              <tr {{ creation_attributes(entry) }}>
+                <td>
+                  {% if activity_kind == "call" %}
+                    <button
+                      class="activity-directory-link"
+                      type="button"
+                      data-customer-call-edit
+                      data-customer-call-update-url="{{ entry.update_href }}"
+                      data-customer-call-name="{{ entry.name }}"
+                      data-customer-call-status="{{ entry.status }}"
+                      data-customer-call-direction="{{ entry.direction }}"
+                      data-customer-call-start-date="{{ entry.scheduled_date }}"
+                      data-customer-call-start-time="{{ entry.scheduled_time }}"
+                      data-customer-call-duration="{{ entry.duration_minutes }}"
+                      data-customer-call-reminder-channels="{{ entry.reminder_channels | join(',') }}"
+                      data-customer-call-reminder-minutes="{{ entry.reminder_minutes_before | join(',') }}"
+                      data-customer-call-description="{{ entry.description }}"
+                      data-customer-activity-relation="{{ entry.relation_label }}"
+                      data-customer-activity-relation-href="{{ entry.related_href }}"
+                    >{{ entry.name }}</button>
+                  {% elif activity_kind == "task" %}
+                    <button
+                      class="activity-directory-link"
+                      type="button"
+                      data-customer-task-edit
+                      data-customer-task-update-url="{{ entry.update_href }}"
+                      data-customer-task-name="{{ entry.name }}"
+                      data-customer-task-status="{{ entry.status }}"
+                      data-customer-task-due-date="{{ entry.scheduled_date }}"
+                      data-customer-task-due-time="{{ entry.scheduled_time }}"
+                      data-customer-task-reminder-channel="{{ entry.task_reminder_channel }}"
+                      data-customer-task-reminder-minutes="{{ entry.task_reminder_minutes_before }}"
+                      data-customer-task-description="{{ entry.description }}"
+                      data-customer-activity-relation="{{ entry.relation_label }}"
+                      data-customer-activity-relation-href="{{ entry.related_href }}"
+                    >{{ entry.name }}</button>
+                  {% else %}
+                    <button
+                      class="activity-directory-link"
+                      type="button"
+                      data-customer-meeting-edit
+                      data-customer-meeting-update-url="{{ entry.update_href }}"
+                      data-customer-meeting-name="{{ entry.name }}"
+                      data-customer-meeting-status="{{ entry.status }}"
+                      data-customer-meeting-start-date="{{ entry.scheduled_date }}"
+                      data-customer-meeting-start-time="{{ entry.scheduled_time }}"
+                      data-customer-meeting-duration="{{ entry.duration_minutes }}"
+                      data-customer-meeting-reminder-channels="{{ entry.reminder_channels | join(',') }}"
+                      data-customer-meeting-reminder-minutes="{{ entry.reminder_minutes_before | join(',') }}"
+                      data-customer-meeting-description="{{ entry.description }}"
+                      data-customer-activity-relation="{{ entry.relation_label }}"
+                      data-customer-activity-relation-href="{{ entry.related_href }}"
+                    >{{ entry.name }}</button>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if entry.related_href %}
+                    <a href="{{ entry.related_href }}">{{ entry.related_name }}</a>
+                    <small>{{ entry.related_kind }}</small>
+                  {% else %}
+                    <span class="subtle">Keine Verknüpfung</span>
+                  {% endif %}
+                </td>
+                <td>{{ entry.status_label }}</td>
+                <td>{{ entry.assignee_name }}</td>
+                {% if activity_kind == "call" %}<td>{{ entry.direction_label }}</td>{% endif %}
+                <td>{{ entry.scheduled_at | berlin_time_short }}</td>
+                {% if activity_kind == "meeting" %}<td>{{ entry.ends_at | berlin_time_short }}</td>{% endif %}
+                {% if activity_kind != "task" %}<td>{{ entry.duration_minutes }} Min.</td>{% else %}<td>{{ entry.reminder_label }}</td>{% endif %}
+                <td>{{ entry.created_by_username }}</td>
+                <td>{{ entry.created_at | berlin_time_local }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="{{ 9 if activity_kind in ('call', 'meeting') else 8 }}">Noch keine {{ title }} vorhanden.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+  {% set activity_composer_mode = "directory" %}
+  {% include "partials/customer_activity_composer.html" %}
+{% endblock %}

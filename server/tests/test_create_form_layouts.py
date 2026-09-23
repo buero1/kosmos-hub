@@ -55,6 +55,7 @@ def test_create_forms_use_the_saved_layout_order():
         db.flush()
         request = _request()
 
+        request.state.hub_user = actor
         lead_order = _reverse_layout(db, actor, LEAD_FIELDS_LAYOUT_KEY, HUB_LEAD_FIELDS)
         assert tuple(field.key for field in web._lead_create_context(request, db)["fields"]) == lead_order
 
@@ -68,7 +69,11 @@ def test_create_forms_use_the_saved_layout_order():
         assert tuple(field.key for field in web._finance_article_create_context(request, db)["fields"]) == article_order
 
         offer_order = _reverse_layout(db, actor, OFFER_FIELDS_LAYOUT_KEY, OFFER_FIELDS)
-        assert tuple(field.key for field in web._finance_offer_create_context(request, db)["fields"]) == offer_order
+        # A saved layout may still include notes; its editor now lives in a separate panel.
+        offer_context = web._finance_offer_create_context(request, db)
+        assert tuple(field.key for field in offer_context["fields"]) == tuple(key for key in offer_order if key != "notes")
+        assert next(field for field in OFFER_FIELDS if field.key == "notes").section == "notes"
+        assert "offer_field__notes" in offer_context["submitted_values"]
 
         for module in FINANCE_DOCUMENT_MODULES.values():
             module_order = _reverse_layout(db, actor, module.layout_key, module.fields)
@@ -84,9 +89,11 @@ def test_finance_and_case_create_contexts_keep_a_preselected_customer():
         request = _request()
         customer_id = 73
         customer = Customer(id=customer_id, name="Verknüpfter Testkunde")
-        db.add(customer)
+        actor = HubUser(username="hub-admin", password_hash="hash", role="admin")
+        db.add_all([customer, actor])
         db.flush()
 
+        request.state.hub_user = actor
         case_context = web._case_create_context(request, db, selected_customer_id=customer_id)
         assert case_context["selected_customer_id"] == customer_id
         assert case_context["selected_customer"] is customer

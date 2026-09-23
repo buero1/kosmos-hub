@@ -1,6 +1,8 @@
 <?php
 namespace KosmosBridge\Abilities;
 
+use KosmosBridge\Updates\AutoUpdatePolicy;
+
 defined( 'ABSPATH' ) || exit;
 
 class Registry {
@@ -38,6 +40,13 @@ class Registry {
 	public static function register_abilities() {
 		if ( ! function_exists( 'wp_register_ability' ) ) {
 			return;
+		}
+		foreach ( AutoUpdatePolicy::definitions() as $definition ) {
+			$name = $definition['name'];
+			unset( $definition['name'] );
+			$definition['permission_callback'] = array( AutoUpdatePolicy::class, 'authorized' );
+			$definition['execute_callback'] = array( AutoUpdatePolicy::class, AutoUpdatePolicy::WRITE_ABILITY === $name ? 'write' : 'read' );
+			wp_register_ability( $name, $definition );
 		}
 
 		wp_register_ability(
@@ -2496,7 +2505,7 @@ class Registry {
 	 * @return array
 	 */
 	public static function get_fallback_abilities() {
-		return array(
+		return array_merge( AutoUpdatePolicy::definitions(), array(
 			array(
 				'name'          => 'kosmos-bridge/get-site-info',
 				'label'         => __( 'Get Site Info', 'kosmos-bridge' ),
@@ -2722,7 +2731,7 @@ class Registry {
 				'output_schema' => self::wp_user_delete_output_schema(),
 				'meta'          => self::destructive_mutation_meta(),
 			),
-		);
+		) );
 	}
 
 	/**
@@ -2745,6 +2754,12 @@ class Registry {
 	 * @return array|null
 	 */
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( AutoUpdatePolicy::WRITE_ABILITY === $ability_name ) {
+			return AutoUpdatePolicy::write( $input );
+		}
+		if ( AutoUpdatePolicy::READ_ABILITY === $ability_name ) {
+			return AutoUpdatePolicy::read( $input );
+		}
 		if ( 'kosmos-bridge/start-updraftplus-backup' === $ability_name ) {
 			return self::execute_start_updraftplus_backup();
 		}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}Kontakte · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -15,11 +16,8 @@
         <h2>Kontakte</h2>
       </div>
       <div class="communication-heading-actions">
-        <form method="post" action="/contacts/sync">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button button-secondary button-variant-1" type="submit">Alle Kontakte synchronisieren</button>
-        </form>
         <a class="button button-variant-1" href="/contacts/new">Kontakt neu anlegen</a>
+        {{ module_layout_menu("contact-fields", "Kontakt") }}
       </div>
     </div>
 

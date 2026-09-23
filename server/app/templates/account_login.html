@@ -1,30 +1,22 @@
-{% extends "base.html" %}
-{% block title %}Sign in · kosmos-hub{% endblock %}
+{% extends "auth_base.html" %}
+{% block title %}Anmelden · kosmos-hub{% endblock %}
 {% block content %}
-  <section>
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Protected control plane</p>
-        <h2>Sign in to kosmos-hub</h2>
-        <p class="subtle">Use your personal Hub account. There is no public registration.</p>
-      </div>
-    </div>
+    <h1 id="auth-title">Anmelden</h1>
     {% if request.query_params.get("setup") == "complete" %}
-      <p class="notice-success">Your administrator account has been created. You can sign in now.</p>
+      <p class="notice-success" role="status">Dein Administratorkonto wurde angelegt. Du kannst dich jetzt anmelden.</p>
     {% endif %}
-    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+    {% if error %}<p class="notice-error" role="alert">{{ error }}</p>{% endif %}
     <form class="account-panel" method="post" action="/account/login">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="{{ next }}">
       <label>
-        <span>Username</span>
+        <span>Benutzername</span>
         <input name="username" autocomplete="username" required>
       </label>
       <label>
-        <span>Password</span>
+        <span>Passwort</span>
         <input type="password" name="password" autocomplete="current-password" required>
       </label>
-      <button class="button" type="submit">Sign in</button>
+      <button class="button" type="submit">Anmelden</button>
     </form>
-  </section>
 {% endblock %}

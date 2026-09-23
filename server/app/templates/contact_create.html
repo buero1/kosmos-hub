@@ -23,7 +23,7 @@
         <article class="card customer-detail-panel">
           <div class="customer-detail-panel-heading">
             <div>
-              <p class="eyebrow">Zoho CRM</p>
+              <p class="eyebrow">Kosmos Hub</p>
               <h3>Kontaktfelder</h3>
               <p class="subtle">Aktuelle Stammdaten und Kontaktwege.</p>
             </div>
@@ -31,7 +31,7 @@
           <form id="contact-create-form" method="post" action="/contacts" class="communication-form customer-field-editor contact-create-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="customer-field-editor-grid">
-              {% for field in fields %}{{ contact_field_control(field, submitted_values.get("contact_field__" ~ field.key, ""), field.key == "salutation") }}{% endfor %}
+              {% for field in fields %}{{ contact_field_control(field, submitted_values.get("contact_field__" ~ field.key, "")) }}{% endfor %}
             </div>
           </form>
         </article>

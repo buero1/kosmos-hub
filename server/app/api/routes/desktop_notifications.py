@@ -1,10 +1,14 @@
 from typing import Annotated, Literal
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.core.security import get_secret_cipher
+from app.services.hub_operations import HubOperationService, HubOperationError
+from app.services.hub_operation_desktop_reminders import reminder_views, mutate_reminders
 from app.services.audit import write_audit_log
 from app.services.customer_desktop_reminders import (
     SNOOZE_MINUTES_OPTIONS,
@@ -34,8 +38,10 @@ def list_desktop_reminders(
     db: Annotated[Session, Depends(get_db)],
 ):
     user = _desktop_user_or_error(request)
-    service = CustomerDesktopReminderService(db=db)
-    reminders = service.list_due_reminders(user=user)
+    try:
+        reminders = reminder_views(_reminder_gateway(db, user), deliver=True)
+    except HubOperationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     db.commit()
     return {
         "reminders": [reminder.as_dict() for reminder in reminders],
@@ -51,12 +57,9 @@ def snooze_desktop_reminders(
 ):
     user = _desktop_user_or_error(request)
     try:
-        changed = CustomerDesktopReminderService(db=db).snooze_reminders(
-            user=user,
-            notification_ids=payload.notification_ids,
-            minutes=payload.minutes,
-        )
-    except DesktopReminderError as exc:
+        changed = mutate_reminders(_reminder_gateway(db, user), {
+            "notification_ids": json.dumps(payload.notification_ids), "minutes": str(payload.minutes)}, action="snooze")
+    except (DesktopReminderError, HubOperationError) as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     write_audit_log(
@@ -80,12 +83,9 @@ def snooze_desktop_reminders_before_start(
 ):
     user = _desktop_user_or_error(request)
     try:
-        changed = CustomerDesktopReminderService(db=db).snooze_reminders_before_start(
-            user=user,
-            notification_ids=payload.notification_ids,
-            minutes_before=payload.minutes_before,
-        )
-    except DesktopReminderError as exc:
+        changed = mutate_reminders(_reminder_gateway(db, user), {
+            "notification_ids": json.dumps(payload.notification_ids), "minutes_before": str(payload.minutes_before)}, action="snooze_before_start")
+    except (DesktopReminderError, HubOperationError) as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     write_audit_log(
@@ -109,11 +109,9 @@ def complete_desktop_reminders(
 ):
     user = _desktop_user_or_error(request)
     try:
-        changed = CustomerDesktopReminderService(db=db).complete_reminders(
-            user=user,
-            notification_ids=payload.notification_ids,
-        )
-    except DesktopReminderError as exc:
+        changed = mutate_reminders(_reminder_gateway(db, user), {
+            "notification_ids": json.dumps(payload.notification_ids)}, action="complete")
+    except (DesktopReminderError, HubOperationError) as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     write_audit_log(
@@ -127,6 +125,10 @@ def complete_desktop_reminders(
     )
     db.commit()
     return {"completed": changed}
+
+
+def _reminder_gateway(db, user):
+    return HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username)
 
 
 def _desktop_user_or_error(request: Request):

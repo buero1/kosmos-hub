@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import format_datetime, formataddr, make_msgid
 from html import unescape
+import logging
 import re
 import smtplib
 import ssl
@@ -29,6 +30,17 @@ _INVISIBLE_CONTENT_PATTERN = re.compile(
     flags=re.IGNORECASE | re.DOTALL,
 )
 _HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", flags=re.DOTALL)
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_delivery_failure(error: Exception) -> None:
+    if isinstance(error, smtplib.SMTPRecipientsRefused):
+        codes = sorted({code for code, _message in error.recipients.values()})
+    else:
+        code = getattr(error, "smtp_code", None)
+        codes = [code] if isinstance(code, int) else []
+    # Raw SMTP responses and exception traces may contain addresses or message content.
+    _LOGGER.warning("SMTP delivery failed: error=%s smtp_codes=%s", type(error).__name__, codes)
 
 
 class HubMailboxTransportError(ValueError):
@@ -65,9 +77,13 @@ class HubMailboxTransportDelivery:
 class HubMailboxTransportService:
     """Deliver Hub-composed mail through Mittwald without involving Zoho."""
 
-    def __init__(self, *, db: Session, cipher: SecretCipher) -> None:
+    def __init__(self, *, db: Session, cipher: SecretCipher, actor: str | None = None) -> None:
         self.db = db
         self.cipher = cipher
+        from app.core.mailbox_actor import resolve_mailbox_actor
+        from app.services.hub_mailbox_permissions import MailboxPermissions
+        self.actor = resolve_mailbox_actor(actor)
+        self.permissions = MailboxPermissions(db=db, actor=self.actor) if self.actor else None
 
     def list_senders(self) -> tuple[HubMailboxTransportSender, ...]:
         accounts = self.db.scalars(
@@ -78,11 +94,13 @@ class HubMailboxTransportService:
         senders = (
             HubMailboxTransportSender(name=account.display_name or account.email_address, email=account.email_address)
             for account in accounts
+            if self.permissions is None or any(self.permissions.can(account.id, action) for action in ("create", "edit", "send"))
         )
+        default_sender = self.permissions.default_sender() if self.permissions else DEFAULT_HUB_MAILBOX_SENDER_EMAIL
         return tuple(sorted(
             senders,
             key=lambda sender: (
-                sender.email.casefold() != DEFAULT_HUB_MAILBOX_SENDER_EMAIL,
+                sender.email.casefold() != default_sender,
                 sender.email.casefold(),
             ),
         ))
@@ -104,6 +122,8 @@ class HubMailboxTransportService:
         inline_images: tuple[HubMailboxTransportInlineImage, ...] = (),
         message_id: str | None = None,
     ) -> HubMailboxTransportDelivery:
+        if self.permissions is not None:
+            self.permissions.require_sender(sender_email, "send")
         account = self._sender_account(sender_email)
         attachment_bytes = self._validate_attachments(attachments)
         inline_image_bytes = self._validate_inline_images(inline_images)
@@ -160,8 +180,18 @@ class HubMailboxTransportService:
                 to_addrs=[recipient_email, *(email for _name, email in cc_recipients)],
             )
         except smtplib.SMTPAuthenticationError as exc:
+            _log_delivery_failure(exc)
             raise HubMailboxTransportError("Die SMTP-Anmeldung bei Mittwald wurde abgelehnt.") from exc
+        except smtplib.SMTPRecipientsRefused as exc:
+            _log_delivery_failure(exc)
+            recipient_label = "Empfängeradresse" if len(exc.recipients) == 1 else "Empfängeradressen"
+            if exc.recipients and all(400 <= code < 500 for code, _message in exc.recipients.values()):
+                raise HubMailboxTransportError(
+                    f"{recipient_label} vom Mailserver vorübergehend abgelehnt. Bitte später erneut versuchen."
+                ) from exc
+            raise HubMailboxTransportError(f"{recipient_label} vom Mailserver abgelehnt. Bitte prüfen.") from exc
         except (OSError, ValueError, smtplib.SMTPException) as exc:
+            _log_delivery_failure(exc)
             raise HubMailboxTransportError("Die E-Mail konnte nicht über Mittwald versendet werden. Bitte später erneut versuchen.") from exc
         finally:
             if smtp is not None:

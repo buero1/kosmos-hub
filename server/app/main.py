@@ -14,6 +14,7 @@ from starlette.background import BackgroundTask, BackgroundTasks
 
 from app.api.routes import accounts, agent, assistant, desktop_notifications, health, integrations, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
+from app.core.form_responses import FormResponseMiddleware
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
 from app.db.base import Base
@@ -24,9 +25,12 @@ from app.models.customer_communication import CustomerEmailAttachment, CustomerZ
 from app.models.customer_activity import CustomerCallActivity, CustomerCallReminder, CustomerMeetingActivity, CustomerMeetingReminder, CustomerTaskActivity
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
+from app.models.hub_scheduled_email import HubScheduledEmail, HubScheduledEmailAttachment
+from app.models.hub_access_control import HubAccessRole, HubRecordAccessGrant, HubRecordAssignment, HubRolePermission, HubTeam
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_case import HubCase
+from app.models.hub_email_template_folder import HubEmailTemplateFolder
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_email import HubLeadEmail
 from app.models.hub_lead_note import HubLeadNote
@@ -80,10 +84,12 @@ from app.models.hub_finance_position_preset import HubFinancePositionPreset
 from app.models.hub_legal_terms import HubLegalTerms, HubLegalTermsRevision
 from app.models.hub_pdf_template import HubPdfTemplate, HubPdfTemplateRevision
 from app.services.hub_accounts import HubAccountService
+from app.services.hub_access_control import HubAccessControlService, permission_target, record_target
 from app.services.hub_activity import (
     begin_activity_request,
     current_activity_request,
     end_activity_request,
+    is_protocol_resource_path,
     record_http_activity,
 )
 from app.services.hub_workflows import HubWorkflowService
@@ -121,6 +127,7 @@ from app.services.maintenance_worker import (
     schedule_pending_zoho_email_workflow_deliveries,
 )
 from app.services.task_email_reminder_worker import TaskEmailReminderWorker
+from app.services.scheduled_email_worker import ScheduledEmailWorker
 
 logger = logging.getLogger(__name__)
 
@@ -135,11 +142,24 @@ def _persist_http_activity(actor: str, path: str, method: str, status_code: int,
         logger.exception("Could not save Hub activity event")
 
 
-def _should_record_http_activity(request: Request) -> bool:
+def _should_record_http_activity(request: Request, *, status_code: int = 200) -> bool:
     if request.url.path.startswith("/static/"):
         return False
     if request.method not in {"GET", "HEAD"}:
         return True
+    # Account tabs use URL fragments, which are not sent to the server. Exclude
+    # successful overview reads so viewing/filtering the protocol cannot log itself.
+    if request.url.path.rstrip("/") == "/account" and status_code < 400:
+        return False
+    # Only admins can open the protocol. Its links suppress navigation events,
+    # not explicit audit records, writes, failed requests or file downloads.
+    user = getattr(request.state, "hub_user", None)
+    if (
+        status_code < 400 and getattr(user, "role", None) == "admin"
+        and request.query_params.get("from_protocol") == "1"
+        and is_protocol_resource_path(request.url.path)
+    ):
+        return False
     if "text/html" in request.headers.get("accept", ""):
         return True
     return "/download" in request.url.path or "/pdf" in request.url.path
@@ -147,8 +167,19 @@ def _should_record_http_activity(request: Request) -> bool:
 
 def _ensure_phase_one_schema() -> None:
     """Apply the small additive schema changes used before Alembic is introduced."""
+    from app.models.hub_wordpress_job import HubWordPressJob
+
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+
+    if "hub_wordpress_jobs" not in table_names:
+        HubWordPressJob.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_wordpress_jobs table.")
+
+    for access_model in (HubTeam, HubAccessRole, HubRolePermission, HubRecordAssignment, HubRecordAccessGrant):
+        if access_model.__tablename__ not in table_names:
+            access_model.__table__.create(bind=engine, checkfirst=True)
+            logger.info("Created %s table.", access_model.__tablename__)
 
     if "site_user_snapshots" not in table_names:
         SiteUserSnapshot.__table__.create(bind=engine, checkfirst=True)
@@ -200,6 +231,10 @@ def _ensure_phase_one_schema() -> None:
             with engine.begin() as connection:
                 connection.execute(text("CREATE UNIQUE INDEX ix_hub_cases_zoho_id ON hub_cases (zoho_id)"))
             logger.info("Added hub_cases.zoho_id index.")
+
+    if "hub_email_template_folders" not in table_names:
+        HubEmailTemplateFolder.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_email_template_folders table.")
 
     if "hub_leads" not in table_names:
         HubLead.__table__.create(bind=engine, checkfirst=True)
@@ -268,6 +303,30 @@ def _ensure_phase_one_schema() -> None:
     if "hub_finance_offers" not in table_names:
         HubFinanceOffer.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_finance_offers table.")
+    else:
+        offer_columns = {column["name"] for column in inspector.get_columns("hub_finance_offers")}
+        if "lead_id" not in offer_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_finance_offers "
+                        "ADD COLUMN lead_id INT NULL AFTER customer_id, "
+                        "ADD INDEX ix_hub_finance_offers_lead_id (lead_id), "
+                        "ADD CONSTRAINT fk_hub_finance_offers_lead "
+                        "FOREIGN KEY (lead_id) REFERENCES hub_leads (id) ON DELETE SET NULL"
+                    )
+                )
+            logger.info("Added lead links to Finance offers.")
+        if "unassigned_owner_user_id" not in offer_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_finance_offers "
+                    "ADD COLUMN unassigned_owner_user_id INT NULL, "
+                    "ADD INDEX ix_hub_finance_offers_unassigned_owner_user_id (unassigned_owner_user_id), "
+                    "ADD CONSTRAINT fk_hub_finance_offers_unassigned_owner "
+                    "FOREIGN KEY (unassigned_owner_user_id) REFERENCES hub_users (id) ON DELETE SET NULL"
+                ))
+            logger.info("Added private ownership for unassigned offer copies.")
 
     if "hub_finance_offer_lines" not in table_names:
         HubFinanceOfferLine.__table__.create(bind=engine, checkfirst=True)
@@ -462,6 +521,16 @@ def _ensure_phase_one_schema() -> None:
     if "hub_agent_conversation_contexts" not in table_names:
         HubAgentConversationContext.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_agent_conversation_contexts table.")
+    elif engine.dialect.name == "mysql":
+        context_columns = {column["name"]: column for column in inspector.get_columns("hub_agent_conversation_contexts")}
+        snapshot_column = context_columns.get("encrypted_snapshot_json")
+        if snapshot_column is not None and "MEDIUMTEXT" not in str(snapshot_column["type"]).upper():
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE hub_agent_conversation_contexts "
+                         "MODIFY COLUMN encrypted_snapshot_json MEDIUMTEXT NOT NULL")
+                )
+            logger.info("Expanded hub_agent_conversation_contexts.encrypted_snapshot_json to MEDIUMTEXT.")
 
     if "hub_agent_jobs" not in table_names:
         HubAgentJob.__table__.create(bind=engine, checkfirst=True)
@@ -572,6 +641,18 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added customer_zoho_emails.encrypted_header_json column.")
+        if "dunning_id" not in columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE customer_zoho_emails "
+                        "ADD COLUMN dunning_id INT NULL AFTER customer_id, "
+                        "ADD INDEX ix_customer_zoho_emails_dunning_id (dunning_id), "
+                        "ADD CONSTRAINT fk_customer_zoho_emails_dunning "
+                        "FOREIGN KEY (dunning_id) REFERENCES hub_finance_dunnings (id) ON DELETE SET NULL"
+                    )
+                )
+            logger.info("Added dunning links to customer_zoho_emails.")
         unique_constraints = inspector.get_unique_constraints("customer_zoho_emails")
         legacy_unique_names = [
             constraint["name"]
@@ -653,7 +734,17 @@ def _ensure_phase_one_schema() -> None:
         logger.info("Created hub_mailbox_accounts table.")
 
     if "hub_users" in table_names:
-        columns = {column["name"] for column in inspector.get_columns("hub_users")}
+        user_columns = {column["name"]: column for column in inspector.get_columns("hub_users")}
+        columns = set(user_columns)
+        if "VARCHAR(64)" not in str(user_columns["role"]["type"]).upper():
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_users MODIFY COLUMN role VARCHAR(64) NOT NULL"))
+            logger.info("Expanded hub_users.role to VARCHAR(64).")
+        if "team_id" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_users ADD COLUMN team_id INT NULL"))
+                connection.execute(text("CREATE INDEX ix_hub_users_team_id ON hub_users (team_id)"))
+            logger.info("Added hub_users.team_id column.")
         if "reminder_email" not in columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE hub_users ADD COLUMN reminder_email VARCHAR(320) NULL"))
@@ -812,6 +903,38 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added customer_task_email_reminders.minutes_before column.")
+
+    if "hub_scheduled_emails" not in table_names:
+        HubScheduledEmail.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_scheduled_emails table.")
+    else:
+        scheduled_email_columns = {
+            column["name"] for column in inspector.get_columns("hub_scheduled_emails")
+        }
+        if "lead_id" not in scheduled_email_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_scheduled_emails ADD COLUMN lead_id INT NULL, "
+                    "ADD INDEX ix_hub_scheduled_emails_lead_id (lead_id), "
+                    "ADD CONSTRAINT fk_hub_scheduled_emails_lead "
+                    "FOREIGN KEY (lead_id) REFERENCES hub_leads (id) ON DELETE SET NULL"
+                ))
+        if "dunning_id" not in scheduled_email_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_scheduled_emails "
+                        "ADD COLUMN dunning_id INT NULL AFTER customer_id, "
+                        "ADD INDEX ix_hub_scheduled_emails_dunning_id (dunning_id), "
+                        "ADD CONSTRAINT fk_hub_scheduled_emails_dunning "
+                        "FOREIGN KEY (dunning_id) REFERENCES hub_finance_dunnings (id) ON DELETE SET NULL"
+                    )
+                )
+            logger.info("Added dunning links to hub_scheduled_emails.")
+
+    if "hub_scheduled_email_attachments" not in table_names:
+        HubScheduledEmailAttachment.__table__.create(bind=engine, checkfirst=True)
+        logger.info("Created hub_scheduled_email_attachments table.")
 
     if "email_composer_settings" not in table_names:
         EmailComposerSettings.__table__.create(bind=engine, checkfirst=True)
@@ -1022,7 +1145,14 @@ async def lifespan(_: FastAPI):
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
+        from app.services.hub_mailbox_permission_schema import ensure_mailbox_permission_schema
+        ensure_mailbox_permission_schema(engine)
+        from app.services.hub_record_info_schema import ensure_record_info_schema
+        ensure_record_info_schema(engine)
+        from app.services.hub_activity_responsibility_schema import ensure_activity_responsibility_schema
+        ensure_activity_responsibility_schema(engine)
         with SessionLocal() as db:
+            HubAccessControlService(db=db).ensure_defaults()
             HubWorkflowService(db=db).ensure_default_workflows()
             EmailAiPromptPresetService(db=db).ensure_default_presets()
             HubPdfTemplateService(db=db).ensure_default_templates()
@@ -1076,9 +1206,17 @@ async def lifespan(_: FastAPI):
         task_email_reminder_worker_task = asyncio.create_task(
             TaskEmailReminderWorker(settings=settings, cipher=get_secret_cipher()).run_forever()
         )
+        scheduled_email_worker_task = asyncio.create_task(
+            ScheduledEmailWorker(settings=settings, cipher=get_secret_cipher()).run_forever()
+        )
+        from app.services.wordpress_jobs import run_wordpress_worker
+        wordpress_worker_task = asyncio.create_task(run_wordpress_worker())
         try:
             yield
         finally:
+            wordpress_worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await wordpress_worker_task
             invoice_mail_recovery_task.cancel()
             with suppress(asyncio.CancelledError):
                 await invoice_mail_recovery_task
@@ -1103,19 +1241,23 @@ async def lifespan(_: FastAPI):
             task_email_reminder_worker_task.cancel()
             with suppress(asyncio.CancelledError):
                 await task_email_reminder_worker_task
+            scheduled_email_worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await scheduled_email_worker_task
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app.add_middleware(FormResponseMiddleware)
 
     @app.middleware("http")
     async def protect_hub_and_prevent_stale_web_pages(request: Request, call_next):
         mcp_context_token = None
         if _is_mcp_path(request.url.path):
-            mcp_actor = _authenticated_mcp_actor(request)
+            mcp_actor = await asyncio.to_thread(_authenticated_mcp_actor, request)
             if mcp_actor is None:
-                user = _authenticated_hub_user(request)
+                user = await asyncio.to_thread(_authenticated_hub_user, request)
                 if user is None:
                     return PlainTextResponse(
                         "MCP bearer token or authenticated Hub session required.",
@@ -1127,7 +1269,7 @@ def create_app() -> FastAPI:
             request.state.mcp_actor = mcp_actor
             mcp_context_token = set_mcp_actor(mcp_actor)
         elif _is_desktop_api_path(request.url.path):
-            user = _authenticated_desktop_user(request)
+            user = await asyncio.to_thread(_authenticated_desktop_user, request)
             if user is None:
                 return PlainTextResponse(
                     "Desktop bearer token required.",
@@ -1136,7 +1278,7 @@ def create_app() -> FastAPI:
                 )
             request.state.hub_user = user
         elif _is_integration_api_path(request.url.path):
-            authenticated = _authenticated_integration(request)
+            authenticated = await asyncio.to_thread(_authenticated_integration, request)
             if authenticated is None:
                 return PlainTextResponse(
                     "Integration bearer token required.",
@@ -1147,7 +1289,7 @@ def create_app() -> FastAPI:
             request.state.hub_user = user
             request.state.integration_token = integration_token
         elif not _is_public_hub_path(request.url.path):
-            user = _authenticated_hub_user(request)
+            user = await asyncio.to_thread(_authenticated_hub_user, request)
             if user is None:
                 if request.method == "GET" and _prefers_html(request):
                     next_url = request.url.path
@@ -1157,15 +1299,22 @@ def create_app() -> FastAPI:
                 return PlainTextResponse("Authentication required.", status_code=401, headers={"Cache-Control": "no-store"})
             request.state.hub_user = user
 
-        activity_token = None
         user = getattr(request.state, "hub_user", None)
+        if user is not None:
+            denial = await asyncio.to_thread(_request_access_denial, request, user)
+            if denial is not None:
+                return denial
+
+        activity_token = None
         actor = getattr(request.state, "mcp_actor", None) or (user.username if user is not None else None)
         if actor:
-            activity_token = begin_activity_request(actor, request.url.path, request.method)
+            activity_token = begin_activity_request(actor, request.url.path, request.method, user=user)
+        from app.core.mailbox_actor import mailbox_actor
+        mailbox_actor_token = mailbox_actor.set(actor)
         try:
             response = await call_next(request)
             context = current_activity_request()
-            if context is not None and not context.recorded and _should_record_http_activity(request):
+            if context is not None and not context.recorded and _should_record_http_activity(request, status_code=response.status_code):
                 route = request.scope.get("route")
                 route_path = getattr(route, "path", None)
                 task = BackgroundTask(
@@ -1192,9 +1341,10 @@ def create_app() -> FastAPI:
         except Exception:
             context = current_activity_request()
             if context is not None and not context.recorded:
-                _persist_http_activity(context.actor, request.url.path, request.method, 500, None)
+                await asyncio.to_thread(_persist_http_activity, context.actor, request.url.path, request.method, 500, None)
             raise
         finally:
+            mailbox_actor.reset(mailbox_actor_token)
             if activity_token is not None:
                 end_activity_request(activity_token)
             if mcp_context_token is not None:
@@ -1243,6 +1393,25 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+def _request_access_denial(request: Request, user):
+    # Keep synchronous DB waits off the event loop so other requests can release
+    # their connections, including FastAPI's dependency cleanup.
+    target = permission_target(request.url.path, request.method)
+    record = record_target(request.url.path)
+    with SessionLocal() as db:
+        access = HubAccessControlService(db=db)
+        if target is not None and not access.can(user, target[0], target[1]):
+            return PlainTextResponse("Access denied.", status_code=403, headers={"Cache-Control": "no-store"})
+        if record is not None and not access.can_access_record(
+            user=user,
+            module_key=record[0],
+            record_id=record[1],
+            action=target[1] if target is not None and target[0] == record[0] else "view",
+        ):
+            return PlainTextResponse("Not found.", status_code=404, headers={"Cache-Control": "no-store"})
+    return None
 
 
 def _is_public_hub_path(path: str) -> bool:

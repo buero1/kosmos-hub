@@ -1,5 +1,5 @@
-{% macro create_customer_link_panel(form_id, selected_customer) %}
-  <aside class="customer-detail-side-column" data-create-customer-link-panel data-create-customer-link-form="{{ form_id }}">
+{% macro create_customer_link_panel(form_id, selected_customer, selected_lead=none, allow_leads=false) %}
+  <aside class="customer-detail-side-column" data-create-customer-link-panel data-create-customer-link-form="{{ form_id }}" data-create-party-link="{{ 'true' if allow_leads else 'false' }}">
     <article class="card customer-detail-panel">
       <div class="customer-detail-panel-heading">
         <div>
@@ -9,10 +9,10 @@
       </div>
       <dl class="customer-fields-grid">
         <div>
-          <dt>Kunde</dt>
+          <dt>{{ "Kunde oder Lead" if allow_leads else "Kunde" }}</dt>
           <dd>
-            <a href="{% if selected_customer %}/customers/{{ selected_customer.id }}{% endif %}" data-create-customer-link{% if not selected_customer %} hidden{% endif %}>{{ selected_customer.name if selected_customer else "" }}</a>
-            <span data-create-customer-link-empty{% if selected_customer %} hidden{% endif %}>-</span>
+            <a href="{% if selected_customer %}/customers/{{ selected_customer.id }}{% elif selected_lead %}/leads/{{ selected_lead.id }}{% endif %}" data-create-customer-link{% if not selected_customer and not selected_lead %} hidden{% endif %}>{{ selected_customer.name if selected_customer else selected_lead.name if selected_lead else "" }}</a>
+            <span data-create-customer-link-empty{% if selected_customer or selected_lead %} hidden{% endif %}>-</span>
           </dd>
         </div>
         <div><dt>Quelle</dt><dd>Hub</dd></div>

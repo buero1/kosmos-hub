@@ -23,18 +23,20 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="customer-field-editor-grid">
               {% for field_key in field_order %}
-                {% if field_key == "customer_name" %}<label class="customer-field-control"><span>Name <small>erforderlich</small></span><input name="customer_field__customer_name" value="{{ values.get('customer_field__customer_name', '') }}" maxlength="255" required autofocus></label>
-                {% elif field_key == "account_status" %}<label class="customer-field-control"><span>Status <small>erforderlich</small></span><select name="customer_field__account_status" required>{% for status in status_options %}<option value="{{ status }}"{% if values.get('customer_field__account_status', 'Neu') == status %} selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
-                {% elif field_key == "website" %}<label class="customer-field-control"><span>Website</span><input name="customer_field__website" type="url" placeholder="https://example.de" value="{{ values.get('customer_field__website', '') }}" maxlength="255"></label>
-                {% elif field_key == "phone" %}<label class="customer-field-control"><span>Tel.</span><input name="customer_field__phone" type="tel" value="{{ values.get('customer_field__phone', '') }}" maxlength="255"></label>
-                {% elif field_key == "industry" %}<label class="customer-field-control"><span>Branche</span><input name="customer_field__industry" value="{{ values.get('customer_field__industry', '') }}" maxlength="255"></label>
-                {% elif field_key == "billing_street" %}<label class="customer-field-control"><span>Rechnungsadresse - Straße</span><input name="customer_field__billing_street" value="{{ values.get('customer_field__billing_street', '') }}" maxlength="255"></label>
-                {% elif field_key == "billing_postal_code" %}<label class="customer-field-control"><span>Rechnungsadresse - PLZ</span><input name="customer_field__billing_postal_code" value="{{ values.get('customer_field__billing_postal_code', '') }}" maxlength="255"></label>
-                {% elif field_key == "billing_city" %}<label class="customer-field-control"><span>Rechnungsadresse - Stadt</span><input name="customer_field__billing_city" value="{{ values.get('customer_field__billing_city', '') }}" maxlength="255"></label>
-                {% elif field_key == "billing_state" %}<label class="customer-field-control"><span>Rechnungsadresse - Bundesland</span><input name="customer_field__billing_state" value="{{ values.get('customer_field__billing_state', '') }}" maxlength="255"></label>
-                {% elif field_key == "billing_country" %}<label class="customer-field-control"><span>Rechnungsadresse - Land</span><input name="customer_field__billing_country" value="{{ values.get('customer_field__billing_country', '') }}" maxlength="255"></label>
-                {% elif field_key == "important_info" %}<label class="customer-field-control"><span>Wichtige Infos</span><textarea name="customer_field__important_info" rows="3" maxlength="5000">{{ values.get('customer_field__important_info', '') }}</textarea></label>
-                {% endif %}
+                {% set field = create_fields[field_key] %}
+                {% set name = "customer_field__" ~ field.key %}
+                <label class="customer-field-control">
+                  <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+                  {% if field.options %}
+                    <select name="{{ name }}"{% if field.required %} required{% endif %}>
+                      {% for value, label in field.options %}<option value="{{ value }}"{% if values.get(name, '') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                  {% elif field.input_type == "textarea" %}
+                    <textarea name="{{ name }}" rows="3" maxlength="{{ field.max_length }}"{% if field.required %} required{% endif %}>{{ values.get(name, '') }}</textarea>
+                  {% else %}
+                    <input name="{{ name }}" type="{{ field.input_type }}" value="{{ values.get(name, '') }}" maxlength="{{ field.max_length }}"{% if field.required %} required{% endif %}{% if field.key == "customer_name" %} autofocus{% endif %}{% if field.input_type == "url" %} placeholder="https://example.de"{% endif %}>
+                  {% endif %}
+                </label>
               {% endfor %}
             </div>
           </form>

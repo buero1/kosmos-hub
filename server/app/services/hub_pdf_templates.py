@@ -15,6 +15,8 @@ from app.models.hub_pdf_template import HubPdfTemplate, HubPdfTemplateRevision
 from app.models.hub_user import HubUser
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.hub_legal_terms import HubLegalTermsService
+from app.services.hub_document_template_catalog import NAME_FIELD, NAME_MIN_LENGTH
+from app.services.hub_offer_notes import OFFER_NOTES_TOKEN, sanitize_offer_notes
 from app.services.template_placeholders import DOCUMENT_NAMES, TemplatePlaceholder as PdfTemplatePlaceholder, pdf_placeholders
 
 
@@ -65,6 +67,7 @@ class PdfTemplateEditorView:
     type_definition: PdfTemplateType
     blocks: tuple[PdfTemplateBlockView, ...]
     columns: tuple[PdfTemplateColumnView, ...]
+    show_totals: bool
     placeholders: tuple[PdfTemplatePlaceholder, ...]
     legal_terms: HubLegalTerms | None
     legal_terms_preview_html: str
@@ -181,19 +184,13 @@ class HubPdfTemplateService:
             self.db.add(template)
             self.db.flush()
             self._add_revision(template=template, actor_username="system")
-        unassigned = self.db.scalars(
-            select(HubPdfTemplate).where(
-                HubPdfTemplate.document_type.in_(("offers", "orders")),
-                HubPdfTemplate.legal_terms_id.is_(None),
-            )
-        ).all()
-        for template in unassigned:
-            template.legal_terms_id = default_legal_terms.id
-            self._version(template=template, actor_username="system")
+        # Existing templates may explicitly opt out of terms. Only newly seeded
+        # templates receive the default association.
         self.db.flush()
 
-    def list_templates(self, *, document_type: str | None = None) -> tuple[HubPdfTemplate, ...]:
-        self.ensure_default_templates()
+    def list_templates(self, *, document_type: str | None = None, initialize: bool = True) -> tuple[HubPdfTemplate, ...]:
+        if initialize:
+            self.ensure_default_templates()
         statement = select(HubPdfTemplate).order_by(
             HubPdfTemplate.document_type.asc(),
             HubPdfTemplate.is_default.desc(),
@@ -235,6 +232,39 @@ class HubPdfTemplateService:
             raise HubPdfTemplateError("Für diese Belegart ist keine Standardvorlage vorhanden.")
         return template
 
+    def offer_notes_default(self) -> str:
+        """Read defaults without initializing templates or mutating old offers."""
+        template = self.db.scalar(select(HubPdfTemplate).where(
+            HubPdfTemplate.document_type == "offers", HubPdfTemplate.is_default.is_(True),
+        ))
+        content = self._decode(template.content_json, document_type="offers") if template else self._default_content("offers")
+        value = (content["offer_notes_default_html"] if content.get("offer_notes_block") == "payment"
+                 else content["blocks"]["payment"]["content_html"])
+        return sanitize_offer_notes(str(value))
+
+    def enable_default_offer_notes(self) -> bool:
+        """Bind the remarks below positions, preserving the independent greeting."""
+        template = self.db.scalar(select(HubPdfTemplate).where(
+            HubPdfTemplate.document_type == "offers", HubPdfTemplate.is_default.is_(True),
+        ).with_for_update())
+        if template is None:
+            return False
+        content = self._decode(template.content_json, document_type="offers")
+        if content.get("offer_notes_block") == "payment":
+            return False
+        intro = content["blocks"]["intro"]
+        # Correct the initial intro binding without overwriting later custom text.
+        if OFFER_NOTES_TOKEN in intro["content_html"]:
+            if intro["content_html"].strip() != OFFER_NOTES_TOKEN or "offer_notes_default_html" not in content:
+                raise HubPdfTemplateError("Die Einleitung wurde angepasst. Bitte die Anmerkungen-Zuordnung prüfen.")
+            intro["content_html"] = content["offer_notes_default_html"]
+        content["offer_notes_default_html"] = sanitize_offer_notes(content["blocks"]["payment"]["content_html"])
+        content["offer_notes_block"] = "payment"
+        content["blocks"]["payment"]["content_html"] = OFFER_NOTES_TOKEN
+        template.content_json = self._encode(content)
+        self._version(template=template, actor_username="system:offer-notes")
+        return True
+
     def editor_view(self, template: HubPdfTemplate) -> PdfTemplateEditorView:
         definition = self._type(template.document_type)
         content = self._decode(template.content_json, document_type=definition.key)
@@ -245,7 +275,8 @@ class HubPdfTemplateService:
                 label=block.label,
                 hint=block.hint,
                 content_html=str(blocks_data[block.key]["content_html"]),
-                preview_html=self._preview_html(str(blocks_data[block.key]["content_html"])),
+                preview_html=self._preview_html(str(blocks_data[block.key]["content_html"]),
+                                                offer_notes_html=content.get("offer_notes_default_html") if content.get("offer_notes_block") == "payment" else None),
                 is_visible=bool(blocks_data[block.key]["is_visible"]),
             )
             for block in PDF_TEMPLATE_BLOCKS
@@ -257,6 +288,7 @@ class HubPdfTemplateService:
             type_definition=definition,
             blocks=blocks,
             columns=columns,
+            show_totals=content["positions"]["show_totals"],
             placeholders=pdf_placeholders(definition.key),
             legal_terms=legal_terms,
             legal_terms_preview_html=legal_terms.content_html if legal_terms is not None else "",
@@ -353,14 +385,32 @@ class HubPdfTemplateService:
         actor: HubUser,
         template_id: int,
         columns: list[dict[str, object]],
+        show_totals: bool | None = None,
     ) -> HubPdfTemplate:
         template = self._required(actor=actor, template_id=template_id)
         validated = self._validated_columns(columns)
         content = self._decode(template.content_json, document_type=template.document_type)
-        content["positions"] = {"columns": validated}
+        if show_totals is not None and not isinstance(show_totals, bool):
+            raise HubPdfTemplateError("Die Auswahl des Summenbereichs ist ungültig.")
+        content["positions"]["columns"] = validated
+        if show_totals is not None:
+            content["positions"]["show_totals"] = show_totals
         template.content_json = self._encode(content)
         self._version(template=template, actor_username=actor.username)
         return template
+
+    def initialize_totals_visibility(self) -> int:
+        """One-time migration: new current revisions opt out; history stays intact."""
+        changed = 0
+        for template in self.db.scalars(select(HubPdfTemplate).with_for_update()).all():
+            content = json.loads(template.content_json)
+            if "show_totals" in content["positions"]:
+                continue
+            content["positions"]["show_totals"] = False
+            template.content_json = self._encode(content)
+            self._version(template=template, actor_username="system")
+            changed += 1
+        return changed
 
     def duplicate(self, *, actor: HubUser, template_id: int) -> HubPdfTemplate:
         source = self._required(actor=actor, template_id=template_id)
@@ -453,7 +503,7 @@ class HubPdfTemplateService:
     @staticmethod
     def _name(value: str) -> str:
         normalized = " ".join(value.split())
-        if not 3 <= len(normalized) <= 255:
+        if not NAME_MIN_LENGTH <= len(normalized) <= NAME_FIELD.max_length:
             raise HubPdfTemplateError("Der Vorlagenname muss zwischen 3 und 255 Zeichen lang sein.")
         return normalized
 
@@ -491,7 +541,14 @@ class HubPdfTemplateService:
             positions["columns"] = cls._validated_columns(positions.get("columns", []))
         except HubPdfTemplateError:
             positions = fallback["positions"]
-        return {"blocks": blocks, "positions": positions}
+        # Old immutable revisions predate this setting and always showed totals.
+        positions["show_totals"] = positions.get("show_totals") is not False
+        result = {"blocks": blocks, "positions": positions}
+        if document_type == "offers" and isinstance(decoded.get("offer_notes_default_html"), str):
+            result["offer_notes_default_html"] = sanitize_offer_notes(decoded["offer_notes_default_html"])
+            if decoded.get("offer_notes_block") == "payment":
+                result["offer_notes_block"] = "payment"
+        return result
 
     @classmethod
     def _default_content(cls, document_type: str) -> dict[str, object]:
@@ -513,13 +570,18 @@ class HubPdfTemplateService:
             ),
         }
         columns = cls._default_columns(document_type)
-        return {
+        content = {
             "blocks": {
                 key: {"content_html": cls._sanitize_html(value), "is_visible": True}
                 for key, value in defaults.items()
             },
-            "positions": {"columns": columns},
+            "positions": {"columns": columns, "show_totals": False},
         }
+        if document_type == "offers":
+            content["offer_notes_default_html"] = content["blocks"]["payment"]["content_html"]
+            content["offer_notes_block"] = "payment"
+            content["blocks"]["payment"]["content_html"] = OFFER_NOTES_TOKEN
+        return content
 
     @staticmethod
     def _default_columns(document_type: str) -> list[dict[str, object]]:
@@ -616,8 +678,8 @@ class HubPdfTemplateService:
             raise HubPdfTemplateError(str(exc).replace("Nachricht", "Vorlagenbereich")) from exc
 
     @staticmethod
-    def _preview_html(content_html: str) -> str:
-        preview = content_html
+    def _preview_html(content_html: str, *, offer_notes_html: str | None = None) -> str:
+        preview = content_html.replace(OFFER_NOTES_TOKEN, offer_notes_html) if offer_notes_html is not None else content_html
         for token, sample in _PLACEHOLDER_SAMPLE.items():
             preview = preview.replace(token, escape(sample))
         return re.sub(

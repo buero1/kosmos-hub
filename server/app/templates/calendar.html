@@ -1,12 +1,14 @@
 {% extends "base.html" %}
+{% from "partials/activity_creation.html" import attributes as creation_attributes %}
 {% block title %}Kalender · kosmos-hub{% endblock %}
 {% block content %}
   <section class="calendar-page" aria-label="Kalender">
     <header class="calendar-page-header">
+      {% include "partials/activity_view_filter.html" %}
       <div class="calendar-navigation" aria-label="Kalenderwoche wechseln">
-        <a class="calendar-nav-button" href="/calendar?week={{ calendar_previous_week }}" aria-label="Vorherige Woche">‹</a>
-        <a class="calendar-nav-button" href="/calendar?week={{ calendar_next_week }}" aria-label="Nächste Woche">›</a>
-        <a class="button button-secondary button-variant-2 calendar-today-button" href="/calendar?week={{ calendar_today_week }}">Heute</a>
+        <a class="calendar-nav-button" href="/calendar?week={{ calendar_previous_week }}&amp;view={{ activity_view|default('mine') }}" aria-label="Vorherige Woche">‹</a>
+        <a class="calendar-nav-button" href="/calendar?week={{ calendar_next_week }}&amp;view={{ activity_view|default('mine') }}" aria-label="Nächste Woche">›</a>
+        <a class="button button-secondary button-variant-2 calendar-today-button" href="/calendar?week={{ calendar_today_week }}&amp;view={{ activity_view|default('mine') }}">Heute</a>
       </div>
     </header>
 
@@ -35,7 +37,7 @@
           {% for day in calendar_days %}
             <div class="calendar-day-column{% if day.is_today %} is-today{% endif %}{% if loop.index > 5 %} is-weekend{% endif %}{% if day.holiday_name %} is-holiday{% endif %}">
               {% for time in calendar_time_slots %}
-                {% if can_manage_calendar %}
+                {% if activity_can_create %}
                   <button class="calendar-slot" type="button" data-calendar-slot data-date="{{ day.date }}" data-time="{{ time }}" aria-label="{{ day.label }} {{ day.day }}, {{ time }}: Termin anlegen"></button>
                 {% else %}
                   <span class="calendar-slot" aria-hidden="true"></span>
@@ -44,15 +46,18 @@
               {% for event in day.events %}
                 {% set event_class = "calendar-event calendar-event-" ~ event.kind ~ (event.status != "planned" and " is-" ~ event.status or "") %}
                 {% set event_style = "top: " ~ ('%.3f' % (event.start_slot * 2.25)) ~ "rem; height: " ~ ('%.3f' % (event.slot_span * 2.25)) ~ "rem; left: calc(0.3rem + " ~ ('%.5f' % (event.column_index * 100 / event.column_count)) ~ "%); width: calc(" ~ ('%.5f' % (100 / event.column_count)) ~ "% - 0.48rem);" %}
-                {% if can_manage_calendar and not event.lead_id %}<button
+                {% if can_manage_calendar %}<button
                   class="{{ event_class }}"
                   id="{{ event.kind }}-{{ event.id }}"
                   type="button"
                   style="{{ event_style }}"
                   data-calendar-activity-edit
+                  {{ creation_attributes(event) }}
                   data-calendar-activity-kind="{{ event.kind }}"
                   data-calendar-activity-update-url="/calendar/activities/{{ event.kind }}/{{ event.id }}"
                   data-calendar-activity-customer-id="{{ event.customer_id or '' }}"
+                  data-calendar-activity-lead-id="{{ event.lead_id or '' }}"
+                  data-calendar-activity-party-name="{{ event.customer_name or event.lead_name }}"
                   data-calendar-activity-name="{{ event.name }}"
                   data-calendar-activity-status="{{ event.status }}"
                   data-calendar-activity-direction="{{ event.direction or '' }}"
@@ -63,7 +68,7 @@
                   data-calendar-activity-reminder-minutes="{{ event.reminder_minutes_before | join(',') }}"
                   data-calendar-activity-description="{{ event.description or '' }}"
                   aria-label="{{ event.kind == 'call' and 'Anruf bearbeiten' or 'Meeting bearbeiten' }}: {{ event.name }}, {{ event.start_time }} bis {{ event.end_time }}{% if event.customer_name %}, {{ event.customer_name }}{% endif %}"
-                >{% elif can_manage_calendar and event.lead_id %}<a
+                >{% elif event.lead_id %}<a
                   class="{{ event_class }}"
                   id="{{ event.kind }}-{{ event.id }}"
                   href="/leads/{{ event.lead_id }}#{{ event.kind }}-{{ event.id }}"
@@ -85,7 +90,7 @@
                   <strong>{{ event.name }}</strong>
                   {% if event.customer_name %}<small>{{ event.customer_name }}</small>{% endif %}
                   {% if event.lead_name %}<small>{{ event.lead_name }}</small>{% endif %}
-                {% if can_manage_calendar and not event.lead_id %}</button>{% elif (can_manage_calendar and event.lead_id) or event.customer_id %}</a>{% else %}</div>{% endif %}
+                {% if can_manage_calendar %}</button>{% elif event.lead_id or event.customer_id %}</a>{% else %}</div>{% endif %}
               {% endfor %}
             </div>
           {% endfor %}
@@ -101,6 +106,7 @@
     </div>
     {% set activity_composer_mode = "calendar" %}
     {% include "partials/customer_activity_composer.html" %}
+    {% include "partials/finance_customer_search_script.html" %}
     <script>
       (function () {
         var calendarScroll = document.querySelector("[data-calendar-scroll]");
@@ -136,8 +142,13 @@
             document.dispatchEvent(new CustomEvent("calendar:activity-edit", {
               detail: {
                 kind: activity.dataset.calendarActivityKind,
+                createdBy: activity.dataset.activityCreatedBy,
+                createdAt: activity.dataset.activityCreatedAt,
+                responsibility: Object.assign({}, activity.dataset),
                 updateUrl: activity.dataset.calendarActivityUpdateUrl,
                 customerId: activity.dataset.calendarActivityCustomerId,
+                leadId: activity.dataset.calendarActivityLeadId,
+                partyName: activity.dataset.calendarActivityPartyName,
                 name: activity.dataset.calendarActivityName,
                 status: activity.dataset.calendarActivityStatus,
                 direction: activity.dataset.calendarActivityDirection,

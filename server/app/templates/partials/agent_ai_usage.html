@@ -1,0 +1,48 @@
+{% if ai_usage is defined %}
+{% macro usage_cost(low, high) -%}{{ low }}{% if low != high %} bis {{ high }}{% endif %}{%- endmacro %}
+<section id="agent-ai-usage" class="account-section">
+  <div class="section-heading">
+    <div><p class="eyebrow">{{ ai_usage.scope }} · Letzte 30 Tage</p><h2>KI-Verbrauch</h2></div>
+  </div>
+  <p>Geschätzte Kosten: <strong>{{ usage_cost(ai_usage.total.usd, ai_usage.total.usd_upper) }} USD</strong> · {{ ai_usage.total.runs }} Anfragen · {{ ai_usage.total.requests }} Modellaufrufe</p>
+  <p class="subtle">Erfassung ab Einführung dieser Übersicht, keine rückwirkenden Verbrauchsdaten. Gemeldete Cache-Schreib-Tokens werden eingerechnet; fehlen sie, zeigt die Spanne mögliche Schreibkosten. Keine Abrechnung: versionierter Standardtarif je Modell und Aufruf; historische Kosten werden nicht neu berechnet. Rabatte, Steuern und abweichende Tarife sind nicht enthalten. <a href="{{ ai_usage.price_source }}" target="_blank" rel="noopener noreferrer">Preisgrundlage</a></p>
+  <p class="subtle">Reasoning-Tokens sind bereits in den Ausgabe-Tokens enthalten. Fehlende Verbrauchsangaben sind unbekannt, nicht kostenlos. Nach {{ ai_usage.run_cost_limit_usd }} USD geschätzten Kosten werden keine weiteren Modellaufrufe derselben Agent-Nachricht gestartet; ein laufender Aufruf kann diese Grenze überschreiten.</p>
+  {% if ai_usage.total.unknown_cost %}<p class="notice-error">Für {{ ai_usage.total.unknown_cost }} Modellaufrufe sind die Kosten nicht bestimmbar. Diese fehlen in der Kostensumme.</p>{% endif %}
+  {% if ai_usage.limited %}<p class="notice-error">Die Anzeige ist auf die neuesten 10.000 Modellaufrufe begrenzt; Summen sind unvollständig.</p>{% endif %}
+  {% if ai_usage.days %}
+  <div class="agent-chat-archive-table-wrap">
+    <table class="agent-chat-archive-table">
+      <thead><tr><th>Tag (Berlin)</th><th>Anfragen / Aufrufe</th><th>Eingabe / davon Cache</th><th>Ausgabe / davon Reasoning</th><th>Kosten, USD</th></tr></thead>
+      <tbody>{% for day in ai_usage.days %}<tr>
+        <td>{{ day.day }}</td><td>{{ day.runs }} / {{ day.requests }}</td>
+        <td>{{ day.input_tokens }} / {{ day.cached_tokens }}</td><td>{{ day.output_tokens }} / {{ day.reasoning_tokens }}</td>
+        <td>{{ usage_cost(day.usd, day.usd_upper) }}{% if day.unknown_cost %}<br><small>{{ day.unknown_cost }} unbekannt</small>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <h3>Nach Funktion</h3>
+  {% for feature in ai_usage.features %}
+  <p>{{ {"hub-agent": "Hub-Agent", "email-rewrite": "E-Mail-Textoptimierung", "wordpress-assistant": "WordPress-Assistent"}.get(feature.feature, feature.feature) }}: {{ usage_cost(feature.usd, feature.usd_upper) }} USD · {{ feature.requests }} Aufrufe{% if feature.unknown_cost %} · {{ feature.unknown_cost }} Kosten unbekannt{% endif %}</p>
+  {% endfor %}
+  <h3>Nach Modell</h3>
+  {% for model in ai_usage.models %}<p>{{ model.model }}: {{ usage_cost(model.usd, model.usd_upper) }} USD · {{ model.requests }} Aufrufe{% if model.unknown_cost %} · {{ model.unknown_cost }} Kosten unbekannt{% endif %}</p>{% endfor %}
+  <h3>Letzte 50 Anfragen</h3>
+  {% for run in ai_usage.runs %}
+  <details class="communication-content">
+    <summary>{{ run.time }} · {{ run.actor }} · {{ run.feature }} · {{ run.requests }} Aufrufe · {{ usage_cost(run.usd, run.usd_upper) }} USD{% if run.unknown_cost %} (unvollständig){% endif %}</summary>
+    <p class="subtle">Anfrage {{ run.run_id }}{% if run.conversation_id %} · Unterhaltung {{ run.conversation_id }}{% endif %}</p>
+    {% for call in run.calls %}
+    <article class="communication-entry">
+      <p><strong>Aufruf {{ call.sequence }} · {{ call.model }}</strong> · {{ {"completed": "Abgeschlossen", "incomplete": "Unvollständig", "error": "Fehler", "started": "Nicht abgeschlossen"}.get(call.status, call.status) }}{% if call.error_code %}: {{ call.error_code }}{% endif %} · {{ call.elapsed_ms if call.elapsed_ms is not none else '?' }} ms</p>
+      <p>Tokens: Eingabe {{ call.input_tokens if call.input_tokens is not none else '?' }}, davon Cache {{ call.cached_tokens if call.cached_tokens is not none else '?' }}; Ausgabe {{ call.output_tokens if call.output_tokens is not none else '?' }}, davon Reasoning {{ call.reasoning_tokens if call.reasoning_tokens is not none else '?' }}.</p>
+      <p class="subtle">Cache-Schreib-Tokens: {{ call.sizes.get('cache_write_tokens') if call.sizes.get('cache_write_tokens') is not none else 'nicht gemeldet' }}.</p>
+      <p class="subtle">Preisprofil: {{ call.pricing_version or 'unbekannt' }}{% if call.sizes.get('pricing') %} · Eingabe / Cache / Ausgabe: {{ call.sizes.pricing.input }} / {{ call.sizes.pricing.cached_input }} / {{ call.sizes.pricing.output }} USD je 1 Mio. Tokens{% endif %}.</p>
+      <p>Kosten: {% if call.usd is not none %}{{ usage_cost(call.usd, call.usd_upper) }} USD{% else %}unbekannt{% endif %}. Schritt: {% for tool in call.tools_used %}{{ {"hub_catalog_search": "Funktionen suchen", "hub_catalog_describe": "Felddefinitionen laden", "hub_read": "Daten lesen", "propose_hub_actions": "Antwort und Aktionsplan", "return_email_rewrite": "E-Mail-Text überarbeiten"}.get(tool, tool) }}{% if not loop.last %}, {% endif %}{% else %}Antwort / kein Werkzeug{% endfor %}</p>
+      <p class="subtle">Übertragene Zeichen: Grundanweisungen {{ call.sizes.get('instructions_chars', 0) }}, Werkzeuge {{ call.sizes.get('tools_chars', 0) }}, Nachrichten und Werkzeugergebnisse {{ call.sizes.get('input_chars', 0) }}. Ausgangskontext {{ call.sizes.get('context_chars', 0) }}, Verlauf {{ call.sizes.get('history_chars', 0) }}.</p>
+    </article>
+    {% endfor %}
+  </details>
+  {% endfor %}
+  {% else %}<p class="subtle">Noch keine gemessenen KI-Anfragen. Neue Modellaufrufe erscheinen hier automatisch.</p>{% endif %}
+</section>
+{% endif %}

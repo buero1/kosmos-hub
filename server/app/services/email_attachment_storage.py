@@ -9,12 +9,48 @@ from shutil import disk_usage
 from tempfile import NamedTemporaryFile
 
 from cryptography.fernet import InvalidToken
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 
 
 class EmailAttachmentStorageError(Exception):
     """Raised when an attachment cannot be safely written or read."""
+
+
+def track_attachment_file(db: Session, storage: "EmailAttachmentStorage", key: str, *, removed: bool = False) -> None:
+    """Keep filesystem changes consistent with commits, rollbacks and savepoints."""
+    if not db.info.get("attachment_file_hooks"):
+        db.info["attachment_file_hooks"] = True
+
+        def committed(session):
+            transaction = session.get_nested_transaction() or session.get_transaction()
+            pending = session.info.get("attachment_files", [])
+            if transaction is not None and transaction.nested:
+                session.info["attachment_files"] = [
+                    (transaction.parent if tx is transaction else tx, store, file_key, deleted)
+                    for tx, store, file_key, deleted in pending
+                ]
+            else:
+                for _tx, store, file_key, deleted in pending:
+                    if deleted:
+                        store.remove(file_key)
+                session.info["attachment_files"] = []
+
+        def ended(session, transaction):
+            # Successful commits consumed/reparented their entries above. Anything
+            # left at transaction end was rolled back (including Session.close()).
+            pending = session.info.get("attachment_files", [])
+            for tx, store, file_key, deleted in pending:
+                if tx is transaction and not deleted:
+                    store.remove(file_key)
+            session.info["attachment_files"] = [item for item in pending if item[0] is not transaction]
+
+        event.listen(db, "after_commit", committed)
+        event.listen(db, "after_transaction_end", ended)
+    transaction = db.get_nested_transaction() or db.get_transaction()
+    db.info.setdefault("attachment_files", []).append((transaction, storage, key, removed))
 
 
 class EmailAttachmentStorage:

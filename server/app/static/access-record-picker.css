@@ -1,0 +1,26 @@
+body.access-record-picker-open { overflow: hidden; }
+.access-record-layer .access-record-drawer { width: min(66rem, 100vw); max-width: 100%; gap: 0.8rem; }
+.access-record-drawer h2, .access-record-drawer p { margin: 0; }
+.access-record-search { display: grid; gap: 0.3rem; }
+.access-record-toolbar, .access-record-pagination, .access-record-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 0.7rem; }
+.access-record-toolbar { justify-content: space-between; }
+.access-record-table-wrap { flex: 1; min-height: 12rem; overflow: auto; border: 1px solid var(--border); border-radius: 0.6rem; }
+.access-picker-table { width: 100%; border-collapse: collapse; min-width: 42rem; }
+.access-picker-table thead { position: sticky; top: 0; background: #fffdfa; z-index: 1; }
+.access-picker-table th, .access-picker-table td { padding: 0.65rem; text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+.access-picker-table th:first-child { width: 5rem; white-space: nowrap; }
+.access-picker-table input[type="checkbox"], .access-record-toolbar input[type="checkbox"] { width: 1.05rem; height: 1.05rem; accent-color: var(--accent); cursor: pointer; }
+.access-picker-table tbody tr { cursor: pointer; user-select: none; }
+.access-picker-table tr.is-selected { background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.access-picker-table a { font-weight: 500; }
+.access-record-pagination { justify-content: center; }
+.access-record-footer { flex-shrink: 0; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+.access-record-footer > span { margin-right: auto; }
+.access-record-footer > p { flex-basis: 100%; }
+.access-selection-summary { overflow-wrap: anywhere; }
+.access-record-drawer .notice-error { color: #b42318; }
+@media (max-width: 600px) {
+  .access-record-layer .access-record-drawer { padding: 1rem; }
+  .access-record-footer > span { flex-basis: 100%; }
+  .access-record-toolbar { align-items: flex-start; }
+}

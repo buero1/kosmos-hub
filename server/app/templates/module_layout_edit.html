@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "partials/field_layout_break.html" import show_more_layout_item %}
+{% block title %}{{ definition.label }} bearbeiten · kosmos-hub{% endblock %}
+{% block content %}
+  <section>
+    <div class="section-heading detail-page-heading">
+      <div>
+        <p class="eyebrow">{{ definition.eyebrow }}</p>
+        <h2>{{ definition.label }} bearbeiten</h2>
+      </div>
+      <div class="detail-page-heading-actions">
+        <a class="button button-secondary button-variant-1" href="{{ definition.back_href }}">Abbrechen</a>
+        <button class="button button-variant-1" type="submit" form="module-layout-form">Speichern</button>
+      </div>
+    </div>
+
+    {% if saved %}<p class="notice-success">Das globale {{ definition.label }} wurde gespeichert.</p>{% endif %}
+    {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
+
+    <article class="card customer-detail-panel is-layout-editing" data-layout-editor="{{ definition.layout_key }}" data-layout-editor-start-open>
+      <div class="customer-detail-panel-heading">
+        <div>
+          <p class="eyebrow">Globale Darstellung</p>
+          <h3>Felder anordnen</h3>
+          <p class="subtle">Felder und Trennlinie per Drag-and-drop verschieben.</p>
+        </div>
+      </div>
+      <section class="is-layout-editing" data-expandable-section>
+        <div data-expandable-content class="is-expanded" hidden></div>
+        <div class="customer-fields-layout-editor" data-layout-fields-editor>
+          <dl class="customer-fields-grid" data-layout-sortable>
+            {% for field in fields %}
+              {% if loop.index0 == show_more_index %}{{ show_more_layout_item() }}{% endif %}
+              <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}">
+                <dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt>
+                <dd>Feld</dd>
+              </div>
+            {% endfor %}
+            {% if show_more_index >= fields|length %}{{ show_more_layout_item() }}{% endif %}
+          </dl>
+        </div>
+        <form id="module-layout-form" method="post" action="/module-layouts/{{ definition.layout_key }}" data-layout-form hidden>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="expected_revision" value="{{ layout_revision }}">
+          <input type="hidden" name="order_json" value="" data-layout-order-input>
+        </form>
+      </section>
+    </article>
+  </section>
+{% endblock %}

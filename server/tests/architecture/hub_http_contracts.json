@@ -1,0 +1,3402 @@
+{
+  "version": 1,
+  "note": "Reviewed migration ledger. Never auto-refresh in CI. Pending entries are NOT completed agent capabilities.",
+  "files": {
+    "app/api/__init__.py": "a288dda82252136562169bce43b89ca3285542ee9dd05230597e9dd018b9c205",
+    "app/api/routes/__init__.py": "7e2e1ab37d53cc951cc8647084289e89858717404ca5398d1757fb5bab64fc67",
+    "app/api/routes/accounts.py": "1d4fabf6a0b729a47b344761de50a8856e53f622a85ea121ac613c2a0483e580",
+    "app/api/routes/agent.py": "6e8bb3a54149cf0c76002eb99da7e5c9478589c8ba7cf39935f61bec1570a64c",
+    "app/api/routes/assistant.py": "35fb30de7c89535f361ee48447bbf8069b487b8218ed4e2e3ea65e67d20a2dec",
+    "app/api/routes/desktop_notifications.py": "f22d13b9c83b7e7145209cff935b1a32352c7068bafcfade91e0515457cd1dd8",
+    "app/api/routes/health.py": "40d6b4accef603e1f8aaaab48931008cce0df2fbf68507c3e3de81e659ac0c21",
+    "app/api/routes/integrations.py": "e06feb327f82991c4c849cb98631219481bc2cae463d81e6ff77ae69cd9783cb",
+    "app/api/routes/registrations.py": "e2d39b7bb3707df93e162d8df686fd79c98a8b08b7c3e7d68a620afdc480ab51",
+    "app/api/routes/site_abilities.py": "15eb6e81e824473579b0fb495d89fda877a0d40beb5fb43c96d650c3a80907fc",
+    "app/api/routes/site_backups.py": "79bae37d4ed4c14c713cf750d09963d7f613d0d6883663c25267b02252e7b922",
+    "app/api/routes/site_inventory.py": "e17ba749ad7654eada8133a3f1426f470614a3e9d58233ed0fa4ebbe83fedd47",
+    "app/api/routes/site_updates.py": "f91cc76b4d88acb3c18646bfed201de7bd3235e1a148402494ff339d2213c6f3",
+    "app/api/routes/sites.py": "3625fd99454a3357f7b2c41c6f00f4c387e72aa6a509a43e4045f8c489b11276",
+    "app/api/routes/web.py": "a47dd70d1aed9339c530d8b78415dcc94dceda9a85f625be696d44ebd0c68eff",
+    "app/main.py": "d910acfa22a0899e33143c3556977a1c61623b4078e2edbaa85d3bbff73cacb3",
+    "app/main.py:route-wiring": "96ebac08e0923d6470e9c39da23a0553783ca0ffffa9b9c82e5ce7c1e75107c0"
+  },
+  "routes": {
+    "app/api/routes/accounts.py:save_mailbox_access:POST:/access/mailboxes/{subject_type}/{subject_id}": {
+      "state": "shared",
+      "contracts": [
+        "access.mailboxes.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ],
+      "reason": "Admin-only mailbox grants use the shared administration boundary in UI and agent. Role caps, explicit user denial, team inheritance and validated mailbox IDs apply; no credentials are exposed.",
+      "fingerprint": "71921fcf2689f86472aeefc98d8054e96d35a06d19a6a6611100b34a167da337"
+    },
+    "app/api/routes/accounts.py:account_page:GET:": {
+      "fingerprint": "3f7fe5f6d615316e5a338a4d8deea22889baa6b4aea8821556304a71a90b8763",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.read"
+      ],
+      "boundary": [
+        "access_snapshot"
+      ],
+      "reader_method": "access_snapshot"
+    },
+    "app/api/routes/accounts.py:cancel_zoho_books_invoice_import:POST:/zoho-books/invoices/import/cancel": {
+      "fingerprint": "32d91021093b9c9fd48b5cba679430734671ab23331f4b8020b794728303aad5",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:cancel_zoho_books_recurring_invoice_import:POST:/zoho-books/recurring-invoices/import/cancel": {
+      "fingerprint": "3bfae3d2ff70782feff7bf0809de78fb3c7b185c3df7a0fb2a3088e7fde92d78",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:cancel_zoho_email_attachment_import:POST:/zoho/email-attachments/import/cancel": {
+      "fingerprint": "009fe7a5ee0b1c6a8b86252d45b2c38fc4722c0773ab31e1802c1f78068a77f7",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:cancel_zoho_email_content_batch:POST:/zoho/email-content/import/cancel": {
+      "fingerprint": "e9f1af5a5c4e9020127b7cc8ba86e67b9283c338ad24ff55f0fe2546371637d2",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:cancel_zoho_order_import:POST:/zoho-books/orders/import/cancel": {
+      "fingerprint": "c4cc974bc502860a9e7c0ec25e5bd63e2f4db7457a50619a2858e95cdc86e425",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:change_password:POST:/password": {
+      "fingerprint": "864f0a52105877f82834e48b3258f6c80aaf77e19a08ede2dbf5aa16a3412fc7",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:configure_crocoblock:POST:/crocoblock": {
+      "fingerprint": "04d50caa848d6b8e2fb8087d6bdbb33045e8ee2478ec5bb41bf5e395586fc071",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:configure_fleet_refresh_settings:POST:/fleet-refresh-settings": {
+      "fingerprint": "b32f9ec73729013600007f4b571855460a6c19f7e3e4de0d7e7d0404fe524547",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.fleet_refresh.update"
+      ],
+      "boundary": [
+        "configure"
+      ],
+      "reader_method": "configure"
+    },
+    "app/api/routes/accounts.py:configure_mail_composer_settings:POST:/mail-composer-settings": {
+      "fingerprint": "7eb3dad5cdb1d59e16df5d63bccee8b9be0ad4aa4b9f48017657996de4addc0e",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.email_composer.update"
+      ],
+      "boundary": [
+        "configure"
+      ],
+      "reader_method": "configure"
+    },
+    "app/api/routes/accounts.py:configure_mail_signature:POST:/mail-signature": {
+      "fingerprint": "85eefc78f950c5f660e30d1a8b3771bac5da131b4d51808cf037cf92f7e66b1f",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.signature.update"
+      ],
+      "boundary": [
+        "configure_signature"
+      ],
+      "reader_method": "configure_signature"
+    },
+    "app/api/routes/accounts.py:configure_mailbox_alert_email:POST:/mailboxes/alerts": {
+      "fingerprint": "78eb74c7f95bd1e83802695b158bee017aa2093e0342d8b102f89b77aed715ee",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.mailbox_alert.update"
+      ],
+      "boundary": [
+        "configure_mailbox_alert"
+      ],
+      "reader_method": "configure_mailbox_alert"
+    },
+    "app/api/routes/accounts.py:configure_mittwald_mailbox:POST:/mailboxes/mittwald": {
+      "fingerprint": "0fefabb77ec466d1dc487ceaa77ee61f3e46b4544c0d7e66090b290a86d17ea8",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:configure_openai:POST:/openai": {
+      "fingerprint": "79585627533075e88cf19998790fb0186050ebed5ad471027ffa9eee31ff7ff2",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:configure_provider_license:POST:/provider-licenses": {
+      "fingerprint": "a48872c728fa2207419626f816ea975ec1f7701766cc12d3ace8b5ff2a258a80",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:configure_task_reminder_email:POST:/task-reminder-email": {
+      "fingerprint": "f9fd4862021eb2454fc2fa8dec3e191fa41a186f11968229c5ec3696ab6c6fcd",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.personal.update"
+      ],
+      "boundary": [
+        "configure_reminder_email"
+      ],
+      "reader_method": "configure_reminder_email"
+    },
+    "app/api/routes/accounts.py:configure_zoho:POST:/zoho": {
+      "fingerprint": "42695241be2c8fbdb9cb22dc945d315a461f34b75a7c2cd5fcc4a4b99f7a14dc",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:connect_zoho:GET:/zoho/connect": {
+      "fingerprint": "c1434b3afa46d37fb76aeabce5f9fc99ff430825f7dc4df8bbda2771714450cb",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:connect_zoho_books:GET:/zoho-books/connect": {
+      "fingerprint": "39dcde194a9271ff16d034fe5d169cc75252e74d89e700c97bd7133b295f6543",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:create_access_role:POST:/access/roles": {
+      "fingerprint": "6a13e32d63bde66b0477e9c67e2b9ab8ea49e3a157d7498acfdcad0d76a82046",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.roles.save"
+      ],
+      "boundary": [
+        "save_role"
+      ],
+      "reader_method": "save_role"
+    },
+    "app/api/routes/accounts.py:create_access_team:POST:/access/teams": {
+      "fingerprint": "8a129e7363af3fafc2467be5689323a27ce040a3feb816e55c381ece6a80fc03",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.teams.create"
+      ],
+      "boundary": [
+        "create_team"
+      ],
+      "reader_method": "create_team"
+    },
+    "app/api/routes/accounts.py:create_bootstrap_token:POST:/internal/bootstrap-token": {
+      "fingerprint": "548dd5357f6338820697078e959b5b2f26cf6c46b5ea32204b645bb11d513012",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:create_desktop_device:POST:/desktop-devices": {
+      "fingerprint": "307f20e2e08d4fb3d2779954a3e8a8f94dba00a9463be4d26d774f54f0c84d24",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:create_hub_user:POST:/users": {
+      "fingerprint": "03e6f7f588976beca19fe171af00e7fff09216ed1bfd5674c4414e26e576ec61",
+      "state": "human_only",
+      "reason": "Password-based initial account provisioning stays in the secure human form; it now enters the same authorized administration service, but no password or confirmation is accepted by agent operations."
+    },
+    "app/api/routes/accounts.py:create_integration_token:POST:/integration-tokens": {
+      "fingerprint": "e5b852bff7e6a69e9e5646f14d3ffb598c5e41f450dc05cdaab0e1dcd0c03047",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:create_legal_terms:POST:/legal-terms": {
+      "fingerprint": "e47602dd648fdef91019eb3c916b2035c46b9b68ee10aca58a8e4aadf2636ddf",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.legal_terms.create"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:create_mcp_token:POST:/mcp-tokens": {
+      "fingerprint": "95299dfb27eedc0892aea080f3f6e6a3beef65327f815a523f3ef5c51e66328a",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:create_pdf_template:POST:/pdf-templates": {
+      "fingerprint": "a032f9b3e09b2155a660cf9f67c4d9eb23e88c7bd60b7f8a6255124bae7e512e",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.create"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:create_record_grant:POST:/access/grants": {
+      "fingerprint": "4ddfe669a0725003fcc3197a0d1c53048898a43c7b2f9926346912adcae65f04",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.grants.create"
+      ],
+      "boundary": [
+        "add_grant"
+      ],
+      "reader_method": "add_grant"
+    },
+    "app/api/routes/accounts.py:delete_access_role:POST:/access/roles/{role_key}/delete": {
+      "fingerprint": "4c98826bb56b66cba18049e16bdeecee955ce24ba82a6db567fe348963fb1213",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.roles.delete"
+      ],
+      "boundary": [
+        "delete_role"
+      ],
+      "reader_method": "delete_role"
+    },
+    "app/api/routes/accounts.py:delete_access_team:POST:/access/teams/{team_id}/delete": {
+      "fingerprint": "94dca08f9e2f0ff10f51eeb6a2dfc478981d734cd5f1912c3df33c9e19b3540b",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.teams.delete"
+      ],
+      "boundary": [
+        "delete_team"
+      ],
+      "reader_method": "delete_team"
+    },
+    "app/api/routes/accounts.py:delete_hub_user:POST:/users/{user_id}/delete": {
+      "fingerprint": "87e55f463eb8684f6d5e193274c72519cb83715b1630208374357e8c894bd91e",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.users.delete"
+      ],
+      "boundary": [
+        "delete_user"
+      ],
+      "reader_method": "delete_user"
+    },
+    "app/api/routes/accounts.py:delete_legal_terms:POST:/legal-terms/{legal_terms_id}/delete": {
+      "fingerprint": "e6444133015c34d0e337b7e9d459b8d169d64f10a64734ddb2aafef21c99a6c7",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.legal_terms.delete"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:delete_pdf_template:POST:/pdf-templates/{template_id}/delete": {
+      "fingerprint": "91dd91733cb293c0c1c51b1a5f57308729e4813885694917ee40a799128d0cbf",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.delete"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:delete_record_grant:POST:/access/grants/{grant_id}/delete": {
+      "fingerprint": "da9e6f35188630d259f0957e72513364ffc3794bdf900dc6debc0908e3c358b9",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.grants.delete"
+      ],
+      "boundary": [
+        "delete_grant"
+      ],
+      "reader_method": "delete_grant"
+    },
+    "app/api/routes/accounts.py:duplicate_legal_terms:POST:/legal-terms/{legal_terms_id}/duplicate": {
+      "fingerprint": "0fa065e16f9996832b6c87213809a38c1b06c679eb210a6707ac5d38482a159f",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.legal_terms.duplicate"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:duplicate_pdf_template:POST:/pdf-templates/{template_id}/duplicate": {
+      "fingerprint": "ebf4bf190ca65aea7556c4bd0ba67f359ff1b4d63c501a63860d35ad88842de3",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.duplicate"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:import_all_zoho_books_recurring_invoices:POST:/zoho-books/recurring-invoices/import": {
+      "fingerprint": "aec1df04803c72c29c9462c64e5118a0da1b78128333d4fe30bcce9a430eedea",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_all_zoho_orders:POST:/zoho-books/orders/import": {
+      "fingerprint": "41d996aeb2bb96cbc3e0abea2151fceac49108c63474369126ae99a2ffa81f3c",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_mittwald_mailboxes:POST:/mailboxes/import": {
+      "fingerprint": "63d83200efe036defab772f52481a4d8113e09019b71a2158f4afb3ac8fa71b0",
+      "state": "out_of_scope",
+      "scope_exclusion": "imports-and-sync",
+      "reason": "External mailbox import is excluded from this migration; existing manual behavior is unchanged."
+    },
+    "app/api/routes/accounts.py:import_recent_zoho_books_invoices:POST:/zoho-books/invoices/import": {
+      "fingerprint": "49080a748ae3bd7a4107b6f83e83b7746642d085b0dde1fa1249a3e1a228c662",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_remaining_zoho_books_invoices:POST:/zoho-books/invoices/import/remaining": {
+      "fingerprint": "cbddc148e2e99245d73f2ffa4941a1741cf9f3f1d0fc2f4146f500e9a027c56f",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_zoho_email_attachments:POST:/zoho/email-attachments/import": {
+      "fingerprint": "0e9b93e800d5a9fda590380ea989476098a78dafc608769208e0db61fcaf53fc",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_zoho_email_content_batch:POST:/zoho/email-content/import": {
+      "fingerprint": "a1aa2307eba29f71e52ee7f51158ab21bf0abaf4083d8e845292aab7451a1bb1",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_zoho_email_content_batch:POST:/zoho/email-content/import-test": {
+      "fingerprint": "a1aa2307eba29f71e52ee7f51158ab21bf0abaf4083d8e845292aab7451a1bb1",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_zoho_email_history:POST:/zoho/email-history/import": {
+      "fingerprint": "8035013f0048742ceb348eea8b73cc8625176e9a6e440f871454f5728ff405ff",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:import_zoho_note_history:POST:/zoho/note-history/import": {
+      "fingerprint": "7076b4a056c488c26cef9561d03f3675ae86439278778fcf3c857906e9b33c90",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:login:POST:/login": {
+      "fingerprint": "45c7cd5584fbdf08f6815aa48aef11e750d4ab0211d423cec4fd061c33c639bb",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:login_page:GET:/login": {
+      "fingerprint": "8be021e14441128273266085b863838f856259149b171efbc595584037b5999f",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:logout:POST:/logout": {
+      "fingerprint": "e7861570cf44b479f56d202a18200a1e32fe4882858566a34cf7517601309ce5",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:receive_zoho_email_workflow_webhook:POST:/zoho/email-workflow-webhook/receive/{token}": {
+      "fingerprint": "75b512d6a53f4a4b4876c454c29c59f01176fcb6d691a27f2ffa88b2adef8d1c",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:refresh_zoho_books_organizations:POST:/zoho-books/organizations/refresh": {
+      "fingerprint": "fc5d25f3e0e2f3c729c303dda2f932006cb72d156b41ef23280947d5d1620031",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:refresh_zoho_mapping:POST:/zoho/mapping": {
+      "fingerprint": "a611de0775863c919230df6fe50e023e7963e58b283da8ea15fee8b1eb566f0d",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:remove_crocoblock:POST:/crocoblock/remove": {
+      "fingerprint": "3a68770697a34a71206f722cf610fe94fe0a17a1f4d3d63f43540415acd6beee",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:remove_openai:POST:/openai/remove": {
+      "fingerprint": "d65d6e76267e13c28be328d19d7036cc5d0898dce1eb60a3efdada332adab99b",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:remove_provider_license:POST:/provider-licenses/{provider}/remove": {
+      "fingerprint": "cf0423d047915e2d594b244ebe42c62f4d06a8a91bc375b9cf3ca50fc669e5e1",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:remove_zoho_books_connection:POST:/zoho-books/remove": {
+      "fingerprint": "3ce2687e7ef062f56726d08c1dba6d09b74fe700051fdf94c33cd6875645e6cb",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:remove_zoho_connection:POST:/zoho/remove": {
+      "fingerprint": "c2d004900176d57309fc31752c4c29e94266a8a90cd065f017bae681f7eb86d4",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:rename_pdf_template:POST:/pdf-templates/{template_id}/rename": {
+      "fingerprint": "772b0494e36a085652755ac0133291e04024f76312b755e5c675409321e02222",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.rename"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:retry_failed_mailbox_message:POST:/mailboxes/failed/{failure_id}/retry": {
+      "fingerprint": "10fa14dc94b09d63c7acf3baff36bf4d4b7c7b31c4a89303e03ddcc55d405b91",
+      "state": "out_of_scope",
+      "reason": "Retry imports one failed IMAP message; belongs to the explicitly excluded import/synchronization integration, not mail sending or editing.",
+      "scope_exclusion": "imports-and-sync"
+    },
+    "app/api/routes/accounts.py:revoke_desktop_device:POST:/desktop-devices/{device_id}/revoke": {
+      "fingerprint": "c10a99342b74a7494995c0a0fa371824eeac6188e450f8045f6b38d111fd53c7",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:revoke_integration_token:POST:/integration-tokens/{token_id}/revoke": {
+      "fingerprint": "db0920141f7dace5e00c53af219b87586a1dbc9a6ca49accb35c228195288cd0",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:revoke_mcp_token:POST:/mcp-tokens/{token_id}/revoke": {
+      "fingerprint": "b6371f2ba56c130c2fbd81e772df43992467255eadf47ddf48b7d4a2cb5d42be",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:rotate_zoho_email_workflow_webhook_token:POST:/zoho/email-workflow-webhook/token": {
+      "fingerprint": "46b93d139707c44a197d1628d241d0e74db65b2fe701e33482e1f877c1d02715",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:save_record_assignment:POST:/access/assignments": {
+      "fingerprint": "2f67183097a8c958f0689b5217a1852da56141ac2b607b87e9431cbfb84bf85d",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.records.assign"
+      ],
+      "boundary": [
+        "assign_record"
+      ],
+      "reader_method": "assign_record"
+    },
+    "app/api/routes/accounts.py:select_zoho_books_organization:POST:/zoho-books/organization": {
+      "fingerprint": "2ec1871a2f508ef63401bc6475975aab5e68bdafb2e1cbb8503bd7f0dc918595",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:set_default_pdf_template:POST:/pdf-templates/{template_id}/default": {
+      "fingerprint": "a82c030c79c4ef55a39274ecc5c7695463194b885f6e83d4b0b48161c005d9fe",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.set_default"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:settings_page:GET:/settings": {
+      "fingerprint": "d20837c8fae39f25778228f271daf38a11192159894812c922631f87ebf96480",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.read"
+      ],
+      "boundary": [
+        "access_snapshot"
+      ],
+      "reader_method": "access_snapshot"
+    },
+    "app/api/routes/accounts.py:setup_first_admin:POST:/setup": {
+      "fingerprint": "b77a5fe1bc24f5375031b0dbc6c469630813ba6268d84808e266741fb5ca6159",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:setup_page:GET:/setup": {
+      "fingerprint": "47555aef54717441b53f4e7316a49bc98e393d18e0506542f618b3b82dd42bfc",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/accounts.py:sync_zoho_accounts:POST:/zoho/sync": {
+      "fingerprint": "0ddf120ef4e3b8dbac7a34d283ab8a14ed278f6d8fecf78a5ebdf940dbc540b9",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:sync_zoho_email_templates:POST:/zoho/email-templates/sync": {
+      "fingerprint": "87914b82b365737cc95bc2daa9df02506e28b39f51d43c8a54e5088c51930385",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:unblock_spam_sender:POST:/mailboxes/spam-senders/{sender_id}/unblock": {
+      "fingerprint": "2a0a43d1ca563b1033f5c8bd62fa7da9e397601be239299bffca780ff823aeef",
+      "state": "shared",
+      "reason": "UI and confirmed agent enter the same operation; permissions rechecked. Scheduled cancellation defers attachment deletion and worker notification until outer commit; sending/planning remain unavailable.",
+      "contracts": [
+        "emails.spam_senders.unblock"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:update_access_role:POST:/access/roles/{role_key}": {
+      "fingerprint": "a05d0c6e18011643b20bca2b036e02f4c28ceb5fe52fb686d204c20841f2374b",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.roles.save"
+      ],
+      "boundary": [
+        "save_role"
+      ],
+      "reader_method": "save_role"
+    },
+    "app/api/routes/accounts.py:update_access_team:POST:/access/teams/{team_id}": {
+      "fingerprint": "25769dd8b02a17d210dfef0b9b2d3b2678f0b5b43a5cdd9b84c6674792f80f4e",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.teams.update"
+      ],
+      "boundary": [
+        "update_team"
+      ],
+      "reader_method": "update_team"
+    },
+    "app/api/routes/accounts.py:update_hub_user:POST:/users/{user_id}": {
+      "fingerprint": "dd36f0d01d5fa2e0edd230a96ef1d3343fdc98af8fc4f0b506326138c10fb65d",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.users.update"
+      ],
+      "boundary": [
+        "update_user"
+      ],
+      "reader_method": "update_user"
+    },
+    "app/api/routes/accounts.py:update_legal_terms:POST:/legal-terms/{legal_terms_id}": {
+      "fingerprint": "88e92dd0315f256304eaf489e9f1817963b5fcaf4b5d9851ce28ae266f06a9f8",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.legal_terms.update"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:update_pdf_template_block:POST:/pdf-templates/{template_id}/blocks/{block_key}": {
+      "fingerprint": "f75dc75031e75a5101d8db1d286256a34e6867f483966429a2e1263689dd8a09",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.update_block"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:update_pdf_template_legal_terms:POST:/pdf-templates/{template_id}/legal-terms": {
+      "fingerprint": "192fafafef8fe1070d7678b717aa1dd57e1425e7a528b11419e8ecbf96edd466",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.set_legal_terms"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:update_pdf_template_positions:POST:/pdf-templates/{template_id}/positions": {
+      "fingerprint": "47971673d98fe826bdbe5bc6a4fbf89d2ef2670d849100d9f1fcbb6fb55c694d",
+      "state": "shared",
+      "reason": "PDF/terms mutations use the same registry executor for UI and agent, preserving admin checks, domain validation and versioning.",
+      "contracts": [
+        "finance.pdf_templates.update_positions"
+      ],
+      "boundary": [
+        "_execute_document_template_operation",
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/accounts.py:update_user_access:POST:/access/users/{user_id}": {
+      "fingerprint": "42ce7a11d5a39f29c9f143ff904580c7bf537c8b61e7cc31656707f36de3be0a",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "access.users.update"
+      ],
+      "boundary": [
+        "update_user"
+      ],
+      "reader_method": "update_user"
+    },
+    "app/api/routes/accounts.py:zoho_books_invoice_import_status:GET:/zoho-books/invoices/import/status": {
+      "fingerprint": "5ebe4040ff4934f04917a9e65447e1642c6543a4900a94b5edb1d323b5db8e07",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_books_recurring_invoice_import_status:GET:/zoho-books/recurring-invoices/import/status": {
+      "fingerprint": "4abe654e7a6f62feb73472d217bf812b2ad0a74e24754b7fcb4bea316f245974",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_callback:GET:/zoho/callback": {
+      "fingerprint": "c2f045075fc95dbc6c15d83ded907a6f2e3cf4fc8c22eadd4a699512e812ca8e",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_email_attachment_import_status:GET:/zoho/email-attachments/import/status": {
+      "fingerprint": "2358d3e225cf7127663c29fb01c768f7d13484917984f9f757a61e1b15352cab",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_email_content_batch_status:GET:/zoho/email-content/import/status": {
+      "fingerprint": "98a001c65bff63227f5ed8e41ba50c7b3c46d1aad83ee931cfd8c8c6209dde7c",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_note_history_import_status:GET:/zoho/note-history/import/status": {
+      "fingerprint": "33815928dd1d91ed32dcb7859a6a0795371d7909c6c11e7439a85d12e87e1033",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/accounts.py:zoho_order_import_status:GET:/zoho-books/orders/import/status": {
+      "fingerprint": "d3132a49b0721f78c5b37236238d6daaad3cbcf674c279b1e0096a097275185c",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/agent.py:add_agent_context:POST:/chat/context": {
+      "fingerprint": "1959524cb46fc1cb2e3d843ae9094303d5be50ca273ece3c546af6fb0ea559ce",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:agent_chat:GET:/chat": {
+      "fingerprint": "fc60c6191b081bd1cdc45cdf00fa7d645f55c195d31f6837036cf1930352d503",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:agent_page:GET:": {
+      "fingerprint": "b71dc9853a6abe0ae0f3b19e6b465861139ba64594c3a51a681f86a5bcc45d3b",
+      "state": "shared",
+      "contracts": [
+        "ai.usage.read"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "query"
+      ],
+      "reason": "Agent UI uses shared permission-scoped usage reader. Admins see all usage; active non-admin users only their own. No prompts, customer content or credentials are stored. Unknown costs and incomplete reports are explicit. Chat archive rendering remains UI infrastructure."
+    },
+    "app/api/routes/agent.py:close_agent_chat:POST:/chat/{conversation_id}/close": {
+      "fingerprint": "3eed3e8f20b8ed52c8e00aa882defe24a572eb5c21e427bfb2606d0265a89b88",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:delete_agent_chat:POST:/chat/{conversation_id}/delete": {
+      "fingerprint": "f145c25fa2f34ff6a7f7e1a1dd2db4cf62ff12e5de821be397b9b0cff42fdf8d",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:execute_agent_chat_action:POST:/chat/actions/{action_id}/execute": {
+      "fingerprint": "3e8dbf37feabb8dc07cd7b0e3598672d739fb6a8b8198d94717fa01fc46606a7",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:remove_agent_context:POST:/chat/context/{context_id}/remove": {
+      "fingerprint": "0b8817114db597a97daa08e20e32fd3898f9e345489657541c10a1d5bb6f4999",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:save_email_ai_prompt_presets:POST:/email-ai-prompts": {
+      "fingerprint": "4f01ba1d57dcf3bd383513e462ed265c0b243979c7edee4d55b7a6f780c6faf7",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.email_prompts.update"
+      ],
+      "boundary": [
+        "save_prompt_presets"
+      ],
+      "reader_method": "save_prompt_presets"
+    },
+    "app/api/routes/agent.py:send_agent_message:POST:/chat/messages": {
+      "fingerprint": "c92b28f53e66f78d130deb213c137f4c908e4fb5800b6a59cee4e88fe74b0f43",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:start_agent_chat:POST:/chat/new": {
+      "fingerprint": "2124b75e4fa416a0caebd4df2614436325d3a6e1d99c947fdeab3497be181a54",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/agent.py:upload_agent_file:POST:/chat/files": {
+      "fingerprint": "84caf9d32075a49027a3fe367fdce63af5aedf5ae1290983b1fccfe71bb1872d",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/assistant.py:ask_assistant:POST:": {
+      "fingerprint": "d4547cb105400c97dc03980cfb16311f97287d7836a4aee1fdfe47db5210152d",
+      "state": "human_only",
+      "reason": "Legacy conversational UI orchestration and browser-local selection, not a recursively callable agent business action. Runtime website/customer/user data now uses shared permission-scoped readers; the main agent already has its own conversational interface."
+    },
+    "app/api/routes/assistant.py:assistant_page:GET:": {
+      "fingerprint": "da776cdf20acd61b7e2cfe32acf4650c22ce1f0d59a91299bcc87e5aee184853",
+      "state": "human_only",
+      "reason": "Legacy conversational UI orchestration and browser-local selection, not a recursively callable agent business action. Runtime website/customer/user data now uses shared permission-scoped readers; the main agent already has its own conversational interface."
+    },
+    "app/api/routes/desktop_notifications.py:complete_desktop_reminders:POST:/reminders/complete": {
+      "fingerprint": "0674edbd357dc4b220a8fc889ba0a226bfabbf74162e47123bc228e9d64d35d6",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "reminders.complete"
+      ],
+      "boundary": [
+        "mutate_reminders"
+      ],
+      "reader_method": "mutate_reminders"
+    },
+    "app/api/routes/desktop_notifications.py:list_desktop_reminders:GET:/reminders": {
+      "fingerprint": "c4e590079309326c942da22137687aa312917bcfcc734db1d1efe143c4964def",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "reminders.list"
+      ],
+      "boundary": [
+        "reminder_views"
+      ],
+      "reader_method": "reminder_views"
+    },
+    "app/api/routes/desktop_notifications.py:snooze_desktop_reminders:POST:/reminders/snooze": {
+      "fingerprint": "84655fe87c2f70417ff7705468d7606f24e44d1195e66300d5bf611c044ec07a",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "reminders.snooze"
+      ],
+      "boundary": [
+        "mutate_reminders"
+      ],
+      "reader_method": "mutate_reminders"
+    },
+    "app/api/routes/desktop_notifications.py:snooze_desktop_reminders_before_start:POST:/reminders/snooze-before-start": {
+      "fingerprint": "6de1642558cb47f1b62363478a8fde2bfcb09d2b36b50bb3658562c1048c47db",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "reminders.snooze_before_start"
+      ],
+      "boundary": [
+        "mutate_reminders"
+      ],
+      "reader_method": "mutate_reminders"
+    },
+    "app/api/routes/health.py:healthcheck:GET:/healthz": {
+      "fingerprint": "35fd6828d7a2f9af6c6e35b5e25bd80124f067d57eee794a07bbaafb74e8ac6b",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/integrations.py:integration_health:GET:/health": {
+      "fingerprint": "f96d160a8307117754c652c37f982e287f60500ca1ad85b68f8ffb48f938ad8b",
+      "state": "infrastructure",
+      "reason": "Authenticated CallApp connection health/inbound idempotent event ingestion, not a user calendar action or an agent tool. Lead/note/activity user operations already have their own shared contracts; token transport is not generalized."
+    },
+    "app/api/routes/integrations.py:list_busy_times:GET:/busy-times": {
+      "fingerprint": "d355b95510397247f440bd9bfd2ee2fa4a2a398ca187d3134c7da23ff936f5e2",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "calendar.busy_times"
+      ],
+      "boundary": [
+        "busy_times"
+      ],
+      "reader_method": "busy_times"
+    },
+    "app/api/routes/integrations.py:receive_closure:POST:/closures": {
+      "fingerprint": "38c24e288187a31e03c90911f7b0b94b7d251ac9668fe17c93c3f36e71c19a51",
+      "state": "infrastructure",
+      "reason": "Reviewed authenticated CallApp event ingestion through native lead/note/activity services. Known industry spelling variants normalize to one catalog value; unknown/ambiguous values retain domain validation. System and manual comments form one encrypted note; legacy completed calls are not imported, only the planned follow-up with popup reminder. Repeated deliveries preserve IDs and note creation time; validation failures roll back lead, note and follow-up together. Covered by test_callapp_delivery_contract.py and test_callapp_integration.py. Protocol infrastructure, not a separate user/agent operation; calendar reads retain their shared contract."
+    },
+    "app/api/routes/registrations.py:download_plugin_package:GET:/plugin-packages/{package_id}/download": {
+      "fingerprint": "d56c8f97c4a48da3a7a9a31f8e6f82ea36dd14e609fe2f39296d3e539eac1c2a",
+      "state": "infrastructure",
+      "reason": "Authenticated Bridge-to-Hub registration/heartbeat and signed package transport are protocol infrastructure, not user business commands. Agent installation already uses the validated package workflow; no raw download credential exposure."
+    },
+    "app/api/routes/registrations.py:register_site:POST:/registrations": {
+      "fingerprint": "83ef0bd41f16073addbe92e2537cafa6ff6577769dfa2e5c99d903c088708648",
+      "state": "infrastructure",
+      "reason": "Authenticated Bridge-to-Hub registration/heartbeat and signed package transport are protocol infrastructure, not user business commands. Agent installation already uses the validated package workflow; no raw download credential exposure."
+    },
+    "app/api/routes/site_abilities.py:discover_site_abilities:GET:/abilities": {
+      "fingerprint": "8807520f1fe5c7bb8b3fff77ec6d153686a714808d2ceee4fbb0e01e82f376d9",
+      "state": "infrastructure",
+      "reason": "Privileged low-level Bridge diagnostics/transport, now explicitly website-manage scoped. Raw execution still enforces readonly/non-destructive metadata; no general ability tool is exposed to the agent. Business reads/actions use typed catalog contracts."
+    },
+    "app/api/routes/site_abilities.py:execute_site_ability:POST:/abilities/execute": {
+      "fingerprint": "bfb91571511824bd123e7d00f19919211d9421368104e8f013fe8559315fca23",
+      "state": "infrastructure",
+      "reason": "Privileged low-level Bridge diagnostics/transport, now explicitly website-manage scoped. Raw execution still enforces readonly/non-destructive metadata; no general ability tool is exposed to the agent. Business reads/actions use typed catalog contracts."
+    },
+    "app/api/routes/site_abilities.py:get_site_ability_info:GET:/ability-info": {
+      "fingerprint": "edb5b88e0c774d731eaea0efcc1309755c3519110a86314bc33091d66a31308d",
+      "state": "infrastructure",
+      "reason": "Privileged low-level Bridge diagnostics/transport, now explicitly website-manage scoped. Raw execution still enforces readonly/non-destructive metadata; no general ability tool is exposed to the agent. Business reads/actions use typed catalog contracts."
+    },
+    "app/api/routes/site_backups.py:get_latest_site_backup_status:GET:/latest": {
+      "fingerprint": "0e191d52a990634f8813659f3ced68c14f073fa5688a703f949b4881c9cd5266",
+      "state": "shared",
+      "reason": "UI/API and agent use the same access-checked WordPress domain reader.",
+      "contracts": [
+        "wordpress.backups.list"
+      ],
+      "boundary": [
+        "backup_snapshot"
+      ],
+      "reader_method": "backup_snapshot"
+    },
+    "app/api/routes/site_backups.py:refresh_site_backup_status:POST:/refresh": {
+      "fingerprint": "caff60d41e07cb7771b85bbf3fad55bdfa9af472d97ad6141b3be67a25addc0f",
+      "state": "shared",
+      "reason": "Authenticated API uses the same remote catalog and executor as the confirmed-agent dispatcher.",
+      "contracts": [
+        "wordpress.backups.refresh"
+      ],
+      "boundary": [
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/site_inventory.py:get_latest_site_snapshot:GET:/state/latest": {
+      "fingerprint": "73adcfa40b97ce84b28f757567db6a8e3e4f2c166f63913251562421b38ffb74",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.state.read"
+      ],
+      "boundary": [
+        "state_snapshot"
+      ],
+      "reader_method": "state_snapshot"
+    },
+    "app/api/routes/site_inventory.py:list_site_capabilities:GET:/capabilities": {
+      "fingerprint": "617d7a84de24b47970298964b44149ff7b97a4e6918c45609768be197f91e483",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.capabilities.list"
+      ],
+      "boundary": [
+        "stored_capabilities"
+      ],
+      "reader_method": "stored_capabilities"
+    },
+    "app/api/routes/site_inventory.py:refresh_site_inventory:POST:/refresh": {
+      "fingerprint": "0ecad248efaf3ea3abe972301c2e6ec8556be74def8c4cb71031def3712dd6b0",
+      "state": "shared",
+      "reason": "Alternate API refresh now enters the common remote catalog, also used by the confirmed agent dispatcher.",
+      "contracts": [
+        "wordpress.capabilities.refresh"
+      ],
+      "boundary": [
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/site_inventory.py:refresh_site_state:POST:/state/refresh": {
+      "fingerprint": "412297a58b2c7df24b4d068d0e4d5d7f83841e2be66071ea924dd0cd0ae3ec57",
+      "state": "shared",
+      "reason": "Alternate API refresh now enters the common remote catalog, also used by the confirmed agent dispatcher.",
+      "contracts": [
+        "wordpress.inventory.refresh"
+      ],
+      "boundary": [
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/site_updates.py:get_latest_site_updates:GET:/latest": {
+      "fingerprint": "254fc548b92426a37b6050f6101327b0ec79c182a0e0d6b7a6ee9173a6315272",
+      "state": "shared",
+      "reason": "UI/API and agent use the same access-checked WordPress domain reader.",
+      "contracts": [
+        "wordpress.updates.read"
+      ],
+      "boundary": [
+        "update_snapshot"
+      ],
+      "reader_method": "update_snapshot"
+    },
+    "app/api/routes/site_updates.py:refresh_site_updates:POST:/refresh": {
+      "fingerprint": "79b4ce1d112439e5b705efabce66d6eebd6ae65c33b94a0c606a8f3cbfc34d78",
+      "state": "shared",
+      "reason": "Authenticated API uses the same remote catalog and executor as the confirmed-agent dispatcher.",
+      "contracts": [
+        "wordpress.updates.refresh"
+      ],
+      "boundary": [
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/sites.py:get_site:GET:/{site_id}": {
+      "fingerprint": "dda1e9e62431b79d49462a81ab84a3cf05782bc2f1c99f3dba1e2c5f3b2638b5",
+      "state": "shared",
+      "reason": "Local website inventory and customer linking use common permission-scoped readers/domain operations. Remote WordPress mutations remain pending.",
+      "contracts": [
+        "websites.read"
+      ],
+      "boundary": [
+        "website_site"
+      ],
+      "reader_method": "website_site"
+    },
+    "app/api/routes/sites.py:list_sites:GET:": {
+      "fingerprint": "9d1a7ae1b6e3bcad034d5427c2d6d355ebe2f5ed6a3a130730b2d84bdc1f496a",
+      "state": "shared",
+      "reason": "Local website inventory and customer linking use common permission-scoped readers/domain operations. Remote WordPress mutations remain pending.",
+      "contracts": [
+        "websites.list"
+      ],
+      "boundary": [
+        "website_sites"
+      ],
+      "reader_method": "website_sites"
+    },
+    "app/api/routes/web.py:apply_mailbox_batch_action:POST:/emails/actions": {
+      "fingerprint": "c60ee4a3b825b3aaedd2223df5eb2f80c748f53af1593ed2f2f83a459b6997aa",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.mailbox.mark_read",
+        "emails.mailbox.mark_unread",
+        "emails.mailbox.move_inbox",
+        "emails.mailbox.move_sent",
+        "emails.mailbox.move_trash",
+        "emails.mailbox.move_spam",
+        "emails.mailbox.restore",
+        "emails.mailbox.permanently_delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:apply_update_workbench_action:POST:/updates/apply-action": {
+      "fingerprint": "811f377924523bf634c57799dba6cfc2f8f4f75ee70f5f8029d5ce5d8c9d457e",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.start"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:backup_workbench_page:GET:/backups": {
+      "fingerprint": "0e8b5c582a64a3644f5c3dbec8864f6c3154dbb0b103d8a897856977443eccba",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.workbench.backups"
+      ],
+      "boundary": [
+        "backup_workbench"
+      ],
+      "reader_method": "backup_workbench"
+    },
+    "app/api/routes/web.py:calendar_page:GET:/calendar": {
+      "fingerprint": "44fafa586cac6ca2f2acc4e4969358305ff7e6c593a332172f4f74221f60fcc6",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "calendar.week"
+      ],
+      "boundary": [
+        "calendar_activities"
+      ],
+      "reader_method": "calendar_activities"
+    },
+    "app/api/routes/web.py:calls_page:GET:/calls": {
+      "fingerprint": "b2aab88a30d071a4131893e4a2028b4b9fcc76007b0394344f53d3e6ce7e2b47",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "activities.calls.list"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "activity_entries"
+      ],
+      "reader_method": "activity_entries"
+    },
+    "app/api/routes/web.py:cancel_complete_site_update_run:POST:/updates/complete-site-update-runs/{run_id}/cancel": {
+      "fingerprint": "79f5b7582b21fb42c0578178565301d3d0dfb779cb89e6b9b5ed88bd72c086f9",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.cancel_complete"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:cancel_direct_update_batch:POST:/updates/direct-update-batches/{batch_id}/cancel": {
+      "fingerprint": "a228a0f04a6b48710b7331a3442fe6596199c9f8ef25d45c28d5459a7cf115bb",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.cancel_batch"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:cancel_fleet_refresh_run:POST:/updates/refresh-runs/{run_id}/cancel": {
+      "fingerprint": "b23fdd2e81b7a0d21261dd12a31a7770b8e4f1e5f409d3f4ad50cb076dd756a2",
+      "state": "shared",
+      "reason": "UI and agent use the same transactional domain operation. Explicit targets, authorization, commit-before-worker and current-rights recheck are preserved.",
+      "contracts": [
+        "wordpress.fleet.cancel"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:cancel_scheduled_mailbox_email:POST:/emails/scheduled/{scheduled_email_id}/cancel": {
+      "fingerprint": "a850651b84e7cc039d61dd0baefba25f3c29a3ed60f1cf70afbec9bf2ab6524f",
+      "state": "shared",
+      "reason": "UI and confirmed agent enter the same operation; permissions rechecked. Scheduled cancellation defers attachment deletion and worker notification until outer commit; sending/planning remain unavailable.",
+      "contracts": [
+        "emails.scheduled.cancel"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:cancel_selected_user_deletion_batch:POST:/users/deletion-batches/{batch_id}/cancel": {
+      "fingerprint": "60f4f52a19f6f1ef21e5d98aa406a94ac1f37307874bb7e358a89ec3fda724f0",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.deletion_cancel"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:case_detail_page:GET:/cases/{case_id}": {
+      "fingerprint": "9647c6707de0ec24adf7fbc235736015d08cf909edb800069acbb9f587836228",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "cases.read"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "case_detail"
+      ],
+      "reader_method": "case_detail"
+    },
+    "app/api/routes/web.py:cases_page:GET:/cases": {
+      "fingerprint": "6bbd2d7d64fe4bb1b0bbbd8eca9eb6286bdf1eee31bb0eb28c7e2447c9e446e4",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "cases.list"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "case_entries"
+      ],
+      "reader_method": "case_entries"
+    },
+    "app/api/routes/web.py:clone_email_template:POST:/email-templates/{template_id}/clone": {
+      "fingerprint": "1dcbb88f293af2902b946f1ec3eaefafa694af539e3d149a4ca6fa8a2fb9a84d",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.clone"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:complete_customer_call:POST:/customers/{customer_id}/activities/calls/{call_id}/complete": {
+      "fingerprint": "4a99c8504e68c18f4a97b88325e1ad66e827193bbb3617012decbefe9c1f3512",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.complete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:complete_customer_task:POST:/customers/{customer_id}/activities/tasks/{task_id}/complete": {
+      "fingerprint": "6fa6c75cda45a552150404e29cec7702c848df72d3ef6db270460aa3501d5669",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.tasks.complete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:complete_lead_activity:POST:/leads/{lead_id}/activities/{kind}/{activity_id}/complete": {
+      "fingerprint": "25ac04247230a5e14559ca9d2792d8494a8e2709014acdadc72dda6d4ced7f2f",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.complete",
+        "activities.tasks.complete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:complete_site_update_run_status:GET:/updates/complete-site-update-runs/{run_id}/status": {
+      "fingerprint": "48a62e18b690c94d673257252f5b4dc72893e07e74eb056109e895bae3da0bbf",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.updates.complete_status"
+      ],
+      "boundary": [
+        "complete_status"
+      ],
+      "reader_method": "complete_status"
+    },
+    "app/api/routes/web.py:confirm_invoice_emails:POST:/finance/invoices/email-confirm": {
+      "fingerprint": "211b02ae25c3252a2c47d3dd836c882c2672ffad4d2a5a51c843781d5b9ba1c7",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:contact_detail_page:GET:/contacts/{contact_id}": {
+      "fingerprint": "c87c45bc7121599d760b1ff03d8d22928fdca1eaf66d02e3689a8aac4a9faa01",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "contacts.read"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "contact_detail"
+      ],
+      "reader_method": "contact_detail"
+    },
+    "app/api/routes/web.py:contacts_page:GET:/contacts": {
+      "fingerprint": "a08af8b1a81b14c28c3072b25b9b80649fedd2afcc574e346cbaeeb91e828384",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "contacts.list"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "contact_entries"
+      ],
+      "reader_method": "contact_entries"
+    },
+    "app/api/routes/web.py:create_case_page:POST:/cases": {
+      "fingerprint": "d97c1216f970bd067f68af5d77ea2be27ef288dd226616cdda2c9d433f530c41",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_contact_page:POST:/contacts": {
+      "fingerprint": "8fd3efb81870c82a68b528483c33ce531cc2704d407d15ece24b5e1d8b8fec47",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "contacts.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_contact_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_customer_communication_note:POST:/customers/{customer_id}/communications/notes": {
+      "fingerprint": "694af123b5978a72ff5cc502463dbfed7aa9767fc166ff965570114c2555f4e9",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "customers.notes.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_customer_page:POST:/customers": {
+      "fingerprint": "8edbc83be59c12bf1e5dc79dc09d953f62805f946b3e819d44fd7db2d970bbe9",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "customers.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_email_template_folder:POST:/email-template-folders": {
+      "fingerprint": "ea26c347d7d4f307f9cc4aad3f8f2e4f2a633444f70546953b2837a8b54afe20",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.folders.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_finance_article_page:POST:/finance/articles": {
+      "fingerprint": "df3cb86ce5deea4425bcc19b583e8e285df51587d83fbaa6f7b8e6a2acdc14ea",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.articles.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_finance_document_page:POST:/finance/{module_key}": {
+      "fingerprint": "c9be517b15a7693a39bf02e500ec60d7627221c6f5f2ea815fbfc70195fab57b",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.orders.create",
+        "finance.invoices.create",
+        "finance.dunnings.create",
+        "finance.recurring-invoices.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_finance_gateway"
+      ]
+    },
+    "app/api/routes/web.py:create_finance_offer_page:POST:/finance/offers": {
+      "fingerprint": "9be47a5edc10decbe6f8b65fcf743f7e8c4f532f5a137f2dc994067c23f9525c",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.offers.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_finance_position_preset:POST:/finance/position-presets": {
+      "fingerprint": "b7c52b4c849b9108f1ea97d2a85321ad816ae249466deb1a4139f9f12f442a2f",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "finance.presets.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_lead_activity:POST:/leads/{lead_id}/activities/{kind}": {
+      "fingerprint": "27af47f98e80429c8baa6e2ec7684ddb7c7c0b9c26dfb59e526343cde3b684d9",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.create",
+        "activities.tasks.create",
+        "activities.meetings.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_lead_note:POST:/leads/{lead_id}/notes": {
+      "fingerprint": "2e482ebe9bd47aa99f7f7fa3d61864def41b692f298b40e4d59142c957bd0893",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "leads.notes.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_lead_page:POST:/leads": {
+      "fingerprint": "d92719474013cead4ebbb45752e3c7c0e49a03b3040e8d6924f7cb5b63a9f41f",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "leads.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:create_mailbox_case:POST:/emails/cases": {
+      "fingerprint": "135d6b345fb5cb37e70a5018e54fc70ed8ef5941c3eab6cd5709fd89047674ac",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:create_selected_site_users:POST:/users/bulk/create": {
+      "fingerprint": "9ea0f4e01988a3697ad16f03dafafa6823476185f051c57eaa36590884e4a189",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.bulk_create"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:create_site_user_from_detail:POST:/sites/{site_id}/users": {
+      "fingerprint": "fd1defbd1a4ff6834fc7a77e053ef38ee2cf55e339b2315181cb0ec871481a7d",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.create"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:create_user_on_one_site:POST:/users/actions/create-site": {
+      "fingerprint": "e86a7c5cc6f11cc713778d87075700cd6e806114b758d3bf4721e952ae47cc44",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.create"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:customer_activity_permalink:GET:/activities/{activity_kind}/{activity_id}": {
+      "fingerprint": "62e7600df11d65fc45f23a8f75b7c27a848a389aa34d129b68cc021e47045be0",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "activities.calls.read",
+        "activities.tasks.read",
+        "activities.meetings.read"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "activity_record"
+      ],
+      "reader_method": "activity_record"
+    },
+    "app/api/routes/web.py:customer_case_edit_compose:GET:/customers/{customer_id}/cases/{case_id}/compose": {
+      "fingerprint": "18b157df2a019814b6a4f159eb835bfd320b89ea0bcea117c159375dcdd8fb3a",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "cases.read"
+      ],
+      "boundary": [
+        "case_detail"
+      ],
+      "reader_method": "case_detail"
+    },
+    "app/api/routes/web.py:customer_contact_detail_page:GET:/customers/{customer_id}/contacts/{contact_id}": {
+      "fingerprint": "c5d18cc9d0d192b9a0f0c71a535fd434d959616ff10d365d70206fc74cf580ff",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "contacts.read"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "contact_detail"
+      ],
+      "reader_method": "contact_detail"
+    },
+    "app/api/routes/web.py:customer_detail_page:GET:/customers/{customer_id}": {
+      "fingerprint": "b0d91a95d06a0f90db57a71596629a8a8e65a340d9318c070cfe370e7be9b762",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "customers.read"
+      ],
+      "boundary": [
+        "read_customer_detail"
+      ],
+      "reader_method": "customer_detail"
+    },
+    "app/api/routes/web.py:customer_suggestions:GET:/customers/suggestions": {
+      "fingerprint": "bc3a46497d72e3bee40be4c168d6fa9ed108e7f30b36c9e929e82642adf50d18",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "customers.suggestions"
+      ],
+      "boundary": [
+        "read_customer_suggestions"
+      ],
+      "reader_method": "customer_suggestions"
+    },
+    "app/api/routes/web.py:customers_page:GET:/customers": {
+      "fingerprint": "790147b7170498301203f4643f95e1a4b3a5b1745d81cb2be9b4a1171bf1f2b5",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "customers.list"
+      ],
+      "boundary": [
+        "customer_entries"
+      ],
+      "reader_method": "customer_entries"
+    },
+    "app/api/routes/web.py:dashboard:GET:/": {
+      "fingerprint": "0e088afaadab6142cb9b3785248d504003f5400eb5b82790f228ba57f86d0478",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "websites.dashboard"
+      ],
+      "boundary": [
+        "dashboard_data"
+      ],
+      "reader_method": "dashboard_data"
+    },
+    "app/api/routes/web.py:delete_case_from_hub:POST:/cases/{case_id}/delete": {
+      "fingerprint": "7d348fee9e8db230aa274c927ea8aa784f5b7575584811e50409a4e87655a40d",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_contact_from_hub:POST:/contacts/{contact_id}/delete": {
+      "fingerprint": "9b1ce02c07f153272d294a59c9bc0e4ad4b4a5ecf1c7697ab78ba9ef1df40b10",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "contacts.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_contact_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_customer_call:POST:/customers/{customer_id}/activities/calls/{call_id}/delete": {
+      "fingerprint": "02eb17d9325c6b24a4a5b1e57c0cad111eaac087718a4b899afc602e7621c2ac",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_customer_case:POST:/customers/{customer_id}/cases/{case_id}/delete": {
+      "fingerprint": "c7abdcc24247f3586caec6a2a47ecbdc412b80ad8241400fbcbe840f70bdcbf3",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_customer_communication_note:POST:/customers/{customer_id}/communications/notes/{note_id}/delete": {
+      "fingerprint": "8c8ce18882273d72b9e6149e1a27e5b3e9166ce189c03886927412b3ae06fa3f",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "customers.notes.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_customer_meeting:POST:/customers/{customer_id}/activities/meetings/{meeting_id}/delete": {
+      "fingerprint": "c16176ea47506ea82038d355dfc3e483803f257263c4d383a28ebd0aa5a12c1d",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.meetings.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_customer_task:POST:/customers/{customer_id}/activities/tasks/{task_id}/delete": {
+      "fingerprint": "3d0eef2f7495016f62fcc4038cd2b2385f7a310f6663bee3f397e953e6833171",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.tasks.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_email_template:POST:/email-templates/{template_id}/delete": {
+      "fingerprint": "3a602f16c32e7f280699e0eb1a115c98718521ea2383bac37332c899c45ed49b",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_email_template_folder:POST:/email-template-folders/{folder_id}/delete": {
+      "fingerprint": "c35cf819c74149914363336a926a595af28e97d24904e46075ab0afade47e7ba",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.folders.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_email_templates:POST:/email-templates/bulk/delete": {
+      "fingerprint": "3fca41dcafa3051b7fd720f3751bfb11d8f6abeaadd4080090af26b31baeee22",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_finance_article:POST:/finance/articles/{article_id}/delete": {
+      "fingerprint": "bf0c64e9305d2a95e181d3a15d051d4c939322bb2483aed3c34d6c6fb9b2a046",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.articles.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_finance_document:POST:/finance/{module_key}/{document_id}/delete": {
+      "fingerprint": "50f83a2934c4ce03b81b64f013ada091924e575642c34ac8f746d3f70da21de3",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.orders.delete",
+        "finance.invoices.delete",
+        "finance.dunnings.delete",
+        "finance.recurring-invoices.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_finance_gateway"
+      ]
+    },
+    "app/api/routes/web.py:delete_finance_offer:POST:/finance/offers/{offer_id}/delete": {
+      "fingerprint": "cedc1d500e734d858c23e667237c88888b306831479056e4c2980a3615323015",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.offers.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_finance_position_preset:POST:/finance/position-presets/{preset_id}/delete": {
+      "fingerprint": "6bf8d52568ad8922d78ff43c9d47cbc5f16030f5f45054fef4e16408930f7915",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "finance.presets.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_lead_activity:POST:/leads/{lead_id}/activities/{kind}/{activity_id}/delete": {
+      "fingerprint": "18a733e80fb96e66640d569a825bca48de100e99a82fd8eff4c9484943b170a4",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.delete",
+        "activities.tasks.delete",
+        "activities.meetings.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_lead_from_hub:POST:/leads/{lead_id}/delete": {
+      "fingerprint": "dd65502709b080f62106103850d16b9a2692561e0fb06d6675b06e590e42ef7e",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "leads.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:delete_lead_note:POST:/leads/{lead_id}/notes/{note_id}/delete": {
+      "fingerprint": "1e2d96b45653df4d4a6e5e6c8e40166ad4ec06335924a57fbe31b6aed77528f8",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "leads.notes.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_mailbox_case:POST:/emails/cases/{case_id}/delete": {
+      "fingerprint": "0a900ef84388ab4204981e418ac1632ea68ae5ab5ad167f99ad168c95378c33e",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_site_user_from_detail:POST:/sites/{site_id}/users/{user_id}/delete": {
+      "fingerprint": "bfa9dbe9a46a5e02e373f4f9cd2c2df848b46a11c7531fdb980c8693c7de9f76",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.delete"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:direct_update_batch_status:GET:/updates/direct-update-batches/{batch_id}/status": {
+      "fingerprint": "31f17797e880364bea4225d0e8d75016b3181f4c92f0d5c951c7deaac4b71bbf",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.updates.batch_status"
+      ],
+      "boundary": [
+        "batch_status"
+      ],
+      "reader_method": "batch_status"
+    },
+    "app/api/routes/web.py:display_customer_communication_email_image:GET:/customers/{customer_id}/communications/emails/{email_id}/images/{source_url_hash}": {
+      "fingerprint": "829f027dbfeca9868a9ca1b7af9c70b2a2b3a3ead26b969debd1a3626fbea94b",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:download_customer_communication_attachment:GET:/customers/{customer_id}/communications/emails/{email_id}/attachments/{attachment_id}": {
+      "fingerprint": "5dd4ddd1e4ffc78e0f4dc5de31e1506cc79d18f1888f9f0073301a91f9f2bd30",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.attachments.read"
+      ],
+      "boundary": [
+        "download_shared_email_attachment"
+      ],
+      "reader_method": "download_attachment"
+    },
+    "app/api/routes/web.py:download_scheduled_mailbox_attachment:GET:/emails/scheduled/{scheduled_email_id}/attachments/{attachment_id}": {
+      "fingerprint": "4dfb5cfaf8f7e71bc4b42a753cd2facab59c9796091759cf5cb569b4ee507836",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.attachments.read"
+      ],
+      "boundary": [
+        "download_shared_email_attachment"
+      ],
+      "reader_method": "download_attachment"
+    },
+    "app/api/routes/web.py:download_unassigned_mailbox_attachment:GET:/emails/unassigned/{email_id}/attachments/{attachment_id}": {
+      "fingerprint": "f1cab87667c0fdf61577650eab182078b163ba0eaf0cfe7f5936fd2ef44b7818",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.attachments.read"
+      ],
+      "boundary": [
+        "download_shared_email_attachment"
+      ],
+      "reader_method": "download_attachment"
+    },
+    "app/api/routes/web.py:email_template_management_page:GET:/email-templates": {
+      "fingerprint": "7ae95172b135b0c885c24dc9322b60b34ad15fa18079e37665bc40bc096e25ee",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.templates.list"
+      ],
+      "boundary": [
+        "template_library"
+      ],
+      "reader_method": "template_library"
+    },
+    "app/api/routes/web.py:execute_selected_plugin_updates:POST:/updates/execute-selected-plugins": {
+      "fingerprint": "bd9214b540ed5df0f80eb3f8bff7409b08cc7ff48cfba19557af10b77b60b6f7",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.start",
+        "wordpress.updates.site"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:execute_selected_plugin_updates:POST:/updates/execute-selected-updates": {
+      "fingerprint": "bd9214b540ed5df0f80eb3f8bff7409b08cc7ff48cfba19557af10b77b60b6f7",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.start",
+        "wordpress.updates.site"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:execute_site_backup_action_from_detail:POST:/sites/{site_id}/backup-actions": {
+      "fingerprint": "9d6463137f436f9bea22a1206ba3227cca55ea2ad1dcf8f76448f7b7be76fb3c",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.backups.refresh",
+        "wordpress.backups.create",
+        "wordpress.backups.delete"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:finance_article_detail_page:GET:/finance/articles/{article_id}": {
+      "fingerprint": "7f02f95e94db0acdab874d240015d00d339289a6531764d954e0a5f2bc106d68",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.read"
+      ],
+      "boundary": [
+        "_finance_read"
+      ],
+      "reader_method": "finance_detail"
+    },
+    "app/api/routes/web.py:finance_articles_page:GET:/finance/articles": {
+      "fingerprint": "702bf98ed9777d77d39ee46bf12bb55e1d09cd96a83ad62c3410a47a1788c7f6",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.list"
+      ],
+      "boundary": [
+        "finance_entries"
+      ],
+      "reader_method": "finance_entries"
+    },
+    "app/api/routes/web.py:finance_document_detail_page:GET:/finance/{module_key}/{document_id}": {
+      "fingerprint": "711c389a5771181d78bed0252403fc727e9afc4baa73c7e3149bbff32e5153ac",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.read"
+      ],
+      "boundary": [
+        "_finance_read"
+      ],
+      "reader_method": "finance_detail"
+    },
+    "app/api/routes/web.py:finance_documents_page:GET:/finance/{module_key}": {
+      "fingerprint": "3b15f77c52422b745066503396a81908332ae2d0be0e3d15faafcca4cbb6d6bc",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.list"
+      ],
+      "boundary": [
+        "finance_entries"
+      ],
+      "reader_method": "finance_entries"
+    },
+    "app/api/routes/web.py:finance_generated_pdf_preview:GET:/finance/{document_type}/{document_id}/generated-pdf": {
+      "fingerprint": "dffdc190313939f539b037f460703ffd5b3761fe4f51b200f019a42e5f2bef6b",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "finance.pdf.read"
+      ],
+      "boundary": [
+        "load_finance_pdf"
+      ],
+      "reader_method": "load_pdf"
+    },
+    "app/api/routes/web.py:finance_generated_pdf_status:GET:/finance/{document_type}/{document_id}/generated-pdf/status": {
+      "fingerprint": "71b04ea741a12c8380b3d062d1d7fdf450c5e1d8b38879f6f1f4971b8e69fc7e",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "finance.pdf.status"
+      ],
+      "boundary": [
+        "finance_pdf_status"
+      ],
+      "reader_method": "generated_status"
+    },
+    "app/api/routes/web.py:finance_invoice_pdf_preview:GET:/finance/invoices/{invoice_id}/pdf": {
+      "fingerprint": "0533157bdcf32a41ec616f38977223c490a2ec44ab9e56a079a68946ba2fd7b4",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "finance.pdf.read"
+      ],
+      "boundary": [
+        "load_finance_pdf"
+      ],
+      "reader_method": "load_pdf"
+    },
+    "app/api/routes/web.py:finance_offer_detail_page:GET:/finance/offers/{offer_id}": {
+      "fingerprint": "d103915b9b1fb0c9c75a680a6b4f15135d2b7f4aef7c8ec6898ef24caf726e25",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.read"
+      ],
+      "boundary": [
+        "_finance_read"
+      ],
+      "reader_method": "finance_detail"
+    },
+    "app/api/routes/web.py:finance_offers_page:GET:/finance/offers": {
+      "fingerprint": "f6c16875a53b809809e9c6d6a11fbe83478f57cd1de3e5f5255cc215f8ce53ae",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.list"
+      ],
+      "boundary": [
+        "finance_entries"
+      ],
+      "reader_method": "finance_entries"
+    },
+    "app/api/routes/web.py:finance_order_pdf_preview:GET:/finance/orders/{order_id}/pdf": {
+      "fingerprint": "ce06dd03cfa8fa560f074aca9f9df7940ea1d08db3a322cf1fd0778e1f591796",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "finance.pdf.read"
+      ],
+      "boundary": [
+        "load_finance_pdf"
+      ],
+      "reader_method": "load_pdf"
+    },
+    "app/api/routes/web.py:finance_page:GET:/finance": {
+      "fingerprint": "eb07dde3761e659f32892654f9f0f64e9ecf5735ba0d5eba18b0cc7e23cd9f08",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:fleet_refresh_run_status:GET:/updates/refresh-runs/{run_id}/status": {
+      "fingerprint": "8dcefe17ff807677fee2a18dab5d785a60c882da67cdc57f643c0ea82296a5c4",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.fleet.status"
+      ],
+      "boundary": [
+        "fleet_status"
+      ],
+      "reader_method": "fleet_status"
+    },
+    "app/api/routes/web.py:global_search_suggestions:GET:/search/suggestions": {
+      "fingerprint": "dbe6408045589ec8b9be25428d7dd61544391c8a8869fdebce4364f4411c57c1",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "hub.search"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "query"
+      ],
+      "reader_method": "HubGlobalSearchService"
+    },
+    "app/api/routes/web.py:invoice_email_batch_status:GET:/finance/invoices/email-batches/{batch_id}": {
+      "fingerprint": "0a3417e800c75e77d5ac952f7ca9bb59a3283e9ada90d1423b42fbadd4e9825c",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:lead_detail_page:GET:/leads/{lead_id}": {
+      "fingerprint": "a56dbb597d371cdde5de902da715ab23c9d60d2367bacd3dc309e695be4c0e08",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "leads.read"
+      ],
+      "boundary": [
+        "read_lead_detail"
+      ],
+      "reader_method": "lead_detail"
+    },
+    "app/api/routes/web.py:leads_page:GET:/leads": {
+      "fingerprint": "3424e51f3f041d463a8314923942ebe3ab81a9964627a7a18714c6b80ba91502",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "leads.list"
+      ],
+      "boundary": [
+        "lead_entries"
+      ],
+      "reader_method": "lead_entries"
+    },
+    "app/api/routes/web.py:link_customer_email_to_case:POST:/cases/email-links": {
+      "fingerprint": "c67a540bb19e845c83d19693e7f22bd20a4958356e9775724622e1349c024c0a",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.link_email"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:link_customer_site:POST:/customers/{customer_id}/link-site": {
+      "fingerprint": "32903cf64f7656b761932ad503978ba762223af88311819e1cc02184481885e5",
+      "state": "shared",
+      "reason": "Local website inventory and customer linking use common permission-scoped readers/domain operations. Remote WordPress mutations remain pending.",
+      "contracts": [
+        "websites.link_customer"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:load_customer_communication_email:POST:/customers/{customer_id}/communications/emails/{email_id}/load": {
+      "fingerprint": "fb7e8bb42dbd4bcc7f1ff839e3e2ec2bbe884a2a96096ba125c9c165fa019242",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:load_customer_communication_email_template:GET:/customers/{customer_id}/communications/email-templates/{template_id}": {
+      "fingerprint": "e5ed5d899b7e231ee3ae73c566a3ca97728a07b7bb7d10b3e6875f4c35d0f33c",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "emails.templates.render",
+        "emails.drafts.from_template"
+      ],
+      "boundary": [
+        "render_template"
+      ],
+      "reader_method": "render_template"
+    },
+    "app/api/routes/web.py:load_linked_mailbox_email_content:POST:/emails/linked/{customer_id}/{email_id}/load": {
+      "fingerprint": "bd03c42e81a04e1d138dd603b0b27f359d51e7008e8abf73359dbcec14710485",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:load_mailbox_compose_image:GET:/emails/compose/images/{token}": {
+      "fingerprint": "ac8bc26cb0d8e876409cf2e982cd3044e04090cb79cf25f3c05cf89ff830d0ff",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:mailbox_case_compose:GET:/emails/cases/compose": {
+      "fingerprint": "0ba9cec5eb84e63eadb7afaf7f4a6244be80d0e5258f647eb660ca95107d12e9",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.cases.context"
+      ],
+      "boundary": [
+        "mailbox_case_context"
+      ],
+      "reader_method": "mailbox_case_context"
+    },
+    "app/api/routes/web.py:mailbox_case_edit_compose:GET:/emails/cases/{case_id}/compose": {
+      "fingerprint": "b396e54416a1940ff3a57b6e087496fd795a0e50d35174e40cb5092e92861161",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.cases.context"
+      ],
+      "boundary": [
+        "mailbox_case_context"
+      ],
+      "reader_method": "mailbox_case_context"
+    },
+    "app/api/routes/web.py:mailbox_compose_customer_contact_recipients:GET:/emails/compose/customers/{customer_id}/recipients": {
+      "fingerprint": "523a2869f46866f7a6af7ea96762fe62336e756121277f7281c49d5b052bd6cc",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.recipients.customer"
+      ],
+      "boundary": [
+        "email_recipients"
+      ],
+      "reader_method": "recipients"
+    },
+    "app/api/routes/web.py:mailbox_compose_options:GET:/emails/compose/options": {
+      "fingerprint": "88f4315e7dfb1b8a730673f6505be6ee8453ae5d39f0ad07e93d2fb60d71125b",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.compose.options"
+      ],
+      "boundary": [
+        "email_compose_options"
+      ],
+      "reader_method": "compose_options"
+    },
+    "app/api/routes/web.py:mailbox_compose_recipients:GET:/emails/compose/recipients": {
+      "fingerprint": "784e70128c7767c77101f151a2ce7e1f712ecfeffb378d4d4b9c3bd0956ac413",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.recipients.search"
+      ],
+      "boundary": [
+        "email_recipients"
+      ],
+      "reader_method": "recipients"
+    },
+    "app/api/routes/web.py:mailbox_compose_template_preview:GET:/emails/compose/templates/{template_id}": {
+      "fingerprint": "04fffd235dfe706ff4137ca73e953b7dcf138f038c2f5ceb6c0acc5bfd623221",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "emails.templates.render",
+        "emails.drafts.from_template"
+      ],
+      "boundary": [
+        "render_template"
+      ],
+      "reader_method": "render_template"
+    },
+    "app/api/routes/web.py:mailbox_draft_compose_context:GET:/emails/drafts/{draft_id}/compose-context": {
+      "fingerprint": "1e262a266073f9a2d5d9cadec948e7ba96a978b35645b90e8e23a6fa0f969459",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.drafts.read"
+      ],
+      "boundary": [
+        "get_draft_compose_context"
+      ],
+      "reader_method": "get_draft_compose_context"
+    },
+    "app/api/routes/web.py:mailbox_folder_list:GET:/emails/list": {
+      "fingerprint": "3e20f29e5e72ff442af54e902266ba30ebce920f9f45271576c6647e3130a433",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.list"
+      ],
+      "boundary": [
+        "get_folder_view"
+      ],
+      "reader_method": "get_folder_view"
+    },
+    "app/api/routes/web.py:mailbox_folder_panel:GET:/emails/folder": {
+      "fingerprint": "4ecbd1511d13ae0cebf4f2b9fffd163b62a87e7ccc86033836351f31409da795",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.list"
+      ],
+      "boundary": [
+        "get_folder_view"
+      ],
+      "reader_method": "get_folder_view"
+    },
+    "app/api/routes/web.py:mailbox_linked_email_compose_context:GET:/emails/linked/{customer_id}/{email_id}/compose-context": {
+      "fingerprint": "8f982ba41948a723ffe73d8a7dac2059f3e34a52a87a419408522f30a2f112df",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.compose.preview"
+      ],
+      "boundary": [
+        "compose_context"
+      ],
+      "reader_method": "compose_context"
+    },
+    "app/api/routes/web.py:mailbox_page:GET:/emails": {
+      "fingerprint": "3f3097e983b5a560e05a04d84c8fd4f102a46ec7ac004675b16e7ee60ad075fb",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.list"
+      ],
+      "boundary": [
+        "get_view"
+      ],
+      "reader_method": "get_folder_view"
+    },
+    "app/api/routes/web.py:mailbox_scheduled_email_compose_context:GET:/emails/scheduled/{scheduled_email_id}/compose-context": {
+      "fingerprint": "256f4cbc539b0fcc1c62d4b6a64a5439f6d6d0c97c93460d0a247ecc24b81091",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.scheduled.read"
+      ],
+      "boundary": [
+        "scheduled_context"
+      ],
+      "reader_method": "scheduled_context"
+    },
+    "app/api/routes/web.py:mailbox_selected_pane:GET:/emails/selected": {
+      "fingerprint": "278c10212b055574dcf53396be3c9efb647a688a8c8acb038d09d98d4b8eae7c",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.read"
+      ],
+      "boundary": [
+        "get_selected_message"
+      ],
+      "reader_method": "get_selected_message"
+    },
+    "app/api/routes/web.py:mailbox_status:GET:/emails/status": {
+      "fingerprint": "75a9ce829715dfe575bc3483a7cb20a14746b5a4930fbc752a52d50536eb9467",
+      "state": "shared",
+      "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
+      "contracts": [
+        "emails.status"
+      ],
+      "boundary": [
+        "mailbox_status_data"
+      ],
+      "reader_method": "mailbox_status_data"
+    },
+    "app/api/routes/web.py:mailbox_unassigned_email_compose_context:GET:/emails/unassigned/{email_id}/compose-context": {
+      "fingerprint": "a9252cfcb5ab321874a05a13f14b14abf904d6db8b9cb7d5ff45b25793af177d",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "emails.compose.preview"
+      ],
+      "boundary": [
+        "compose_context"
+      ],
+      "reader_method": "compose_context"
+    },
+    "app/api/routes/web.py:mark_customer_communication_email_read:POST:/customers/{customer_id}/communications/emails/{email_id}/read": {
+      "fingerprint": "6a447ba8f3a71feab33994fa60d1e7ee07ecb72f39044d7449fc135d7f684945",
+      "state": "shared",
+      "reason": "UI and confirmed agent enter the same operation; permissions rechecked. Scheduled cancellation defers attachment deletion and worker notification until outer commit; sending/planning remain unavailable.",
+      "contracts": [
+        "emails.mailbox.mark_read"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:mark_unassigned_mailbox_email_read:POST:/emails/unassigned/{email_id}/read": {
+      "fingerprint": "b57148d6deede9a7a433ddbe544c2943d30efb4834a577cd4a49d2c9cff38894",
+      "state": "shared",
+      "reason": "UI and confirmed agent enter the same operation; permissions rechecked. Scheduled cancellation defers attachment deletion and worker notification until outer commit; sending/planning remain unavailable.",
+      "contracts": [
+        "emails.mailbox.mark_read"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:meetings_page:GET:/meetings": {
+      "fingerprint": "7d9c211c566991b82d97cc288a7978ef04132b7266e3377decbca23958910be9",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "activities.meetings.list"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "activity_entries"
+      ],
+      "reader_method": "activity_entries"
+    },
+    "app/api/routes/web.py:module_layout_page:GET:/module-layouts/{layout_key}": {
+      "fingerprint": "c3cbceadb9f32d822388f5aaf72075ac6b6af69b8223207ed5ef6ddb9720db06",
+      "state": "shared",
+      "reason": "Reviewed native authorized reader shared by UI and bounded catalog query. Layouts remain admin-only; cases enforce customer relation; local PDF reads/downloads never generate or fetch remote files. Binary reuse uses finance.pdf.file artifacts.",
+      "contracts": [
+        "layouts.read"
+      ],
+      "boundary": [
+        "layout_view"
+      ],
+      "reader_method": "layout_view"
+    },
+    "app/api/routes/web.py:move_email_templates:POST:/email-templates/bulk/move": {
+      "fingerprint": "8e8d893e132df90dffd831db8c932cf3eb972c3de1e1506f44d0ddf0612e001c",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.move"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:new_case_page:GET:/cases/new": {
+      "fingerprint": "17882453ec2f6015898c851f460b7a0627100e4f0ee305d50441a7ef2ee8b9be",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_contact_page:GET:/contacts/new": {
+      "fingerprint": "5f23accb8ce3c907e01f58bbde60205839f93380de3be08b37eccdfd73152f4b",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_customer_page:GET:/customers/new": {
+      "fingerprint": "7f6b58d58226aa6119a73831ac0e90046f48429e602b88c78db32122a579515e",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_finance_article_page:GET:/finance/articles/new": {
+      "fingerprint": "c99a6751a270e8ff3a599714e944377d02a3a5e21a9df37e601863c80f2134c7",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_finance_document_page:GET:/finance/{module_key}/new": {
+      "fingerprint": "904c2211bee4fc9f5cef80e79e86039d57586267a430b88fa6a4bdb83387c45a",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_finance_offer_page:GET:/finance/offers/new": {
+      "fingerprint": "c8ef01c634980de54df8544baed22644f0c331278f817ac724f1e12e99774598",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:new_lead_page:GET:/leads/new": {
+      "fingerprint": "0050219fe1751748e0b337c1c0cd906ae3f1425471cce48fcadd55aeaad53ce7",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:open_site_wordpress_admin:POST:/sites/{site_id}/open-wordpress-admin": {
+      "fingerprint": "e5f0634bf045f57d82015dfb6a849f8fc7a7c82286354aa69b54d259647b2ab6",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:plugin_installation_catalog:GET:/plugin-installations/catalog": {
+      "fingerprint": "d7529e108ff6f93da1c30d8dbc694ab60e274b0381eec575845819e4941063f5",
+      "state": "shared",
+      "reason": "UI/API and agent use the same access-checked WordPress domain reader.",
+      "contracts": [
+        "wordpress.plugins.catalog"
+      ],
+      "boundary": [
+        "plugin_catalog"
+      ],
+      "reader_method": "plugin_catalog"
+    },
+    "app/api/routes/web.py:plugin_installations_page:GET:/plugin-installations": {
+      "fingerprint": "42a6b7ac27e42995918699d6f30bad3df44494d4cc2d3baaab1aa09479ce86a7",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.plugins.batch_status"
+      ],
+      "boundary": [
+        "maintenance_batch"
+      ],
+      "reader_method": "maintenance_batch"
+    },
+    "app/api/routes/web.py:prepare_selected_user_deletions:POST:/users/bulk/delete/prepare": {
+      "fingerprint": "8aeab0d20387934c247d05a26f7261947cdbd304b0008976834259a89755e99b",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.deletion_prepare"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:queue_plugin_installation:POST:/plugin-installations/queue": {
+      "fingerprint": "3b99ce2d06c94fa4a025e41f6c032be1396aa6db7449ed9227f9066453976c44",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.plugins.install"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:refresh_site_backup_from_detail:POST:/sites/{site_id}/backup-refresh": {
+      "fingerprint": "9900b4f0e9e5d80d74eebc05f512d9f02fad32464732778a2a80b5d87b3142c9",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.backups.refresh"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:refresh_site_from_detail:POST:/sites/{site_id}/refresh": {
+      "fingerprint": "ba2964097de1acdfef08d4b10fb0ab7922c21c562f79021bd10499b3325e74ae",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.inventory.refresh",
+        "wordpress.updates.refresh"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:refresh_site_users_from_detail:POST:/sites/{site_id}/users/refresh": {
+      "fingerprint": "c2eb05fa81837cb581d9635e1f341519219410a4aaea0e8013e8331aa69c2c1a",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.refresh"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:regenerate_finance_pdf:POST:/finance/{document_type}/{document_id}/generated-pdf": {
+      "fingerprint": "848736de1bca3ec71bdf9fb0fe40d19cb57b071ca39b1a1d3e262a7c423850a0",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "finance.pdf.generate"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:remove_empty_test_registration:POST:/sites/{site_id}/remove-empty-test-registration": {
+      "fingerprint": "1327366d9ed2a51f0e662430d1edf907ea29c08e80f09aec613ed493ee1bfdd1",
+      "state": "shared",
+      "reason": "UI and agent use the same transactional domain operation. Explicit targets, authorization, commit-before-worker and current-rights recheck are preserved.",
+      "contracts": [
+        "websites.remove_test_registration"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:review_invoice_emails:POST:/finance/invoices/email-review": {
+      "fingerprint": "b3dc8bfed568adee3826d1abb153a30dffd1898fa49ec580dad05db346b977a9",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:rewrite_selected_mailbox_email_text:POST:/emails/ai/rewrite": {
+      "fingerprint": "835a3ba3b45e84e616079762cc278cce1c600d413cd07dbf9e76bfa378bf7091",
+      "state": "human_only",
+      "reason": "Conversational editor orchestration: user-selected text sent to the configured model for a reviewable replacement, without storing/sending an email. The agent already generates draft text; no recursive model-calling tool is needed. Draft persistence remains shared."
+    },
+    "app/api/routes/web.py:save_mailbox_draft:POST:/emails/drafts": {
+      "fingerprint": "2c3bd18292a769f02fae70c70900ad14817540161cc3e66f2e41b9012793839c",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.drafts.save"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:schedule_calendar_activity:POST:/calendar/activities": {
+      "fingerprint": "002b42bc7f320ebb9179ba9db2c9e3962af2a3a0bd700378398983574a740fc2",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.create",
+        "activities.tasks.create",
+        "activities.meetings.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:schedule_customer_call:POST:/customers/{customer_id}/activities/calls": {
+      "fingerprint": "c025535e66e77f4e71bed71bb255021626046dcc7ed1eccff4585164f9cc42b3",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:schedule_customer_meeting:POST:/customers/{customer_id}/activities/meetings": {
+      "fingerprint": "943b4e608bbe9afc2f8e307fff934e854a873e19b911cf6cf0c004b38c6f23c3",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.meetings.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:schedule_customer_task:POST:/customers/{customer_id}/activities/tasks": {
+      "fingerprint": "0931bc4a7d1527d4a0cf3c8d7071b3497825c243485030c43882e4f9dc6f8ef1",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.tasks.create"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:send_customer_communication_email:POST:/customers/{customer_id}/communications/emails": {
+      "fingerprint": "abdf42364e209563ae659f1662b32a312bbc9ebe834f1d5a0ba3c21ad3e81cfe",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:send_direct_mailbox_email:POST:/emails/send": {
+      "fingerprint": "a860db463421c15f750a327c550254a330ce6ac14a6f923b35fcea15b664ad76",
+      "state": "human_only",
+      "reason": "Sending/scheduling stays human-only. Reviewed lead ID propagation: current access and parent lock before send/schedule, scheduled FK plus sent-mail JSON link; shared deletion guard prevents pending delivery and removes retained mail references."
+    },
+    "app/api/routes/web.py:deletion_preview:GET:/deletion-preview": {
+      "fingerprint": "9662653ac69a1141292986254073b67a1d467fff3de2bf67ae6490ee521ecd30",
+      "state": "shared",
+      "reason": "Read-only consequence preview for native confirmation dialogs and the agent. Explicit route whitelist and current record delete permissions; lead deletion is rechecked transactionally in the shared domain service.",
+      "contracts": [
+        "records.deletion_preview"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "query"
+      ]
+    },
+    "app/api/routes/web.py:send_scheduled_mailbox_email_now:POST:/emails/scheduled/{scheduled_email_id}/send-now": {
+      "fingerprint": "228fbbca64b73ee1384e1b031500340895cd3eb0dc35217ba73430cefedb4681",
+      "state": "human_only",
+      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+    },
+    "app/api/routes/web.py:show_fresh_backups:POST:/backups/fresh-show": {
+      "fingerprint": "3f10ae7713b99bdd0b24d87c04a37ad4b824e1e5b00633968cffb8eaae98abf5",
+      "state": "shared",
+      "reason": "UI and agent use the same transactional domain operation. Explicit targets, authorization, commit-before-worker and current-rights recheck are preserved.",
+      "contracts": [
+        "wordpress.fleet.start"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:show_fresh_updates:POST:/updates/fresh-show": {
+      "fingerprint": "3ea1b469a2cfa6e60731c6cfa1e0884ac11c2c2da4ca371c82db5631449499f0",
+      "state": "shared",
+      "reason": "UI and agent use the same transactional domain operation. Explicit targets, authorization, commit-before-worker and current-rights recheck are preserved.",
+      "contracts": [
+        "wordpress.fleet.start"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:show_fresh_users:POST:/users/fresh-show": {
+      "fingerprint": "d552d2f790b0dc1309bd4b287830cd8802ef6382f167323a2d9e0b23d72b1738",
+      "state": "shared",
+      "reason": "UI and agent use the same transactional domain operation. Explicit targets, authorization, commit-before-worker and current-rights recheck are preserved.",
+      "contracts": [
+        "wordpress.fleet.start"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:site_detail_page:GET:/sites/{site_id}": {
+      "fingerprint": "a5f0c0690a414dcd0a2098131943f0c400a9a74bc55d72e2500ca8464be683a2",
+      "state": "shared",
+      "reason": "Local website detail inventory remains shared; the WordPress-user panel additionally uses the protected common users reader. Other subpanels are not implied migrated.",
+      "contracts": [
+        "websites.read"
+      ],
+      "boundary": [
+        "website_inventory"
+      ],
+      "reader_method": "website_inventory"
+    },
+    "app/api/routes/web.py:sites_page:GET:/sites": {
+      "fingerprint": "d857bceeefc27b743e3ed22543f7dcf720da06cfb5d5044c8f7c52e74631506d",
+      "state": "shared",
+      "reason": "Local website inventory and customer linking use common permission-scoped readers/domain operations. Remote WordPress mutations remain pending.",
+      "contracts": [
+        "websites.list"
+      ],
+      "boundary": [
+        "website_items"
+      ],
+      "reader_method": "website_items"
+    },
+    "app/api/routes/web.py:start_complete_site_update:POST:/updates/complete-site-update": {
+      "fingerprint": "3c659f22efa50cb48691dc3dea9f072a267d809f3dfe0bc98a7ce7d6f4dafa28",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.updates.complete"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:start_selected_user_deletion_batch:POST:/users/deletion-batches/{batch_id}/start": {
+      "fingerprint": "79d39b0891075e1fbdb593a6908c39cded8ee06f7e4aedccb992c5b09cb10d7a",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.deletion_start"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:start_updraftplus_backup_from_detail:POST:/sites/{site_id}/maintenance/updraftplus-backup": {
+      "fingerprint": "36144d47ccbc491551f68d2d8b0c4fb74b4aa5eb7f3ac2046a17166256a121c4",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.backups.create"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:styling_page:GET:/styling": {
+      "fingerprint": "e807ca6eeffeb18e695979076e8bdcd5d1078107660f6b4e621066324f09f701",
+      "state": "human_only",
+      "reason": "UI-only redirect to the existing styling panel; reading and updating its values is covered by settings.read and settings.styling.update, not a separate agent action."
+    },
+    "app/api/routes/web.py:sync_customer_communications:POST:/customers/{customer_id}/communications/sync": {
+      "fingerprint": "388e17caa442aede12bdcabe3657dabce35b7a8cbc98355188fd214c3c66f0f2",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:sync_customer_contact:POST:/customers/{customer_id}/contacts/{contact_id}/sync": {
+      "fingerprint": "b5aa37b00c2c1f125b5b4ca365934977c705c93e8d5ed7ecf2df54cd83cd5466",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:synchronize_all_cases:POST:/cases/sync": {
+      "fingerprint": "0aba7b0cbde3f1dbfbd9049fef17c968a7916cd782f6497b5fb53627a836bdc6",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:synchronize_all_contacts:POST:/contacts/sync": {
+      "fingerprint": "57fadb826b7153f23f264c219a62dbcabd007e9367e7b85a51ab937d51da1a1a",
+      "state": "out_of_scope",
+      "scope_exclusion": "zoho-retirement",
+      "reason": "Zoho import/synchronization, connection management or remote content fetching is outside the agreed migration scope."
+    },
+    "app/api/routes/web.py:tasks_page:GET:/tasks": {
+      "fingerprint": "a096a5e376d5317086fe5a28f666090b735b07ae065d7135ef38dc569ecdcfed",
+      "state": "shared",
+      "reason": "UI and catalog use the same authorized reader/preparer.",
+      "contracts": [
+        "activities.tasks.list"
+      ],
+      "boundary": [
+        "HubCrmReadService",
+        "activity_entries"
+      ],
+      "reader_method": "activity_entries"
+    },
+    "app/api/routes/web.py:unlink_email_from_case:POST:/cases/{case_id}/email-links/{link_id}/delete": {
+      "fingerprint": "035bd55f37ee5f8255c585087e864ebb69f85c0a1025d866f922f757c7776544",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.unlink_email"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:delete_activity_from_panel:POST:/activities/{activity_kind}/{activity_id}/delete": {
+      "fingerprint": "a542394ce95d5e97756be4b1871dd1276edae99351d255c3e48f9cc948387112",
+      "state": "shared",
+      "reason": "Panel confirmation uses the existing activity deletion operations, including ownership checks and reminder cancellation; no separate UI mutation.",
+      "contracts": [
+        "activities.calls.delete",
+        "activities.tasks.delete",
+        "activities.meetings.delete"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation",
+        "require_csrf"
+      ]
+    },
+    "app/api/routes/web.py:update_activity_from_directory:POST:/activities/{activity_kind}/{activity_id}": {
+      "fingerprint": "478cd98ae1afce41406aa61621065aac838db9ad6762a26de4d98ec610ecf665",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.update",
+        "activities.tasks.update",
+        "activities.meetings.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_calendar_activity:POST:/calendar/activities/{activity_kind}/{activity_id}": {
+      "fingerprint": "15a902e63bc9db37e61122c47bc187cddce071853cab3c4fe82710856b5ae127",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.update",
+        "activities.tasks.update",
+        "activities.meetings.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_case_field_layout:POST:/cases/{case_id}/layout": {
+      "fingerprint": "90fa305c5903060968b6949376c0d516fb326ab3ac77d9b97d3621c776dffa71",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_case_fields:POST:/cases/{case_id}/fields": {
+      "fingerprint": "c78f011cd5330f88bb41ab15beddd226c1b59ff8edf0eba8eb376716e5ad6b81",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_call:POST:/customers/{customer_id}/activities/calls/{call_id}": {
+      "fingerprint": "3fcdb36129b831511a479995a9a4b75f4b1f533240f2f371ae5d91c56024686a",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_case:POST:/customers/{customer_id}/cases/{case_id}": {
+      "fingerprint": "ab10f2a7013ff745e31bae91c30fe5a9cc7384382a80780bb45f92d206a8a3f2",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_communication_note:POST:/customers/{customer_id}/communications/notes/{note_id}": {
+      "fingerprint": "c6a94acb8b9ed0be0d31a3c15967973722244df75ba742fdf5f95d3e4b8d79b7",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "customers.notes.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_contact_field_layout:POST:/customers/{customer_id}/contacts/{contact_id}/layout": {
+      "fingerprint": "bc06d6dc87eb6da6c2306c08fd88bb0c0ee44364dba7bd251133dc5607e4c723",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_contact_fields:POST:/customers/{customer_id}/contacts/{contact_id}/fields": {
+      "fingerprint": "10cb6598d9d38bd0d4dc7f422e4dca7f6f10c46cf8f589f969e8a0471e57ed7a",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "contacts.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_contact_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_field_layout:POST:/customers/{customer_id}/layout": {
+      "fingerprint": "1f34057c2761ff6863d78464e9cfc8c85ca0c931ba58b2b73e381ff9af3acdd5",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_fields:POST:/customers/{customer_id}/fields": {
+      "fingerprint": "50de402d9b56b1ce59801dbcb07b46362c0981522257993dad38389a792902b2",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "customers.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_meeting:POST:/customers/{customer_id}/activities/meetings/{meeting_id}": {
+      "fingerprint": "83530ca361f8179697d3040b068f1d4450784912fe34536470f1757bbf132042",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.meetings.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_customer_task:POST:/customers/{customer_id}/activities/tasks/{task_id}": {
+      "fingerprint": "dd55dbee8f709eb5ce3cfba45edbc5db1972649395091c931ef1b937d378664c",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.tasks.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_email_template:POST:/email-templates/{template_id}": {
+      "fingerprint": "6b0f6f8ac5592dd9b3bf0df42c66b16a973529ea1b83f875afc1eedd1aad9158",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "emails.templates.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_article_fields:POST:/finance/articles/{article_id}/fields": {
+      "fingerprint": "e5c2ef7e8e610f52e29cf74ec9e4148d7fcc4895d8d792bb1685aa6888837100",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.articles.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_article_layout:POST:/finance/articles/{article_id}/layout": {
+      "fingerprint": "2a44eb48adea5042eef3d0614ab425a6ed5935884d9c6b3b7a5a235d1337a2f9",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_document_fields:POST:/finance/{module_key}/{document_id}/fields": {
+      "fingerprint": "62e07f486060355d189ac9d9ee587c03c56c39eed9d124ea371a97b41c8b757b",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.orders.update",
+        "finance.invoices.update",
+        "finance.dunnings.update",
+        "finance.recurring-invoices.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_finance_gateway"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_document_layout:POST:/finance/{module_key}/{document_id}/layout": {
+      "fingerprint": "953fd547b221742f4fef027f74b49705bc290102a62386befde0f714c15fdf4c",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_offer_fields:POST:/finance/offers/{offer_id}/fields": {
+      "fingerprint": "dbb96266f30c786835bc7c114a177e927ac67a8748e07942ede0704803768714",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "finance.offers.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_finance_offer_layout:POST:/finance/offers/{offer_id}/layout": {
+      "fingerprint": "bc65a5ebce42acfdc6c918685eddac6cb02fe46c38e21bba7092f5707407e38e",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_hub_contact_field_layout:POST:/contacts/{contact_id}/layout": {
+      "fingerprint": "a7dcc960fd085cc2d252b10c97728f97da9878f54a63f39f43a5e684735bdba0",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_hub_contact_fields:POST:/contacts/{contact_id}/fields": {
+      "fingerprint": "d7e62bf000ffcecda7826e7831cb8f9e4e243fe4f5e82e2857134b060e0be03c",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "contacts.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_contact_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_hub_contact_link:POST:/contacts/{contact_id}/link": {
+      "fingerprint": "3e2832bab28e549f00fc6cccb16ce287063f9be3c896bf7c7460e3e97622b42d",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "contacts.link_customer"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_contact_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_lead_activity:POST:/leads/{lead_id}/activities/{kind}/{activity_id}": {
+      "fingerprint": "e1024f015f1660112d5b8170bb9624789c13af290621b44e09d9599a08d74d8f",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "activities.calls.update",
+        "activities.tasks.update",
+        "activities.meetings.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_activity_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_lead_field_layout:POST:/leads/{lead_id}/layout": {
+      "fingerprint": "543cdc962da234b4e1984fb265a223e33ece5990957d02f8b697578a60ccbbd9",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_lead_fields:POST:/leads/{lead_id}/fields": {
+      "fingerprint": "a977e5bf2bfb2cdfe1dc68993ebd0c193601cfed7f41a038c1479334f73fc2a3",
+      "state": "shared",
+      "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
+      "contracts": [
+        "leads.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_lead_note:POST:/leads/{lead_id}/notes/{note_id}": {
+      "fingerprint": "504b05449b7a05a01883e355a41a508f9240fd2f0dc100a59d24e5ddf2db8077",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "leads.notes.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_note_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_mailbox_case:POST:/emails/cases/{case_id}": {
+      "fingerprint": "9a8a2fef4a0c5d5a099840d859585045df3b3b476aada909dc569f9966876b6d",
+      "state": "shared",
+      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "contracts": [
+        "cases.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute",
+        "_execute_case_operation"
+      ]
+    },
+    "app/api/routes/web.py:update_module_layout:POST:/module-layouts/{layout_key}": {
+      "fingerprint": "15c2b5420153440ecf8887caa6d12585157d3a307e1740904fe7524f06a6d268",
+      "state": "shared",
+      "reason": "Global and legacy UI layout saves enter the same confirmed agent operation using canonical module fields, existing admin checks, full-order validation and optional optimistic revision. No record values or permissions are changed.",
+      "contracts": [
+        "layouts.update"
+      ],
+      "boundary": [
+        "execute"
+      ]
+    },
+    "app/api/routes/web.py:update_one_user_password:POST:/users/actions/update-password": {
+      "fingerprint": "7fc777695337ead9be35428367cbb68cd5eec85bd99af4f94032f16c69a5a84f",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.password"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:update_one_user_role:POST:/users/actions/update-role": {
+      "fingerprint": "e49e2889ed9b6fb1e9ce7c9e53e89b1a5c3974b9b723523ab16ad6243d38ed60",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.role"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:update_selected_user_passwords:POST:/users/bulk/password": {
+      "fingerprint": "cd4ca6981deffdf4ed69f52930e1bb01ec5ebf7628e2b9889c1bd281864827d1",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.bulk_password"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:update_selected_user_roles:POST:/users/bulk/role": {
+      "fingerprint": "76f3f6cf74ba9505bf688492de8553a920426317ba9eb08fde32582b11abdd5b",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.bulk_role"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:update_site_user_password_from_detail:POST:/sites/{site_id}/users/{user_id}/password": {
+      "fingerprint": "6809ea30095e3504a56394169e56a99b320500f050b5e8ed8fb4c4800df2a0c7",
+      "state": "shared",
+      "reason": "UI and confirmed-agent dispatcher share the allowlisted WordPress executor, domain defaults and authorization. Agent queue isolates legacy remote commits; existing maintenance services own child jobs.",
+      "contracts": [
+        "wordpress.users.password"
+      ],
+      "boundary": [
+        "_wordpress_remote",
+        "execute_ui_remote"
+      ]
+    },
+    "app/api/routes/web.py:update_styling:POST:/styling": {
+      "fingerprint": "8825dfa4f40398b214c7ba8698020fee5cfa95b492f123e12dfb0b9649db0fd6",
+      "state": "shared",
+      "reason": "UI and confirmed agent changes use the same native administration/reminder boundary. Current admin/record rights, last-admin protection and domain validation apply. Passwords, tokens, setup and external integrations remain excluded; sharing an account page covers only its explicit settings/access data, not all panels. Reminder queries preview without delivery writes; desktop polling may materialize notifications.",
+      "contracts": [
+        "settings.styling.update"
+      ],
+      "boundary": [
+        "configure"
+      ],
+      "reader_method": "configure"
+    },
+    "app/api/routes/web.py:update_workbench_page:GET:/updates": {
+      "fingerprint": "f3fa7cfb602b42b7904dbc05215992f9e3daa8ebd1a11a887e1f86c0b6b71f0c",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.workbench.updates"
+      ],
+      "boundary": [
+        "update_workbench"
+      ],
+      "reader_method": "update_workbench"
+    },
+    "app/api/routes/web.py:upload_mailbox_compose_image:POST:/emails/compose/images": {
+      "fingerprint": "c981963d0e1cb9d01777e8017f14d615eaeb9f435bda9f05f8cb3f2b47b34893",
+      "state": "infrastructure",
+      "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
+    },
+    "app/api/routes/web.py:user_deletion_batch_status:GET:/users/deletion-batches/{batch_id}/status": {
+      "fingerprint": "220e71ce85ff39c2652447f43cf1ff1b092278cd02f325f399c11bce2bb01910",
+      "state": "shared",
+      "reason": "UI/API and agent use the same access-checked WordPress domain reader.",
+      "contracts": [
+        "wordpress.users.deletion_read"
+      ],
+      "boundary": [
+        "deletion_batch"
+      ],
+      "reader_method": "deletion_batch"
+    },
+    "app/api/routes/web.py:users_workbench_page:GET:/users": {
+      "fingerprint": "b56639ae42c73e0608051c06ec669e62356d3b66b6391c380a100eff9698de9a",
+      "state": "shared",
+      "reason": "Permission-scoped native reader and domain filters/serialization shared by UI/API and paginated agent query. Read adapters do not start remote actions.",
+      "contracts": [
+        "wordpress.workbench.users"
+      ],
+      "boundary": [
+        "user_entries"
+      ],
+      "reader_method": "user_entries"
+    },
+    "app/api/routes/web.py:wordpress_job_page:GET:/wordpress/jobs/{job_id}": {
+      "state": "shared",
+      "contracts": [
+        "wordpress.jobs.read"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "query"
+      ],
+      "reason": "Job status and pre-dispatch cancellation share the registry with the agent, with actor and site access checks.",
+      "fingerprint": "f4c32ccfadf3d3b6dba0247b0bfb537b3ab50a9ea4a404d668808a4d67d77f3f"
+    },
+    "app/api/routes/web.py:cancel_wordpress_job:POST:/wordpress/jobs/{job_id}/cancel": {
+      "state": "shared",
+      "contracts": [
+        "wordpress.jobs.cancel"
+      ],
+      "boundary": [
+        "_website_gateway",
+        "execute"
+      ],
+      "reason": "Job status and pre-dispatch cancellation share the registry with the agent, with actor and site access checks.",
+      "fingerprint": "529110df3b30bb9d1c14a84b4a5e3f49c3a2dd9f7fbf6e4fe49be099b4bd7665"
+    },
+    "app/api/routes/web.py:duplicate_finance_offer:POST:/finance/offers/{offer_id}/duplicate": {
+      "state": "shared",
+      "contracts": [
+        "finance.offers.duplicate"
+      ],
+      "boundary": [
+        "_finance_gateway",
+        "execute"
+      ],
+      "reader_method": "duplicate_offer",
+      "fingerprint": "d07c56b381511542bca0e6aa2094595d5802fb4e416f2853f4b0ddc4db2803f9",
+      "reason": "New menu POST and confirmed agent both use finance.offers.duplicate: current source read plus finance create/edit rights, fresh number, independent stored lines, draft status, empty party/contact links, creator-only unassigned visibility, edit-mode redirect and no copied/generated PDF or email. CSRF and native validation retained; actual route negative/bypass and parity tests included."
+    },
+    "app/api/routes/web.py:discard_finance_offer_copy:POST:/finance/offers/{offer_id}/discard-copy": {
+      "state": "shared",
+      "contracts": [
+        "finance.offers.discard_copy"
+      ],
+      "boundary": [
+        "_finance_gateway",
+        "execute"
+      ],
+      "reader_method": "discard_offer_copy",
+      "fingerprint": "f6e036ef73308b77a4088706098699cb69dc89946cabf1fb799ce705e833e826",
+      "reason": "Cancel and confirmed agent share discard_offer_copy. CSRF, current Finance edit rights and locked persisted owner/unlinked state are required; finalized offers cannot be discarded, even with stale editor state. Native cleanup removes lines/PDF with post-commit file deletion. Only readable original is returned, otherwise list. UI retains unsaved edits on errors. Negative contract/bypass, actual persistence, permissions, rollback and desktop/mobile tests cover this path."
+    },
+    "app/api/routes/accounts.py:access_record_options:GET:/access/records/options": {
+      "state": "shared",
+      "contracts": [
+        "access.records.options"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "query"
+      ],
+      "reason": "Admin-only named customer/lead selection reuses module readers, projects names/status/assignments without credentials. Bounded searchable pagination; no writes; private no-store response. Optional team selection loads saved assignments independently of search/page; hidden assigned customers remain editable. Complete snapshot and explicit deselections roundtrip through the shared bulk operation, with stale-state checks and owner/grant preservation. Covered by HTTP/domain and desktop/mobile browser tests.",
+      "fingerprint": "b5a76f26bf7343063b1da4c553aa692cadace60466d46b30ad36043e92cb7c59"
+    },
+    "app/api/routes/accounts.py:save_record_access_batch:POST:/access/records/batch": {
+      "state": "shared",
+      "contracts": [
+        "access.records.assign_many",
+        "access.grants.create_many"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ],
+      "reason": "UI and agent use identical bulk operations: active-admin and CSRF boundaries, validated explicit IDs and active targets, locked rows, savepoint and all-or-nothing persistence. Omitted assignments preserved; explicit clearing only. Common form handler retains selection on validation failures. Backend and desktop/mobile tests cover permissions, bulk/range selection and rollback.",
+      "fingerprint": "64f4142825382a047e5aa628de71ceb42680637672078af31a65562a28f6345f"
+    },
+    "app/api/routes/web.py:set_plugin_auto_updates:POST:/updates/plugin-auto-updates": {
+      "fingerprint": "681941a9568c501f5ea14cf3c901ebec444db742d30c647d29f0a2f1f335c84a",
+      "state": "shared",
+      "reason": "Admin-only, CSRF-protected and explicitly confirmed plugin policy queues the same durable wordpress.plugins.auto_updates operation as the agent. Validated explicit site/plugin lists, execution-time permissions, signed Bridge verification and per-site persisted results; no writes in the HTTP request and no automatic retry. Covered by Python, PHP and browser tests.",
+      "contracts": ["wordpress.plugins.auto_updates"],
+      "boundary": ["HubOperationService", "execute"]
+    },
+    "app/api/routes/accounts.py:select_openai_model:POST:/openai/model": {
+      "fingerprint": "a3d9b1bc3c169fb90fdb3cb89c6eba3e004959a676f8e72ebbfaa1e43e8619dd",
+      "state": "shared",
+      "reason": "Admin-only model selection through the shared settings.ai_model.update operation; current role, model allowlist and audit checked in the domain. CSRF protected; credentials and prior request costs remain untouched. Covered by test_ai_models.py.",
+      "contracts": [
+        "settings.ai_model.update"
+      ],
+      "boundary": [
+        "HubOperationService",
+        "execute"
+      ]
+    }
+  },
+  "scope_exclusions": {
+    "zoho-retirement": {
+      "reason": "User decision 2026-09-20: no further Zoho integration migration; removal is a separate future task. Existing data and connections are not deleted."
+    },
+    "imports-and-sync": {
+      "reason": "User decision 2026-09-20: remaining external imports and bulk synchronization are outside this architecture migration."
+    }
+  }
+}

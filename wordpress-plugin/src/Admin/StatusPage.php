@@ -47,6 +47,10 @@ class StatusPage {
 			<table class="widefat striped" style="max-width: 880px;">
 				<tbody>
 					<tr>
+						<th><?php echo esc_html__( 'Identity domain', 'kosmos-bridge' ); ?></th>
+						<td><code><?php echo esc_html( \KosmosBridge\Registration\SecretStore::current_domain() ); ?></code></td>
+					</tr>
+					<tr>
 						<th><?php echo esc_html__( 'Site UUID', 'kosmos-bridge' ); ?></th>
 						<td><code><?php echo esc_html( $site_uuid ); ?></code></td>
 					</tr>

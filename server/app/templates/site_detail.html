@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/hub_data_panel.html" import hub_data_panel, hub_data_link with context %}
 {% block title %}{{ site.domain }} · kosmos-hub{% endblock %}
 {% block content %}
   {% macro post_update_diagnostics(diagnostic) -%}
@@ -40,10 +41,10 @@
       <h2>{{ site.domain }}</h2>
       <p class="subtle">{{ "Maintenance is running" if running_maintenance_runs else "Ready for maintenance" }}</p>
       <nav class="site-section-nav" aria-label="Customer site navigation">
-        <a href="#updates">Aktualisierungen</a>
-        <a href="#backups">Backups</a>
-        <a href="#users">Benutzer</a>
         <a href="#dashboard">Dashboard</a>
+        <a href="#updates">Aktualisierungen</a>
+        <a href="#users">Benutzer</a>
+        <a href="#backups">Backups</a>
         <a href="#protocol">Protokoll</a>
       </nav>
       <a class="button button-secondary site-back-link" href="/sites">Back to sites</a>
@@ -92,6 +93,9 @@
           </div>
         </div>
         <section class="detail-list">
+          {% call hub_data_panel(site) %}
+            {% if site.customer %}<dl class="customer-fields-grid">{{ hub_data_link(site, 'customers', site.customer_id, 'Kunde', site.customer.name, '/customers/' ~ site.customer_id) }}</dl>{% endif %}
+          {% endcall %}
           <article class="card">
             <h2>{{ site.domain }}</h2>
             <p><strong>Status:</strong> {{ site.status }}</p>

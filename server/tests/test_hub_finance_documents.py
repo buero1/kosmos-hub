@@ -260,7 +260,7 @@ def test_orders_and_invoices_keep_positions_and_document_links_locally():
         assert detail.lines[0].amount_net == Decimal("216.00")
         assert detail.lines[0].quantity == "2.00"
         assert detail.totals.total_gross == Decimal("257.04")
-        assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "257,04 EUR"
+        assert next(field.value for field in detail.fields if field.key == "remaining_amount") == "257,04 \u20ac"
 
 
 def test_dunning_draft_copies_invoice_data_into_an_independent_editable_document():
@@ -346,8 +346,7 @@ def test_dunning_requires_a_linked_invoice_and_exposes_the_requested_statuses():
         )
 
 
-@pytest.mark.parametrize("unit", ("", "Wöchentlich"))
-def test_finance_documents_require_a_supported_position_unit(unit: str):
+def test_finance_document_allows_a_position_without_unit():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -357,8 +356,27 @@ def test_finance_documents_require_a_supported_position_unit(unit: str):
         db.flush()
         article = _finance(db).create_article(submitted_values=_article_values())
         values = _document_values(module="invoices", article_id=article.id)
-        values["document_line__0__unit"] = unit
+        values.pop("document_line__0__unit")
+        invoice = _documents(db).create_document(
+            module=INVOICE_MODULE, customer_id=customer.id, contact_id=_contact_id(db, customer),
+            link_id=None, submitted_values=values,
+        )
+        detail = _documents(db).get_detail(module=INVOICE_MODULE, document_id=invoice.id)
+        assert detail is not None
+        assert detail.lines[0].unit == ""
 
+
+def test_finance_document_rejects_an_unsupported_position_unit():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        article = _finance(db).create_article(submitted_values=_article_values())
+        values = _document_values(module="invoices", article_id=article.id)
+        values["document_line__0__unit"] = "Wöchentlich"
         with pytest.raises(HubFinanceDocumentError, match="Einheit"):
             _documents(db).create_document(
                 module=INVOICE_MODULE,

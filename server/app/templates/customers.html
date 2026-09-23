@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/site_domain.html" import site_domain_link with context %}
+{% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}Customers · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -13,13 +14,14 @@
       <div>
         <p class="eyebrow">CRM directory</p>
         <h2>Customers</h2>
-        <p class="subtle">{% if filters.email == "unread" %}Kunden mit ungelesenen eingehenden E-Mails.{% else %}Kunden aus Zoho CRM und im Hub angelegte Kunden. Websites werden nur nach ausdrücklicher Bestätigung verknüpft.{% endif %}</p>
+        {% if filters.email == "unread" %}<p class="subtle">Kunden mit ungelesenen eingehenden E-Mails.</p>{% endif %}
       </div>
-      <div class="inventory-totals">
-        <span><strong>{{ entries | length }}</strong> shown</span>
-        <span><strong>{{ candidate_count }}</strong> exact matches to review</span>
-      </div>
-      {% if can_create_customer %}<a class="button button-variant-1" href="/customers/new">Customer neu anlegen</a>{% endif %}
+      {% if can_create_customer %}
+        <div class="communication-heading-actions">
+          <a class="button button-variant-1" href="/customers/new">Customer neu anlegen</a>
+          {{ module_layout_menu("customer-fields", "Kunden") }}
+        </div>
+      {% endif %}
     </div>
 
     <form id="customer-filter-form" class="filter-panel customer-filter-panel" method="get" action="/customers">

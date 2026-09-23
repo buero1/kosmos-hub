@@ -1,3 +1,4 @@
+{% from "partials/activity_creation.html" import attributes as creation_attributes, summary as creation_summary %}
 {% macro activity_icon(kind) %}
   <svg class="customer-activity-action-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     {% if kind == "call" %}<path d="M7 4 4 7c-.6 4.4 7.6 12.6 12 12l3-3-4-3-2 2c-2.3-1-4-2.7-5-5l2-2-3-4Z"/>
@@ -10,52 +11,55 @@
 {% endmacro %}
 <article id="lead-activities" class="card customer-detail-panel lead-subform-panel lead-activities-panel">
   <div class="customer-detail-panel-heading">
-    <div><p class="eyebrow">Zoho CRM</p><h3>Aktivitäten</h3></div>
-    <div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
+    <div><p class="eyebrow">Kosmos Hub</p><h3>Aktivitäten</h3></div>
+    {% if can_create_lead_activities %}<div class="customer-activity-actions" role="group" aria-label="Neue Aktivität anlegen">
       {% for kind, label in [("call", "Neuen Anruf anlegen"), ("task", "Neue Aufgabe anlegen"), ("meeting", "Neues Meeting anlegen")] %}
         <button class="customer-activity-action" type="button" data-customer-activity-action="{{ kind }}" aria-label="{{ label }}" title="{{ label }}">{{ activity_icon(kind) }}</button>
       {% endfor %}
-    </div>
+    </div>{% endif %}
   </div>
   <div class="customer-activity-list">
     {% for call in activity_calls %}
-      <article id="call-{{ call.id }}" class="customer-activity-entry">
+      <article id="call-{{ call.id }}" class="customer-activity-entry" {{ creation_attributes(call) }}>
         <div class="customer-activity-entry-heading">
           <strong>{{ call.name }}</strong><span class="pill">{% if call.status == "planned" %}Geplant{% else %}Abgeschlossen{% endif %}</span>
         </div>
         <p class="subtle">Anruf · {{ call.starts_at | berlin_time }} · {% if call.duration_seconds is not none %}{{ call.duration_seconds }} Sek.{% else %}{{ call.duration_minutes }} Min.{% endif %}</p>
         <div class="customer-activity-entry-actions" role="group" aria-label="Anrufaktionen">
-          {% if call.status == "planned" %}<button class="customer-activity-entry-action" type="button" data-customer-call-complete-open data-customer-call-complete-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}/complete" data-customer-call-name="{{ call.name }}" aria-label="Anruf abschließen" title="Anruf abschließen">{{ activity_icon("complete") }}</button>{% endif %}
-          <button class="customer-activity-entry-action" type="button" data-customer-call-edit data-customer-call-update-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}" data-customer-call-name="{{ call.name }}" data-customer-call-status="{{ call.status }}" data-customer-call-direction="{{ call.direction }}" data-customer-call-start-date="{{ call.start_date }}" data-customer-call-start-time="{{ call.start_time }}" data-customer-call-duration="{{ call.duration_minutes }}" data-customer-call-reminder-channels="{{ call.reminders | map(attribute='channel') | join(',') }}" data-customer-call-reminder-minutes="{{ call.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-call-description="{{ call.description or '' }}" aria-label="Anruf bearbeiten" title="Anruf bearbeiten">{{ activity_icon("edit") }}</button>
-          <button class="customer-activity-entry-action" type="button" data-customer-call-delete-open data-customer-call-delete-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}/delete" data-customer-call-name="{{ call.name }}" aria-label="Anruf löschen" title="Anruf löschen">{{ activity_icon("delete") }}</button>
+          {% if can_edit_lead_activities and call.can_edit and call.status == "planned" %}<button class="customer-activity-entry-action" type="button" data-customer-call-complete-open data-customer-call-complete-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}/complete" data-customer-call-name="{{ call.name }}" aria-label="Anruf abschließen" title="Anruf abschließen">{{ activity_icon("complete") }}</button>{% endif %}
+          {% if can_edit_lead_activities and call.can_edit %}<button class="customer-activity-entry-action" type="button" data-customer-call-edit data-customer-call-update-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}" data-customer-call-name="{{ call.name }}" data-customer-call-status="{{ call.status }}" data-customer-call-direction="{{ call.direction }}" data-customer-call-start-date="{{ call.start_date }}" data-customer-call-start-time="{{ call.start_time }}" data-customer-call-duration="{{ call.duration_minutes }}" data-customer-call-reminder-channels="{{ call.reminders | map(attribute='channel') | join(',') }}" data-customer-call-reminder-minutes="{{ call.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-call-description="{{ call.description or '' }}" aria-label="Anruf bearbeiten" title="Anruf bearbeiten">{{ activity_icon("edit") }}</button>{% endif %}
+          {% if can_delete_lead_activities and call.can_delete %}<button class="customer-activity-entry-action" type="button" data-customer-call-delete-open data-customer-call-delete-url="/leads/{{ detail.lead.id }}/activities/calls/{{ call.id }}/delete" data-customer-call-name="{{ call.name }}" aria-label="Anruf löschen" title="Anruf löschen">{{ activity_icon("delete") }}</button>{% endif %}
         </div>
         {% if call.recording_url %}<p><a class="button button-secondary" href="{{ call.recording_url }}" target="_blank" rel="noopener noreferrer">Aufnahme abspielen</a></p>{% endif %}
         {% if call.transcript_url %}<p><a href="{{ call.transcript_url }}" target="_blank" rel="noopener noreferrer">Transkript öffnen</a></p>{% endif %}
         {% if call.description %}<p class="customer-activity-entry-description">{{ call.description }}</p>{% endif %}
+        {{ creation_summary(call) }}
       </article>
     {% endfor %}
     {% for task in activity_tasks %}
-      <article id="task-{{ task.id }}" class="customer-activity-entry">
+      <article id="task-{{ task.id }}" class="customer-activity-entry" {{ creation_attributes(task) }}>
         <div class="customer-activity-entry-heading"><strong>{{ task.name }}</strong><span class="pill">Geplant</span></div>
         <p class="subtle">Aufgabe · {{ task.due_at | berlin_time }}</p>
         <div class="customer-activity-entry-actions" role="group" aria-label="Aufgabenaktionen">
-          <button class="customer-activity-entry-action" type="button" data-customer-task-complete-open data-customer-task-complete-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}/complete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe abschließen" title="Aufgabe abschließen">{{ activity_icon("complete") }}</button>
-          <button class="customer-activity-entry-action" type="button" data-customer-task-edit data-customer-task-update-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}" data-customer-task-name="{{ task.name }}" data-customer-task-status="{{ task.status }}" data-customer-task-due-date="{{ task.due_date }}" data-customer-task-due-time="{{ task.due_time }}" data-customer-task-reminder-channel="{{ task.reminder_channel or 'none' }}" data-customer-task-reminder-minutes="{{ task.reminder_minutes_before if task.reminder_minutes_before is not none else 0 }}" data-customer-task-description="{{ task.description or '' }}" aria-label="Aufgabe bearbeiten" title="Aufgabe bearbeiten">{{ activity_icon("edit") }}</button>
-          <button class="customer-activity-entry-action" type="button" data-customer-task-delete-open data-customer-task-delete-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}/delete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe löschen" title="Aufgabe löschen">{{ activity_icon("delete") }}</button>
+          {% if can_edit_lead_activities and task.can_edit %}<button class="customer-activity-entry-action" type="button" data-customer-task-complete-open data-customer-task-complete-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}/complete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe abschließen" title="Aufgabe abschließen">{{ activity_icon("complete") }}</button>
+          <button class="customer-activity-entry-action" type="button" data-customer-task-edit data-customer-task-update-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}" data-customer-task-name="{{ task.name }}" data-customer-task-status="{{ task.status }}" data-customer-task-due-date="{{ task.due_date }}" data-customer-task-due-time="{{ task.due_time }}" data-customer-task-reminder-channel="{{ task.reminder_channel or 'none' }}" data-customer-task-reminder-minutes="{{ task.reminder_minutes_before if task.reminder_minutes_before is not none else 0 }}" data-customer-task-description="{{ task.description or '' }}" aria-label="Aufgabe bearbeiten" title="Aufgabe bearbeiten">{{ activity_icon("edit") }}</button>{% endif %}
+          {% if can_delete_lead_activities and task.can_delete %}<button class="customer-activity-entry-action" type="button" data-customer-task-delete-open data-customer-task-delete-url="/leads/{{ detail.lead.id }}/activities/tasks/{{ task.id }}/delete" data-customer-task-name="{{ task.name }}" aria-label="Aufgabe löschen" title="Aufgabe löschen">{{ activity_icon("delete") }}</button>{% endif %}
         </div>
         {% if task.email_reminder_status == "failed" %}<p class="notice-warning">E-Mail-Erinnerung konnte nicht versendet werden: {{ task.email_reminder_last_error or "Unbekannter Fehler" }}</p>{% endif %}
         {% if task.description %}<p class="customer-activity-entry-description">{{ task.description }}</p>{% endif %}
+        {{ creation_summary(task) }}
       </article>
     {% endfor %}
     {% for meeting in activity_meetings %}
-      <article id="meeting-{{ meeting.id }}" class="customer-activity-entry">
+      <article id="meeting-{{ meeting.id }}" class="customer-activity-entry" {{ creation_attributes(meeting) }}>
         <div class="customer-activity-entry-heading"><strong>{{ meeting.name }}</strong><span class="pill">{% if meeting.status == "planned" %}Geplant{% else %}Abgeschlossen{% endif %}</span></div>
         <p class="subtle">Meeting · {{ meeting.starts_at | berlin_time }} · {{ meeting.duration_minutes }} Min.</p>
         <div class="customer-activity-entry-actions" role="group" aria-label="Meetingaktionen">
-          <button class="customer-activity-entry-action" type="button" data-customer-meeting-edit data-customer-meeting-update-url="/leads/{{ detail.lead.id }}/activities/meetings/{{ meeting.id }}" data-customer-meeting-name="{{ meeting.name }}" data-customer-meeting-status="{{ meeting.status }}" data-customer-meeting-start-date="{{ meeting.start_date }}" data-customer-meeting-start-time="{{ meeting.start_time }}" data-customer-meeting-duration="{{ meeting.duration_minutes }}" data-customer-meeting-reminder-channels="{{ meeting.reminders | map(attribute='channel') | join(',') }}" data-customer-meeting-reminder-minutes="{{ meeting.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-meeting-description="{{ meeting.description or '' }}" aria-label="Meeting bearbeiten" title="Meeting bearbeiten">{{ activity_icon("edit") }}</button>
-          <button class="customer-activity-entry-action" type="button" data-customer-meeting-delete-open data-customer-meeting-delete-url="/leads/{{ detail.lead.id }}/activities/meetings/{{ meeting.id }}/delete" data-customer-meeting-name="{{ meeting.name }}" aria-label="Meeting löschen" title="Meeting löschen">{{ activity_icon("delete") }}</button>
+          {% if can_edit_lead_activities and meeting.can_edit %}<button class="customer-activity-entry-action" type="button" data-customer-meeting-edit data-customer-meeting-update-url="/leads/{{ detail.lead.id }}/activities/meetings/{{ meeting.id }}" data-customer-meeting-name="{{ meeting.name }}" data-customer-meeting-status="{{ meeting.status }}" data-customer-meeting-start-date="{{ meeting.start_date }}" data-customer-meeting-start-time="{{ meeting.start_time }}" data-customer-meeting-duration="{{ meeting.duration_minutes }}" data-customer-meeting-reminder-channels="{{ meeting.reminders | map(attribute='channel') | join(',') }}" data-customer-meeting-reminder-minutes="{{ meeting.reminders | map(attribute='minutes_before') | join(',') }}" data-customer-meeting-description="{{ meeting.description or '' }}" aria-label="Meeting bearbeiten" title="Meeting bearbeiten">{{ activity_icon("edit") }}</button>{% endif %}
+          {% if can_delete_lead_activities and meeting.can_delete %}<button class="customer-activity-entry-action" type="button" data-customer-meeting-delete-open data-customer-meeting-delete-url="/leads/{{ detail.lead.id }}/activities/meetings/{{ meeting.id }}/delete" data-customer-meeting-name="{{ meeting.name }}" aria-label="Meeting löschen" title="Meeting löschen">{{ activity_icon("delete") }}</button>{% endif %}
         </div>
         {% if meeting.description %}<p class="customer-activity-entry-description">{{ meeting.description }}</p>{% endif %}
+        {{ creation_summary(meeting) }}
       </article>
     {% endfor %}
     {% if not activity_calls and not activity_tasks and not activity_meetings %}<p class="subtle customer-activity-empty">Noch keine Aktivitäten geplant.</p>{% endif %}

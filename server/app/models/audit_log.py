@@ -12,6 +12,8 @@ class AuditLog(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     site_id: Mapped[int | None] = mapped_column(ForeignKey("sites.id"), nullable=True, index=True)
     actor: Mapped[str] = mapped_column(String(64))
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True)
+    actor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source: Mapped[str] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(128))
     result: Mapped[str] = mapped_column(String(64))
@@ -20,4 +22,3 @@ class AuditLog(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     site = relationship("Site", back_populates="audit_entries")
-

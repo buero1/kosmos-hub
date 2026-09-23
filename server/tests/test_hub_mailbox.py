@@ -14,6 +14,7 @@ from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
+from app.models.hub_lead import HubLead
 from app.services.customer_communications import CustomerCommunicationAttachmentUpload
 from app.services.email_attachment_storage import EmailAttachmentStorage
 from app.services.hub_mailbox import HubMailboxService
@@ -37,6 +38,35 @@ def test_email_composers_show_twenty_message_lines():
     assert expected_editor in global_composer
     assert ".email-compose-form .email-rich-editor .jodit-wysiwyg_iframe" in base_template
     assert "min-height: 264px !important;" in base_template
+
+
+def test_email_composers_offer_optional_scheduled_delivery():
+    main_composer = Path("app/templates/emails.html").read_text(encoding="utf-8")
+    global_composer = Path("app/templates/partials/global_mailbox_composer.html").read_text(encoding="utf-8")
+    base_template = Path("app/templates/base.html").read_text(encoding="utf-8")
+    customer_template = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
+
+    expected_control = 'name="scheduled_at" type="datetime-local" data-email-compose-scheduled-at'
+    assert expected_control in main_composer
+    assert expected_control in global_composer
+    assert '"E-Mail planen"' in base_template
+    assert "'E-Mail planen'" in main_composer
+    assert 'email.source == "scheduled" %}Geplant' in customer_template
+
+
+def test_mailbox_exposes_planned_folder_and_delivery_actions():
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
+    list_template = Path("app/templates/emails_message_list.html").read_text(encoding="utf-8")
+    reading_pane = Path("app/templates/emails_reading_pane.html").read_text(encoding="utf-8")
+
+    assert 'data-mailbox-folder-count="planned"' in mailbox_template
+    assert mailbox_template.index('data-mailbox-folder-count="drafts"') < mailbox_template.index('data-mailbox-folder-count="planned"')
+    assert mailbox_template.index('data-mailbox-folder-count="planned"') < mailbox_template.index('data-mailbox-folder-count="sent"')
+    assert "mailbox_state" in list_template
+    assert "Fehlgeschlagen" in reading_pane
+    assert "data-mailbox-scheduled-open" in reading_pane
+    assert "/send-now" in reading_pane
+    assert "/cancel" in reading_pane
 
 
 def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
@@ -200,7 +230,7 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         service.communications._email_view = track_full_view
         inbox = service.get_view(folder="inbox", unread_only=False)
 
-        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "drafts": 0, "unassigned": 1, "trash": 0, "spam": 0}
+        assert inbox.folder_counts == {"inbox": 2, "sent": 0, "drafts": 0, "planned": 0, "unassigned": 1, "trash": 0, "spam": 0}
         assert [message.subject for message in inbox.messages] == ["Noch unbekannt", "Bekannte E-Mail"]
         assert full_view_calls == []
         assert not hasattr(inbox.messages[1], "preview_html")
@@ -319,7 +349,7 @@ def test_mailbox_separates_spam_and_trashed_messages_from_active_folders():
         assert [message.subject for message in service.get_folder_view(folder="inbox", unread_only=False).messages] == ["Aktive Nachricht"]
         assert [message.subject for message in service.get_folder_view(folder="spam", unread_only=False).messages] == ["Spam-Nachricht"]
         assert [message.subject for message in service.get_folder_view(folder="trash", unread_only=False).messages] == ["Gelöschte Nachricht"]
-        assert service.get_folder_counts() == {"inbox": 1, "sent": 0, "drafts": 0, "unassigned": 0, "trash": 1, "spam": 1}
+        assert service.get_folder_counts() == {"inbox": 1, "sent": 0, "drafts": 0, "planned": 0, "unassigned": 0, "trash": 1, "spam": 1}
 
 
 def test_mailbox_batch_actions_update_all_linked_message_copies_and_unassigned_emails():
@@ -451,6 +481,54 @@ def test_mailbox_drafts_are_encrypted_editable_and_separate_from_sent_emails():
         assert context["content"] == "<p>Bearbeitbarer Entwurf</p>"
         assert service.discard_draft(draft_id=draft.id)
         assert service.get_folder_counts()["drafts"] == 0
+
+
+@pytest.mark.parametrize("record_kind", ("customer", "lead", "none"))
+def test_draft_reading_pane_links_the_saved_customer_or_lead(record_kind):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    templates = create_templates(directory="app/templates")
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        lead = HubLead(encrypted_profile_json=cipher.encrypt(json.dumps({
+            "fields": {"first_name": "Lea", "last_name": "Beispiel"},
+        })))
+        db.add_all([customer, lead])
+        db.flush()
+        service = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        draft = service.save_draft(
+            draft_id=None, sender_email="team@example.test", recipient_email="contact@example.test",
+            recipient_key="", recipient_name="Alter Empfaengername",
+            recipient_customer_id=customer.id if record_kind == "customer" else None,
+            recipient_lead_id=lead.id if record_kind == "lead" else None,
+            subject="Angebot", content="<p>Unser Angebot.</p>", cc_emails="",
+            template_id="", reply_to_email_id="", forward_from_email_id="",
+        )
+        selected = service.get_selected_message(
+            folder="drafts", unread_only=False, selected_key=f"unassigned-{draft.id}",
+        )
+        assert selected is not None
+        rendered = templates.get_template("emails_reading_pane.html").render(selected=selected)
+        if record_kind == "none":
+            assert selected.customers == ()
+            assert selected.lead is None
+            assert 'class="mailbox-customer-links"' not in rendered
+        else:
+            href, label = (
+                (f"/customers/{customer.id}", customer.name) if record_kind == "customer"
+                else (f"/leads/{lead.id}", "Lea Beispiel")
+            )
+            assert f'<a href="{href}">{label}</a>' in rendered
+            assert rendered.index('class="mailbox-customer-links"') < rendered.index('class="mailbox-unassigned"')
+            db.delete(customer if record_kind == "customer" else lead)
+            db.flush()
+            without_record = service.get_selected_message(
+                folder="drafts", unread_only=False, selected_key=f"unassigned-{draft.id}",
+            )
+            assert without_record is not None
+            assert without_record.customers == ()
+            assert without_record.lead is None
 
 
 def test_mailbox_prepares_replies_and_forwards_for_unassigned_inbound_emails():
@@ -616,7 +694,7 @@ def test_mailbox_sends_direct_email_via_mittwald_and_keeps_a_local_attachment(mo
         assert sent_view.selected.kind == "direct"
         assert sent_view.selected.subject == "Unterlagen"
         assert sent_view.selected.cc_recipients == "Buchhaltung <buchhaltung@example.de>"
-        assert service.get_folder_counts() == {"inbox": 0, "sent": 1, "drafts": 0, "unassigned": 0, "trash": 0, "spam": 0}
+        assert service.get_folder_counts() == {"inbox": 0, "sent": 1, "drafts": 0, "planned": 0, "unassigned": 0, "trash": 0, "spam": 0}
         attachment = db.scalar(select(HubMailboxAttachment).where(HubMailboxAttachment.email_id == sent.id))
         assert attachment is not None
         downloaded = service.download_unassigned_attachment(email_id=sent.id, attachment_id=attachment.source_attachment_id)

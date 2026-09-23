@@ -39,7 +39,7 @@
       a:not(.button),
       a:not(.button):visited {
         color: var(--accent);
-        font-weight: 700;
+        font-weight: 500;
         text-decoration: none;
       }
       a:not(.button):hover {
@@ -61,7 +61,8 @@
         align-self: start;
         min-width: 0;
         height: 100vh;
-        overflow-y: auto;
+        height: 100dvh;
+        overflow: hidden;
         padding: 1.4rem 1rem;
         border-right: 1px solid var(--border);
         background:
@@ -70,6 +71,7 @@
         box-shadow: 14px 0 35px rgba(40, 45, 44, 0.045);
       }
       .app-brand {
+        flex-shrink: 0;
         padding: 0.25rem 0.45rem 1.4rem;
         border-bottom: 1px solid var(--border);
       }
@@ -85,6 +87,7 @@
       }
       .app-email-alert {
         display: flex;
+        flex-shrink: 0;
         align-items: center;
         justify-content: space-between;
         gap: 0.6rem;
@@ -111,11 +114,16 @@
       }
       .app-navigation {
         display: grid;
+        flex: 1 1 auto;
+        min-height: 0;
+        align-content: start;
+        overflow-y: auto;
+        scrollbar-width: thin;
         gap: 0.2rem;
         padding: 1.1rem 0.2rem 1.5rem;
       }
       .app-navigation a {
-        color: var(--ink);
+        color: var(--accent);
         text-decoration: none;
         border-radius: 9px;
         padding: 0.62rem 0.7rem;
@@ -135,7 +143,7 @@
         gap: 0.5rem;
         padding: 0.62rem 0.7rem;
         border-radius: 9px;
-        color: var(--ink);
+        color: var(--accent);
         cursor: pointer;
         font: 700 0.84rem "Trebuchet MS", sans-serif;
         list-style: none;
@@ -161,6 +169,20 @@
         font-size: 0.79rem;
       }
       .app-navigation-placeholder { color: var(--muted); font: 700 0.79rem "Trebuchet MS", sans-serif; }
+      .app-user-menu {
+        display: grid;
+        flex-shrink: 0;
+        gap: 0.7rem;
+        padding: 0.9rem 0.45rem 0;
+        border-top: 1px solid var(--border);
+      }
+      .app-user-identity { min-width: 0; overflow-wrap: anywhere; }
+      .app-user-name { display: inline-block; font-size: 0.92rem; }
+      .app-user-name strong { font-weight: 600; }
+      .app-user-login { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.75rem; line-height: 1.4; }
+      .app-user-menu form { margin: 0; }
+      .app-user-menu .button { display: inline-flex; align-items: center; gap: 0.45rem; margin: 0; }
+      .app-user-menu svg { width: 1rem; height: 1rem; flex-shrink: 0; }
       .app-main {
         width: 100%;
         min-width: 0;
@@ -596,6 +618,9 @@
         box-shadow: 0 24px 70px rgba(29, 42, 47, 0.2);
       }
       .update-confirmation-dialog::backdrop { background: rgba(29, 42, 47, 0.32); }
+      .update-confirmation-dialog.deletion-impact-dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; box-sizing: border-box; }
+      [data-deletion-impact] ul { padding-left: 1.25rem; }
+      [data-deletion-impact] li + li { margin-top: 0.3rem; }
       .update-confirmation-dialog h3 { margin: 0; }
       .update-confirmation-dialog p { margin: 0.75rem 0 1.15rem; }
       .update-confirmation-dialog .dialog-selection-heading {
@@ -1589,17 +1614,6 @@
       .account-section-stack { display: grid; gap: 1rem; margin: 1.25rem 0; }
       .account-section-stack > .account-panel { width: 100%; margin: 0; }
       .account-section[hidden] { display: none; }
-      .account-session {
-        display: grid;
-        gap: 0.75rem;
-        max-width: 42rem;
-        margin: 2.5rem 0 0;
-        padding: 1.15rem;
-        border-top: 1px solid var(--border);
-      }
-      .account-session h3,
-      .account-session p { margin: 0; }
-      .account-session form { margin: 0; }
       .account-panel.account-panel-wide { max-width: 72rem; }
       .account-panel .account-protocol-filters {
         grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
@@ -1735,6 +1749,67 @@
       }
       .account-user-action-buttons form { display: block; }
       .account-user-action-buttons .subtle { margin-right: auto; }
+      .access-user-grid,
+      .access-team-grid,
+      .access-record-forms {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+        gap: 0.8rem;
+      }
+      .access-user-card,
+      .access-team-card,
+      .access-record-form {
+        display: grid;
+        align-content: start;
+        gap: 0.7rem;
+        padding: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: rgba(255, 253, 248, 0.62);
+      }
+      .access-create-form,
+      .access-role-heading-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: end;
+        gap: 0.7rem;
+      }
+      .access-create-form {
+        margin: 0.9rem 0;
+        padding: 0.9rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .access-wide-field { grid-column: 1 / -1; }
+      .access-matrix,
+      .access-record-table { width: 100%; border-collapse: collapse; }
+      .access-matrix th,
+      .access-matrix td,
+      .access-record-table th,
+      .access-record-table td {
+        padding: 0.65rem;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: middle;
+      }
+      .access-matrix thead th,
+      .access-record-table thead th {
+        color: var(--muted);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+      }
+      .access-matrix td:not(:last-child) { text-align: center; }
+      .access-matrix input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--accent); }
+      .access-matrix select { min-width: 9rem; }
+      .access-team-grid,
+      .access-record-forms,
+      .access-record-table { margin-top: 0.9rem; }
+      .access-team-card > form { display: grid; gap: 0.7rem; }
+      .access-user-card,
+      .access-team-card,
+      .mailbox-access { min-width: 0; }
+      .access-user-card > form,
+      .mailbox-access > form { display: grid; gap: 0.7rem; min-width: 0; }
       @media (max-width: 700px) {
         .account-user-summary { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
         .account-user-summary-meta { text-align: left; }
@@ -1744,6 +1819,9 @@
         .account-user-action-buttons .subtle { margin-right: 0; }
         .account-user-action-buttons form,
         .account-user-action-buttons .button { width: 100%; }
+        .access-create-form,
+        .access-role-heading-fields { grid-template-columns: 1fr; }
+        .access-wide-field { grid-column: auto; }
       }
       .account-panel label.checkbox-label {
         display: flex;
@@ -2088,6 +2166,7 @@
         font-size: 0.76rem;
       }
       .agent-context-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .agent-context-ocr-warning { color: #8a493c; font-weight: 700; white-space: nowrap; }
       .agent-context-chip button { width: 1.15rem; height: 1.15rem; padding: 0; border: 0; border-radius: 999px; background: transparent; color: inherit; cursor: pointer; font-size: 0.95rem; line-height: 1; }
       .agent-context-chip button:hover { background: rgba(7, 95, 78, 0.12); }
       .agent-float-chat {
@@ -2100,6 +2179,33 @@
         padding: 0.85rem 0.95rem 1rem;
       }
       .agent-float-chat .assistant-message { max-width: 94%; }
+      .agent-float-working {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.35rem 0.95rem;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      .agent-float-working[hidden] { display: none; }
+      .agent-working-dots { display: inline-flex; flex: 0 0 auto; gap: 0.35rem; padding-right: 3px; color: var(--accent); }
+      .agent-working-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: agent-working-dot 1.2s ease-in-out infinite;
+      }
+      .agent-working-dots span:nth-child(2) { animation-delay: 0.16s; }
+      .agent-working-dots span:nth-child(3) { animation-delay: 0.32s; }
+      @keyframes agent-working-dot {
+        0%, 60%, 100% { opacity: 0.35; transform: translateX(0); }
+        30% { opacity: 1; transform: translateX(3px); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .agent-working-dots span { animation: none; opacity: 1; }
+      }
       .agent-float-empty { margin: auto 0; }
       .agent-chat-action-card {
         display: grid;
@@ -2117,6 +2223,16 @@
       .agent-chat-action-footer .button { min-height: 2rem; padding: 0.35rem 0.6rem; font-size: 0.78rem; }
       .agent-chat-action-status { color: var(--muted); font-size: 0.75rem; }
       .agent-float-composer { margin: 0.65rem; }
+      .agent-float-upload {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        cursor: pointer;
+      }
+      .agent-float-upload[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
+      .agent-float-upload svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; }
+      .agent-float-upload input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+      .agent-float-upload:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
       .agent-float-notice { margin: 0; padding: 0.6rem 0.95rem; border-top: 1px solid var(--border); color: #8a493c; font-size: 0.82rem; }
       .agent-context-action { text-align: left; }
       @media (max-width: 680px) {
@@ -2373,6 +2489,7 @@
         background: var(--accent-soft);
         color: #075f4e;
       }
+      .hub-form-error { grid-column: 1 / -1; white-space: pre-line; scroll-margin-block: 5rem; }
       .notice-warning {
         border-left: 4px solid #9a6a14;
         padding: 0.7rem 0.85rem;
@@ -2719,6 +2836,18 @@
         border-radius: 18px;
       }
       .finance-directory-table { min-width: 760px; }
+      .activity-directory-link {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        color: var(--accent);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        text-align: left;
+      }
+      .activity-directory-link:hover { text-decoration: underline; }
+      .activity-directory-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
       .finance-invoice-directory-table .finance-invoice-select-cell {
         width: 2.75rem;
         min-width: 2.75rem;
@@ -3186,6 +3315,14 @@
         font: inherit;
         font-weight: 700;
       }
+      .customer-communication-tabs .field-tabs-list {
+        flex-wrap: wrap;
+        overflow-x: visible;
+      }
+      .customer-communication-tabs .field-tab {
+        flex: 0 1 auto;
+        white-space: normal;
+      }
       .field-tab:hover { color: var(--ink); }
       .field-tab[aria-selected="true"] {
         border-bottom-color: var(--accent);
@@ -3245,6 +3382,37 @@
         cursor: grab;
         user-select: none;
       }
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 0.85rem;
+        border: 1px dashed var(--accent);
+        border-radius: var(--control-v2-radius);
+        background: color-mix(in srgb, var(--accent-soft) 72%, white);
+        color: var(--accent);
+        cursor: grab;
+        user-select: none;
+      }
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break::before,
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break::after {
+        content: "";
+        height: 1px;
+        background: currentColor;
+        opacity: 0.55;
+      }
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break strong,
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break small {
+        grid-column: 2;
+        margin: 0;
+        text-align: center;
+      }
+      .customer-detail-panel.is-layout-editing .customer-field-layout-break small {
+        color: var(--muted);
+        font-weight: 400;
+      }
       .customer-detail-panel.is-layout-editing .layout-sortable-ghost {
         opacity: 0.4;
       }
@@ -3280,6 +3448,29 @@
         font-size: 0.82rem;
       }
       .customer-field-control small { font-weight: 400; }
+      .customer-profile-edit-grid { column-gap: 1.5rem; }
+      .customer-profile-edit-field { min-width: 0; }
+      .customer-field-control-readonly > div {
+        color: var(--ink);
+        overflow-wrap: anywhere;
+      }
+      .customer-postal-city-control {
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      .customer-postal-city-control > legend {
+        padding: 0;
+        margin-bottom: 0.35rem;
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      .customer-postal-city-inputs {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        gap: 0.5rem;
+      }
       .finance-customer-combobox { position: relative; min-width: 0; }
       .finance-customer-combobox > input[type="search"] { width: 100%; }
       .finance-customer-options {
@@ -3502,7 +3693,13 @@
         gap: 0.75rem;
       }
       .communication-entry-heading strong { overflow-wrap: anywhere; }
-      .communication-entry .subtle { margin: 0.3rem 0 0.55rem; }
+      .communication-entry .subtle {
+        min-width: 0;
+        max-width: 100%;
+        margin: 0.3rem 0 0.55rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
       .communication-entry .button { margin-top: 0.15rem; }
       .case-email-actions {
         display: flex;
@@ -3519,6 +3716,12 @@
         margin: 0;
       }
       .case-email-actions .button { margin-top: 0; }
+      .case-email-create-action { margin-left: auto; }
+      .customer-email-case-link { border-radius: 999px; white-space: nowrap; }
+      button.customer-email-case-link.is-open { border-color: #d99191; background: #fde7e7; color: #9d2424; }
+      button.customer-email-case-link.is-open:hover { border-color: #bf5f5f; background: #fbd8d8; color: #7e1c1c; }
+      button.customer-email-case-link.is-closed { border-color: #8dbb9b; background: #e2f3e7; color: #1f7040; }
+      button.customer-email-case-link.is-closed:hover { border-color: #5e9d72; background: #d2ebda; color: #155a30; }
       .communication-content summary {
         color: var(--accent);
         cursor: pointer;
@@ -3528,9 +3731,22 @@
       .communication-content-with-actions > summary {
         display: flex;
         align-items: center;
+        gap: 0.5rem;
         min-height: var(--control-v1-height);
         padding-right: 8rem;
+        list-style: none;
       }
+      .communication-content-with-actions > summary::-webkit-details-marker { display: none; }
+      .communication-content-with-actions > summary::before {
+        content: "";
+        flex: 0 0 auto;
+        width: 0.42rem;
+        height: 0.42rem;
+        border-right: 2px solid currentColor;
+        border-bottom: 2px solid currentColor;
+        transform: rotate(-45deg);
+      }
+      .communication-content-with-actions[open] > summary::before { transform: rotate(45deg); }
       .communication-email-actions {
         position: absolute;
         top: 0;
@@ -3638,7 +3854,7 @@
       }
       .communication-attachments a {
         color: var(--accent);
-        font-weight: 700;
+        font-weight: 500;
         overflow-wrap: anywhere;
       }
       .communication-form {
@@ -3762,6 +3978,27 @@
       .activity-compose-layer.is-open .activity-compose-drawer { transform: translateX(0); }
       .activity-compose-form { flex: 1; align-content: start; }
       .activity-compose-form[hidden] { display: none; }
+      .activity-compose-relation { display: grid; min-width: 0; gap: 0.35rem; overflow-wrap: anywhere; }
+      .activity-compose-relation > span:first-child { color: var(--muted); font-size: 0.84rem; }
+      .activity-compose-relation > [hidden] { display: none; }
+      .activity-creation-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.7rem; margin: 0 0 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--border); }
+      .activity-creation-fields[hidden] { display: none; }
+      .activity-creation-fields dt { color: var(--muted); font-size: 0.84rem; }
+      .activity-creation-fields dd { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
+      .activity-creation-summary { font-size: 0.84rem; overflow-wrap: anywhere; }
+      .activity-view-filter { margin: 0 0 1rem; min-width: 0; }
+      .activity-view-filter label { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; color: var(--muted); }
+      .activity-view-filter select { width: auto; max-width: 100%; }
+      .activity-compose-form button[type="submit"][hidden] { display: none; }
+      .activity-compose-form [data-activity-delete-open][hidden],
+      [data-activity-panel-delete-error][hidden] { display: none; }
+      .activity-compose-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.7rem; align-items: end; }
+      .activity-compose-status-row > label { min-width: 0; }
+      .activity-compose-status-row > button { margin: 0; white-space: nowrap; }
+      .activity-compose-status-with-duration { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .activity-compose-status-with-duration:has([data-activity-delete-open]:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+      .calendar-page-header { flex-wrap: wrap; gap: 0.75rem; }
+      .calendar-page-header .activity-view-filter { margin: 0; }
       .activity-compose-two-columns,
       .activity-compose-datetime {
         display: grid;
@@ -3888,6 +4125,7 @@
       .email-compose-close:hover { border-color: var(--accent); color: var(--accent); }
       .email-compose-form { flex: 1; align-content: start; }
       .email-compose-template-status { min-height: 1.25rem; margin: -0.25rem 0 0; }
+      .email-compose-template-status[data-status="error"] { color: var(--danger, #b42318); }
       .email-recipient-search { position: relative; }
       .email-recipient-search-results,
       .email-template-search-results {
@@ -3953,7 +4191,8 @@
       .email-compose-attachment-list { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
       .email-compose-attachment-list[hidden] { display: none; }
       .email-compose-attachment-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid var(--border); border-radius: var(--control-v1-radius); color: var(--muted); font-size: 0.8rem; }
-      .email-compose-attachment-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .email-compose-attachment-list span,
+      .email-compose-attachment-list a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .email-compose-attachment-remove { flex: 0 0 auto; min-width: 1.55rem; height: 1.55rem; margin: 0; padding: 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 1rem; line-height: 1; }
       .email-compose-recipient-fields {
         display: grid;
@@ -4159,6 +4398,17 @@
         gap: 0.65rem;
         margin-top: 0.35rem;
       }
+      .email-compose-schedule {
+        display: grid;
+        grid-template-columns: auto minmax(11rem, 13rem);
+        align-items: center;
+        gap: 0.55rem;
+        margin: 0 auto 0 0;
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+      }
+      .email-compose-schedule input { min-width: 0; margin: 0; }
       body.email-compose-open,
       body.activity-compose-open { overflow: hidden; }
       @media (max-width: 760px) {
@@ -4172,8 +4422,13 @@
         .email-compose-drawer,
         .activity-compose-drawer { width: 100vw; }
         .email-compose-recipient-fields { grid-template-columns: 1fr; }
+        .email-compose-actions { flex-wrap: wrap; }
+        .email-compose-schedule { grid-template-columns: 1fr; width: 100%; }
         .activity-compose-two-columns,
         .activity-compose-datetime { grid-template-columns: 1fr; }
+        .activity-compose-status-with-duration,
+        .activity-compose-status-with-duration:has([data-activity-delete-open]:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
+        .activity-compose-status-with-duration > label:last-child { grid-column: 1 / -1; }
         .email-template-library-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
         .email-template-library-categories { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); }
         .email-template-library-category { flex: 0 0 auto; width: auto; }
@@ -4419,10 +4674,17 @@
         }
         .app-navigation {
           display: flex;
+          flex: none;
           gap: 0.3rem;
           overflow-x: auto;
           padding: 0.7rem 0.15rem 0.05rem;
           scrollbar-width: thin;
+        }
+        .app-user-menu {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          margin-top: 0.75rem;
+          padding: 0.75rem 0.2rem 0.1rem;
         }
         .app-navigation a {
           flex: 0 0 auto;
@@ -4909,26 +5171,43 @@
     </style>
     <link rel="stylesheet" href="/static/template-placeholder-picker.css?v=2">
     <link rel="stylesheet" href="/static/hub-quick-access.css?v=1">
+    <link rel="stylesheet" href="/static/hub-data-panel.css?v=1">
   </head>
   <body data-email-composer-font-family="{{ email_composer_settings.font_family }}" data-email-composer-font-size="{{ email_composer_settings.font_size }}" data-email-composer-line-height="{{ email_composer_settings.line_height }}">
+    {% set module_access = hub_module_access | default({
+      'dashboard': {'view': true},
+      'emails': {'view': true},
+      'customers': {'view': true},
+      'contacts': {'view': true},
+      'leads': {'view': true},
+      'activities': {'view': true},
+      'cases': {'view': true},
+      'finance': {'view': true},
+      'websites': {'view': true},
+      'agent': {'view': true}
+    }) %}
     <div class="app-shell">
       <aside class="app-sidebar" aria-label="Hauptnavigation">
         <div class="app-brand">
         <h1>kosmos-hub</h1>
         <p class="subtle">Phase 1 registry, onboarding and visibility for managed WordPress sites.</p>
         </div>
-          <a class="app-email-alert" href="/emails?folder=inbox&amp;unread=true" data-unread-email-alert aria-label="{{ unread_email_count }} ungelesene E-Mails anzeigen"{% if not unread_email_count %} hidden{% endif %}>
+          <a class="app-email-alert" href="/emails?folder=inbox&amp;unread=true" data-unread-email-alert aria-label="{{ unread_email_count }} ungelesene E-Mails anzeigen"{% if not unread_email_count or not module_access.get('emails', {}).get('view') %} hidden{% endif %}>
             <span>Neue E-Mails</span>
             <strong class="app-email-alert-count" data-unread-email-count>{{ unread_email_count }}</strong>
           </a>
         <nav class="app-navigation" aria-label="Bereiche">
-          <a href="/"{% if request.url.path == "/" %} class="is-active"{% endif %}>Dashboard</a>
-          <a href="/sites"{% if request.url.path.startswith("/sites") %} class="is-active"{% endif %}>Sites</a>
-          <a href="/customers"{% if request.url.path.startswith("/customers") and "/contacts/" not in request.url.path %} class="is-active"{% endif %}>Customers</a>
-          <a href="/calendar"{% if request.url.path.startswith("/calendar") %} class="is-active"{% endif %}>Kalender</a>
-          <a href="/contacts"{% if request.url.path.startswith("/contacts") or "/contacts/" in request.url.path %} class="is-active"{% endif %}>Kontakte</a>
-          <a href="/leads"{% if request.url.path.startswith("/leads") %} class="is-active"{% endif %}>Leads</a>
-          <a href="/cases"{% if request.url.path.startswith("/cases") %} class="is-active"{% endif %}>Fälle</a>
+          {% if module_access.get('dashboard', {}).get('view') %}<a href="/"{% if request.url.path == "/" %} class="is-active"{% endif %}>Dashboard</a>{% endif %}
+          {% if module_access.get('emails', {}).get('view') %}<a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>{% endif %}
+          {% if module_access.get('customers', {}).get('view') %}<a href="/customers"{% if request.url.path.startswith("/customers") and "/contacts/" not in request.url.path %} class="is-active"{% endif %}>Customers</a>{% endif %}
+          {% if module_access.get('contacts', {}).get('view') %}<a href="/contacts"{% if request.url.path.startswith("/contacts") or "/contacts/" in request.url.path %} class="is-active"{% endif %}>Kontakte</a>{% endif %}
+          {% if module_access.get('leads', {}).get('view') %}<a href="/leads"{% if request.url.path.startswith("/leads") %} class="is-active"{% endif %}>Leads</a>{% endif %}
+          {% if module_access.get('activities', {}).get('view') %}<a href="/calendar"{% if request.url.path.startswith("/calendar") %} class="is-active"{% endif %}>Kalender</a>
+          <a href="/calls"{% if request.url.path.startswith("/calls") or request.url.path.startswith("/activities/call/") %} class="is-active"{% endif %}>Anrufe</a>
+          <a href="/tasks"{% if request.url.path.startswith("/tasks") or request.url.path.startswith("/activities/task/") %} class="is-active"{% endif %}>Aufgaben</a>
+          <a href="/meetings"{% if request.url.path.startswith("/meetings") or request.url.path.startswith("/activities/meeting/") %} class="is-active"{% endif %}>Meetings</a>{% endif %}
+          {% if module_access.get('cases', {}).get('view') %}<a href="/cases"{% if request.url.path.startswith("/cases") %} class="is-active"{% endif %}>Fälle</a>{% endif %}
+          {% if module_access.get('finance', {}).get('view') %}
           <details class="app-navigation-group"{% if request.url.path.startswith("/finance") %} open{% endif %}>
             <summary class="app-navigation-group-summary{% if request.url.path.startswith('/finance') %} is-active{% endif %}">Finance</summary>
             <div class="app-navigation-group-links">
@@ -4940,17 +5219,41 @@
               <a href="/finance/recurring-invoices"{% if request.url.path.startswith("/finance/recurring-invoices") %} class="is-active"{% endif %}>Periodische Rechnungen</a>
             </div>
           </details>
-          <a href="/emails"{% if request.url.path.startswith("/emails") %} class="is-active"{% endif %}>E-Mails</a>
-          <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
-          <a href="/backups"{% if request.url.path.startswith("/backups") %} class="is-active"{% endif %}>Backups</a>
-          <a href="/updates"{% if request.url.path.startswith("/updates") %} class="is-active"{% endif %}>Update workbench</a>
-          <a href="/plugin-installations"{% if request.url.path.startswith("/plugin-installations") %} class="is-active"{% endif %}>Plugin installation</a>
-          <a href="/assistant"{% if request.url.path.startswith("/assistant") %} class="is-active"{% endif %}>Assistant</a>
-          <a href="/agent"{% if request.url.path.startswith("/agent") %} class="is-active"{% endif %}>Hub-Agent</a>
+          {% endif %}
+          {% if module_access.get('websites', {}).get('view') %}
+          {% set administration_active = request.url.path.startswith("/sites") or request.url.path.startswith("/users") or request.url.path.startswith("/backups") or request.url.path.startswith("/updates") or request.url.path.startswith("/plugin-installations") or request.url.path.startswith("/assistant") %}
+          <details class="app-navigation-group"{% if administration_active %} open{% endif %}>
+            <summary class="app-navigation-group-summary{% if administration_active %} is-active{% endif %}">Websites</summary>
+            <div class="app-navigation-group-links">
+              <a href="/sites"{% if request.url.path.startswith("/sites") %} class="is-active"{% endif %}>Sites</a>
+              <a href="/users"{% if request.url.path.startswith("/users") %} class="is-active"{% endif %}>Users</a>
+              <a href="/backups"{% if request.url.path.startswith("/backups") %} class="is-active"{% endif %}>Backups</a>
+              <a href="/updates"{% if request.url.path.startswith("/updates") %} class="is-active"{% endif %}>Update workbench</a>
+              <a href="/plugin-installations"{% if request.url.path.startswith("/plugin-installations") %} class="is-active"{% endif %}>Plugin installation</a>
+              <a href="/assistant"{% if request.url.path.startswith("/assistant") %} class="is-active"{% endif %}>Assistant</a>
+            </div>
+          </details>
+          {% endif %}
+          {% if module_access.get('agent', {}).get('view') %}<a href="/agent"{% if request.url.path.startswith("/agent") %} class="is-active"{% endif %}>Hub-Agent</a>{% endif %}
+          {% if can_open_settings | default(false) %}<a href="/settings"{% if request.url.path.startswith("/settings") or request.url.path.startswith("/styling") %} class="is-active"{% endif %}>Einstellungen</a>{% endif %}
           <a href="/account"{% if request.url.path.startswith("/account") %} class="is-active"{% endif %}>Account</a>
-          <a href="/styling"{% if request.url.path.startswith("/styling") %} class="is-active"{% endif %}>Styling</a>
-          <a href="/healthz">Health</a>
         </nav>
+        {% set signed_in_user = request.state.hub_user | default(none) if request.state is defined else none %}
+        {% if signed_in_user %}
+        <section class="app-user-menu" aria-label="Angemeldeter Benutzer">
+          <div class="app-user-identity">
+            <a class="app-user-name" href="/account" title="Eigenen Account öffnen"><strong>{{ signed_in_user.display_name or signed_in_user.username }}</strong></a>
+            <p class="app-user-login">Angemeldet als {{ signed_in_user.username }}</p>
+          </div>
+          <form method="post" action="/account/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button button-secondary" type="submit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4H4v16h5M10 12h10m-4-4 4 4-4 4"/></svg>
+              Abmelden
+            </button>
+          </form>
+        </section>
+        {% endif %}
       </aside>
       <main class="app-main">
         <header class="hub-quick-access" data-hub-quick-access aria-label="Schnellzugriff">
@@ -5014,6 +5317,10 @@
       </details>
       <div class="agent-float-contexts" data-agent-float-contexts></div>
       <div class="agent-float-chat" data-agent-float-messages aria-live="polite"></div>
+      <div class="agent-float-working" data-agent-float-working role="status" aria-live="polite" aria-atomic="true" hidden>
+        <span class="agent-working-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span data-agent-float-working-label></span>
+      </div>
       <p class="agent-float-notice" data-agent-float-notice hidden></p>
       <form class="assistant-composer agent-float-composer" data-agent-float-form>
         <div class="assistant-composer-field">
@@ -5021,7 +5328,13 @@
           <textarea id="agent-float-instruction" rows="3" maxlength="4000" placeholder="Was soll der Hub-Agent vorbereiten?" data-agent-float-input></textarea>
           <button class="assistant-send" type="submit" aria-label="Anweisung senden" title="Senden"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 14-7-4 14-3.5-5.5L5 12Z"/><path d="m11.5 13.5 3.2-3.2"/></svg></button>
         </div>
-        <div class="assistant-composer-meta"><span>Enter sendet, Umschalt+Enter fügt eine Zeile ein.</span><span>Jede Aktion braucht deine Bestätigung.</span></div>
+        <div class="assistant-composer-meta">
+          <label class="agent-float-upload" data-agent-float-upload-label title="PDF oder TXT als Kontext hinzufügen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/></svg>
+            Datei hinzufügen
+            <input type="file" accept=".pdf,.txt,application/pdf,text/plain" data-agent-float-upload aria-label="PDF oder TXT als Agent-Kontext hochladen">
+          </label>
+        </div>
       </form>
     </section>
     {% if can_use_global_email_composer and not request.url.path.startswith('/emails') %}
@@ -5029,7 +5342,11 @@
     {% endif %}
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <link rel="stylesheet" href="/static/jodit-editor.css?v=1">
-    <script src="/static/jodit-editor.js?v=11"></script>
+    <script src="/static/jodit-editor.js?v=12"></script>
+    <script src="/static/email-delivery.js?v=1"></script>
+    <script src="/static/form-submit.js?v=2"></script>
+    <script src="/static/deletion-preview.js?v=1"></script>
+    <script src="/static/email-draft-attachments.js?v=2"></script>
     <script src="/static/template-placeholder-picker.js?v=2" defer></script>
     <script src="/static/hub-quick-access.js?v=1" defer></script>
     <script>
@@ -5580,9 +5897,7 @@
               var recipientKey = emailComposerRecipientKey && emailComposerRecipientKey.value
                 ? emailComposerRecipientKey.value
                 : (emailComposerRecipient && emailComposerRecipient.tagName === "SELECT" ? emailComposerRecipient.value : "");
-              if (!isPreview && recipientKey) {
-                templateUrl += "?recipient_key=" + encodeURIComponent(recipientKey);
-              }
+              templateUrl += "?" + new URLSearchParams({ recipient_key: recipientKey, context_path: window.location.pathname }).toString();
               window.fetch(templateUrl, {
                 credentials: "same-origin",
                 headers: { "Accept": "application/json" }
@@ -5657,6 +5972,8 @@
             if (emailComposerTrigger) { emailComposerTrigger.focus(); }
           }
 
+          emailComposerLayer.addEventListener("email-compose-saved", closeEmailComposer);
+
           document.addEventListener("click", function (event) {
             var openTrigger = event.target.closest("[data-email-compose-open]");
             if (openTrigger) {
@@ -5686,7 +6003,12 @@
           var globalMailboxRecipient = globalMailboxComposer.querySelector("[data-email-compose-recipient]");
           var globalMailboxRecipientKey = globalMailboxComposer.querySelector("[data-email-compose-recipient-key]");
           var globalMailboxRecipientCustomerId = globalMailboxComposer.querySelector("[data-email-compose-recipient-customer-id]");
+          var globalMailboxLeadId = globalMailboxComposer.querySelector("[data-email-compose-lead-id]");
           var globalMailboxRecipientName = globalMailboxComposer.querySelector("[data-email-compose-recipient-name]");
+          var globalMailboxDunningId = globalMailboxComposer.querySelector("[data-email-compose-dunning-id]");
+          var globalMailboxContextModule = globalMailboxComposer.querySelector("[data-email-compose-context-module]");
+          var globalMailboxContextRecordId = globalMailboxComposer.querySelector("[data-email-compose-context-record-id]");
+          var globalMailboxContextPath = "";
           var globalMailboxDraftId = globalMailboxComposer.querySelector("[data-email-compose-draft-id]");
           var globalMailboxReplyTo = globalMailboxComposer.querySelector("[data-email-compose-reply-to]");
           var globalMailboxForwardFrom = globalMailboxComposer.querySelector("[data-email-compose-forward-from]");
@@ -5697,6 +6019,7 @@
           var globalMailboxContentValue = globalMailboxComposer.querySelector("[data-email-compose-content-value]");
           var globalMailboxStatus = globalMailboxComposer.querySelector("[data-email-compose-template-status]");
           var globalMailboxSubmit = globalMailboxComposer.querySelector("[data-global-mailbox-compose-submit]");
+          var globalMailboxScheduledAt = globalMailboxComposer.querySelector("[data-email-compose-scheduled-at]");
           var globalMailboxSaveDraft = globalMailboxComposer.querySelector("[data-global-mailbox-compose-save-draft]");
           var globalMailboxRecipientResults = globalMailboxComposer.querySelector("[data-global-mailbox-compose-recipient-results]");
           var globalMailboxCcResults = globalMailboxComposer.querySelector("[data-global-mailbox-compose-cc-results]");
@@ -5723,6 +6046,7 @@
           var globalMailboxNeedsNewEmailDefaults = false;
           var globalMailboxTemplateRequest = 0;
           var globalMailboxAttachments = [];
+          var globalMailboxStoredAttachments = [];
           var globalMailboxRecipientTimer = 0;
           var globalMailboxCcTimer = 0;
           var globalMailboxSuggestedRecipients = [];
@@ -5737,8 +6061,10 @@
           var globalMailboxAutostartTemplateId = globalMailboxComposer.dataset.emailComposeAutostartTemplateId || "";
           var globalMailboxAutostartCustomerId = globalMailboxComposer.dataset.emailComposeAutostartCustomerId || "";
 
-          function globalMailboxStatusMessage(message) {
-            if (globalMailboxStatus) globalMailboxStatus.textContent = message;
+          function globalMailboxStatusMessage(message, isError) {
+            if (!globalMailboxStatus) return;
+            globalMailboxStatus.textContent = message;
+            globalMailboxStatus.dataset.status = isError ? "error" : "info";
           }
 
           function globalMailboxOption(select, value, label) {
@@ -5768,8 +6094,12 @@
 
           function globalMailboxUpdateSubmit() {
             if (!globalMailboxSubmit) return;
-            globalMailboxSubmit.disabled = !(
+            globalMailboxSubmit.textContent = globalMailboxScheduledAt && globalMailboxScheduledAt.value
+              ? "E-Mail planen"
+              : "E-Mail senden";
+            globalMailboxSubmit.disabled = globalMailboxSubmitting || !(
               globalMailboxSender && globalMailboxSender.value &&
+              globalMailboxSender.selectedOptions[0].dataset.canSend === "true" &&
               globalMailboxRecipient && globalMailboxRecipient.validity.valid
             );
           }
@@ -5825,7 +6155,7 @@
                 return recipients;
               })
               .catch(function (error) {
-                if (requestId === globalMailboxSuggestedRequest) globalMailboxStatusMessage(error.message || "Die verknüpften Kontakte konnten nicht geladen werden.");
+                if (requestId === globalMailboxSuggestedRequest) globalMailboxStatusMessage(error.message || "Die verknüpften Kontakte konnten nicht geladen werden.", true);
                 return [];
               });
           }
@@ -5840,23 +6170,41 @@
 
           function globalMailboxSetAttachments(attachments) {
             globalMailboxAttachments = attachments.slice();
+            window.KosmosEmailDraftAttachments.sync(globalMailboxForm, globalMailboxStoredAttachments);
             if (globalMailboxAttachmentInput) {
               var transfer = new DataTransfer();
               globalMailboxAttachments.forEach(function (attachment) { transfer.items.add(attachment); });
               globalMailboxAttachmentInput.files = transfer.files;
             }
             if (globalMailboxAttachmentSummary) {
-              globalMailboxAttachmentSummary.textContent = globalMailboxAttachments.length
-                ? globalMailboxAttachments.length + (globalMailboxAttachments.length === 1 ? " Anhang ausgewählt" : " Anhänge ausgewählt")
+              var attachmentCount = globalMailboxAttachments.length + globalMailboxStoredAttachments.length;
+              globalMailboxAttachmentSummary.textContent = attachmentCount
+                ? attachmentCount + (attachmentCount === 1 ? " Anhang" : " Anhänge")
                 : "Keine Anhänge ausgewählt";
             }
             if (!globalMailboxAttachmentList) return;
-            globalMailboxAttachmentList.replaceChildren();
+            window.KosmosEmailDraftAttachments.clearList(globalMailboxAttachmentList);
+            globalMailboxStoredAttachments.forEach(function (attachment) {
+              var item = document.createElement("li");
+              var name = window.KosmosEmailDraftAttachments.storedLink(attachment, globalMailboxDraftId && globalMailboxDraftId.value);
+              var remove = document.createElement("button");
+              remove.type = "button";
+              remove.className = "email-compose-attachment-remove";
+              remove.setAttribute("aria-label", attachment.filename + " entfernen");
+              remove.title = "Anhang entfernen";
+              remove.textContent = "x";
+              remove.addEventListener("click", function () {
+                globalMailboxStoredAttachments = globalMailboxStoredAttachments.filter(function (item) { return item.id !== attachment.id; });
+                globalMailboxSetAttachments(globalMailboxAttachments);
+                globalMailboxScheduleDraftSave();
+              });
+              item.append(name, remove);
+              globalMailboxAttachmentList.append(item);
+            });
             globalMailboxAttachments.forEach(function (attachment, index) {
               var item = document.createElement("li");
-              var name = document.createElement("span");
+              var name = window.KosmosEmailDraftAttachments.localLink(attachment);
               var remove = document.createElement("button");
-              name.textContent = attachment.name;
               remove.type = "button";
               remove.className = "email-compose-attachment-remove";
               remove.setAttribute("aria-label", attachment.name + " entfernen");
@@ -5864,11 +6212,12 @@
               remove.textContent = "x";
               remove.addEventListener("click", function () {
                 globalMailboxSetAttachments(globalMailboxAttachments.filter(function (_attachment, itemIndex) { return itemIndex !== index; }));
+                globalMailboxScheduleDraftSave();
               });
               item.append(name, remove);
               globalMailboxAttachmentList.append(item);
             });
-            globalMailboxAttachmentList.hidden = !globalMailboxAttachments.length;
+            globalMailboxAttachmentList.hidden = !(globalMailboxAttachments.length + globalMailboxStoredAttachments.length);
           }
 
           function globalMailboxHasDraftContent() {
@@ -5882,6 +6231,8 @@
               (globalMailboxCc && globalMailboxCc.value.trim()) ||
               (globalMailboxSubject && globalMailboxSubject.value.trim()) ||
               messageText ||
+              globalMailboxAttachments.length || globalMailboxStoredAttachments.length ||
+              (globalMailboxDraftId && globalMailboxDraftId.value) ||
               (globalMailboxTemplateId && globalMailboxTemplateId.value)
             );
           }
@@ -5893,6 +6244,7 @@
           }
 
           function globalMailboxScheduleDraftSave() {
+            if (globalMailboxSubmitting) return;
             if (!globalMailboxHasDraftContent()) return;
             if (!globalMailboxDraftStartedAt) globalMailboxDraftStartedAt = Date.now();
             globalMailboxDraftDirty = true;
@@ -5905,6 +6257,7 @@
 
           function saveGlobalMailboxDraft(options) {
             options = options || {};
+            if (globalMailboxSubmitting && !options.beforeSend) return Promise.resolve(false);
             if (!globalMailboxForm || !globalMailboxHasDraftContent()) {
               globalMailboxDraftDirty = false;
               return Promise.resolve(false);
@@ -5920,34 +6273,36 @@
             }
             globalMailboxClearDraftTimer();
             globalMailboxDraftDirty = false;
-            var data = new FormData(globalMailboxForm);
-            // Drafts retain text only; attachments are stored once the email is actually sent.
-            data.delete("attachments");
+            var attachmentSnapshot = window.KosmosEmailDraftAttachments.capture(globalMailboxForm, globalMailboxAttachments);
             if (!options.automatic) globalMailboxSaveDraft.disabled = true;
             if (!options.quiet) globalMailboxStatusMessage("Entwurf wird gespeichert ...");
-            var saving = window.fetch("/emails/drafts", { method: "POST", body: data, credentials: "same-origin" })
+            var saving = window.fetch("/emails/drafts", { method: "POST", body: attachmentSnapshot.body, credentials: "same-origin" })
               .then(function (response) {
                 return response.json().catch(function () { return {}; }).then(function (payload) {
-                  if (!response.ok) throw new Error(payload.detail || "Der Entwurf konnte nicht gespeichert werden.");
+                  if (!response.ok || !payload.draft_id) throw new Error(payload.detail || "Der Entwurf konnte nicht gespeichert werden.");
                   return payload;
                 });
               })
               .then(function (payload) {
                 if (session !== globalMailboxDraftSession) return true;
                 globalMailboxDraftId.value = String(payload.draft_id || "");
+                var attachmentState = window.KosmosEmailDraftAttachments.reconcile(attachmentSnapshot, globalMailboxAttachments, globalMailboxStoredAttachments, payload);
+                globalMailboxStoredAttachments = attachmentState.stored;
+                globalMailboxSetAttachments(attachmentState.files);
                 if (!options.quiet) globalMailboxStatusMessage("Entwurf gespeichert.");
+                if (options.closeAfterSave && !globalMailboxDraftDirty) globalMailboxClose({ draftSaved: true });
                 return true;
               })
               .catch(function (error) {
                 globalMailboxDraftDirty = true;
                 if (session === globalMailboxDraftSession && !options.quiet) {
-                  globalMailboxStatusMessage(error.message || "Der Entwurf konnte nicht gespeichert werden.");
+                  globalMailboxStatusMessage(error.message || "Der Entwurf konnte nicht gespeichert werden.", true);
                 }
                 return false;
               });
             var completed = saving.finally(function () {
               if (globalMailboxDraftSavePromise === completed) globalMailboxDraftSavePromise = null;
-              if (!options.automatic) globalMailboxSaveDraft.disabled = false;
+              if (!options.automatic && !globalMailboxSubmitting) globalMailboxSaveDraft.disabled = false;
               if (globalMailboxDraftDirty) globalMailboxScheduleDraftSave();
             });
             globalMailboxDraftSavePromise = completed;
@@ -5967,6 +6322,12 @@
             if (globalMailboxDraftId) globalMailboxDraftId.value = "";
             if (globalMailboxReplyTo) globalMailboxReplyTo.value = "";
             if (globalMailboxForwardFrom) globalMailboxForwardFrom.value = "";
+            if (globalMailboxScheduledAt) globalMailboxScheduledAt.value = "";
+            if (globalMailboxDunningId) globalMailboxDunningId.value = "";
+            globalMailboxContextModule.value = "";
+            globalMailboxContextRecordId.value = "";
+            globalMailboxContextPath = "";
+            if (globalMailboxLeadId) globalMailboxLeadId.value = "";
             if (globalMailboxSender) globalMailboxSender.value = "";
             if (globalMailboxRecipient) globalMailboxRecipient.value = "";
             globalMailboxClearRecipient();
@@ -5987,6 +6348,7 @@
               globalMailboxTemplateResults.hidden = true;
             }
             globalMailboxCloseLibrary();
+            globalMailboxStoredAttachments = [];
             globalMailboxSetAttachments([]);
             globalMailboxApplyNewEmailDefaults();
           }
@@ -6027,6 +6389,7 @@
                 globalMailboxOption(globalMailboxSender, "", "Absender auswählen");
                 (payload.senders || []).forEach(function (sender) {
                   globalMailboxOption(globalMailboxSender, sender.email, sender.name + " · " + sender.email);
+                  globalMailboxSender.lastElementChild.dataset.canSend = String(sender.can_send === true);
                 });
                 globalMailboxSender.disabled = !(payload.senders || []).length;
                 globalMailboxTemplates = (payload.templates || []).map(function (template) {
@@ -6040,11 +6403,11 @@
                 globalMailboxLoaded = true;
                 globalMailboxApplyNewEmailDefaults();
                 globalMailboxApplyDefaultSender();
-                globalMailboxStatusMessage(payload.sender_error || "Kontakt oder E-Mail-Adresse eingeben.");
+                globalMailboxStatusMessage(payload.sender_error || "Kontakt oder E-Mail-Adresse eingeben.", Boolean(payload.sender_error));
                 globalMailboxUpdateSubmit();
               })
               .catch(function (error) {
-                globalMailboxStatusMessage(error.message || "Die E-Mail-Maske konnte nicht vorbereitet werden.");
+                globalMailboxStatusMessage(error.message || "Die E-Mail-Maske konnte nicht vorbereitet werden.", true);
                 throw error;
               })
               .finally(function () { globalMailboxLoading = null; });
@@ -6145,7 +6508,7 @@
                 return recipients;
               })
               .catch(function (error) {
-                globalMailboxStatusMessage(error.message || "Die Kontakte konnten nicht gesucht werden.");
+                globalMailboxStatusMessage(error.message || "Die Kontakte konnten nicht gesucht werden.", true);
                 return [];
               });
           }
@@ -6259,11 +6622,19 @@
             globalMailboxTemplateId.value = templateId;
             if (!templateId) return;
             var requestId = ++globalMailboxTemplateRequest;
-            var baseUrl = globalMailboxComposer.dataset.emailTemplateUrl;
-            var isPreview = !baseUrl || !globalMailboxRecipientKey.value;
-            var templateUrl = isPreview
-              ? "/emails/compose/templates/" + encodeURIComponent(templateId)
-              : baseUrl + "/" + encodeURIComponent(templateId) + "?recipient_key=" + encodeURIComponent(globalMailboxRecipientKey.value);
+            var isPreview = !globalMailboxRecipientKey.value && !globalMailboxLeadId.value && !globalMailboxContextRecordId.value;
+            var templateUrl = "/emails/compose/templates/" + encodeURIComponent(templateId);
+            var templateParams = new URLSearchParams({
+              recipient_key: globalMailboxRecipientKey.value,
+              recipient_email: globalMailboxRecipient.value,
+              customer_id: globalMailboxRecipientCustomerId.value,
+              lead_id: globalMailboxLeadId.value,
+              dunning_id: globalMailboxDunningId.value,
+              context_module: globalMailboxContextModule.value,
+              context_record_id: globalMailboxContextRecordId.value,
+              context_path: globalMailboxContextPath
+            });
+            templateUrl += "?" + templateParams.toString();
             globalMailboxStatusMessage(isPreview ? "Vorlage wird als Entwurf geladen ..." : "Vorlage wird geladen ...");
             window.fetch(templateUrl, { credentials: "same-origin", headers: { "Accept": "application/json" } })
               .then(function (response) {
@@ -6274,6 +6645,12 @@
               })
               .then(function (template) {
                 if (requestId !== globalMailboxTemplateRequest) return;
+                var resolved = template.template_context || {};
+                globalMailboxContextModule.value = resolved.context_module || "";
+                globalMailboxContextRecordId.value = resolved.context_record_id || "";
+                if (resolved.customer_id) globalMailboxRecipientCustomerId.value = resolved.customer_id;
+                if (resolved.lead_id) globalMailboxLeadId.value = resolved.lead_id;
+                if (resolved.recipient_key) globalMailboxRecipientKey.value = resolved.recipient_key;
                 globalMailboxSubject.value = template.subject || "";
                 globalMailboxSetContent(template.content || "");
                 globalMailboxSyncContent();
@@ -6289,7 +6666,7 @@
               })
               .catch(function (error) {
                 if (requestId === globalMailboxTemplateRequest) {
-                  globalMailboxStatusMessage(error.message || "Die E-Mail-Vorlage konnte nicht geladen werden.");
+                  globalMailboxStatusMessage(error.message || "Die E-Mail-Vorlage konnte nicht geladen werden.", true);
                 }
               });
           }
@@ -6300,24 +6677,31 @@
             globalMailboxDrawer.setAttribute("aria-hidden", "false");
             document.body.classList.add("email-compose-open");
             var customerId = trigger.dataset.emailComposeCustomerId || "";
+            var leadId = trigger.dataset.emailComposeLeadId || "";
+            globalMailboxContextPath = window.location.pathname;
+            globalMailboxContextModule.value = trigger.dataset.emailComposeContextModule || "";
+            globalMailboxContextRecordId.value = trigger.dataset.emailComposeContextRecordId || "";
+            if (globalMailboxLeadId) globalMailboxLeadId.value = leadId;
+            if (globalMailboxDunningId) globalMailboxDunningId.value = trigger.dataset.emailComposeDunningId || "";
             globalMailboxLoadOptions().then(function () {
               globalMailboxApplyDefaultSender();
               var recipientEmail = trigger.dataset.recipientEmail || "";
               if (recipientEmail) {
                 globalMailboxRecipient.value = recipientEmail;
                 globalMailboxClearRecipient();
-                globalMailboxSearchRecipients(recipientEmail, true);
+                globalMailboxSearchRecipients(recipientEmail, !leadId);
               } else if (customerId) {
                 globalMailboxLoadSuggestedRecipients(customerId);
               }
+              globalMailboxUpdateSubmit();
               window.setTimeout(function () { (globalMailboxRecipient || globalMailboxSubject).focus(); }, 230);
             });
           }
 
-          function globalMailboxClose() {
+          function globalMailboxClose(options) {
             var hasSavedDraft = Boolean(globalMailboxDraftId && globalMailboxDraftId.value);
             var autosaveIsDue = globalMailboxDraftStartedAt && Date.now() - globalMailboxDraftStartedAt >= 30000;
-            if (hasSavedDraft || autosaveIsDue) saveGlobalMailboxDraft({ force: true, quiet: true });
+            if ((!options || !options.draftSaved) && (hasSavedDraft || autosaveIsDue)) saveGlobalMailboxDraft({ force: true, quiet: true });
             globalMailboxComposer.classList.remove("is-open");
             globalMailboxDrawer.setAttribute("aria-hidden", "true");
             document.body.classList.remove("email-compose-open");
@@ -6340,6 +6724,11 @@
             }
             globalMailboxReplyTo.value = action.reply_to_email_id || "";
             globalMailboxForwardFrom.value = action.forward_from_email_id || "";
+            if (globalMailboxDunningId) globalMailboxDunningId.value = action.dunning_id || "";
+            globalMailboxContextModule.value = action.context_module || "";
+            globalMailboxContextRecordId.value = action.context_record_id || "";
+            if (globalMailboxLeadId) globalMailboxLeadId.value = action.lead_id || "";
+            if (globalMailboxScheduledAt) globalMailboxScheduledAt.value = action.scheduled_at || "";
             globalMailboxSubject.value = action.subject || "";
             globalMailboxSetContent(action.content || "");
             if (Array.isArray(action.cc_emails) && action.cc_emails.length) {
@@ -6371,13 +6760,17 @@
                 });
               })
               .then(globalMailboxApplyAction)
-              .catch(function (error) { globalMailboxStatusMessage(error.message || "Die E-Mail-Aktion konnte nicht vorbereitet werden."); })
+              .catch(function (error) { globalMailboxStatusMessage(error.message || "Die E-Mail-Aktion konnte nicht vorbereitet werden.", true); })
               .finally(function () { button.disabled = false; });
           }
 
           globalMailboxContent.addEventListener("input", globalMailboxSyncContent);
           globalMailboxContent.addEventListener("blur", globalMailboxSyncContent);
           globalMailboxSender.addEventListener("change", globalMailboxUpdateSubmit);
+          if (globalMailboxScheduledAt) {
+            globalMailboxScheduledAt.addEventListener("input", globalMailboxUpdateSubmit);
+            globalMailboxScheduledAt.addEventListener("change", globalMailboxUpdateSubmit);
+          }
           globalMailboxRecipient.addEventListener("input", function () {
             globalMailboxClearRecipient();
             globalMailboxUpdateSubmit();
@@ -6419,19 +6812,31 @@
             globalMailboxScheduleDraftSave();
           });
           globalMailboxSaveDraft.addEventListener("click", function () {
-            saveGlobalMailboxDraft({ force: true });
+            saveGlobalMailboxDraft({ force: true, closeAfterSave: true });
           });
-          globalMailboxForm.addEventListener("submit", function (event) {
+          function submitGlobalMailboxForm(event) {
+            if (event.defaultPrevented) return;
+            event.preventDefault();
             globalMailboxSyncContent();
             if (globalMailboxSubmitting || !globalMailboxHasDraftContent()) return;
-            event.preventDefault();
+            if (!globalMailboxForm.reportValidity()) return;
             globalMailboxSubmitting = true;
             globalMailboxClearDraftTimer();
             globalMailboxSubmit.disabled = true;
-            saveGlobalMailboxDraft({ force: true, quiet: true }).finally(function () {
-              HTMLFormElement.prototype.submit.call(globalMailboxForm);
+            globalMailboxSaveDraft.disabled = true;
+            globalMailboxStatusMessage("E-Mail wird übermittelt ...");
+            return saveGlobalMailboxDraft({ force: true, quiet: true, beforeSend: true }).then(function () {
+              return window.KosmosEmailDelivery.submit(globalMailboxForm);
+            }).then(function (url) {
+              window.location.assign(url);
+            }).catch(function (error) {
+              globalMailboxSubmitting = false;
+              globalMailboxSaveDraft.disabled = false;
+              globalMailboxUpdateSubmit();
+              globalMailboxStatusMessage(error.message, true);
             });
-          });
+          }
+          globalMailboxForm.addEventListener("submit", submitGlobalMailboxForm);
           globalMailboxForm.querySelectorAll("input, select, textarea").forEach(function (control) {
             if (control.type === "hidden" || control === globalMailboxContentValue) return;
             control.addEventListener("input", globalMailboxScheduleDraftSave);
@@ -6473,7 +6878,7 @@
                 globalMailboxTemplate.dispatchEvent(new Event("change", { bubbles: true }));
               })
               .catch(function (error) {
-                globalMailboxStatusMessage(error.message || "Die Abschlussvorlage konnte nicht geladen werden.");
+                globalMailboxStatusMessage(error.message || "Die Abschlussvorlage konnte nicht geladen werden.", true);
               });
           }
         }
@@ -6544,6 +6949,7 @@
           var customerMeetingDeleteForm = customerMeetingDeleteDialog && customerMeetingDeleteDialog.querySelector("[data-customer-meeting-delete-form]");
           var customerMeetingDeleteName = customerMeetingDeleteDialog && customerMeetingDeleteDialog.querySelector("[data-customer-meeting-delete-name]");
           var customerActivityCalendarMode = customerActivityComposer.dataset.activityComposerMode === "calendar";
+          var customerActivityDirectoryMode = customerActivityComposer.dataset.activityComposerMode === "directory";
 
           function customerActivityClose() {
             customerActivityComposer.classList.remove("is-open");
@@ -6781,20 +7187,97 @@
 
           function customerActivitySetCalendarName(form, nameInput, prefix) {
             if (!customerActivityCalendarMode || nameInput.dataset.automatic === "false") return;
-            var customer = form.querySelector("[data-customer-activity-calendar-customer]");
-            var option = customer && customer.options[customer.selectedIndex];
-            var customerName = customer && customer.value && option ? option.textContent.trim() : "";
+            var party = form.querySelector("[data-activity-party-search]");
+            var customerName = party ? party.dataset.selectedPartyName || "" : "";
             nameInput.value = customerName ? prefix + " " + customerName : prefix;
             nameInput.dataset.automatic = "true";
           }
 
-          function customerActivitySetCalendarCustomer(form, customerId) {
+          function customerActivitySetCalendarCustomer(form, customerId, leadId, name) {
             if (!customerActivityCalendarMode) return;
-            var customer = form.querySelector("[data-customer-activity-calendar-customer]");
-            if (customer) customer.value = customerId || "";
+            var party = form.querySelector("[data-activity-party-search]");
+            if (party) party.dispatchEvent(new CustomEvent("finance-party:set", { detail: {customerId: customerId || "", leadId: leadId || "", name: name || ""} }));
+          }
+
+          function customerActivitySetDirectoryRelation(form, relation, href) {
+            if (!customerActivityDirectoryMode) return;
+            var link = form.querySelector("[data-customer-activity-directory-relation]");
+            var empty = form.querySelector("[data-customer-activity-directory-relation-empty]");
+            if (!link || !empty) return;
+            var hasRelation = /^\/(customers|leads|cases)\/[1-9]\d*$/.test(href || "");
+            link.hidden = !hasRelation;
+            empty.hidden = hasRelation;
+            link.textContent = hasRelation ? relation : "";
+            if (hasRelation) link.setAttribute("href", href);
+            else link.removeAttribute("href");
+          }
+
+          function customerActivitySetCreation(opener) {
+            var panel = customerActivityComposer.querySelector("[data-activity-creation-fields]");
+            if (!panel) return;
+            var source = opener && (opener.closest ? opener.closest("[data-activity-created-by]") : opener);
+            var values = source && source.dataset;
+            panel.hidden = !values;
+            panel.querySelector("[data-activity-creation-author]").textContent = values ? (values.activityCreatedBy || "Nicht bekannt") : "";
+            panel.querySelector("[data-activity-creation-time]").textContent = values ? (values.activityCreatedAt || "-") : "";
+            [["changed-author", "activityChangedBy"], ["changed-time", "activityChangedAt"],
+             ["completion-author", "activityCompletedBy"], ["completion-time", "activityCompletedAt"]].forEach(function (pair) {
+              var node = panel.querySelector("[data-activity-" + pair[0] + "]");
+              if (node) node.textContent = values ? (values[pair[1]] || "-") : "";
+            });
+            panel.querySelectorAll("[data-activity-completion-row]").forEach(function (row) {
+              row.hidden = !values || !values.activityCompletedBy;
+            });
+          }
+
+          function customerActivitySetResponsibility(form, opener) {
+            var source = opener && (opener.closest ? opener.closest("[data-activity-created-by]") : opener);
+            var values = source && source.dataset || {};
+            var select = form.querySelector("[data-activity-assignee]");
+            if (select) {
+              var identifier = values.activityAssigneeId || "";
+              if (!Array.from(select.options).some(function (option) { return option.value === identifier; })) {
+                var option = new Option(values.activityAssigneeName || "Nicht zugeordnet", identifier);
+                option.dataset.activityTemporaryOption = "true";
+                select.add(option);
+              }
+              select.value = identifier;
+            }
+            var readonly = values.activityCanEdit === "false";
+            form.querySelectorAll("input, select, textarea, button").forEach(function (element) {
+              if (element.hasAttribute("data-customer-activity-compose-close") || element.hasAttribute("data-activity-delete-open")) return;
+              if (readonly || element === select && values.activityCanAssign === "false") {
+                if (!element.disabled) element.dataset.activityPolicyDisabled = "true";
+                element.disabled = true;
+              }
+            });
+            form.querySelectorAll('[type="submit"]').forEach(function (button) { button.hidden = readonly; });
+            var deleteButton = form.querySelector("[data-activity-delete-open]");
+            if (deleteButton) {
+              var identifier = values.activityId || "";
+              deleteButton.hidden = values.activityCanDelete !== "true" || !/^[1-9]\d*$/.test(identifier);
+              deleteButton.dataset.activityDeleteUrl = deleteButton.hidden ? "" : "/activities/" + deleteButton.dataset.activityDeleteKind + "/" + identifier + "/delete";
+              deleteButton.dataset.activityDeleteName = form.elements.namedItem("name").value;
+            }
+            if (readonly) customerActivityTitle.textContent = customerActivityTitle.textContent.replace("bearbeiten", "ansehen");
           }
 
           function customerActivityOpen(kind, selectedStart) {
+            customerActivitySetCreation(null);
+            [customerCallForm, customerTaskForm, customerMeetingForm].forEach(function (form) {
+              form.querySelectorAll("[data-activity-policy-disabled]").forEach(function (element) {
+                element.disabled = false;
+                delete element.dataset.activityPolicyDisabled;
+              });
+              form.querySelectorAll("[data-activity-temporary-option]").forEach(function (element) { element.remove(); });
+              form.querySelectorAll('[type="submit"]').forEach(function (button) { button.hidden = false; });
+              form.querySelectorAll("[data-activity-delete-open]").forEach(function (button) {
+                button.hidden = true;
+                delete button.dataset.activityDeleteUrl;
+                delete button.dataset.activityDeleteName;
+              });
+              customerActivitySetDirectoryRelation(form, "", "");
+            });
             var isCall = kind === "call";
             var isTask = kind === "task";
             var isMeeting = kind === "meeting";
@@ -6845,6 +7328,7 @@
 
           function customerCallOpenForEdit(opener) {
             customerActivityOpen("call");
+            customerActivitySetCreation(opener);
             customerCallForm.action = opener.dataset.customerCallUpdateUrl;
             customerCallName.value = opener.dataset.customerCallName || "";
             customerCallStatus.value = opener.dataset.customerCallStatus || "planned";
@@ -6857,10 +7341,12 @@
               (opener.dataset.customerCallReminderChannels || "").split(",").filter(Boolean),
               (opener.dataset.customerCallReminderMinutes || "").split(",").filter(Boolean)
             );
-            customerActivitySetCalendarCustomer(customerCallForm, opener.dataset.customerCalendarCustomerId);
+            customerActivitySetCalendarCustomer(customerCallForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId, opener.dataset.customerCalendarPartyName);
+            customerActivitySetDirectoryRelation(customerCallForm, opener.dataset.customerActivityRelation, opener.dataset.customerActivityRelationHref);
             customerCallName.dataset.automatic = "false";
             customerActivityTitle.textContent = "Anruf bearbeiten";
             customerCallSubmit.textContent = "Änderungen speichern";
+            customerActivitySetResponsibility(customerCallForm, opener);
           }
 
           function customerCallOpenDeleteDialog(opener) {
@@ -6879,6 +7365,7 @@
 
           function customerTaskOpenForEdit(opener) {
             customerActivityOpen("task");
+            customerActivitySetCreation(opener);
             customerTaskForm.action = opener.dataset.customerTaskUpdateUrl;
             customerTaskName.value = opener.dataset.customerTaskName || "";
             customerTaskStatus.value = opener.dataset.customerTaskStatus || "planned";
@@ -6887,8 +7374,10 @@
             customerTaskReminderChannel.value = opener.dataset.customerTaskReminderChannel || "none";
             customerTaskReminderMinutes.value = opener.dataset.customerTaskReminderMinutes || "0";
             customerTaskDescription.value = opener.dataset.customerTaskDescription || "";
+            customerActivitySetDirectoryRelation(customerTaskForm, opener.dataset.customerActivityRelation, opener.dataset.customerActivityRelationHref);
             customerActivityTitle.textContent = "Aufgabe bearbeiten";
             customerTaskSubmit.textContent = "Änderungen speichern";
+            customerActivitySetResponsibility(customerTaskForm, opener);
           }
 
           function customerTaskOpenDeleteDialog(opener) {
@@ -6907,6 +7396,7 @@
 
           function customerMeetingOpenForEdit(opener) {
             customerActivityOpen("meeting");
+            customerActivitySetCreation(opener);
             customerMeetingForm.action = opener.dataset.customerMeetingUpdateUrl;
             customerMeetingName.value = opener.dataset.customerMeetingName || "";
             customerMeetingStatus.value = opener.dataset.customerMeetingStatus || "planned";
@@ -6918,11 +7408,13 @@
               (opener.dataset.customerMeetingReminderChannels || "").split(",").filter(Boolean),
               (opener.dataset.customerMeetingReminderMinutes || "").split(",").filter(Boolean)
             );
-            customerActivitySetCalendarCustomer(customerMeetingForm, opener.dataset.customerCalendarCustomerId);
+            customerActivitySetCalendarCustomer(customerMeetingForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId, opener.dataset.customerCalendarPartyName);
+            customerActivitySetDirectoryRelation(customerMeetingForm, opener.dataset.customerActivityRelation, opener.dataset.customerActivityRelationHref);
             customerMeetingName.dataset.automatic = "false";
             customerMeetingUpdateEnd();
             customerActivityTitle.textContent = "Meeting bearbeiten";
             customerMeetingSubmit.textContent = "Änderungen speichern";
+            customerActivitySetResponsibility(customerMeetingForm, opener);
           }
 
           function customerMeetingOpenDeleteDialog(opener) {
@@ -7124,7 +7616,12 @@
             var activity = event.detail || {};
             if (activity.kind !== "call" && activity.kind !== "meeting") return;
             var opener = { dataset: {
+              activityCreatedBy: activity.createdBy || "",
+              activityCreatedAt: activity.createdAt || "",
+              ...activity.responsibility,
               customerCalendarCustomerId: activity.customerId || "",
+              customerCalendarLeadId: activity.leadId || "",
+              customerCalendarPartyName: activity.partyName || "",
               customerCallUpdateUrl: activity.updateUrl || "",
               customerCallName: activity.name || "",
               customerCallStatus: activity.status || "planned",
@@ -7405,12 +7902,23 @@
             opener.addEventListener("click", function () { setEditing(true); });
           });
           cancels.forEach(function (cancel) {
-            cancel.addEventListener("click", function () { setEditing(false); });
+            cancel.addEventListener("click", function () {
+              // Discard submits its own form; keep inputs until the server confirms.
+              if (!cancel.hasAttribute("data-customer-edit-discard")) { setEditing(false); }
+            });
           });
+          if (editor.hasAttribute("data-customer-edit-start-open")) {
+            // Wait for position editors to register their reset/snapshot handlers.
+            window.requestAnimationFrame(function () { setEditing(true); });
+            var editUrl = new URL(window.location.href);
+            editUrl.searchParams.delete("edit");
+            window.history.replaceState(window.history.state, "", editUrl.href);
+          }
         });
 
         document.querySelectorAll("[data-layout-editor]").forEach(function (editor) {
           var layoutKey = editor.getAttribute("data-layout-editor");
+          var startsOpen = editor.hasAttribute("data-layout-editor-start-open");
           var sortable = editor.querySelector("[data-layout-sortable]");
           var layoutFieldsEditor = editor.querySelector("[data-layout-fields-editor]");
           var form = editor.querySelector("[data-layout-form]");
@@ -7429,7 +7937,7 @@
           var originalExpanded = content.classList.contains("is-expanded");
           var moreLabel = content.getAttribute("data-expandable-more-label") || "Weiter lesen ...";
           var lessLabel = content.getAttribute("data-expandable-less-label") || "Weniger anzeigen";
-          if (!openers.length || !actions.length || !cancels.length) { return; }
+          if (!startsOpen && (!openers.length || !actions.length || !cancels.length)) { return; }
 
           function items() {
             return Array.prototype.filter.call(sortable.children, function (item) {
@@ -7509,6 +8017,7 @@
           form.addEventListener("submit", function () {
             orderInput.value = JSON.stringify(itemKeys());
           });
+          if (startsOpen) { setLayoutEditing(true); }
         });
 
         (function setupHubAgentFloat() {
@@ -7521,9 +8030,14 @@
           var historyList = panel.querySelector("[data-agent-float-history-list]");
           var contexts = panel.querySelector("[data-agent-float-contexts]");
           var messages = panel.querySelector("[data-agent-float-messages]");
+          var working = panel.querySelector("[data-agent-float-working]");
+          var workingLabel = panel.querySelector("[data-agent-float-working-label]");
           var notice = panel.querySelector("[data-agent-float-notice]");
           var form = panel.querySelector("[data-agent-float-form]");
+          var send = form.querySelector('[type="submit"]');
           var input = panel.querySelector("[data-agent-float-input]");
+          var upload = panel.querySelector("[data-agent-float-upload]");
+          var uploadLabel = panel.querySelector("[data-agent-float-upload-label]");
           var badge = document.querySelector("[data-agent-float-badge]");
           var state = { csrfToken: {{ csrf_token | tojson }}, chat: null, busy: false };
           var pageContext = {
@@ -7559,7 +8073,7 @@
             return message;
           }
 
-          function appendActionCard(parent, action, conversationStatus) {
+          function appendActionCard(parent, action, conversationStatus, hasOcrContext) {
             var card = createElement("section", "agent-chat-action-card");
             card.appendChild(createElement("strong", "", action.title));
             card.appendChild(createElement("p", "", action.details));
@@ -7569,6 +8083,9 @@
                 preview.appendChild(createElement("li", "", line));
               });
               card.appendChild(preview);
+            }
+            if (hasOcrContext) {
+              card.appendChild(createElement("p", "agent-context-ocr-warning", "OCR-Daten prüfen: besonders Namen, Beträge und Termine."));
             }
             if (action.error) {
               card.appendChild(createElement("p", "notice-error", action.error));
@@ -7601,6 +8118,9 @@
               var chip = createElement("span", "agent-context-chip");
               chip.title = context.description || context.label;
               chip.appendChild(createElement("span", "agent-context-chip-label", context.label));
+              if (context.type === "file" && (context.description || "").indexOf("OCR-Text") !== -1) {
+                chip.appendChild(createElement("span", "agent-context-ocr-warning", "OCR prüfen"));
+              }
               if (conversation.status === "active") {
                 var remove = createElement("button", "", "×");
                 remove.type = "button";
@@ -7629,13 +8149,13 @@
               var response = appendMessage("assistant", "Hub-Agent", message.response || message.summary);
               (message.actions || []).forEach(function (action) {
                 if (action.status === "proposed") { proposedCount += 1; }
-                appendActionCard(response, action, conversation.status);
+                appendActionCard(response, action, conversation.status, !!message.ocr_context_used);
               });
             });
             if (!(payload.messages || []).length) {
               var empty = createElement("section", "assistant-chat-empty agent-float-empty");
               empty.appendChild(createElement("h3", "", "Womit soll ich helfen?"));
-              empty.appendChild(createElement("p", "", "Du kannst eine Aufgabe beschreiben oder über das Kontextmenü bewusst eine E-Mail, Notiz, einen Kunden oder eine Aktivität hinzufügen."));
+              empty.appendChild(createElement("p", "", "Beschreibe eine Aufgabe, füge eine PDF- oder TXT-Datei hinzu oder wähle einen Hub-Kontext aus."));
               messages.appendChild(empty);
             }
             badge.hidden = proposedCount === 0;
@@ -7643,18 +8163,28 @@
             panel.querySelector("[data-agent-float-complete]").disabled = conversation.status !== "active";
             panel.querySelector("[data-agent-float-delete]").disabled = conversation.status !== "active";
             input.disabled = state.busy || conversation.status !== "active";
+            upload.disabled = state.busy || conversation.status !== "active" || (payload.contexts || []).filter(function (item) { return item.type === "file"; }).length >= 3;
+            uploadLabel.setAttribute("aria-disabled", upload.disabled ? "true" : "false");
             input.placeholder = conversation.status === "active" ? "Was soll der Hub-Agent vorbereiten?" : "Diese Unterhaltung ist nicht mehr aktiv. Starte eine neue.";
+            send.disabled = input.disabled;
             messages.scrollTop = messages.scrollHeight;
           }
 
-          function setBusy(busy) {
+          function setBusy(busy, label) {
             state.busy = busy;
             panel.classList.toggle("is-busy", busy);
+            working.hidden = !busy;
+            workingLabel.textContent = busy ? (label || "Hub-Agent arbeitet") : "";
+            messages.setAttribute("aria-busy", busy ? "true" : "false");
             if (state.chat && state.chat.conversation) {
               input.disabled = busy || state.chat.conversation.status !== "active";
             } else {
               input.disabled = busy;
             }
+            send.disabled = input.disabled;
+            upload.disabled = busy || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active" ||
+              (state.chat.contexts || []).filter(function (item) { return item.type === "file"; }).length >= 3;
+            uploadLabel.setAttribute("aria-disabled", upload.disabled ? "true" : "false");
           }
 
           function showPanel() {
@@ -7669,13 +8199,14 @@
 
           async function requestJson(url, options) {
             var response = await window.fetch(url, options);
-            var payload = await response.json().catch(function () { return { error: "Die Antwort des Hub-Agenten konnte nicht gelesen werden." }; });
+            var payload = await response.json().catch(function () { throw new Error("Die Antwort des Hub-Agenten konnte nicht gelesen werden."); });
             if (!response.ok) { throw new Error(payload.error || "Der Hub-Agent konnte die Anfrage nicht verarbeiten."); }
             return payload;
           }
 
           async function loadChat(conversationId) {
-            setBusy(true);
+            if (state.busy) { return; }
+            setBusy(true, "Unterhaltung wird geladen");
             try {
               var suffix = conversationId ? "?conversation_id=" + encodeURIComponent(conversationId) : "";
               render(await requestJson("/agent/chat" + suffix, { credentials: "same-origin" }));
@@ -7687,7 +8218,8 @@
           }
 
           async function postChat(path, values) {
-            setBusy(true);
+            if (state.busy) { return; }
+            setBusy(true, path === "/agent/chat/new" ? "Neue Unterhaltung wird geöffnet" : "Hub-Agent arbeitet");
             setNotice("");
             try {
               values = values || {};
@@ -7722,19 +8254,31 @@
             });
           }
 
+          async function startNewChat() {
+            if (state.busy) { return false; }
+            state.chat = null;
+            input.value = "";
+            title.textContent = "Neue Unterhaltung";
+            messages.replaceChildren();
+            contexts.replaceChildren();
+            history.open = false;
+            var payload = await postChat("/agent/chat/new");
+            if (payload) { await addPageContext(); }
+            return !!payload;
+          }
+
           launcher.addEventListener("click", async function () {
             if (panel.hidden) {
               showPanel();
-              if (!state.chat) { await loadChat(); }
-              else { render(state.chat); }
-              await addPageContext();
+              // Keep an in-flight reply visible when the user only minimizes the panel.
+              if (!state.busy) { await startNewChat(); }
             } else {
               hidePanel();
             }
           });
 
           panel.querySelector("[data-agent-float-close]").addEventListener("click", hidePanel);
-          panel.querySelector("[data-agent-float-new]").addEventListener("click", function () { postChat("/agent/chat/new"); });
+          panel.querySelector("[data-agent-float-new]").addEventListener("click", startNewChat);
           panel.querySelector("[data-agent-float-complete]").addEventListener("click", function () {
             if (!state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
             postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/close");
@@ -7744,25 +8288,16 @@
             postChat("/agent/chat/" + encodeURIComponent(state.chat.conversation.id) + "/delete");
           });
 
-          function openPreparedReplyDraft(payload) {
-            var messages = payload && payload.messages || [];
-            var latestMessage = messages[messages.length - 1];
-            if (!latestMessage) { return; }
-            var draftAction = (latestMessage.actions || []).find(function (action) {
-              return action.type === "create_email_reply_draft" && action.status === "completed" && action.result_href;
-            });
-            if (draftAction) { window.location.assign(draftAction.result_href); }
-          }
-
           form.addEventListener("submit", function (event) {
             event.preventDefault();
+            if (state.busy) { return; }
             var instruction = input.value.trim();
             if (!instruction || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
             input.value = "";
             postChat("/agent/chat/messages", {
               conversation_id: state.chat.conversation.id,
               instruction: instruction
-            }).then(openPreparedReplyDraft);
+            });
           });
           input.addEventListener("keydown", function (event) {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -7771,14 +8306,46 @@
             }
           });
 
-          document.addEventListener("click", function (event) {
+          upload.addEventListener("change", async function () {
+            if (state.busy) { return; }
+            var file = upload.files && upload.files[0];
+            if (!file || !state.chat || !state.chat.conversation || state.chat.conversation.status !== "active") { return; }
+            if (file.size > 5 * 1024 * 1024) {
+              setNotice("Die Datei darf höchstens 5 MB groß sein.");
+              upload.value = "";
+              return;
+            }
+            setBusy(true, "Datei wird verarbeitet");
+            setNotice("");
+            try {
+              var body = new FormData();
+              body.set("csrf_token", state.csrfToken);
+              body.set("conversation_id", String(state.chat.conversation.id));
+              body.set("file", file);
+              render(await requestJson("/agent/chat/files", {
+                method: "POST", credentials: "same-origin", body: body
+              }));
+            } catch (error) {
+              setNotice(error.message);
+            } finally {
+              upload.value = "";
+              setBusy(false);
+            }
+          });
+
+          document.addEventListener("click", async function (event) {
             var contextTrigger = event.target.closest("[data-agent-context-add]");
             if (contextTrigger) {
               event.preventDefault();
+              if (state.busy) { return; }
               var detailMenu = contextTrigger.closest("details");
               if (detailMenu) { detailMenu.open = false; }
+              var needsNewChat = panel.hidden || !state.chat;
               showPanel();
+              if (needsNewChat && !await startNewChat()) { return; }
+              if (!state.chat || !state.chat.conversation) { return; }
               postChat("/agent/chat/context", {
+                conversation_id: state.chat.conversation.id,
                 resource_type: contextTrigger.dataset.agentContextType,
                 resource_key: contextTrigger.dataset.agentContextKey
               });

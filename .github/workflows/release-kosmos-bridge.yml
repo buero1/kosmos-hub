@@ -30,6 +30,12 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Check Bridge domain identity contracts
+        run: php tools/test-bridge-identity.php
+
+      - name: Check scoped plugin auto-update policy
+        run: php tools/test-bridge-auto-updates.php
+
       - name: Build plugin package and metadata
         id: package
         shell: bash

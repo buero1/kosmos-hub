@@ -41,6 +41,9 @@ class CustomerZohoEmail(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=False, index=True)
+    dunning_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hub_finance_dunnings.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     zoho_message_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     zoho_module: Mapped[str | None] = mapped_column(String(32), nullable=True)
     zoho_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

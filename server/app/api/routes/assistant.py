@@ -15,6 +15,8 @@ from app.services.ai_provider import AiProviderConfigService
 from app.services.audit import write_audit_log
 from app.services.fleet_inventory import FleetInventoryService
 from app.services.site_selection import build_site_selector_context
+from app.services.hub_operations import HubOperationService, HubOperationError
+from app.services.hub_operation_websites import website_sites
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(prefix="/assistant", include_in_schema=False)
@@ -30,7 +32,7 @@ def assistant_page(
 ):
     user = _current_user(request)
     provider = AiProviderConfigService(db=db, cipher=get_secret_cipher()).get_openai_config()
-    selection = _assistant_selection(db, site_ids=site_id, site_scope=site_scope)
+    selection = _assistant_selection(db, site_ids=site_id, site_scope=site_scope, actor=user.username)
     return templates.TemplateResponse(
         request,
         "assistant.html",
@@ -55,7 +57,7 @@ def ask_assistant(
     require_csrf(request, csrf_token)
     user = _current_user(request)
     provider = AiProviderConfigService(db=db, cipher=get_secret_cipher()).get_openai_config()
-    selection = _assistant_selection(db, site_ids=site_id, site_scope=site_scope)
+    selection = _assistant_selection(db, site_ids=site_id, site_scope=site_scope, actor=user.username)
     context = _page_context(
         request,
         provider_configured=provider is not None and provider.enabled,
@@ -72,6 +74,7 @@ def ask_assistant(
         answer = HubAssistantService(db=db, cipher=get_secret_cipher()).answer(
             question,
             selected_site_ids=selection["selected_site_ids"],
+            actor=user.username,
         )
     except (AssistantError, ValueError) as exc:
         write_audit_log(
@@ -92,6 +95,7 @@ def ask_assistant(
             db,
             site_ids=list(answer.selection_site_ids),
             site_scope="selected",
+            actor=user.username,
         )
         context["site_selector"] = selection["site_selector"]
         context["assistant_selection"] = selection
@@ -142,12 +146,12 @@ def _assistant_selection(
     *,
     site_ids: list[int] | None,
     site_scope: Literal["all", "selected"],
+    actor: str,
 ) -> dict:
-    inventory = FleetInventoryService(db=db, cipher=get_secret_cipher())
-    sites = sorted(
-        (item.site for item in inventory.list_items(limit=1000)),
-        key=lambda site: site.domain.casefold(),
-    )
+    try:
+        sites = website_sites(HubOperationService(db=db, cipher=get_secret_cipher(), actor=actor))
+    except HubOperationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     available_site_ids = {site.id for site in sites}
     selected_ids = set(site_ids or []) & available_site_ids
     selected_site_ids = None if site_scope == "all" else selected_ids

@@ -1,39 +1,48 @@
 {% extends "base.html" %}
-{% block title %}Account · kosmos-hub{% endblock %}
+{% block title %}{{ "Einstellungen" if page_mode == "settings" else "Account" }} · kosmos-hub{% endblock %}
 {% block content %}
+  {% set settings_page = page_mode == "settings" %}
   <div class="account-page-layout" data-account-navigation>
     <aside class="account-page-sidebar">
-      <p class="eyebrow">Account</p>
-      <nav class="account-section-nav" aria-label="Account sections">
-        <a href="#account-security" aria-current="page">Security</a>
-        <a href="#account-mcp">MCP access</a>
-        <a href="#account-desktop-notifier">Windows Erinnerungen</a>
-        <a href="#account-workflows">Workflows</a>
-        {% if user.role == "admin" %}<a href="#account-legal-terms">AGBs</a>{% endif %}
-        {% if user.role == "admin" %}<a href="#account-pdf-templates">PDF-Vorlagen</a>{% endif %}
-        {% if user.role == "admin" %}<a href="#account-users">Benutzer</a>{% endif %}
-        {% if user.role == "admin" %}<a href="#account-protocol">Protokoll</a>{% endif %}
-        {% if user.role == "admin" %}<a href="#account-mailbox">E-Mail-Postfächer</a>{% endif %}
-        <a href="#account-openai">OpenAI</a>
-        <a href="#account-provider-licenses">Provider licenses</a>
-        <a href="#account-zoho">Zoho CRM</a>
-        <a href="#account-zoho-books">Zoho Books</a>
-        {% if user.role == "admin" %}<a href="#account-refresh-settings">Refresh settings</a>{% endif %}
-        <a href="#account-session">Session</a>
+      <p class="eyebrow">{{ "Einstellungen" if settings_page else "Account" }}</p>
+      <nav class="account-section-nav" aria-label="{{ 'Einstellungen' if settings_page else 'Account' }} Bereiche">
+        {% if settings_page %}
+          <a href="#account-access" aria-current="page">Benutzer &amp; Rechte</a>
+          <a href="#account-workflows">Workflows</a>
+          <a href="#account-legal-terms">AGBs</a>
+          <a href="#account-pdf-templates">PDF-Vorlagen</a>
+          <a href="#account-mailbox">E-Mail-Postfächer</a>
+          <a href="#account-zoho">Zoho CRM</a>
+          <a href="#account-zoho-books">Zoho Books</a>
+          <a href="#account-refresh-settings">Refresh settings</a>
+          <a href="#account-styling">Styling</a>
+        {% else %}
+          {% if user.role != "admin" %}<a href="#account-security" aria-current="page">Mein Account</a>{% endif %}
+          {% if user.role == "admin" %}<a href="#account-mcp">MCP access</a>{% endif %}
+          <a href="#account-desktop-notifier">Windows Erinnerungen</a>
+          {% if user.role == "admin" %}<a href="#account-users" aria-current="page">Benutzer</a>{% endif %}
+          {% if user.role == "admin" %}<a href="#account-protocol">Protokoll</a>{% endif %}
+          {% if user.role == "admin" %}
+          <a href="#account-openai">OpenAI</a>
+          <a href="#account-provider-licenses">Provider licenses</a>
+          {% endif %}
+        {% endif %}
       </nav>
     </aside>
     <section class="account-page-content">
+    {% if not settings_page and user.role != "admin" %}
     <div class="section-heading">
       <div>
-        <p class="eyebrow">Account security</p>
-        <h2>Your Hub account</h2>
-        <p class="subtle">Signed in as <strong>{{ user.username }}</strong> with the {{ user.role }} role.</p>
+        <p class="eyebrow">Persönliche Einstellungen</p>
+        <h2>Mein Account</h2>
+        <p class="subtle">Angemeldet als <strong>{{ user.display_name or user.username }}</strong> (Anmeldename: {{ user.username }}).</p>
       </div>
     </div>
-    {% if request.query_params.get("password") == "changed" %}
-      <p class="notice-success" data-account-notice-section="account-security">Your password was changed. Other active sessions are no longer valid.</p>
     {% endif %}
-    {% if request.query_params.get("mcp_token") == "revoked" %}
+    {% if request.query_params.get("password") == "changed" %}
+      <p class="notice-success" data-account-notice-section="{{ 'account-users' if user.role == 'admin' else 'account-security' }}">Dein Passwort wurde geändert. Andere aktive Sitzungen sind nicht mehr gültig.</p>
+    {% endif %}
+    {% if user.role == "admin" and request.query_params.get("mcp_token") == "revoked" %}
       <p class="notice-success" data-account-notice-section="account-mcp">The MCP token was revoked. Clients using it can no longer access the Hub.</p>
     {% endif %}
     {% if request.query_params.get("desktop_device") == "revoked" %}
@@ -42,6 +51,7 @@
     {% if request.query_params.get("task_reminder_email") == "saved" %}
       <p class="notice-success" data-account-notice-section="{{ 'account-users' if user.role == 'admin' else 'account-security' }}">Die persönliche Adresse für Aufgaben-Erinnerungen wurde gespeichert.</p>
     {% endif %}
+    {% if user.role == "admin" %}
     {% if request.query_params.get("user") == "created" %}
       <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde angelegt.</p>
     {% endif %}
@@ -50,6 +60,12 @@
     {% endif %}
     {% if request.query_params.get("user") == "deleted" %}
       <p class="notice-success" data-account-notice-section="account-users">Der Hub-Benutzer wurde gelöscht.</p>
+    {% endif %}
+    {% if request.query_params.get("access") and request.query_params.get("access") != "error" %}
+      <p class="notice-success" data-account-notice-section="account-access">Benutzer- und Zugriffsrechte wurden gespeichert.</p>
+    {% endif %}
+    {% if request.query_params.get("access") == "error" %}
+      <p class="notice-error" data-account-notice-section="account-access">{{ request.query_params.get("access_message", "Die Zugriffsrechte konnten nicht gespeichert werden.") }}</p>
     {% endif %}
     {% if request.query_params.get("mailbox") == "connected" %}
       <p class="notice-success" data-account-notice-section="account-mailbox">Das Mittwald-Postfach wurde per IMAP und SMTP erfolgreich getestet und verschlüsselt gespeichert. Der Abruf und Versand über Mittwald sind noch nicht aktiviert.</p>
@@ -189,24 +205,32 @@
     {% if request.query_params.get("zoho_books") in ["connect-failed", "not-approved", "refresh-failed"] %}
       <p class="notice-error" data-account-notice-section="account-zoho-books">{{ zoho_books_status.last_error or "Die Zoho-Books-Aktion konnte nicht ausgeführt werden." }}</p>
     {% endif %}
+    {% if request.query_params.get("styling") == "saved" %}
+      <p class="notice-success" data-account-notice-section="account-styling">Die globalen Styling-Werte wurden gespeichert.</p>
+    {% endif %}
+    {% endif %}
     {% if error %}<p class="notice-error" data-account-notice-section="{{ error_section }}">{{ error }}</p>{% endif %}
+    {% if not settings_page %}
+    {% if user.role != "admin" %}
     <form id="account-security" class="account-panel account-section" data-account-section method="post" action="/account/password">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <h3>Change password</h3>
+      <h3>Passwort ändern</h3>
       <label>
-        <span>Current password</span>
+        <span>Aktuelles Passwort</span>
         <input type="password" name="current_password" autocomplete="current-password" required>
       </label>
       <label>
-        <span>New password</span>
+        <span>Neues Passwort</span>
         <input type="password" name="new_password" autocomplete="new-password" minlength="12" required>
       </label>
       <label>
-        <span>Confirm new password</span>
+        <span>Neues Passwort bestätigen</span>
         <input type="password" name="password_confirmation" autocomplete="new-password" minlength="12" required>
       </label>
-      <button class="button" type="submit">Change password</button>
+      <button class="button" type="submit">Passwort ändern</button>
     </form>
+    {% endif %}
+    {% if user.role == "admin" %}
     <section id="account-mcp" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">MCP access</p>
@@ -299,6 +323,7 @@
         </table>
       </div>
     </section>
+    {% endif %}
     <section id="account-desktop-notifier" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">Windows Erinnerungen</p>
@@ -347,6 +372,109 @@
         </table>
       </div>
     </section>
+    {% endif %}
+    {% if settings_page %}
+    <section id="account-access" class="account-section account-section-stack" data-account-section>
+      <article class="account-panel account-panel-wide">
+        <div>
+          <p class="eyebrow">Zugriffssteuerung</p>
+          <h3>Benutzer und Rechte</h3>
+          <p class="subtle">Rollen bestimmen erlaubte Aktionen. Der Datenbereich begrenzt zusätzlich, welche Datensätze in Listen, Suche und Direktaufrufen sichtbar sind.</p>
+        </div>
+        <div class="access-user-grid">
+          {% for account_user in hub_users %}
+            <div class="access-user-card"><form method="post" action="/account/access/users/{{ account_user.id }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <strong>{{ account_user.display_name or account_user.username }}</strong><small class="subtle"> · {{ account_user.username }}</small>
+              <label><span>Rolle</span><select name="role">{% for role in access_roles %}<option value="{{ role.key }}"{% if role.key == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role.key != "admin" %} disabled{% endif %}>{{ role.name }}</option>{% endfor %}</select></label>
+              <label><span>Team</span><select name="team_id"><option value="">Kein Team</option>{% for team in hub_teams %}<option value="{{ team.id }}"{% if team.id == account_user.team_id %} selected{% endif %}>{{ team.name }}</option>{% endfor %}</select></label>
+              {% include "partials/user_identity_fields.html" %}
+                  {% include "partials/user_email_fields.html" %}
+              <button class="button button-secondary" type="submit">Zugriff speichern</button>
+            </form>
+            {% set mailbox_subject_type = 'user' %}{% set mailbox_subject_id = account_user.id %}
+            {% include "partials/mailbox_access_form.html" %}
+            </div>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="account-panel account-panel-wide">
+        <div><p class="eyebrow">Rollen</p><h3>Rollen und Modulrechte</h3><p class="subtle">Die Superadmin-Rolle bleibt unveränderbar. Weitere Rollen können passend zum Arbeitsablauf angepasst werden.</p></div>
+        <form method="post" action="/account/access/roles" class="access-create-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label><span>Rollenname</span><input name="name" maxlength="96" required placeholder="z. B. Innendienst"></label>
+          <label><span>Technischer Schlüssel <small>(optional)</small></span><input name="role_key" maxlength="64" placeholder="innendienst"></label>
+          <label class="access-wide-field"><span>Kurze Beschreibung</span><input name="description" maxlength="500" placeholder="Aufgaben und Verantwortungsbereich"></label>
+          <button class="button button-secondary" type="submit">Rolle anlegen</button>
+        </form>
+        <div class="account-user-disclosures" data-account-disclosure-group>
+          {% for role in access_roles %}
+            {% set role_permissions = access_permissions.get(role.key, {}) %}
+            <details class="account-details zoho-area account-user-area">
+              <summary><span class="account-user-summary"><span class="account-user-summary-name">{{ role.name }}{% if role.is_system %}<span class="pill">Standardrolle</span>{% endif %}</span><span class="account-user-summary-meta">{{ role.description }}</span></span></summary>
+              <div class="zoho-area-content account-user-area-content">
+                <form id="access-role-{{ role.key }}" method="post" action="/account/access/roles/{{ role.key }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <div class="access-role-heading-fields">
+                    <label><span>Name</span><input name="name" value="{{ role.name }}" maxlength="96" required{% if role.key == "admin" %} disabled{% endif %}></label>
+                    <label><span>Beschreibung</span><input name="description" value="{{ role.description }}" maxlength="500"{% if role.key == "admin" %} disabled{% endif %}></label>
+                  </div>
+                  <div class="table-scroll">
+                    <table class="access-matrix">
+                      <thead><tr><th>Modul</th>{% for action in access_actions %}<th>{{ access_action_labels[action] }}</th>{% endfor %}<th>Datenbereich</th></tr></thead>
+                      <tbody>
+                        {% for module in access_modules %}
+                          {% set permission = role_permissions.get(module.key) %}
+                          <tr>
+                            <th>{{ module.label }}</th>
+                            {% for action in access_actions %}<td>{% if action != 'send' or module.key == 'emails' %}<input type="checkbox" name="permission__{{ module.key }}__{{ action }}" value="1"{% if role.key == "admin" or (permission and permission|attr("can_" ~ action)) %} checked{% endif %}{% if role.key == "admin" %} disabled{% endif %} aria-label="{{ module.label }}: {{ access_action_labels[action] }}">{% else %}-{% endif %}</td>{% endfor %}
+                            <td>{% if module.scope_configurable %}<select name="permission__{{ module.key }}__scope"{% if role.key == "admin" %} disabled{% endif %}>{% for scope_key, scope_label in access_scope_labels.items() %}<option value="{{ scope_key }}"{% if role.key == "admin" and scope_key == "all" or permission and permission.record_scope == scope_key %} selected{% endif %}>{{ 'Keine Datensätze' if module.activity_scoped and scope_key == 'none' else scope_label }}</option>{% endfor %}</select>{% else %}<span class="subtle">Modulweit</span><input type="hidden" name="permission__{{ module.key }}__scope" value="all">{% endif %}{% if module.activity_scoped %}<small>Verwalten erlaubt Zuweisung und Bearbeiten fremder Aktivitäten im Datenbereich. Kunden-/Leadrechte bleiben erforderlich.</small>{% endif %}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </form>
+                {% if role.key != "admin" %}<div class="account-user-action-buttons">{% if not role.is_system %}<form method="post" action="/account/access/roles/{{ role.key }}/delete" onsubmit="return window.confirm('Rolle {{ role.name }} wirklich löschen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">Löschen</button></form>{% endif %}<button class="button" type="submit" form="access-role-{{ role.key }}">Rolle speichern</button></div>{% endif %}
+              </div>
+            </details>
+          {% endfor %}
+        </div>
+      </article>
+
+      <article class="account-panel account-panel-wide">
+        <div><p class="eyebrow">Teams</p><h3>Teams verwalten</h3><p class="subtle">Teamzugehörigkeit wird für Rollen mit dem Datenbereich „Eigenes Team“ verwendet.</p></div>
+        <form method="post" action="/account/access/teams" class="access-create-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label><span>Teamname</span><input name="name" maxlength="96" required></label>
+          <label class="access-wide-field"><span>Beschreibung</span><input name="description" maxlength="500"></label>
+          <button class="button button-secondary" type="submit">Team anlegen</button>
+        </form>
+        <div class="access-team-grid">
+          {% for team in hub_teams %}
+            <div class="access-team-card">
+              <form id="access-team-{{ team.id }}" method="post" action="/account/access/teams/{{ team.id }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <label><span>Name</span><input name="name" value="{{ team.name }}" maxlength="96" required></label>
+                <label><span>Beschreibung</span><input name="description" value="{{ team.description }}" maxlength="500"></label>
+              </form>
+              <div class="account-user-action-buttons"><form method="post" action="/account/access/teams/{{ team.id }}/delete" onsubmit="return window.confirm('Team {{ team.name }} wirklich löschen?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">Löschen</button></form><button class="button button-secondary" type="submit" form="access-team-{{ team.id }}">Speichern</button></div>
+              {% set mailbox_subject_type = 'team' %}{% set mailbox_subject_id = team.id %}
+              {% include "partials/mailbox_access_form.html" %}
+            </div>
+          {% else %}<p class="subtle">Noch keine Teams angelegt.</p>{% endfor %}
+        </div>
+      </article>
+
+      <article class="account-panel account-panel-wide">
+        <div><p class="eyebrow">Datensatzrechte</p><h3>Verantwortung und Freigaben</h3><p class="subtle">Zuweisungen steuern regulären Zugriff. Zusätzliche Freigaben ergänzen einzelne Benutzer oder Teams, ohne die Rolle zu verändern.</p></div>
+        {% include "partials/access_record_forms.html" %}
+        <div class="table-scroll"><table class="access-record-table"><thead><tr><th>Modul</th><th>ID</th><th>Verantwortlicher</th><th>Team</th></tr></thead><tbody>{% for assignment in access_assignments %}<tr><td>{{ assignment.module_key }}</td><td>{{ assignment.record_id }}</td><td>{{ access_user_labels.get(assignment.owner_user_id, "-") }}</td><td>{{ hub_team_labels.get(assignment.team_id, "-") }}</td></tr>{% else %}<tr><td colspan="4">Noch keine Datensätze zugewiesen.</td></tr>{% endfor %}</tbody></table></div>
+        <div class="table-scroll"><table class="access-record-table"><thead><tr><th>Modul</th><th>ID</th><th>Freigabe für</th><th>Recht</th><th></th></tr></thead><tbody>{% for grant in access_grants %}<tr><td>{{ grant.module_key }}</td><td>{{ grant.record_id }}</td><td>{{ access_user_labels.get(grant.user_id) or hub_team_labels.get(grant.team_id, "-") }}</td><td>{{ "Bearbeiten" if grant.can_edit else "Ansehen" }}</td><td><form method="post" action="/account/access/grants/{{ grant.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">Entfernen</button></form></td></tr>{% else %}<tr><td colspan="5">Noch keine zusätzlichen Freigaben.</td></tr>{% endfor %}</tbody></table></div>
+      </article>
+    </section>
+
     <section id="account-workflows" class="account-panel account-panel-wide account-section" data-account-section>
       <div>
         <p class="eyebrow">Automatisierung</p>
@@ -654,6 +782,8 @@
         }());
       </script>
     {% endif %}
+    {% endif %}
+    {% if not settings_page %}
     {% if user.role == "admin" %}
     <section id="account-users" class="account-section account-section-stack" data-account-section>
       <article class="account-panel account-panel-wide">
@@ -666,14 +796,18 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label>
             <span>Benutzername</span>
-            <input type="text" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" placeholder="vorname.nachname" required>
+            <input type="text" name="username" autocomplete="username" minlength="3" maxlength="64" pattern="[a-z0-9][a-z0-9._-]{2,63}" placeholder="s.mueller" required>
+            <small class="subtle">Eindeutiger Anmeldename, unabhängig vom Mitarbeiternamen.</small>
           </label>
+          {% include "partials/user_identity_fields.html" %}
           <label>
             <span>Rolle</span>
             <select name="role">
-              {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == "viewer" %} selected{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+              {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == "viewer" %} selected{% endif %}>{{ hub_role_labels.get(role, role) }}</option>{% endfor %}
             </select>
           </label>
+          <label><span>Team <small>(optional)</small></span><select name="team_id"><option value="">Kein Team</option>{% for team in hub_teams %}<option value="{{ team.id }}">{{ team.name }}</option>{% endfor %}</select></label>
+          <label><span>Persönliche E-Mail-Adresse <small>(optional)</small></span><input type="email" name="email_address" maxlength="320" autocomplete="email"></label>
           <label>
             <span>Passwort</span>
             <input type="password" name="password" autocomplete="new-password" minlength="12" required>
@@ -697,11 +831,11 @@
               <summary>
                 <span class="account-user-summary">
                   <span class="account-user-summary-name">
-                    {{ account_user.username }}
+                    {{ account_user.display_name or account_user.username }}
                     {% if account_user.id == user.id %}<span class="pill">Aktueller Benutzer</span>{% endif %}
                   </span>
                   <span class="account-user-summary-meta">
-                    {{ "Administrator" if account_user.role == "admin" else "Mitarbeiter" }}
+                    {{ account_user.username }} · {{ hub_role_labels.get(account_user.role, account_user.role) }}
                     · {% if account_user.is_active %}Aktiv{% else %}Deaktiviert{% endif %}
                   </span>
                 </span>
@@ -718,14 +852,17 @@
                   <label>
                     <span>Rolle</span>
                     <select name="role">
-                      {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role != "admin" %} disabled{% endif %}>{{ "Administrator" if role == "admin" else "Mitarbeiter" }}</option>{% endfor %}
+                      {% for role in hub_user_roles %}<option value="{{ role }}"{% if role == account_user.role %} selected{% endif %}{% if account_user.role == "admin" and hub_admin_count == 1 and role != "admin" %} disabled{% endif %}>{{ hub_role_labels.get(role, role) }}</option>{% endfor %}
                     </select>
                   </label>
+                  <label><span>Team <small>(optional)</small></span><select name="team_id"><option value="">Kein Team</option>{% for team in hub_teams %}<option value="{{ team.id }}"{% if account_user.team_id == team.id %} selected{% endif %}>{{ team.name }}</option>{% endfor %}</select></label>
                   <label class="account-user-reminder-field">
                     <span>E-Mail-Erinnerungsadresse <small>(optional)</small></span>
                     <input type="email" name="reminder_email" value="{{ account_user.reminder_email or '' }}" autocomplete="email" placeholder="name@ihre-domain.de">
                     <small class="subtle">Aufgaben mit Erinnerung „E-Mail“ werden an diese persönliche Adresse gesendet.</small>
                   </label>
+                  {% include "partials/user_identity_fields.html" %}
+                  {% include "partials/user_email_fields.html" %}
                   <label><span>Neues Passwort <small>(optional)</small></span><input type="password" name="password" autocomplete="new-password" minlength="12"></label>
                   <label><span>Passwort bestätigen</span><input type="password" name="password_confirmation" autocomplete="new-password" minlength="12"></label>
                 </form>
@@ -741,6 +878,8 @@
                   <button class="button button-secondary" type="button" data-account-user-edit-cancel>Abbrechen</button>
                   <button class="button" type="submit" form="account-user-edit-{{ account_user.id }}">Speichern</button>
                 </div>
+                {% set mailbox_subject_type = 'user' %}{% set mailbox_subject_id = account_user.id %}
+                {% include "partials/mailbox_access_form.html" %}
               </div>
             </details>
           {% endfor %}
@@ -759,7 +898,7 @@
         <label><span>Von</span><input type="date" name="protocol_from" value="{{ protocol.filters['from'] }}"></label>
         <label><span>Bis</span><input type="date" name="protocol_to" value="{{ protocol.filters['to'] }}"></label>
         <label><span>Benutzer</span><input type="text" name="protocol_actor" value="{{ protocol.filters.actor }}" list="protocol-actors" placeholder="Alle"></label>
-        <datalist id="protocol-actors"><option value="system">{% for account_user in hub_users %}<option value="{{ account_user.username }}">{% endfor %}</datalist>
+        <datalist id="protocol-actors"><option value="system">{% for account_user in hub_users %}<option value="{{ account_user.username }}" label="{{ account_user.display_name or account_user.username }}">{% endfor %}</datalist>
         <label><span>Modul</span><select name="protocol_module"><option value="">Alle</option>{% for key, label in protocol_module_labels.items() %}<option value="{{ key }}"{% if protocol.filters.module == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <label><span>Aktion</span><select name="protocol_action"><option value="">Alle</option>{% for key, label in [('create', 'Angelegt'), ('update', 'Geändert'), ('delete', 'Gelöscht'), ('view', 'Angesehen'), ('execute', 'Ausgeführt'), ('bulk', 'Sammelaktion')] %}<option value="{{ key }}"{% if protocol.filters.action == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
         <button class="button button-secondary" type="submit">Filtern</button>
@@ -771,7 +910,7 @@
             {% for event, url in protocol.rows %}
               <tr>
                 <td>{{ event.timestamp | berlin_time }}</td>
-                <td>{{ event.actor }}</td>
+                <td>{{ hub_actor_label(event.actor_name or event.actor, event.origin) }}</td>
                 <td>{{ protocol_module_labels.get(event.module_key, event.module_key) }}</td>
                 <td><strong>{{ {'create': 'Angelegt', 'update': 'Geändert', 'delete': 'Gelöscht', 'view': 'Angesehen', 'execute': 'Ausgeführt', 'bulk': 'Sammelaktion'}.get(event.category, event.category) }}</strong><br><small class="subtle">{{ 'Hintergrund' if event.origin == 'background' else 'Hub' }} · {{ event.action }}</small>{% if event.changed_fields %}<br><small class="subtle">Felder: {{ event.changed_fields }}</small>{% endif %}</td>
                 <td>{{ 'Erfolgreich' if event.result in ['ok', 'success'] else 'Fehlgeschlagen' if event.result in ['error', 'failed'] else event.result }}</td>
@@ -790,6 +929,8 @@
       </div>
     </section>
     {% endif %}
+    {% endif %}
+    {% if settings_page %}
     {% if user.role == "admin" %}
     <section id="account-mailbox" class="account-panel account-section" data-account-section>
       <div>
@@ -1001,10 +1142,13 @@
       </details>
     </section>
     {% endif %}
+    {% endif %}
+    {% if not settings_page and user.role == "admin" %}
     <section id="account-openai" class="account-panel account-section" data-account-section>
       <div>
         <p class="eyebrow">AI provider</p>
-        <h3>OpenAI for Kosmos Assistant</h3>
+        <h3>OpenAI für den Kosmos Hub</h3>
+        {% if request.query_params.get('openai') == 'model-saved' %}<p class="notice-success">Das KI-Modell wurde gespeichert.</p>{% endif %}
         {% if openai_config and openai_config.enabled %}
           <p class="subtle">Connected with <strong>{{ openai_config.model }}</strong>. Last used: {% if openai_config.last_used_at %}{{ openai_config.last_used_at | berlin_time }}{% else %}Never{% endif %}.</p>
           {% if openai_config.last_error %}<p class="notice-error">Last assistant request: {{ openai_config.last_error }}</p>{% endif %}
@@ -1022,6 +1166,29 @@
         <button class="button" type="submit">Save OpenAI key</button>
       </form>
       {% if openai_config %}
+        <form method="post" action="/account/openai/model">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>
+            <span>KI-Modell</span>
+            <select name="model" required>
+              {% if openai_config.model not in (openai_models | map(attribute='model') | list) %}
+              <option value="" selected disabled>{{ openai_config.model }}: Bitte ein freigegebenes Modell wählen</option>
+              {% endif %}
+              {% for profile in openai_models %}
+              <option value="{{ profile.model }}"{% if openai_config.model == profile.model %} selected{% endif %}>{{ profile.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="subtle">Gilt für neue Anfragen des Hub-Agenten, des WordPress-Assistenten und der E-Mail-Textoptimierung. Laufende Anfragen und bisherige Kosten bleiben unverändert. Ein Modellwechsel benötigt keinen neuen API-Schlüssel.</p>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Modell</th><th>Eingabe</th><th>Cache-Eingabe</th><th>Ausgabe</th></tr></thead>
+              <tbody>{% for profile in openai_models %}<tr><td><a href="{{ profile.pricing.source }}" target="_blank" rel="noopener noreferrer">{{ profile.label }}</a></td><td>{{ profile.pricing.input }}</td><td>{{ profile.pricing.cached_input }}</td><td>{{ profile.pricing.output }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+          <p class="subtle">USD je 1 Mio. Tokens im Standardtarif, Preisstand 23.09.2026. Cache-Schreibvorgänge und lange Eingaben können Zuschläge verursachen. Modellzugang hängt vom OpenAI-Projekt ab; bei Fehlern wird nicht automatisch auf ein teureres Modell gewechselt.</p>
+          <button class="button" type="submit">Modell speichern</button>
+        </form>
         <form method="post" action="/account/openai/remove">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button class="button button-secondary" type="submit">Remove OpenAI key</button>
@@ -1083,6 +1250,8 @@
         </table>
       </div>
     </section>
+    {% endif %}
+    {% if settings_page %}
     <section id="account-zoho" class="account-panel account-panel-wide account-section" data-account-section>
       <div class="zoho-heading-copy">
         <p class="eyebrow">CRM-Integration</p>
@@ -1466,15 +1635,8 @@
         </form>
       </section>
     {% endif %}
-    <section id="account-session" class="account-session account-section" data-account-section>
-      <p class="eyebrow">Session</p>
-      <h3>Sign out</h3>
-      <p class="subtle">End the current Hub session on this device.</p>
-      <form method="post" action="/account/logout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="button button-secondary" type="submit">Sign out</button>
-      </form>
-    </section>
+    {% include "partials/settings_styling.html" %}
+    {% endif %}
     </section>
   </div>
   <script>
@@ -1485,9 +1647,33 @@
       const links = Array.from(page.querySelectorAll(".account-section-nav a"));
       const sections = Array.from(page.querySelectorAll("[data-account-section]"));
       const notices = Array.from(page.querySelectorAll("[data-account-notice-section]"));
+      const settingsPage = {{ "true" if settings_page else "false" }};
+      const settingsSectionIds = new Set([
+        "account-workflows",
+        "account-legal-terms",
+        "account-pdf-templates",
+        "account-mailbox",
+        "account-zoho",
+        "account-zoho-books",
+        "account-refresh-settings",
+        "account-styling",
+      ]);
+      const requestedHash = window.location.hash.slice(1);
+      if (!settingsPage && settingsSectionIds.has(requestedHash)) {
+        window.location.replace(`/settings${window.location.search}${window.location.hash}`);
+        return;
+      }
+      if (settingsPage && requestedHash && !settingsSectionIds.has(requestedHash)) {
+        window.location.replace(`/account${window.location.search}${window.location.hash}`);
+        return;
+      }
+      const defaultSectionId = "{{ 'account-access' if settings_page else ('account-users' if user.role == 'admin' else 'account-security') }}";
       const selectSection = (id, { updateHash = false } = {}) => {
-        const selected = sections.find((section) => section.id === id) || sections[0];
+        const requested = sections.find((section) => section.id === id);
+        const selected = requested || sections.find((section) => section.id === defaultSectionId) || sections[0];
         if (!selected) return;
+
+        if (id && !requested) history.replaceState(null, "", `#${selected.id}`);
 
         sections.forEach((section) => {
           section.hidden = section !== selected;
@@ -1818,7 +2004,7 @@
         return "";
       };
       const noticeSection = notices.length ? notices[0].dataset.accountNoticeSection : "";
-      selectSection(savedActionSection() || noticeSection || window.location.hash.slice(1) || "account-security");
+      selectSection(savedActionSection() || noticeSection || window.location.hash.slice(1) || defaultSectionId);
     })();
   </script>
 {% endblock %}

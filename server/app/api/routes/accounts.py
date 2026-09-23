@@ -16,11 +16,22 @@ from app.core.security import get_secret_cipher
 from app.core.templates import create_templates
 from app.db.session import get_db
 from app.services.audit import write_audit_log
+from app.services.hub_operations import HubOperationService, HubOperationError
+from app.services.hub_administration import HubAdministrationService, runtime_settings
 from app.services.hub_activity import MODULE_LABELS, list_activity_events
 from app.services.ai_provider import AiProviderConfigError, AiProviderConfigService
+from app.services.ai_models import MODEL_PROFILES
 from app.services.crocoblock_license import CrocoblockLicenseError, CrocoblockLicenseService
 from app.services.fleet_refresh_settings import FleetRefreshSettingsError, FleetRefreshSettingsService
 from app.services.hub_accounts import HUB_USER_ROLES, HubAccountService
+from app.services.hub_access_control import (
+    ACCESS_ACTIONS,
+    ACCESS_ACTION_LABELS,
+    ACCESS_MODULES,
+    ACCESS_SCOPE_LABELS,
+    HubAccessControlService,
+    can_open_settings,
+)
 from app.services.hub_mailbox_accounts import HubMailboxAccountError, HubMailboxAccountService
 from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
 from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
@@ -48,6 +59,10 @@ from app.services.email_composer_settings import (
     LINE_HEIGHT_OPTIONS,
     EmailComposerSettingsError,
     EmailComposerSettingsService,
+)
+from app.services.styling_settings import (
+    FONT_FAMILY_OPTIONS as STYLING_FONT_FAMILY_OPTIONS,
+    StylingSettingsService,
 )
 from app.services.email_attachment_storage import EmailAttachmentStorageError
 from app.services.email_compose_images import EmailComposeImageService
@@ -99,7 +114,7 @@ def login(
         return templates.TemplateResponse(
             request,
             "account_login.html",
-            {"next": _safe_next(next), "csrf_token": get_csrf_token(request), "error": "Username or password is incorrect."},
+            {"next": _safe_next(next), "csrf_token": get_csrf_token(request), "error": "Benutzername oder Passwort ist falsch."},
             status_code=400,
         )
     request.session.clear()
@@ -159,7 +174,361 @@ def setup_first_admin(
 def account_page(request: Request, db: Annotated[Session, Depends(get_db)]):
     service = _account_service(db)
     user = _require_persisted_current_user(request, service)
-    return templates.TemplateResponse(request, "account.html", _account_context(request, user, service))
+    settings_query_sections = (
+        ("fleet_refresh", "account-refresh-settings"),
+        ("legal_terms", "account-legal-terms"),
+        ("legal_terms_state", "account-legal-terms"),
+        ("pdf_template", "account-pdf-templates"),
+        ("pdf_template_type", "account-pdf-templates"),
+        ("pdf_template_state", "account-pdf-templates"),
+        ("mailbox", "account-mailbox"),
+        ("spam_sender", "account-mailbox"),
+        ("email_composer", "account-mailbox"),
+        ("email_signature", "account-mailbox"),
+        ("zoho_books", "account-zoho-books"),
+        ("zoho", "account-zoho"),
+        ("styling", "account-styling"),
+    )
+    for query_key, section_id in settings_query_sections:
+        if query_key in request.query_params:
+            query = f"?{request.url.query}" if request.url.query else ""
+            return RedirectResponse(url=f"/settings{query}#{section_id}", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(request, user, service, page_mode="account"),
+    )
+
+
+@bootstrap_router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db: Annotated[Session, Depends(get_db)]):
+    service = _account_service(db)
+    user = _require_persisted_current_user(request, service)
+    if not can_open_settings(user, can_view=HubAccessControlService(db=db).can(user, "settings", "view")):
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    return templates.TemplateResponse(
+        request,
+        "account.html",
+        _account_context(request, user, service, page_mode="settings"),
+    )
+
+
+def _access_redirect(state: str, message: str = "") -> RedirectResponse:
+    query = urlencode({"access": state, "access_message": message})
+    return RedirectResponse(url=f"/settings?{query}#account-access", status_code=303)
+
+
+def _access_permission_values(form: object) -> dict[str, dict[str, object]]:
+    return {
+        module.key: {
+            **{
+                action: str(form.get(f"permission__{module.key}__{action}") or "") == "1"
+                for action in ACCESS_ACTIONS
+            },
+            "scope": str(form.get(f"permission__{module.key}__scope") or ("all" if not module.scope_configurable else "none")),
+        }
+        for module in ACCESS_MODULES
+    }
+
+
+@router.post("/access/roles")
+async def create_access_role(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    actor = _require_admin_user(request)
+    try:
+        role = _administration(db, actor).save_role(
+            role_key=str(form.get("role_key") or ""),
+            name=str(form.get("name") or ""),
+            description=str(form.get("description") or ""),
+            permissions=_access_permission_values(form),
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="create-role", result="success", detail=f"Created access role {role.key}.")
+    db.commit()
+    return _access_redirect("role-saved")
+
+
+@router.post("/access/roles/{role_key}")
+async def update_access_role(role_key: str, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    actor = _require_admin_user(request)
+    try:
+        role = _administration(db, actor).save_role(
+            role_key=role_key,
+            name=str(form.get("name") or ""),
+            description=str(form.get("description") or ""),
+            permissions=_access_permission_values(form),
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="update-role", result="success", detail=f"Updated access role {role.key}.")
+    db.commit()
+    return _access_redirect("role-saved")
+
+
+@router.post("/access/roles/{role_key}/delete")
+def delete_access_role(
+    role_key: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        _administration(db, actor).delete_role(role_key)
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="delete-role", result="success", detail=f"Deleted access role {role_key}.")
+    db.commit()
+    return _access_redirect("role-deleted")
+
+
+@router.post("/access/teams")
+def create_access_team(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        team = _administration(db, actor).create_team(name=name, description=description)
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="create-team", result="success", detail=f"Created team {team.id}.")
+    db.commit()
+    return _access_redirect("team-saved")
+
+
+@router.post("/access/teams/{team_id}")
+def update_access_team(
+    team_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    name: Annotated[str, Form()] = "",
+    description: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        team = _administration(db, actor).update_team(team_id=team_id, name=name, description=description)
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="update-team", result="success", detail=f"Updated team {team.id}.")
+    db.commit()
+    return _access_redirect("team-saved")
+
+
+@router.post("/access/teams/{team_id}/delete")
+def delete_access_team(
+    team_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        _administration(db, actor).delete_team(team_id)
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="delete-team", result="success", detail=f"Deleted team {team_id}.")
+    db.commit()
+    return _access_redirect("team-deleted")
+
+
+@router.post("/access/users/{user_id}")
+def update_user_access(
+    user_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    role: Annotated[str, Form()] = "viewer",
+    team_id: Annotated[str, Form()] = "",
+    email_address: Annotated[str | None, Form()] = None,
+    default_sender_account_id: Annotated[str | None, Form()] = None,
+    first_name: Annotated[str | None, Form()] = None,
+    last_name: Annotated[str | None, Form()] = None,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    service = _account_service(db)
+    target = service.get_user(user_id)
+    if target is None:
+        return _access_redirect("error", "Dieser Hub-Benutzer wurde nicht gefunden.")
+    try:
+        updated = _administration(db, actor).update_user(
+            user_id=target.id,
+            username=target.username,
+            role=role,
+            team_id=int(team_id) if team_id.isdigit() else None,
+            reminder_email=target.reminder_email or "",
+            email_address=email_address,
+            default_sender_account_id=default_sender_account_id,
+            first_name=first_name,
+            last_name=last_name,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="update-user-access", result="success", detail=f"Updated role and team for Hub user {updated.id}.")
+    db.commit()
+    if updated.id == actor.id:
+        request.session.clear()
+        request.session.update({"user_id": updated.id, "session_version": updated.session_version})
+    return _access_redirect("user-saved")
+
+
+@router.post("/access/mailboxes/{subject_type}/{subject_id}")
+async def save_mailbox_access(request: Request, subject_type: str, subject_id: int, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token", "")))
+    actor = _require_admin_user(request)
+    from app.services.hub_mailbox_permissions import MAILBOX_ACTIONS
+    entries = {}
+    try:
+        for account_id in form.getlist("mailbox_id"):
+            values = {}
+            for action in MAILBOX_ACTIONS:
+                raw = str(form.get(f"mailbox__{account_id}__{action}", "false" if subject_type == "team" else "inherit"))
+                if raw not in {"true", "false", "inherit"}:
+                    raise ValueError("Ungültige Postfachberechtigung.")
+                values[action] = {"true": True, "false": False, "inherit": None}[raw]
+            entries[str(account_id)] = values
+        HubOperationService(db=db, cipher=get_secret_cipher(), actor=actor.username).execute("access.mailboxes.update", {
+            "subject_type": subject_type, "subject_id": str(subject_id), "permissions": json.dumps(entries),
+        })
+        write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="update-mailbox-access", result="success", detail=f"Updated mailbox grants for {subject_type} {subject_id}.")
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    return _access_redirect("mailbox-saved")
+
+
+@router.get("/access/records/options")
+def access_record_options(request: Request, db: Annotated[Session, Depends(get_db)],
+                          module_key: str = "customers", query: str = "", offset: str = "0", limit: str = "100", team_id: str = ""):
+    actor = _require_admin_user(request)
+    try:
+        data = HubOperationService(db=db, cipher=get_secret_cipher(), actor=actor.username).query(
+            "access.records.options", {"module_key": module_key, "query": query, "offset": offset, "limit": limit, "team_id": team_id})
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+    return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/access/records/batch")
+async def save_record_access_batch(request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    actor = _require_admin_user(request)
+    try:
+        operation = {"assign": "access.records.assign_many", "grant": "access.grants.create_many"}.get(form.get("kind"))
+        if operation is None:
+            raise ValueError("Ungueltige Zuweisungsart.")
+        values = {key: value for key, value in form.items() if key not in {"csrf_token", "kind"}
+                  and not (key in {"owner_user_id", "team_id"} and value == "__keep__")}
+        result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=actor.username).execute(operation, values)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return JSONResponse({"detail": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+    state = "assignment-saved" if form.get("kind") == "assign" else "grant-saved"
+    return JSONResponse({"message": result.label, "changed": result.outputs["changed"],
+                         "redirect_url": f"/settings?access={state}#account-access"}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/access/assignments")
+def save_record_assignment(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    module_key: Annotated[str, Form()] = "",
+    record_id: Annotated[str, Form()] = "",
+    owner_user_id: Annotated[str, Form()] = "",
+    team_id: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        if not record_id.isdigit():
+            raise ValueError("Bitte eine gültige Datensatz-ID eingeben.")
+        assignment = _administration(db, actor).assign_record(
+            module_key=module_key,
+            record_id=int(record_id),
+            owner_user_id=int(owner_user_id) if owner_user_id.isdigit() else None,
+            team_id=int(team_id) if team_id.isdigit() else None,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="assign-record", result="success", detail=f"Assigned {assignment.module_key} record {assignment.record_id}.")
+    db.commit()
+    return _access_redirect("assignment-saved")
+
+
+@router.post("/access/grants")
+def create_record_grant(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    module_key: Annotated[str, Form()] = "",
+    record_id: Annotated[str, Form()] = "",
+    user_id: Annotated[str, Form()] = "",
+    team_id: Annotated[str, Form()] = "",
+    can_edit: Annotated[bool, Form()] = False,
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        if not record_id.isdigit():
+            raise ValueError("Bitte eine gültige Datensatz-ID eingeben.")
+        grant = _administration(db, actor).add_grant(
+            module_key=module_key,
+            record_id=int(record_id),
+            user_id=int(user_id) if user_id.isdigit() else None,
+            team_id=int(team_id) if team_id.isdigit() else None,
+            can_edit=can_edit,
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="grant-record", result="success", detail=f"Granted {grant.module_key} record {grant.record_id}.")
+    db.commit()
+    return _access_redirect("grant-saved")
+
+
+@router.post("/access/grants/{grant_id}/delete")
+def delete_record_grant(
+    grant_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    actor = _require_admin_user(request)
+    try:
+        _administration(db, actor).delete_grant(grant_id)
+    except ValueError as exc:
+        db.rollback()
+        return _access_redirect("error", str(exc))
+    write_audit_log(db, site=None, actor=actor.username, source="hub-access", action="revoke-record", result="success", detail=f"Revoked record grant {grant_id}.")
+    db.commit()
+    return _access_redirect("grant-deleted")
 
 
 @router.post("/legal-terms")
@@ -173,7 +542,7 @@ def create_legal_terms(
     user = _require_admin_user(request)
     service = HubLegalTermsService(db=db)
     try:
-        legal_terms = service.create(actor=user, name=name)
+        legal_terms = _execute_document_template_operation(db, user, "legal_terms", "create", name=name)
     except HubLegalTermsError as exc:
         db.rollback()
         return _legal_terms_error_response(request, user, db, str(exc))
@@ -195,8 +564,8 @@ def update_legal_terms(
     user = _require_admin_user(request)
     service = HubLegalTermsService(db=db)
     try:
-        legal_terms = service.update(
-            actor=user,
+        legal_terms = _execute_document_template_operation(
+            db, user, "legal_terms", "update",
             legal_terms_id=legal_terms_id,
             name=name,
             content_html=content_html,
@@ -226,7 +595,7 @@ def duplicate_legal_terms(
     user = _require_admin_user(request)
     service = HubLegalTermsService(db=db)
     try:
-        legal_terms = service.duplicate(actor=user, legal_terms_id=legal_terms_id)
+        legal_terms = _execute_document_template_operation(db, user, "legal_terms", "duplicate", legal_terms_id=legal_terms_id)
     except HubLegalTermsError as exc:
         db.rollback()
         return _legal_terms_error_response(
@@ -253,7 +622,7 @@ def delete_legal_terms(
     service = HubLegalTermsService(db=db)
     legal_terms = service.get(legal_terms_id)
     try:
-        service.delete(actor=user, legal_terms_id=legal_terms_id)
+        _execute_document_template_operation(db, user, "legal_terms", "delete", legal_terms_id=legal_terms_id)
     except HubLegalTermsError as exc:
         db.rollback()
         return _legal_terms_error_response(
@@ -281,7 +650,7 @@ def create_pdf_template(
     user = _require_admin_user(request)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.create(actor=user, document_type=document_type, name=name)
+        template = _execute_document_template_operation(db, user, "pdf_templates", "create", document_type=document_type, name=name)
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_type=document_type)
@@ -302,7 +671,7 @@ def rename_pdf_template(
     user = _require_admin_user(request)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.rename(actor=user, template_id=template_id, name=name)
+        template = _execute_document_template_operation(db, user, "pdf_templates", "rename", template_id=template_id, name=name)
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
@@ -325,8 +694,8 @@ def update_pdf_template_block(
     user = _require_admin_user(request)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.update_block(
-            actor=user,
+        template = _execute_document_template_operation(
+            db, user, "pdf_templates", "update_block",
             template_id=template_id,
             block_key=block_key,
             content_html=content_html,
@@ -363,8 +732,8 @@ def update_pdf_template_legal_terms(
         selected_legal_terms_id = int(legal_terms_id)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.set_legal_terms(
-            actor=user,
+        template = _execute_document_template_operation(
+            db, user, "pdf_templates", "set_legal_terms",
             template_id=template_id,
             legal_terms_id=selected_legal_terms_id,
         )
@@ -411,7 +780,8 @@ async def update_pdf_template_positions(
     ]
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.update_positions(actor=user, template_id=template_id, columns=columns)
+        template = _execute_document_template_operation(db, user, "pdf_templates", "update_positions",
+            template_id=template_id, columns=columns, show_totals=form.get("show_totals") == "true")
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
@@ -431,7 +801,7 @@ def duplicate_pdf_template(
     user = _require_admin_user(request)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.duplicate(actor=user, template_id=template_id)
+        template = _execute_document_template_operation(db, user, "pdf_templates", "duplicate", template_id=template_id)
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
@@ -451,7 +821,7 @@ def set_default_pdf_template(
     user = _require_admin_user(request)
     service = HubPdfTemplateService(db=db)
     try:
-        template = service.set_default(actor=user, template_id=template_id)
+        template = _execute_document_template_operation(db, user, "pdf_templates", "set_default", template_id=template_id)
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
@@ -472,7 +842,7 @@ def delete_pdf_template(
     service = HubPdfTemplateService(db=db)
     template = service.get(template_id)
     try:
-        document_type = service.delete(actor=user, template_id=template_id)
+        document_type = _execute_document_template_operation(db, user, "pdf_templates", "delete", template_id=template_id)
     except HubPdfTemplateError as exc:
         db.rollback()
         return _pdf_template_error_response(request, user, db, str(exc), selected_template_id=template_id)
@@ -506,17 +876,19 @@ def change_password(
             password_confirmation=password_confirmation,
         )
     except ValueError as exc:
+        error_section = "account-users" if user.role == "admin" else "account-security"
         return templates.TemplateResponse(
             request,
             "account.html",
-            _account_context(request, user, service, error=str(exc)),
+            _account_context(request, user, service, error=str(exc), error_section=error_section),
             status_code=400,
         )
     write_audit_log(db, site=None, actor=user.username, source="hub-account", action="change-password", result="success")
     db.commit()
     request.session.clear()
     request.session.update({"user_id": user.id, "session_version": user.session_version})
-    return RedirectResponse(url="/account?password=changed", status_code=303)
+    destination = "account-users" if user.role == "admin" else "account-security"
+    return RedirectResponse(url=f"/account?password=changed#{destination}", status_code=303)
 
 
 @router.post("/users")
@@ -527,17 +899,25 @@ def create_hub_user(
     password: Annotated[str, Form()] = "",
     password_confirmation: Annotated[str, Form()] = "",
     role: Annotated[str, Form()] = "viewer",
+    team_id: Annotated[str, Form()] = "",
+    email_address: Annotated[str, Form()] = "",
+    first_name: Annotated[str, Form()] = "",
+    last_name: Annotated[str, Form()] = "",
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     actor = _require_admin_user(request)
     service = _account_service(db)
     try:
-        user = service.create_user(
+        user = _administration(db, actor).create_user(
             username=username,
             password=password,
             password_confirmation=password_confirmation,
             role=role,
+            team_id=int(team_id) if team_id.isdigit() else None,
+            email_address=email_address,
+            first_name=first_name,
+            last_name=last_name,
         )
     except ValueError as exc:
         db.rollback()
@@ -567,22 +947,32 @@ def update_hub_user(
     db: Annotated[Session, Depends(get_db)],
     username: Annotated[str, Form()] = "",
     role: Annotated[str, Form()] = "viewer",
+    team_id: Annotated[str, Form()] = "",
     password: Annotated[str, Form()] = "",
     password_confirmation: Annotated[str, Form()] = "",
     reminder_email: Annotated[str, Form()] = "",
+    email_address: Annotated[str | None, Form()] = None,
+    default_sender_account_id: Annotated[str | None, Form()] = None,
+    first_name: Annotated[str | None, Form()] = None,
+    last_name: Annotated[str | None, Form()] = None,
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
     actor = _require_admin_user(request)
     service = _account_service(db)
     try:
-        user = service.update_user(
+        user = _administration(db, actor).update_user(
             user_id=user_id,
             username=username,
             role=role,
+            team_id=int(team_id) if team_id.isdigit() else None,
             password=password,
             password_confirmation=password_confirmation,
             reminder_email=reminder_email,
+            email_address=email_address,
+            default_sender_account_id=default_sender_account_id,
+            first_name=first_name,
+            last_name=last_name,
         )
     except ValueError as exc:
         db.rollback()
@@ -619,7 +1009,7 @@ def delete_hub_user(
     actor = _require_admin_user(request)
     service = _account_service(db)
     try:
-        deleted_username, image_storage_keys = service.delete_user(user_id=user_id)
+        deleted_username, image_storage_keys = _administration(db, actor).delete_user(user_id=user_id)
     except ValueError as exc:
         db.rollback()
         return templates.TemplateResponse(
@@ -658,7 +1048,7 @@ def configure_task_reminder_email(
     service = _account_service(db)
     user = _require_persisted_current_user(request, service)
     try:
-        service.configure_reminder_email(user=user, reminder_email=reminder_email)
+        _administration(db, user).configure_reminder_email(reminder_email=reminder_email)
     except ValueError as exc:
         error_section = "account-users" if user.role == "admin" else "account-security"
         return templates.TemplateResponse(
@@ -721,7 +1111,7 @@ def configure_mittwald_mailbox(
         detail=f"Verified Mittwald IMAP and SMTP access for mailbox {account.email_address}.",
     )
     db.commit()
-    return RedirectResponse(url="/account?mailbox=connected#account-mailbox", status_code=303)
+    return RedirectResponse(url="/settings?mailbox=connected#account-mailbox", status_code=303)
 
 
 @router.post("/mailboxes/alerts")
@@ -737,13 +1127,7 @@ def configure_mailbox_alert_email(
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Administrator access required.")
     try:
-        address = HubMailboxAccountService._email_address(mailbox_alert_email)
-        monitored = {
-            status.email_address.casefold()
-            for status in HubMailboxAccountService(db=db, cipher=get_secret_cipher()).list_statuses()
-        }
-        if address in monitored:
-            raise ValueError("Die Warnadresse muss außerhalb der überwachten Postfächer liegen.")
+        _administration(db, user).configure_mailbox_alert(mailbox_alert_email=mailbox_alert_email)
     except (HubMailboxAccountError, ValueError) as exc:
         return templates.TemplateResponse(
             request,
@@ -751,17 +1135,13 @@ def configure_mailbox_alert_email(
             _account_context(request, user, service, error=str(exc), error_section="account-mailbox"),
             status_code=400,
         )
-    user.mailbox_alert_email = address
-    for state in db.scalars(select(HubMailboxImapSyncState).where(HubMailboxImapSyncState.folder == "INBOX")):
-        if state.last_error or state.consecutive_failures:
-            state.alerted_at = None
     write_audit_log(
         db, site=None, actor=user.username, source="hub-mailbox",
         action="configure-mailbox-alert-email", result="success",
         detail="Updated independent mailbox health alert recipient.",
     )
     db.commit()
-    return RedirectResponse(url="/account?mailbox=alert-saved#account-mailbox", status_code=303)
+    return RedirectResponse(url="/settings?mailbox=alert-saved#account-mailbox", status_code=303)
 
 
 @router.post("/mailboxes/failed/{failure_id}/retry")
@@ -787,7 +1167,7 @@ def retry_failed_mailbox_message(
     )
     db.commit()
     result = "retry-success" if succeeded else "retry-failed"
-    return RedirectResponse(url=f"/account?mailbox={result}#account-mailbox", status_code=303)
+    return RedirectResponse(url=f"/settings?mailbox={result}#account-mailbox", status_code=303)
 
 
 @router.post("/mailboxes/spam-senders/{sender_id}/unblock")
@@ -799,9 +1179,11 @@ def unblock_spam_sender(
 ):
     require_csrf(request, csrf_token)
     user = _require_admin_user(request)
-    address = HubSpamSenderService(db=db).unblock_id(sender_id)
-    if address is None:
-        raise HTTPException(status_code=404, detail="Die Absendersperre wurde nicht gefunden.")
+    try:
+        HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
+            "emails.spam_senders.unblock", {"sender_id": str(sender_id)})
+    except HubOperationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     write_audit_log(
         db,
         site=None,
@@ -809,10 +1191,10 @@ def unblock_spam_sender(
         source="hub-mailbox",
         action="unblock-spam-sender",
         result="success",
-        detail=f"Removed spam sender rule for {address}.",
+        detail=f"Removed spam sender rule {sender_id}; address is not retained in the audit log.",
     )
     db.commit()
-    return RedirectResponse(url="/account?spam_sender=unblocked#account-mailbox", status_code=303)
+    return RedirectResponse(url="/settings?spam_sender=unblocked#account-mailbox", status_code=303)
 
 
 @router.post("/mailboxes/import")
@@ -853,7 +1235,7 @@ def import_mittwald_mailboxes(
     db.commit()
     schedule_pending_hub_mailbox_imap_import()
     state = "import-started" if started else "import-running"
-    return RedirectResponse(url=f"/account?mailbox={state}#account-mailbox", status_code=303)
+    return RedirectResponse(url=f"/settings?mailbox={state}#account-mailbox", status_code=303)
 
 
 @router.post("/mail-composer-settings")
@@ -868,12 +1250,12 @@ def configure_mail_composer_settings(
     require_csrf(request, csrf_token)
     user = _require_admin_user(request)
     try:
-        configured = EmailComposerSettingsService(db=db).configure(
+        configured = _administration(db, user).configure("email_composer",
             font_family_key=font_family_key,
             font_size=font_size,
             line_height=line_height,
         )
-    except EmailComposerSettingsError as exc:
+    except ValueError as exc:
         return templates.TemplateResponse(
             request,
             "account.html",
@@ -893,7 +1275,7 @@ def configure_mail_composer_settings(
         ),
     )
     db.commit()
-    return RedirectResponse(url="/account?email_composer=saved#account-mailbox", status_code=303)
+    return RedirectResponse(url="/settings?email_composer=saved#account-mailbox", status_code=303)
 
 
 @router.post("/mail-signature")
@@ -906,10 +1288,7 @@ def configure_mail_signature(
     require_csrf(request, csrf_token)
     user = _require_admin_user(request)
     try:
-        normalized_signature = signature_html.strip()
-        if normalized_signature:
-            normalized_signature = CustomerCommunicationService._sanitized_email_content(normalized_signature)
-        EmailComposerSettingsService(db=db).configure_signature(signature_html=normalized_signature)
+        _administration(db, user).configure_signature(signature_html=signature_html)
     except (EmailComposerSettingsError, ValueError) as exc:
         return templates.TemplateResponse(
             request,
@@ -927,7 +1306,7 @@ def configure_mail_signature(
         detail="Updated the shared email signature; signature content is not retained in the audit log.",
     )
     db.commit()
-    return RedirectResponse(url="/account?email_signature=saved#account-mailbox", status_code=303)
+    return RedirectResponse(url="/settings?email_signature=saved#account-mailbox", status_code=303)
 
 
 @router.post("/mcp-tokens")
@@ -938,7 +1317,7 @@ def create_mcp_token(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    current_user = _require_current_user(request)
+    current_user = _require_admin_user(request)
     service = _account_service(db)
     user = service.get_user(current_user.id)
     if user is None:
@@ -980,7 +1359,7 @@ def revoke_mcp_token(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    current_user = _require_current_user(request)
+    current_user = _require_admin_user(request)
     service = _account_service(db)
     user = service.get_user(current_user.id)
     if user is None:
@@ -1018,7 +1397,7 @@ def create_integration_token(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    current_user = _require_current_user(request)
+    current_user = _require_admin_user(request)
     service = _account_service(db)
     user = service.get_user(current_user.id)
     if user is None:
@@ -1064,7 +1443,7 @@ def revoke_integration_token(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    current_user = _require_current_user(request)
+    current_user = _require_admin_user(request)
     service = _account_service(db)
     user = service.get_user(current_user.id)
     if user is None:
@@ -1182,7 +1561,7 @@ def configure_openai(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     provider_service = AiProviderConfigService(db=db, cipher=get_secret_cipher())
     try:
         config = provider_service.configure_openai(actor=user, api_key=api_key)
@@ -1207,6 +1586,27 @@ def configure_openai(
     return RedirectResponse(url="/account?openai=configured", status_code=303)
 
 
+@router.post("/openai/model")
+def select_openai_model(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    model: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_admin_user(request)
+    try:
+        HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
+            "settings.ai_model.update", {"model": model})
+    except ValueError as exc:
+        db.rollback()
+        return templates.TemplateResponse(request, "account.html",
+            _account_context(request, user, _account_service(db), error=str(exc), error_section="account-openai"),
+            status_code=400)
+    db.commit()
+    return RedirectResponse(url="/account?openai=model-saved#account-openai", status_code=303)
+
+
 @router.post("/openai/remove")
 def remove_openai(
     request: Request,
@@ -1214,7 +1614,7 @@ def remove_openai(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     provider_service = AiProviderConfigService(db=db, cipher=get_secret_cipher())
     try:
         provider_service.remove_openai(actor=user)
@@ -1247,7 +1647,7 @@ def configure_crocoblock(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     service = CrocoblockLicenseService(db=db, cipher=get_secret_cipher())
     try:
         service.configure(actor=user, license_key=license_key)
@@ -1279,7 +1679,7 @@ def remove_crocoblock(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     service = CrocoblockLicenseService(db=db, cipher=get_secret_cipher())
     try:
         service.remove(actor=user)
@@ -1316,18 +1716,17 @@ def configure_fleet_refresh_settings(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     service = FleetRefreshSettingsService(db=db)
     try:
-        config = service.configure(
-            actor=user,
+        config = _administration(db, user).configure("fleet_refresh",
             max_parallel_site_checks=max_parallel_site_checks,
             max_parallel_direct_updates=max_parallel_direct_updates,
             auto_refresh_enabled=auto_refresh_enabled,
             auto_refresh_interval_hours=auto_refresh_interval_hours,
             auto_refresh_time=auto_refresh_time,
         )
-    except FleetRefreshSettingsError as exc:
+    except ValueError as exc:
         return templates.TemplateResponse(
             request,
             "account.html",
@@ -1350,7 +1749,7 @@ def configure_fleet_refresh_settings(
         ),
     )
     db.commit()
-    return RedirectResponse(url="/account?fleet_refresh=settings-saved", status_code=303)
+    return RedirectResponse(url="/settings?fleet_refresh=settings-saved#account-refresh-settings", status_code=303)
 
 
 @router.post("/provider-licenses")
@@ -1362,7 +1761,7 @@ def configure_provider_license(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     service = ProviderCredentialService(db=db, cipher=get_secret_cipher())
     try:
         credential = service.configure(actor=user, provider=provider, license_key=license_key)
@@ -1395,7 +1794,7 @@ def remove_provider_license(
     csrf_token: Annotated[str, Form()] = "",
 ):
     require_csrf(request, csrf_token)
-    user = _require_current_user(request)
+    user = _require_admin_user(request)
     service = ProviderCredentialService(db=db, cipher=get_secret_cipher())
     try:
         credential = service.remove(actor=user, provider=provider)
@@ -1451,7 +1850,7 @@ def configure_zoho(
         detail="Stored encrypted Zoho CRM OAuth client credentials. Full CRM OAuth access still requires explicit connection.",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho=configured", status_code=303)
+    return RedirectResponse(url="/settings?zoho=configured#account-zoho", status_code=303)
 
 
 @router.get("/zoho/connect")
@@ -1465,7 +1864,7 @@ def connect_zoho(request: Request, db: Annotated[Session, Depends(get_db)]):
     except ZohoCrmError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=connect-failed#account-zoho", status_code=303)
     return RedirectResponse(url=authorization_url, status_code=303)
 
 
@@ -1483,7 +1882,7 @@ def connect_zoho_books(request: Request, db: Annotated[Session, Depends(get_db)]
     except ZohoBooksError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho_books=connect-failed#account-zoho-books", status_code=303)
     request.session["zoho_books_oauth_state"] = state
     return RedirectResponse(url=authorization_url, status_code=303)
 
@@ -1503,18 +1902,18 @@ def zoho_callback(
         if not isinstance(expected_books_state, str) or not compare_digest(expected_books_state, state):
             service.record_error("Der Status der Zoho-Books-Verbindung passt nicht. Starte die Verbindung erneut.")
             db.commit()
-            return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+            return RedirectResponse(url="/settings?zoho_books=connect-failed#account-zoho-books", status_code=303)
         if error:
             service.record_error("Der Zoho-Books-Zugriff wurde nicht freigegeben.")
             db.commit()
-            return RedirectResponse(url="/account?zoho_books=not-approved", status_code=303)
+            return RedirectResponse(url="/settings?zoho_books=not-approved#account-zoho-books", status_code=303)
         try:
             organizations = service.complete_authorization(code=code)
             status = service.get_status()
         except ZohoBooksError as exc:
             service.record_error(str(exc))
             db.commit()
-            return RedirectResponse(url="/account?zoho_books=connect-failed", status_code=303)
+            return RedirectResponse(url="/settings?zoho_books=connect-failed#account-zoho-books", status_code=303)
         write_audit_log(
             db,
             site=None,
@@ -1530,17 +1929,17 @@ def zoho_callback(
         )
         db.commit()
         outcome = "connected" if status.ready_for_import else "organization-selection-required"
-        return RedirectResponse(url=f"/account?zoho_books={outcome}", status_code=303)
+        return RedirectResponse(url=f"/settings?zoho_books={outcome}#account-zoho-books", status_code=303)
 
     expected_state = request.session.pop("zoho_oauth_state", "")
     if not isinstance(expected_state, str) or not expected_state or not compare_digest(expected_state, state):
         _zoho_service(db).record_error("The Zoho connection state did not match. Start the connection again.")
         db.commit()
-        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=connect-failed#account-zoho", status_code=303)
     if error:
         _zoho_service(db).record_error("Zoho access was not approved.")
         db.commit()
-        return RedirectResponse(url="/account?zoho=not-approved", status_code=303)
+        return RedirectResponse(url="/settings?zoho=not-approved#account-zoho", status_code=303)
 
     service = _zoho_service(db)
     try:
@@ -1549,7 +1948,7 @@ def zoho_callback(
     except ZohoCrmError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho=connect-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=connect-failed#account-zoho", status_code=303)
     write_audit_log(
         db,
         site=None,
@@ -1564,7 +1963,7 @@ def zoho_callback(
         ),
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho=connected", status_code=303)
+    return RedirectResponse(url="/settings?zoho=connected#account-zoho", status_code=303)
 
 
 @router.post("/zoho-books/organization")
@@ -1596,7 +1995,7 @@ def select_zoho_books_organization(
         detail=f"Selected Zoho Books organization {connection.organization_id} ({connection.organization_name}).",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho_books=organization-selected", status_code=303)
+    return RedirectResponse(url="/settings?zoho_books=organization-selected#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/organizations/refresh")
@@ -1613,7 +2012,7 @@ def refresh_zoho_books_organizations(
     except ZohoBooksError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho_books=refresh-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho_books=refresh-failed#account-zoho-books", status_code=303)
     write_audit_log(
         db,
         site=None,
@@ -1624,7 +2023,7 @@ def refresh_zoho_books_organizations(
         detail=f"Refreshed {len(organizations)} accessible Zoho Books organization(s).",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho_books=organizations-refreshed", status_code=303)
+    return RedirectResponse(url="/settings?zoho_books=organizations-refreshed#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/invoices/import")
@@ -1662,7 +2061,7 @@ def import_recent_zoho_books_invoices(
     db.commit()
     schedule_pending_zoho_books_invoice_import()
     state = "invoice-import-started" if started else "invoice-import-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/invoices/import/remaining")
@@ -1700,7 +2099,7 @@ def import_remaining_zoho_books_invoices(
     db.commit()
     schedule_pending_zoho_books_invoice_import()
     state = "invoice-remaining-import-started" if started else "invoice-import-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/invoices/import/cancel")
@@ -1724,7 +2123,7 @@ def cancel_zoho_books_invoice_import(
         )
         db.commit()
     state = "invoice-import-cancel-requested" if requested else "invoice-import-not-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.get("/zoho-books/invoices/import/status")
@@ -1795,7 +2194,7 @@ def import_all_zoho_orders(
     db.commit()
     schedule_pending_zoho_books_order_import()
     state = "order-import-started" if started else "order-import-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/orders/import/cancel")
@@ -1822,7 +2221,7 @@ def cancel_zoho_order_import(
         )
         db.commit()
     state = "order-import-cancel-requested" if requested else "order-import-not-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.get("/zoho-books/orders/import/status")
@@ -1894,7 +2293,7 @@ def import_all_zoho_books_recurring_invoices(
     db.commit()
     schedule_pending_zoho_books_recurring_invoice_import()
     state = "recurring-invoice-import-started" if started else "recurring-invoice-import-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.post("/zoho-books/recurring-invoices/import/cancel")
@@ -1921,7 +2320,7 @@ def cancel_zoho_books_recurring_invoice_import(
         )
         db.commit()
     state = "recurring-invoice-import-cancel-requested" if requested else "recurring-invoice-import-not-running"
-    return RedirectResponse(url=f"/account?zoho_books={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho_books={state}#account-zoho-books", status_code=303)
 
 
 @router.get("/zoho-books/recurring-invoices/import/status")
@@ -1963,7 +2362,7 @@ def refresh_zoho_mapping(
     except ZohoCrmError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho=mapping-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=mapping-failed#account-zoho", status_code=303)
     write_audit_log(
         db,
         site=None,
@@ -1974,7 +2373,7 @@ def refresh_zoho_mapping(
         detail=f"Refreshed {sum(row.api_name is not None for row in mappings)} Zoho Account field mappings.",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho=mapping-refreshed", status_code=303)
+    return RedirectResponse(url="/settings?zoho=mapping-refreshed#account-zoho", status_code=303)
 
 
 @router.post("/zoho/sync")
@@ -1991,7 +2390,7 @@ def sync_zoho_accounts(
     except ZohoCrmError as exc:
         service.record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho=sync-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=sync-failed#account-zoho", status_code=303)
     write_audit_log(
         db,
         site=None,
@@ -2010,12 +2409,12 @@ def sync_zoho_accounts(
     db.commit()
     return RedirectResponse(
         url=(
-            f"/account?zoho=synced&zoho_created={result.created_customers}&zoho_updated={result.updated_customers}"
+            f"/settings?zoho=synced&zoho_created={result.created_customers}&zoho_updated={result.updated_customers}"
             f"&zoho_total={result.synchronized_accounts}&zoho_visible={result.visible_accounts}"
             f"&zoho_hidden={result.hidden_customers}&zoho_sites_created={result.created_sites}"
             f"&zoho_sites_linked={result.linked_sites}&zoho_site_conflicts={result.site_conflicts}"
             f"&zoho_contacts_total={result.synchronized_contacts}&zoho_contacts_created={result.created_contacts}"
-            f"&zoho_contacts_updated={result.updated_contacts}&zoho_contacts_removed={result.removed_contacts}"
+            f"&zoho_contacts_updated={result.updated_contacts}&zoho_contacts_removed={result.removed_contacts}#account-zoho"
         ),
         status_code=303,
     )
@@ -2058,7 +2457,7 @@ def import_zoho_email_history(
     db.commit()
     schedule_pending_zoho_email_history_import()
     state = "email-history-import-started" if started else "email-history-import-running"
-    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho={state}#account-zoho", status_code=303)
 
 
 @router.post("/zoho/note-history/import")
@@ -2098,7 +2497,7 @@ def import_zoho_note_history(
     db.commit()
     schedule_pending_zoho_note_history_import()
     state = "note-history-import-started" if started else "note-history-import-running"
-    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho={state}#account-zoho", status_code=303)
 
 
 @router.get("/zoho/note-history/import/status")
@@ -2168,7 +2567,7 @@ def import_zoho_email_content_batch(
         state = "email-content-import-started"
     else:
         state = "email-content-import-running"
-    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho={state}#account-zoho", status_code=303)
 
 
 @router.post("/zoho/email-content/import/cancel")
@@ -2195,7 +2594,7 @@ def cancel_zoho_email_content_batch(
             detail=f"Cancellation requested for Zoho email content import {status.id}.",
         )
         db.commit()
-    return RedirectResponse(url="/account?zoho=email-content-import-cancel-requested", status_code=303)
+    return RedirectResponse(url="/settings?zoho=email-content-import-cancel-requested#account-zoho", status_code=303)
 
 
 @router.post("/zoho/email-attachments/import")
@@ -2236,7 +2635,7 @@ def import_zoho_email_attachments(
     db.commit()
     schedule_pending_zoho_email_attachment_import()
     state = "email-attachment-import-started" if started else "email-attachment-import-running"
-    return RedirectResponse(url=f"/account?zoho={state}", status_code=303)
+    return RedirectResponse(url=f"/settings?zoho={state}#account-zoho", status_code=303)
 
 
 @router.post("/zoho/email-attachments/import/cancel")
@@ -2263,7 +2662,7 @@ def cancel_zoho_email_attachment_import(
             detail=f"Cancellation requested for Zoho email attachment import {status.id}.",
         )
         db.commit()
-    return RedirectResponse(url="/account?zoho=email-attachment-import-cancel-requested", status_code=303)
+    return RedirectResponse(url="/settings?zoho=email-attachment-import-cancel-requested#account-zoho", status_code=303)
 
 
 @router.get("/zoho/email-content/import/status")
@@ -2342,7 +2741,7 @@ def sync_zoho_email_templates(
     except (ValueError, ZohoCrmError) as exc:
         _zoho_service(db).record_error(str(exc))
         db.commit()
-        return RedirectResponse(url="/account?zoho=email-templates-failed", status_code=303)
+        return RedirectResponse(url="/settings?zoho=email-templates-failed#account-zoho", status_code=303)
     write_audit_log(
         db,
         site=None,
@@ -2354,7 +2753,7 @@ def sync_zoho_email_templates(
     )
     db.commit()
     return RedirectResponse(
-        url=f"/account?zoho=email-templates-synced&zoho_templates_created={result.created}&zoho_templates_updated={result.updated}&zoho_templates_archived={result.archived}",
+        url=f"/settings?zoho=email-templates-synced&zoho_templates_created={result.created}&zoho_templates_updated={result.updated}&zoho_templates_archived={result.archived}#account-zoho",
         status_code=303,
     )
 
@@ -2452,7 +2851,7 @@ def remove_zoho_connection(
         detail="Removed the encrypted Zoho OAuth credentials. Imported customer data remains until a separate customer-data action is added.",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho=removed", status_code=303)
+    return RedirectResponse(url="/settings?zoho=removed#account-zoho", status_code=303)
 
 
 @router.post("/zoho-books/remove")
@@ -2483,7 +2882,7 @@ def remove_zoho_books_connection(
         detail="Removed the encrypted Zoho Books OAuth token and copied client credentials. Zoho CRM remains connected.",
     )
     db.commit()
-    return RedirectResponse(url="/account?zoho_books=removed", status_code=303)
+    return RedirectResponse(url="/settings?zoho_books=removed#account-zoho-books", status_code=303)
 
 
 @bootstrap_router.post("/internal/bootstrap-token")
@@ -2497,6 +2896,10 @@ def create_bootstrap_token(request: Request, db: Annotated[Session, Depends(get_
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return JSONResponse({"setup_url": f"{get_settings().public_base_url}/account/setup#token={token}", "expires_in_minutes": 20})
+
+
+def _administration(db, user):
+    return HubAdministrationService(db=db, cipher=get_secret_cipher(), actor=user.username)
 
 
 def _account_service(db: Session) -> HubAccountService:
@@ -2544,7 +2947,41 @@ def _account_context(
     selected_legal_terms_id: int | None = None,
     selected_pdf_template_id: int | None = None,
     selected_pdf_template_type: str | None = None,
+    page_mode: str | None = None,
 ) -> dict:
+    resolved_error_section = error_section or _account_section_for_path(request.url.path)
+    settings_sections = {
+        "account-access",
+        "account-workflows",
+        "account-legal-terms",
+        "account-pdf-templates",
+        "account-mailbox",
+        "account-zoho",
+        "account-zoho-books",
+        "account-refresh-settings",
+        "account-styling",
+    }
+    resolved_page_mode = page_mode or (
+        "settings"
+        if request.url.path == "/settings" or resolved_error_section in settings_sections
+        else "account"
+    )
+    if user.role != "admin":
+        if resolved_page_mode == "settings":
+            raise HTTPException(status_code=403, detail="Administrator access required.")
+        # Personal account rendering must not load system credentials or administration data.
+        return {
+            "page_mode": "account",
+            "user": user,
+            "csrf_token": get_csrf_token(request),
+            "desktop_devices": service.list_desktop_devices(user=user),
+            "new_desktop_device_token": new_desktop_device_token,
+            "new_desktop_device_name": new_desktop_device_name,
+            "error": error,
+            "error_section": resolved_error_section if resolved_error_section in {
+                "account-security", "account-desktop-notifier",
+            } else "account-security",
+        }
     protocol = list_activity_events(service.db, request.query_params) if user.role == "admin" else None
     if protocol is not None:
         filters = {key: value for key, value in request.query_params.items() if key.startswith("protocol_") and key != "protocol_page"}
@@ -2571,11 +3008,44 @@ def _account_context(
         selected_template_id=selected_pdf_template_id,
         selected_type=selected_pdf_template_type,
     )
+    access_roles = ()
+    access_teams = ()
+    access_permissions: dict[str, dict[str, object]] = {}
+    access_assignments = ()
+    access_grants = ()
+    if user.role == "admin":
+        access_service = HubAccessControlService(db=service.db)
+        access_service.ensure_defaults()
+        snapshot = _administration(service.db, user).access_snapshot()
+        access_roles = snapshot["roles"]
+        access_teams = snapshot["teams"]
+        access_permissions = snapshot["permissions"]
+        access_assignments = snapshot["assignments"]
+        access_grants = snapshot["grants"]
+    role_labels = {role.key: role.name for role in access_roles}
+    team_labels = {team.id: team.name for team in access_teams}
+    access_users = snapshot["users"] if user.role == "admin" else ()
     return {
+        "page_mode": resolved_page_mode,
         "user": user,
-        "hub_users": service.list_users() if user.role == "admin" else (),
+        "hub_users": access_users,
         "hub_admin_count": service.admin_count() if user.role == "admin" else 0,
-        "hub_user_roles": HUB_USER_ROLES,
+        "hub_user_roles": tuple(role.key for role in access_roles) or HUB_USER_ROLES,
+        "hub_role_labels": role_labels or {"admin": "Administrator", "viewer": "Mitarbeiter"},
+        "hub_teams": access_teams,
+        "hub_team_labels": team_labels,
+        "access_roles": access_roles,
+        "access_permissions": access_permissions,
+        "mailbox_access": _administration(service.db, user).mailbox_access_snapshot() if user.role == "admin" else {},
+        "mailbox_action_labels": {"view": "Lesen", "create": "Entwürfe anlegen", "edit": "Bearbeiten", "send": "Senden", "delete": "Löschen"},
+        "access_modules": ACCESS_MODULES,
+        "access_actions": ACCESS_ACTIONS,
+        "access_action_labels": ACCESS_ACTION_LABELS,
+        "access_scope_labels": ACCESS_SCOPE_LABELS,
+        "access_record_modules": tuple(module for module in ACCESS_MODULES if module.record_scoped),
+        "access_assignments": access_assignments,
+        "access_grants": access_grants,
+        "access_user_labels": {account_user.id: account_user.display_name for account_user in access_users},
         "protocol": protocol,
         "protocol_module_labels": protocol["modules"] if protocol is not None else MODULE_LABELS,
         "csrf_token": get_csrf_token(request),
@@ -2583,7 +3053,7 @@ def _account_context(
         "integration_tokens": service.list_integration_tokens(user=user),
         "desktop_devices": service.list_desktop_devices(user=user),
         "error": error,
-        "error_section": error_section or _account_section_for_path(request.url.path),
+        "error_section": resolved_error_section,
         "new_mcp_token": new_mcp_token,
         "new_mcp_token_name": new_mcp_token_name,
         "new_integration_token": new_integration_token,
@@ -2613,8 +3083,9 @@ def _account_context(
         ).status(),
         "new_zoho_email_workflow_webhook_url": new_zoho_email_workflow_webhook_url,
         "openai_config": AiProviderConfigService(db=service.db, cipher=get_secret_cipher()).get_openai_config(),
+        "openai_models": MODEL_PROFILES,
         "provider_licenses": ProviderCredentialService(db=service.db, cipher=get_secret_cipher()).list_rows(),
-        "fleet_refresh_settings": FleetRefreshSettingsService(db=service.db).get_runtime_settings(),
+        "fleet_refresh_settings": runtime_settings(service.db, "fleet_refresh"),
         "mittwald_mailbox_accounts": HubMailboxAccountService(
             db=service.db,
             cipher=get_secret_cipher(),
@@ -2628,10 +3099,15 @@ def _account_context(
             cipher=get_secret_cipher(),
             public_base_url=get_settings().public_base_url,
         ).status(),
-        "email_composer_settings": EmailComposerSettingsService(db=service.db).get_runtime_settings(),
+        "email_composer_settings": runtime_settings(service.db, "email_composer"),
         "email_composer_font_options": FONT_FAMILY_OPTIONS,
         "email_composer_font_size_options": FONT_SIZE_OPTIONS,
         "email_composer_line_height_options": LINE_HEIGHT_OPTIONS,
+        "styling": runtime_settings(service.db, "styling"),
+        "font_family_options": [
+            {"key": key, "label": label}
+            for key, label, _ in STYLING_FONT_FAMILY_OPTIONS
+        ],
         "workflows": HubWorkflowService(db=service.db).list_workflows(),
         "zoho_status": zoho_service.get_status(),
         "zoho_mapping": zoho_service.mapping_rows(),
@@ -2716,6 +3192,22 @@ def _account_section_for_path(path: str) -> str:
     return "account-security"
 
 
+def _execute_document_template_operation(db, user, family, action, **values):
+    encoded = {
+        key: json.dumps(value) if isinstance(value, (list, dict, bool)) else str(value) if value is not None else ""
+        for key, value in values.items()
+    }
+    domain = HubPdfTemplateService(db=db) if family == "pdf_templates" else HubLegalTermsService(db=db)
+    try:
+        result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
+            f"finance.{family}.{action}", encoded,
+        )
+    except HubOperationError as exc:
+        error = HubPdfTemplateError if family == "pdf_templates" else HubLegalTermsError
+        raise error(str(exc)) from exc
+    return result.outputs.get("document_type", "") if action == "delete" else domain.get(result.record_id)
+
+
 def _legal_terms_context(
     request: Request,
     user,
@@ -2784,7 +3276,7 @@ def _legal_terms_redirect(legal_terms_id: int | None, state: str) -> RedirectRes
     parameters = [f"legal_terms_state={state}"]
     if legal_terms_id is not None:
         parameters.append(f"legal_terms={legal_terms_id}")
-    return RedirectResponse(url=f"/account?{'&'.join(parameters)}#account-legal-terms", status_code=303)
+    return RedirectResponse(url=f"/settings?{'&'.join(parameters)}#account-legal-terms", status_code=303)
 
 
 def _legal_terms_error_response(
@@ -2814,7 +3306,7 @@ def _pdf_template_redirect(template_id: int | None, document_type: str, state: s
     parameters = [f"pdf_template_type={document_type}", f"pdf_template_state={state}"]
     if template_id is not None:
         parameters.append(f"pdf_template={template_id}")
-    return RedirectResponse(url=f"/account?{'&'.join(parameters)}#account-pdf-templates", status_code=303)
+    return RedirectResponse(url=f"/settings?{'&'.join(parameters)}#account-pdf-templates", status_code=303)
 
 
 def _pdf_template_error_response(

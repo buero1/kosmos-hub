@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}Leads · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -10,7 +11,8 @@
         <h2>Leads</h2>
       </div>
       <div class="communication-heading-actions">
-        <a class="button button-variant-1" href="/leads/new">Lead neu anlegen</a>
+        {% if can_create_lead %}<a class="button button-variant-1" href="/leads/new">Lead neu anlegen</a>{% endif %}
+        {% if can_manage_lead_layout %}{{ module_layout_menu("lead-fields", "Lead") }}{% endif %}
       </div>
     </div>
     <article class="card customer-detail-panel">

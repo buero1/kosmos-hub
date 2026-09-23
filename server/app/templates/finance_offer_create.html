@@ -5,21 +5,39 @@
 {% block title %}Angebot neu anlegen · Finance · kosmos-hub{% endblock %}
 {% block content %}
   <section>
-    {% if selected_customer %}{% set back_href = "/customers/" ~ selected_customer.id %}{% set back_label = "Zurück zu " ~ selected_customer.name %}{% else %}{% set back_href = "/finance/offers" %}{% set back_label = "Zurück zu Angebote" %}{% endif %}
+    {% if selected_customer %}{% set back_href = "/customers/" ~ selected_customer.id %}{% set back_label = "Zurück zu " ~ selected_customer.name %}{% elif selected_lead %}{% set back_href = "/leads/" ~ selected_lead.id %}{% set back_label = "Zurück zu " ~ selected_lead.name %}{% else %}{% set back_href = "/finance/offers" %}{% set back_label = "Zurück zu Angebote" %}{% endif %}
     {% call module_detail_header(back_href, back_label, "Finance", "Angebot neu anlegen", has_actions=true) %}<a class="button button-secondary button-variant-1" href="{{ back_href }}">Abbrechen</a><button class="button button-variant-1" type="submit" form="finance-offer-create-form">Angebot anlegen</button>{% endcall %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form id="finance-offer-create-form" method="post" action="/finance/offers" class="communication-form finance-offer-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="customer-detail-layout">
         <div class="customer-detail-main-column">
-          <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Angebote</p><h3>Alle Felder</h3><p class="subtle">Das Angebot wird ausschließlich im Hub gespeichert.</p></div></div><div class="customer-field-editor-grid">{% for field in fields %}{{ finance_field_control(field, submitted_values.get("offer_field__" ~ field.key, ""), customers, contacts, selected_customer_id, selected_contact_id, "offer") }}{% endfor %}{% include "partials/finance_pdf_template_control.html" %}</div></article>
+          <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Angebote</p><h3>Alle Felder</h3><p class="subtle">Das Angebot wird ausschließlich im Hub gespeichert.</p></div></div><div class="customer-field-editor-grid">{% for field in fields %}{{ finance_field_control(field, submitted_values.get("offer_field__" ~ field.key, ""), customers=customers, contacts=contacts, selected_customer_id=selected_customer_id, selected_contact_id=selected_contact_id, field_prefix="offer", leads=leads, selected_lead_id=selected_lead_id, allow_leads=true) }}{% endfor %}{% include "partials/finance_pdf_template_control.html" %}</div></article>
+          {% set notes_form_id = "finance-offer-create-form" %}{% set notes_html = submitted_values.get("offer_field__notes", "") %}
+          {% include "partials/finance_offer_notes.html" %}
           {% include "partials/finance_offer_positions.html" %}
         </div>
-        {{ create_customer_link_panel("finance-offer-create-form", selected_customer) }}
+        {{ create_customer_link_panel("finance-offer-create-form", selected_customer, selected_lead, true) }}
       </div>
     </form>
     {% include "partials/finance_position_preset_drawer.html" %}
     {% include "partials/finance_customer_search_script.html" %}
     {% include "partials/create_customer_link_script.html" %}
+    <script>
+      (function () {
+        const form = document.getElementById("finance-offer-create-form");
+        const offerDate = form.querySelector('[name="offer_field__offer_date"]');
+        const validUntil = form.querySelector('[name="offer_field__valid_until"]');
+        if (!offerDate || !validUntil) return;
+        let automaticValidity = validUntil.value;
+        offerDate.addEventListener("change", function () {
+          if (!offerDate.value || (validUntil.value && validUntil.value !== automaticValidity)) return;
+          const [year, month, day] = offerDate.value.split("-").map(Number);
+          const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+          automaticValidity = new Date(Date.UTC(year, month, Math.min(day, lastDay))).toISOString().slice(0, 10);
+          validUntil.value = automaticValidity;
+        });
+      })();
+    </script>
   </section>
 {% endblock %}

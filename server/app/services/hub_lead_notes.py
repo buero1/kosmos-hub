@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.services.hub_record_info import record_author
 from app.models.hub_lead import HubLead
 from app.models.hub_lead_note import HubLeadNote
+from app.services.hub_note_catalog import normalize_note
 from app.services.zoho_crm import ZOHO_LEAD_MODULE, ZohoCrmError, ZohoCrmService
 
 
@@ -58,12 +60,8 @@ class HubLeadNoteService:
 
     def create_note(self, *, lead_id: int, actor: str, title: str = "", content: str) -> HubLeadNoteView:
         lead = self._lead_or_error(lead_id)
-        normalized_content = self._required_text(content, "Notiz", maximum=30_000)
-        normalized_title = (
-            self._required_text(title, "Titel", maximum=255)
-            if title.strip()
-            else self._title_from_content(normalized_content)
-        )
+        values = self._validated_note(title=title, content=content, creating=True)
+        normalized_title, normalized_content = values["title"], values["content"]
         now = datetime.now(UTC)
         note = HubLeadNote(
             lead=lead,
@@ -137,11 +135,12 @@ class HubLeadNoteService:
 
     def update_note(self, *, lead_id: int, note_id: int, title: str, content: str) -> HubLeadNoteView:
         note = self._note_or_error(lead_id=lead_id, note_id=note_id)
+        values = self._validated_note(title=title, content=content)
         payload = self._payload(note.encrypted_payload_json)
         payload.update(
             {
-                "Note_Title": self._required_text(title, "Titel", maximum=255),
-                "Note_Content": self._required_text(content, "Notiz", maximum=30_000),
+                "Note_Title": values["title"],
+                "Note_Content": values["content"],
             }
         )
         note.encrypted_payload_json = self._encrypt_payload(payload)
@@ -154,6 +153,13 @@ class HubLeadNoteService:
         note = self._note_or_error(lead_id=lead_id, note_id=note_id)
         self.db.delete(note)
         self.db.flush()
+
+    @staticmethod
+    def _validated_note(**values):
+        try:
+            return normalize_note(**values)
+        except ValueError as exc:
+            raise HubLeadNoteError(str(exc)) from exc
 
     def _lead_or_error(self, lead_id: int) -> HubLead:
         lead = self.db.get(HubLead, lead_id)
@@ -177,7 +183,7 @@ class HubLeadNoteService:
             id=note.id,
             title=title,
             content=content,
-            author=note.created_by_username,
+            author=record_author(note, note.created_by_username),
             occurred_at=note.zoho_created_at or note.created_at,
         )
 

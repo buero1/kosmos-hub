@@ -62,7 +62,8 @@ def test_lead_calls_are_separate_from_customer_calls_and_link_back_to_lead(monke
         calendar_event = next(event for event in activities.list_calendar_activities(week_start=date(2026, 9, 14)) if event.id == call.id and event.kind == "call")
         assert calendar_event.lead_id == lead.id
         assert calendar_event.lead_name == "Erika Test"
-        assert web.customer_activity_permalink("call", call.id, None, db).headers["location"] == f"/leads/{lead.id}#call-{call.id}"
+        request = SimpleNamespace(state=SimpleNamespace(hub_user=user))
+        assert web.customer_activity_permalink("call", call.id, request, db).headers["location"] == f"/leads/{lead.id}#call-{call.id}"
         with pytest.raises(CustomerActivityError, match="nicht gefunden"):
             LeadActivityService(db=db).delete(lead_id=other_lead.id, kind="call", activity_id=call.id)
 
@@ -141,6 +142,21 @@ def test_lead_activity_form_fields_and_right_column_template():
     web.templates.env.get_template("partials/lead_activity_panel.html")
 
 
+def test_lead_email_panel_follows_the_subform_and_opens_the_global_composer():
+    template = Path("app/templates/lead_detail.html").read_text(encoding="utf-8")
+
+    assert template.index('<article id="lead-emails"') < template.index('<aside class="customer-detail-side-column">')
+    assert "{% if can_view_lead_emails %}" in template
+    assert "<h3>E-Mails</h3>" in template
+    assert "Verknüpfte E-Mails" not in template
+    assert "E-Mail-Kopf und Inhalt der vergangenen zwölf Monate." not in template
+    assert "Keine verknüpften E-Mails aus den vergangenen zwölf Monaten vorhanden." not in template
+    assert "data-email-compose-open" in template
+    assert 'data-recipient-email="{{ lead_email | lower }}"' in template
+    assert ">E-Mail schreiben</button>" in template
+    web.templates.env.get_template("lead_detail.html")
+
+
 def test_lead_activity_post_saves_the_lead_relation(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -162,6 +178,7 @@ def test_lead_activity_post_saves_the_lead_relation(monkeypatch):
 
     with Session(engine) as db:
         lead = _lead(db, "Erika")
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
         db.flush()
         response = asyncio.run(web.create_lead_activity(lead.id, "calls", Request(), db))
         assert response.status_code == 303
@@ -183,7 +200,14 @@ def test_lead_detail_renders_notes_then_activity_card_on_the_right(monkeypatch):
     }])
 
     with Session(engine) as db:
-        lead = _lead(db, "Erika")
+        lead = HubLeadService(db=db, cipher=get_secret_cipher()).create_lead(
+            submitted_values={
+                "lead_field__first_name": "Erika",
+                "lead_field__last_name": "Test",
+                "lead_field__lead_status": "Lead erstellt",
+                "lead_field__email": "erika@example.de",
+            }
+        )
         user = HubUser(username="hub-admin", password_hash="hash", role="admin")
         db.add(user)
         db.flush()
@@ -209,6 +233,9 @@ def test_lead_detail_renders_notes_then_activity_card_on_the_right(monkeypatch):
 
         side_column = html.index('class="customer-detail-side-column"')
         assert side_column < html.index('id="lead-notes"') < html.index('id="lead-activities"')
+        assert html.index("Unterformular-Leadergebnisse") < html.index('id="lead-emails"') < side_column
+        assert 'data-recipient-email="erika@example.de"' in html
+        assert "Keine verknüpften E-Mails" not in html
         assert f'action="/leads/{lead.id}/notes"' in html
         assert "Eine Notiz hinzufügen" in html
         assert "data-customer-note-edit-dialog" in html

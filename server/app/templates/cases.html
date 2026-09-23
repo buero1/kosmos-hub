@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}Fälle · kosmos-hub{% endblock %}
 {% block content %}
   <section>
@@ -16,6 +17,7 @@
           <button class="button button-secondary button-variant-1" type="submit">Alle Fälle aus Zoho importieren</button>
         </form>
         <a class="button button-variant-1" href="/cases/new">Fall neu anlegen</a>
+        {{ module_layout_menu("case-fields", "Fall") }}
       </div>
     </div>
 

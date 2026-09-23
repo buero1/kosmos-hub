@@ -16,6 +16,10 @@ from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.services.fleet_inventory import FleetInventoryItem, FleetInventoryService
 from app.services.site_users import SiteUserService
+from app.services.hub_operations import HubOperationService, HubOperationError
+from app.services.hub_operation_websites import website_items
+from app.services.wordpress_workbench import user_entries
+from app.services.hub_operation_records import customer_entries
 
 MAX_TOOL_RESULTS = 100
 MAX_SEARCH_RESULTS = 5
@@ -41,11 +45,13 @@ class HubAssistantTools:
         db: Session,
         cipher: SecretCipher,
         panel_site_ids: set[int] | None,
+        actor: str | None = None,
     ):
         self.db = db
         self.cipher = cipher
         self.inventory = FleetInventoryService(db=db, cipher=cipher)
-        self.items = self.inventory.list_items(limit=1000)
+        self.gateway = HubOperationService(db=db, cipher=cipher, actor=actor) if actor else None
+        self.items = website_items(self.gateway) if self.gateway else self.inventory.list_items(limit=1000)
         self.items_by_id = {item.site.id: item for item in self.items}
         self.state = AssistantToolState(
             panel_scope="all" if panel_site_ids is None else "selected",
@@ -204,7 +210,11 @@ class HubAssistantTools:
                 site_domains_by_customer.setdefault(customer.id, []).append(item.site.domain)
 
         matches: list[tuple[float, Customer]] = []
-        for customer in self.db.scalars(select(Customer).order_by(Customer.name.asc(), Customer.id.asc())).all():
+        try:
+            customers = [entry.customer for entry in customer_entries(self.gateway)] if self.gateway else self.db.scalars(select(Customer).order_by(Customer.name.asc(), Customer.id.asc())).all()
+        except HubOperationError as exc:
+            raise AssistantToolError(str(exc)) from exc
+        for customer in customers:
             values = [customer.name, customer.website_domain or "", *site_domains_by_customer.get(customer.id, [])]
             score = max((self._similarity(query, value) for value in values if value), default=0.0)
             if score >= 0.35:
@@ -387,7 +397,11 @@ class HubAssistantTools:
         role = self._text(arguments, "role") or "all"
         limit = self._limit(arguments)
         rows = []
-        for entry in SiteUserService(db=self.db, cipher=self.cipher).list_workbench_entries():
+        try:
+            entries = user_entries(self.gateway) if self.gateway else SiteUserService(db=self.db, cipher=self.cipher).list_workbench_entries()
+        except HubOperationError as exc:
+            raise AssistantToolError(str(exc)) from exc
+        for entry in entries:
             if entry.site.id not in allowed_site_ids:
                 continue
             if role != "all" and role not in entry.user["roles"]:

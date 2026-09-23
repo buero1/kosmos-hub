@@ -1,0 +1,39 @@
+<div class="update-action-explanation" hidden data-update-action-panel="auto-updates">
+  <h3>Automatische Plugin-Updates</h3>
+  <p class="subtle">Gilt für die links ausgewählten Websites. Manuelle Updates bleiben möglich. Hosting- und MainWP-Automatiken müssen separat geprüft werden. Voraussetzung: Kosmos Bridge 0.3.68 oder neuer.</p>
+  <form method="post" action="/updates/plugin-auto-updates" data-plugin-auto-updates>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="confirmed" value="">
+    <span data-auto-update-sites></span>
+    <label>Aktion
+      <select name="blocked">
+        <option value="true">Automatische Updates deaktivieren und sperren</option>
+        <option value="false">Hub-Sperre aufheben (schaltet die Automatik nicht ein)</option>
+      </select>
+    </label>
+    <fieldset class="plugin-auto-update-options">
+      <legend>Plugins aus dem gespeicherten Bestand auswählen</legend>
+      {% for identifier, name in plugin_options %}
+      <label><input type="checkbox" name="plugin_file" value="{{ identifier }}" data-plugin-label="{{ name }}"> <span>{{ name }} <small class="subtle">{{ identifier }}</small></span></label>
+      {% else %}<p class="subtle">Noch kein Plugin-Bestand vorhanden. Zuerst das Website-Inventar laden.</p>{% endfor %}
+    </fieldset>
+    <p class="subtle" data-auto-update-summary>Websites und Plugins auswählen, dann oben auf Starten klicken.</p>
+  </form>
+</div>
+<dialog class="update-confirmation-dialog" data-auto-update-confirmation aria-labelledby="auto-update-confirmation-title">
+  <h3 id="auto-update-confirmation-title">Plugin-Automatik ändern?</h3>
+  <p data-auto-update-confirmation-text></p>
+  <ul class="update-confirmation-list" data-auto-update-confirmation-list></ul>
+  <p class="subtle">Nur ausgewählte, installierte Plugins werden geändert. Es werden keine Updates installiert. Sicherheitsupdates dieser Plugins müssen anschließend bewusst durchgeführt werden.</p>
+  <div class="dialog-actions">
+    <button class="button button-secondary" type="button" data-auto-update-cancel>Abbrechen</button>
+    <button class="button" type="button" data-auto-update-confirm>Bestätigen</button>
+  </div>
+</dialog>
+<style>
+  .plugin-auto-update-options { max-height: 18rem; overflow: auto; margin: 1rem 0; padding: .75rem; }
+  .plugin-auto-update-options label { display: flex; align-items: baseline; gap: .6rem; margin: .5rem 0; }
+  .plugin-auto-update-options input { width: auto; flex-shrink: 0; }
+  .plugin-auto-update-options small { display: block; overflow-wrap: anywhere; }
+</style>
+<script src="/static/plugin-auto-updates.js?v=1" defer></script>

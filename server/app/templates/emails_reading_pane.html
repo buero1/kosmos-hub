@@ -4,7 +4,7 @@
       <div class="mailbox-reading-subject-row">
         <h3>{{ selected.subject }}</h3>
         <div class="mailbox-reading-subject-actions">
-          {% if selected.kind not in ("draft", "system") %}
+          {% if selected.kind not in ("draft", "system", "scheduled") %}
             <button class="button button-secondary button-variant-2 mailbox-reading-agent-action" type="button" data-agent-context-add data-agent-context-type="email" data-agent-context-key="{{ selected.key }}">Mit Agent bearbeiten</button>
             {% if linked_case %}
               <button class="button button-secondary button-variant-2 mailbox-reading-case-link{% if linked_case.status | lower == "abgeschlossen" %} is-closed{% else %} is-open{% endif %}" type="button" data-mailbox-case-edit-open data-mailbox-case-id="{{ linked_case.case.id }}" data-mailbox-case-source-key="{{ selected.key }}">{% if linked_case.status | lower == "abgeschlossen" %}Fall abgeschlossen{% else %}Offener Fall{% endif %}</button>
@@ -30,9 +30,44 @@
       </div>
     </div>
     <p class="mailbox-preview-timing" data-mailbox-preview-timing aria-live="polite"></p>
-    {% if selected.customers %}<div class="mailbox-customer-links">{% for customer in selected.customers %}<a href="/customers/{{ customer.id }}">{{ customer.name }}</a>{% endfor %}</div>{% endif %}
-    {% if selected.kind == 'draft' %}
-      <div class="mailbox-unassigned"><h4>Gespeicherter Entwurf</h4><p>Dieser Entwurf wurde noch nicht über Mittwald versendet.</p><button class="button button-secondary" type="button" data-mailbox-draft-open data-mailbox-draft-id="{{ selected.customer_email_id }}">Entwurf bearbeiten</button>{% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview><summary>Nachricht</summary><iframe data-email-preview-frame title="Entwurf: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% endif %}</div>
+    {% if selected.customers or selected.lead or selected.record_links %}
+      <div class="mailbox-customer-links">
+        {% for customer in selected.customers %}<a href="/customers/{{ customer.id }}">{{ customer.name }}</a>{% endfor %}
+        {% if selected.lead %}<a href="/leads/{{ selected.lead.id }}">{{ selected.lead.name }}</a>{% endif %}
+        {% for link in selected.record_links %}
+          {% if not (link.module == 'customers' and link.id in selected.customers | map(attribute='id') | list) and not (link.module == 'leads' and selected.lead and selected.lead.id == link.id) %}<a href="{{ link.url }}">{{ link.name }}{% if link.module == 'leads' %} (Lead){% elif link.module == 'contacts' %} (Kontakt){% endif %}</a>{% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if selected.kind == 'scheduled' %}
+      <div class="mailbox-unassigned">
+        <h4><span class="pill mailbox-planned-status{% if selected.mailbox_state == 'failed' %} is-failed{% endif %}">{% if selected.mailbox_state == 'failed' %}Fehlgeschlagen{% elif selected.mailbox_state == 'retrying' %}Erneuter Versuch{% elif selected.mailbox_state == 'sending' %}Wird gesendet{% else %}Geplant{% endif %}</span></h4>
+        <p>Versand geplant für {{ selected.occurred_at | berlin_time }}.</p>
+        {% if selected.mailbox_state != 'sending' %}
+          <div class="mailbox-planned-actions">
+            <button class="button button-secondary" type="button" data-mailbox-scheduled-open data-mailbox-scheduled-email-id="{{ selected.scheduled_email_id }}">Bearbeiten</button>
+            <form method="post" action="/emails/scheduled/{{ selected.scheduled_email_id }}/send-now"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button" type="submit">Sofort senden</button></form>
+            <form method="post" action="/emails/scheduled/{{ selected.scheduled_email_id }}/cancel"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-danger" type="submit">Versand abbrechen</button></form>
+          </div>
+        {% endif %}
+        {% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview><summary>Nachricht</summary><iframe data-email-preview-frame title="Geplante E-Mail: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% endif %}
+        {% if selected.attachments %}<ul class="communication-attachments">{% for attachment in selected.attachments %}<li><a href="/emails/scheduled/{{ selected.scheduled_email_id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}</ul>{% endif %}
+      </div>
+    {% elif selected.kind == 'draft' %}
+      <div class="mailbox-unassigned">
+        <div class="mailbox-draft-heading">
+          <h4>Gespeicherter Entwurf</h4>
+          <button class="button button-secondary" type="button" data-mailbox-draft-open data-mailbox-draft-id="{{ selected.customer_email_id }}">Entwurf bearbeiten</button>
+        </div>
+        {% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview><summary>Nachricht</summary><iframe data-email-preview-frame title="Entwurf: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% endif %}
+      </div>
+      {% if selected.attachments %}
+        <ul class="communication-attachments">
+          {% for attachment in selected.attachments %}
+            <li><a href="/emails/unassigned/{{ selected.customer_email_id }}/attachments/{{ attachment.id }}" download="{{ attachment.filename }}">{{ attachment.filename }}</a></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     {% elif selected.kind == 'linked' %}
       {% if selected.preview_html %}
         <details class="mailbox-preview" open data-email-preview data-email-unread="{{ 'true' if selected.is_unread else 'false' }}" data-email-read-url="/customers/{{ selected.customer_id }}/communications/emails/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>
@@ -41,7 +76,7 @@
       {% else %}<p class="mailbox-empty">Für diese E-Mail liegt nur der Kopf vor.</p>{% endif %}
       {% if selected.attachments %}<ul class="communication-attachments">{% for attachment in selected.attachments %}<li><a href="/customers/{{ selected.customer_id }}/communications/emails/{{ selected.customer_email_id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}</ul>{% endif %}
     {% else %}
-      <div class="mailbox-unassigned"><h4>{% if selected.kind == 'direct' %}Direkt über Mittwald versendet{% else %}Unbekannte E-Mail{% endif %}</h4>{% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview{% if selected.is_unread %} data-email-unread="true" data-email-read-url="/emails/unassigned/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"{% endif %}><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% else %}<p>Der Hub hat Absender und Empfänger aus dem Zoho-Workflow gespeichert. Der vollständige Nachrichtentext ist noch nicht vorhanden.</p>{% endif %}{% if selected.attachments %}<ul class="communication-attachments">{% for attachment in selected.attachments %}<li><a href="/emails/unassigned/{{ selected.customer_email_id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}</ul>{% endif %}{% if selected.is_unread %}<form method="post" action="/emails/unassigned/{{ selected.customer_email_id }}/read" data-mailbox-unassigned-read><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary" type="submit">Als gelesen markieren</button></form>{% endif %}</div>
+      <div class="mailbox-unassigned">{% if not selected.record_links %}<h4>{% if selected.kind == 'direct' %}Direkt über Mittwald versendet{% else %}Unbekannte E-Mail{% endif %}</h4>{% endif %}{% if selected.preview_html %}<details class="mailbox-preview" open data-email-preview{% if selected.is_unread %} data-email-unread="true" data-email-read-url="/emails/unassigned/{{ selected.customer_email_id }}/read" data-email-read-csrf="{{ csrf_token }}"{% endif %}><summary>Nachricht</summary><iframe data-email-preview-frame title="E-Mail-Vorschau: {{ selected.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" data-srcdoc="{{ selected.preview_html }}"></iframe></details>{% else %}<p>Der Hub hat Absender und Empfänger aus dem Zoho-Workflow gespeichert. Der vollständige Nachrichtentext ist noch nicht vorhanden.</p>{% endif %}{% if selected.attachments %}<ul class="communication-attachments">{% for attachment in selected.attachments %}<li><a href="/emails/unassigned/{{ selected.customer_email_id }}/attachments/{{ attachment.id }}">{{ attachment.filename }}</a></li>{% endfor %}</ul>{% endif %}{% if selected.is_unread %}<form method="post" action="/emails/unassigned/{{ selected.customer_email_id }}/read" data-mailbox-unassigned-read><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button button-secondary" type="submit">Als gelesen markieren</button></form>{% endif %}</div>
     {% endif %}
     {% if selected.last_error %}<p class="notice-warning">{{ selected.last_error }}</p>{% endif %}
   {% else %}<p class="mailbox-empty">Wähle links eine E-Mail aus.</p>{% endif %}

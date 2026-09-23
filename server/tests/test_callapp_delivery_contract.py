@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -174,5 +175,69 @@ def test_delivery_rejects_unknown_industry_without_partial_records(monkeypatch):
         assert error.value.status_code == 400
         assert error.value.detail == "Die Auswahl für Branche ist ungültig."
         assert db.scalar(select(HubLead)) is None
+        assert db.scalar(select(HubLeadNote)) is None
+        assert db.scalar(select(CustomerCallActivity)) is None
+
+
+def test_industry_normalization_keeps_ambiguous_spelling_for_domain_validation(monkeypatch):
+    field = next(field for field in integrations.HUB_LEAD_FIELDS if field.key == "industry")
+    monkeypatch.setattr(integrations, "HUB_LEAD_FIELDS", (
+        replace(field, options=(("Cafes", "Cafes"), ("Caf\u00e9s", "Caf\u00e9s"))),
+    ))
+    assert integrations._normalize_callapp_industry("CAFES") == "CAFES"
+    assert integrations._normalize_callapp_industry("Cafes") == "Cafes"
+
+
+@pytest.mark.parametrize("has_user,token_source", [(False, "callapp"), (True, None), (True, "other")])
+def test_delivery_requires_the_authenticated_callapp_connection(has_user, token_source):
+    payload = integrations.CallAppClosurePayload.model_validate({
+        "closure_id": "unauthorized", "occurred_at": "2026-09-18T10:00:00Z",
+        "lead": {"id": "unauthorized"}, "campaign": {"id": "campaign"},
+    })
+    request = SimpleNamespace(state=SimpleNamespace(
+        hub_user=SimpleNamespace(username="hub-admin") if has_user else None,
+        integration_token=SimpleNamespace(id=1, source_key=token_source) if token_source else None,
+    ))
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        with pytest.raises(HTTPException) as error:
+            integrations.receive_closure(payload, request, db)
+        assert error.value.status_code == 401
+        assert not db.new and not db.dirty
+        assert db.scalar(select(HubLead)) is None
+        assert db.scalar(select(HubLeadNote)) is None
+        assert db.scalar(select(CustomerCallActivity)) is None
+
+
+@pytest.mark.parametrize("existing_lead", [False, True])
+def test_invalid_follow_up_rolls_back_lead_and_note_together(monkeypatch, existing_lead):
+    cipher = SecretCipher("a" * 32)
+    monkeypatch.setattr(integrations, "get_secret_cipher", lambda: cipher)
+    payload = integrations.CallAppClosurePayload.model_validate({
+        "closure_id": "late-failure", "occurred_at": "2026-09-18T10:00:00Z",
+        "notes": "Should be rolled back", "lead": {"id": "lead-rollback", "company": "Changed"},
+        "campaign": {"id": "campaign"},
+        "follow_up": {"starts_at": "2026-09-21T10:00:00Z", "subject": "   "},
+    })
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        user = HubUser(username="hub-admin", password_hash="test", role="admin")
+        db.add(user)
+        db.commit()
+        request = SimpleNamespace(state=SimpleNamespace(hub_user=user, integration_token=SimpleNamespace(id=1, source_key="callapp")))
+        leads = HubLeadService(db=db, cipher=cipher)
+        if existing_lead:
+            lead, _ = leads.upsert_external_lead(source_system="callapp:primary", source_external_id="lead-rollback", field_values={"company": "Original"})
+            db.commit()
+            original = lead.encrypted_profile_json
+        with pytest.raises(HTTPException) as error:
+            integrations.receive_closure(payload, request, db)
+        assert error.value.status_code == 400
+        stored_leads = db.scalars(select(HubLead)).all()
+        assert len(stored_leads) == int(existing_lead)
+        if existing_lead:
+            assert stored_leads[0].encrypted_profile_json == original
         assert db.scalar(select(HubLeadNote)) is None
         assert db.scalar(select(CustomerCallActivity)) is None

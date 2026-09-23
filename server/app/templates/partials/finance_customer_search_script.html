@@ -102,5 +102,140 @@
       filterContacts();
       filterLinkedRecords();
     });
+
+    document.querySelectorAll('[data-finance-party-search]').forEach(function (root) {
+      if (root.dataset.partySearchReady) return;
+      root.dataset.partySearchReady = 'true';
+      var form = root.closest('form');
+      var input = root.querySelector('[data-finance-party-input]');
+      var customerId = root.querySelector('[data-finance-customer]');
+      var leadId = root.querySelector('[data-finance-lead]');
+      var list = root.querySelector('.finance-customer-options');
+      var empty = root.querySelector('[data-finance-party-empty]');
+      var options = Array.from(root.querySelectorAll('[data-finance-party-option]'));
+      var contact = form && form.querySelector('[data-finance-contact]');
+      var contactControl = contact && contact.closest('[data-finance-contact-control]');
+      var visible = [];
+      var activeIndex = -1;
+
+      function normalize(value) {
+        return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('de');
+      }
+      function selectedOption() {
+        return options.find(function (option) {
+          return option.dataset.partyId === (option.dataset.partyType === 'customer' ? customerId.value : leadId.value)
+            && Boolean(option.dataset.partyId);
+        });
+      }
+      function updateContact() {
+        if (!contact) return;
+        var usesCustomer = Boolean(customerId.value);
+        if (contactControl) contactControl.hidden = !usesCustomer;
+        contact.disabled = !usesCustomer;
+        contact.required = usesCustomer;
+        Array.from(contact.options).forEach(function (option) {
+          if (!option.dataset.customerId) return;
+          var available = usesCustomer && option.dataset.customerId === customerId.value;
+          option.hidden = !available;
+          option.disabled = !available;
+          if (!available && option.selected) contact.value = '';
+        });
+      }
+      function notifySelection() {
+        var selected = selectedOption();
+        root.dataset.selectedPartyName = selected ? (selected.dataset.partyLabel || selected.textContent.trim()) : '';
+        customerId.dispatchEvent(new Event('change', { bubbles: true }));
+        leadId.dispatchEvent(new Event('change', { bubbles: true }));
+        updateContact();
+      }
+      function clearSelection() {
+        customerId.value = '';
+        leadId.value = '';
+        options.forEach(function (option) { option.setAttribute('aria-selected', 'false'); });
+        notifySelection();
+      }
+      function closeList() {
+        list.hidden = true;
+        input.setAttribute('aria-expanded', 'false');
+        options.forEach(function (option) { option.classList.remove('is-active'); });
+        activeIndex = -1;
+      }
+      function showMatches() {
+        var query = normalize(input.value.trim());
+        visible = options.filter(function (option) { return normalize(option.textContent).includes(query); }).slice(0, 40);
+        options.forEach(function (option) { option.hidden = !visible.includes(option); });
+        empty.hidden = visible.length > 0;
+        list.hidden = false;
+        input.setAttribute('aria-expanded', 'true');
+        activeIndex = -1;
+      }
+      function setActive(index) {
+        activeIndex = index;
+        visible.forEach(function (option, optionIndex) {
+          option.classList.toggle('is-active', optionIndex === index);
+        });
+        if (visible[index]) visible[index].scrollIntoView({ block: 'nearest' });
+      }
+      function choose(option) {
+        input.value = option.textContent.trim();
+        customerId.value = option.dataset.partyType === 'customer' ? option.dataset.partyId : '';
+        leadId.value = option.dataset.partyType === 'lead' ? option.dataset.partyId : '';
+        input.setCustomValidity('');
+        options.forEach(function (item) {
+          item.setAttribute('aria-selected', String(item === option));
+        });
+        notifySelection();
+        closeList();
+      }
+
+      root.addEventListener('finance-party:set', function (event) {
+        var value = event.detail || {};
+        customerId.value = value.customerId || '';
+        leadId.value = value.leadId || '';
+        var selected = selectedOption();
+        root.dataset.selectedPartyName = selected ? (selected.dataset.partyLabel || selected.textContent.trim()) : (value.name || '');
+        input.value = selected ? selected.textContent.trim() : ((customerId.value || leadId.value) && value.name ? (leadId.value ? 'Lead' : 'Kunde') + ' · ' + value.name : '');
+        input.setCustomValidity('');
+        options.forEach(function (option) { option.setAttribute('aria-selected', String(option === selected)); });
+        updateContact();
+        closeList();
+      });
+      if (form) form.addEventListener('reset', function () {
+        root.dataset.selectedPartyName = '';
+        input.setCustomValidity('');
+        options.forEach(function (option) { option.setAttribute('aria-selected', 'false'); });
+        closeList();
+      });
+
+      input.addEventListener('focus', showMatches);
+      input.addEventListener('input', function () {
+        var selected = selectedOption();
+        if (!selected || input.value !== selected.textContent.trim()) {
+          clearSelection();
+          input.setCustomValidity(input.value ? 'Bitte einen Kunden oder Lead aus der Liste auswählen.' : '');
+        }
+        showMatches();
+      });
+      input.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { closeList(); return; }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (list.hidden) showMatches();
+          if (visible.length) setActive((activeIndex + (event.key === 'ArrowDown' ? 1 : visible.length - 1)) % visible.length);
+        }
+        if (event.key === 'Enter' && !list.hidden && visible.length) {
+          event.preventDefault();
+          choose(visible[activeIndex < 0 ? 0 : activeIndex]);
+        }
+      });
+      list.addEventListener('click', function (event) {
+        var option = event.target.closest('[data-finance-party-option]');
+        if (option) choose(option);
+      });
+      document.addEventListener('pointerdown', function (event) {
+        if (!root.contains(event.target)) closeList();
+      });
+      updateContact();
+    });
   }());
 </script>

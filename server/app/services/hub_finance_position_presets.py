@@ -72,6 +72,13 @@ class HubFinancePositionPresetService:
         ).all()
         return tuple(self._view(preset) for preset in presets)
 
+    def get(self, *, preset_id: int, library_key: str) -> FinancePositionPresetView:
+        library = self._library(library_key)
+        preset = self.db.get(HubFinancePositionPreset, preset_id)
+        if preset is None or preset.library_key != library:
+            raise HubFinancePositionPresetError("Das Positionspaket wurde nicht gefunden.")
+        return self._view(preset)
+
     def create(
         self,
         *,
@@ -229,8 +236,8 @@ class HubFinancePositionPresetService:
         normalized = value.replace(" ", "").replace(",", ".")
         try:
             decimal_value = Decimal(normalized)
+            if not decimal_value.is_finite() or decimal_value < minimum or (maximum is not None and decimal_value > maximum):
+                raise HubFinancePositionPresetError(f"{label} ist ungültig.")
+            return format(decimal_value.quantize(places, rounding=ROUND_HALF_UP), "f")
         except InvalidOperation as exc:
             raise HubFinancePositionPresetError(f"{label} ist ungültig.") from exc
-        if decimal_value < minimum or (maximum is not None and decimal_value > maximum):
-            raise HubFinancePositionPresetError(f"{label} ist ungültig.")
-        return format(decimal_value.quantize(places, rounding=ROUND_HALF_UP), "f")

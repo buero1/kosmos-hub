@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 from app.core.security import SecretCipher
 from app.models.ai_provider_config import AiProviderConfig
 from app.models.hub_user import HubUser
+from app.services.ai_models import DEFAULT_OPENAI_MODEL, MODEL_PROFILES
 
 OPENAI_PROVIDER = "openai"
-DEFAULT_OPENAI_MODEL = "gpt-5.6-sol"
 
 
 class AiProviderConfigError(ValueError):
@@ -49,11 +49,23 @@ class AiProviderConfigService:
             self.db.add(config)
         else:
             config.encrypted_api_key = self.cipher.encrypt(normalized_key)
-            config.model = DEFAULT_OPENAI_MODEL
             config.enabled = True
             config.configured_by_user_id = actor.id
             config.last_error = None
 
+        self.db.flush()
+        return config
+
+    def select_openai_model(self, *, actor: HubUser, model: str) -> AiProviderConfig:
+        if actor.role != "admin" or not actor.is_active:
+            raise AiProviderConfigError("Only Hub administrators can configure AI access.")
+        if model not in {profile.model for profile in MODEL_PROFILES}:
+            raise AiProviderConfigError("Bitte ein freigegebenes Modell mit bekannter Preisgrundlage auswaehlen.")
+        config = self.get_openai_config()
+        if config is None:
+            raise AiProviderConfigError("Bitte zuerst den OpenAI-Zugang einrichten.")
+        config.model = model
+        config.configured_by_user_id = actor.id
         self.db.flush()
         return config
 

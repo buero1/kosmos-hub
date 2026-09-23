@@ -24,8 +24,9 @@ from app.models.hub_user import HubUser
 from app.models.site import Site, SiteStatus
 from app.models.zoho_connection import ZohoConnection
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS, ZOHO_ACCOUNT_SUBFORMS, ZohoAccountField
-from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
+from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS, contact_fields
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
+from app.services.customer_profile import canonical_customer_metadata, resolve_customer_fields
 
 ZOHO_ACCOUNT_MODULE = "Accounts"
 ZOHO_CONTACT_MODULE = "Contacts"
@@ -1328,12 +1329,12 @@ class ZohoCrmService:
     @staticmethod
     def _contact_creation_values(submitted_values: dict[str, str]) -> dict[str, str]:
         values: dict[str, str] = {}
-        for field in ZOHO_CONTACT_FIELDS:
+        for field in contact_fields(creating=True):
             raw_value = submitted_values.get(f"contact_field__{field.key}", "")
             value = raw_value.strip()
             if len(value) > _MAX_CONTACT_FIELD_LENGTH:
                 raise ZohoCrmError(f"{field.label} ist zu lang.")
-            if (field.required or field.key == "salutation") and not value:
+            if field.required and not value:
                 raise ZohoCrmError(f"{field.label} ist erforderlich.")
             if value:
                 values[field.api_name] = value
@@ -1515,7 +1516,7 @@ class ZohoCrmService:
             "modified_time": self._as_text(record.get("Modified_Time")),
             "synced_at": synced_at.isoformat(),
             "fields": {},
-            "field_metadata": field_map.get("metadata", {}) if isinstance(field_map, dict) else {},
+            "field_metadata": canonical_customer_metadata(field_map.get("metadata")) if isinstance(field_map, dict) else {},
             "subforms": {},
         }
         values = profile["fields"]
@@ -1605,6 +1606,8 @@ class ZohoCrmService:
         connection.last_sync_at = synced_at
         connection.last_error = None
         self.db.flush()
+        from app.services.site_customer_matching import SiteCustomerMatchingService
+        SiteCustomerMatchingService(db=self.db, cipher=self.cipher).customer_saved(customer)
         return customer
 
     def _root_field_changes(
@@ -1613,7 +1616,7 @@ class ZohoCrmService:
         profile: dict[str, object],
         submitted_values: dict[str, str],
     ) -> dict[str, object]:
-        stored_values = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
+        stored_values = {field.key: field.value for field in resolve_customer_fields({**profile, "field_metadata": metadata})}
         changes: dict[str, object] = {}
         for field in ZOHO_ACCOUNT_FIELDS:
             if field.key == "record_id" or field.subform_parent:
@@ -1631,7 +1634,7 @@ class ZohoCrmService:
             if field.sensitive and not submitted.strip():
                 continue
             value = self._normalize_field_value(submitted, definition)
-            previous = stored_values.get(field.label) if isinstance(stored_values, dict) else None
+            previous = stored_values.get(field.key)
             if self._profile_value_key(previous) != self._profile_value_key(value):
                 changes[api_name] = value
         return changes

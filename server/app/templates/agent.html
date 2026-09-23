@@ -5,14 +5,15 @@
     <aside class="account-page-sidebar">
       <p class="eyebrow">Hub-Agent</p>
       <nav class="account-section-nav" aria-label="Hub-Agent Bereiche">
-        <a href="#agent-capabilities" aria-current="page">Fähigkeiten</a>
+        <a href="#agent-overview" aria-current="page">Übersicht</a>
+        <a href="#agent-ai-usage">KI-Verbrauch</a>
         <a href="#agent-email-ai-prompts">E-Mail-Schnellaktionen</a>
         <a href="#agent-completed-chats">Abgeschlossene Chats</a>
         <a href="#agent-deleted-chats">Gelöschte Chats</a>
       </nav>
     </aside>
     <section class="account-page-content">
-      <section id="agent-capabilities" class="agent-capabilities account-section">
+      <section id="agent-overview" class="agent-capabilities account-section">
         <div class="section-heading">
           <div>
             <p class="eyebrow">KI-Mitarbeiter</p>
@@ -29,23 +30,8 @@
             <a class="button" href="/account#account-openai">OpenAI in Account öffnen</a>
           </section>
         {% endif %}
-        <div class="agent-capability-table-wrap">
-          <table class="agent-capability-table">
-            <thead><tr><th>Fähigkeit</th><th>Status</th><th>Beschreibung</th></tr></thead>
-            <tbody>
-              {% for capability in capabilities %}
-                <tr>
-                  <td>{{ capability.name }}</td>
-                  <td><span class="agent-capability-status agent-capability-status-{{ capability.status }}">
-                    {% if capability.status == 'available' %}Verfügbar{% elif capability.status == 'planned' %}Geplant{% else %}Deaktiviert{% endif %}
-                  </span></td>
-                  <td>{{ capability.description }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
       </section>
+      {% include "partials/agent_ai_usage.html" %}
       <section id="agent-email-ai-prompts" class="agent-email-ai-prompts account-section">
         <div class="section-heading">
           <div>
@@ -103,7 +89,7 @@
                   <tr>
                     <td>{{ chat.title }}</td>
                     <td>{{ chat.context_count }}</td>
-                    <td>{{ chat.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ chat.updated_at | berlin_time_short }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -133,7 +119,7 @@
                   <tr>
                     <td>{{ chat.title }}</td>
                     <td>{{ chat.context_count }}</td>
-                    <td>{{ chat.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ chat.updated_at | berlin_time_short }}</td>
                   </tr>
                 {% endfor %}
               </tbody>

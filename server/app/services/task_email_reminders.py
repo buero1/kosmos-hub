@@ -48,87 +48,85 @@ class TaskEmailReminderService:
         self.public_base_url = public_base_url.rstrip("/")
 
     def sync_task(self, *, task: CustomerTaskActivity) -> CustomerTaskEmailReminder | None:
-        reminder = self.db.scalar(
-            select(CustomerTaskEmailReminder).where(CustomerTaskEmailReminder.task_id == task.id)
-        )
-        if not self._requires_email_reminder(task):
-            if reminder is not None and reminder.status in {*_PENDING_STATUSES, "sending"}:
-                reminder.status = "cancelled"
-                reminder.locked_at = None
-                reminder.last_error = None
-            self.db.flush()
-            return reminder
-
-        recipient_email = self._reminder_email_for(task.created_by_username)
-        scheduled_at = task.due_at - timedelta(minutes=task.reminder_minutes_before or 0)
-        customer = self.db.get(Customer, task.customer_id)
-        customer_name = customer.name if customer is not None else ""
-        if reminder is None:
-            reminder = CustomerTaskEmailReminder(
-                task_id=task.id,
-                customer_id=task.customer_id,
-                creator_username=task.created_by_username or "",
-                task_name=task.name,
-                task_description=task.description,
-                customer_name=customer_name,
-                recipient_email=recipient_email,
-                sender_email=DEFAULT_HUB_MAILBOX_SENDER_EMAIL,
-                minutes_before=task.reminder_minutes_before or 0,
-                scheduled_at=scheduled_at,
-                next_attempt_at=scheduled_at,
-                message_id=self._new_message_id(),
-            )
-            self.db.add(reminder)
-        elif reminder.status != "sent" or self._sent_reminder_was_rescheduled(
-            reminder=reminder,
-            scheduled_at=scheduled_at,
-            minutes_before=task.reminder_minutes_before or 0,
-        ):
-            was_sent = reminder.status == "sent"
-            reminder.customer_id = task.customer_id
-            reminder.creator_username = task.created_by_username or ""
-            reminder.task_name = task.name
-            reminder.task_description = task.description
-            reminder.customer_name = customer_name
-            reminder.recipient_email = recipient_email
-            reminder.sender_email = DEFAULT_HUB_MAILBOX_SENDER_EMAIL
-            reminder.minutes_before = task.reminder_minutes_before or 0
-            reminder.scheduled_at = scheduled_at
-            reminder.next_attempt_at = scheduled_at
-            reminder.status = "scheduled"
-            reminder.attempt_count = 0
-            reminder.last_error = None
-            reminder.locked_at = None
-            if was_sent:
-                # A deliberate move of an already completed reminder is a new delivery, not a retry.
-                reminder.sent_at = None
-                reminder.mailbox_email_id = None
-                reminder.message_id = self._new_message_id()
-        self.db.flush()
-        return reminder
+        jobs = self.sync_activity(activity=task, kind="task")
+        return jobs[0] if jobs else None
 
     @staticmethod
-    def _sent_reminder_was_rescheduled(
-        *,
-        reminder: CustomerTaskEmailReminder,
-        scheduled_at: datetime,
-        minutes_before: int,
-    ) -> bool:
-        """Only re-open a delivered reminder when its delivery time actually changed."""
+    def specifications(activity, kind):
+        if activity.status != "planned":
+            return {}
+        if kind == "task":
+            return {"primary": activity.reminder_minutes_before} if TaskEmailReminderService._requires_email_reminder(activity) else {}
+        if activity.starts_at is None:
+            return {}
+        reminders = list(activity.reminders)
+        if not reminders and kind == "call" and activity.reminder_channel == "email":
+            return {"email:" + str(activity.reminder_minutes_before or 0): activity.reminder_minutes_before or 0}
+        return {"email:" + str(row.minutes_before): row.minutes_before for row in reminders if row.channel == "email"}
+
+    def sync_activity(self, *, activity, kind):
+        jobs = list(self.db.scalars(select(CustomerTaskEmailReminder).where(
+            CustomerTaskEmailReminder.activity_kind == kind,
+            CustomerTaskEmailReminder.activity_id == activity.id)))
+        specifications = self.specifications(activity, kind)
+        owner = self.db.get(HubUser, activity.assignee_user_id) if activity.assignee_user_id else None
+        if not owner or not owner.is_active:
+            specifications = {}
+        email = self._reminder_email_for(owner.username) if specifications else ""
+        start = activity.due_at if kind == "task" else activity.starts_at
+        customer = self.db.get(Customer, activity.customer_id) if activity.customer_id else None
+        by_key = {job.reminder_key: job for job in jobs}
+        for job in jobs:
+            if job.reminder_key not in specifications and job.status in {*_PENDING_STATUSES, "sending"}:
+                job.status, job.locked_at, job.last_error = "cancelled", None, None
+        for key, minutes in specifications.items():
+            scheduled_at = start - timedelta(minutes=minutes)
+            job = by_key.get(key)
+            if job is not None and job.status == "sent" and not self._sent_reminder_was_rescheduled(
+                    reminder=job, scheduled_at=scheduled_at, minutes_before=minutes):
+                continue
+            if job is None:
+                job = CustomerTaskEmailReminder(task_id=activity.id if kind == "task" else None,
+                    activity_kind=kind, activity_id=activity.id, reminder_key=key)
+                self.db.add(job)
+                jobs.append(job)
+            was_sent = job.status == "sent"
+            job.customer_id = activity.customer_id
+            job.creator_username = activity.created_by_username or ""
+            job.task_name, job.task_description = activity.name, activity.description
+            job.customer_name = customer.name if customer else ""
+            job.recipient_user_id, job.recipient_email = owner.id, email
+            job.sender_email = DEFAULT_HUB_MAILBOX_SENDER_EMAIL
+            job.minutes_before, job.scheduled_at, job.next_attempt_at = minutes, scheduled_at, scheduled_at
+            job.status, job.attempt_count, job.last_error, job.locked_at = "scheduled", 0, None, None
+            if was_sent or not job.message_id:
+                job.sent_at, job.mailbox_email_id, job.message_id = None, None, self._new_message_id()
+        self.db.flush()
+        return jobs
+
+    @staticmethod
+    def _sent_reminder_was_rescheduled(*, reminder, scheduled_at, minutes_before):
         return reminder.scheduled_at != scheduled_at or reminder.minutes_before != minutes_before
 
-    def cancel_for_deleted_task(self, *, task: CustomerTaskActivity) -> None:
-        reminder = self.db.scalar(
-            select(CustomerTaskEmailReminder).where(CustomerTaskEmailReminder.task_id == task.id)
-        )
-        if reminder is None:
-            return
-        if reminder.status in {*_PENDING_STATUSES, "sending"}:
-            reminder.status = "cancelled"
-            reminder.locked_at = None
-            reminder.last_error = None
-        reminder.task_id = None
+    def assert_not_sending(self, *, activity, kind):
+        sending = self.db.scalar(select(CustomerTaskEmailReminder.id).where(
+            CustomerTaskEmailReminder.activity_kind == kind, CustomerTaskEmailReminder.activity_id == activity.id,
+            CustomerTaskEmailReminder.status == "sending"))
+        if sending is not None:
+            raise TaskEmailReminderError("Eine Erinnerung wird gerade versendet. Bitte kurz warten und die Aenderung erneut speichern.")
+
+    def cancel_activity(self, *, activity, kind):
+        self.assert_not_sending(activity=activity, kind=kind)
+        for job in self.db.scalars(select(CustomerTaskEmailReminder).where(
+                CustomerTaskEmailReminder.activity_kind == kind, CustomerTaskEmailReminder.activity_id == activity.id)):
+            if job.status in _PENDING_STATUSES:
+                job.status, job.locked_at, job.last_error = "cancelled", None, None
+            job.task_id = None
+            job.activity_id = None
         self.db.flush()
+
+    def cancel_for_deleted_task(self, *, task):
+        self.cancel_activity(activity=task, kind="task")
 
     def next_due_at(self) -> datetime | None:
         return self.db.scalar(
@@ -167,8 +165,29 @@ class TaskEmailReminderService:
         reminder = self.db.get(CustomerTaskEmailReminder, reminder_id)
         if reminder is None or reminder.status not in _PENDING_STATUSES or reminder.next_attempt_at > now:
             return TaskEmailReminderProcessResult()
-        task = self.db.get(CustomerTaskActivity, reminder.task_id) if reminder.task_id is not None else None
-        if task is None or not self._requires_email_reminder(task):
+        from app.services.hub_activity_responsibility import ACTIVITY_MODELS, ActivityResponsibility
+        model = ACTIVITY_MODELS.get(reminder.activity_kind)
+        task = self.db.scalar(select(model).where(model.id == reminder.activity_id).with_for_update()) if model else None
+        reminder = self.db.scalar(select(CustomerTaskEmailReminder).where(CustomerTaskEmailReminder.id == reminder_id)
+            .with_for_update().execution_options(populate_existing=True))
+        if reminder is None or reminder.status not in _PENDING_STATUSES or reminder.next_attempt_at > now:
+            self.db.rollback()
+            return TaskEmailReminderProcessResult()
+        owner = self.db.get(HubUser, task.assignee_user_id) if task and task.assignee_user_id else None
+        specs = self.specifications(task, reminder.activity_kind) if task else {}
+        valid = bool(owner and owner.is_active and owner.id == reminder.recipient_user_id
+                     and ActivityResponsibility(self.db, owner).visible(task)
+                     and specs.get(reminder.reminder_key) == reminder.minutes_before
+                     and reminder.reminder_key in specs)
+        if valid:
+            start = task.due_at if reminder.activity_kind == "task" else task.starts_at
+            valid = start - timedelta(minutes=reminder.minutes_before) == reminder.scheduled_at
+        if valid:
+            try:
+                reminder.recipient_email = self._reminder_email_for(owner.username)
+            except TaskEmailReminderError:
+                valid = False
+        if not valid:
             reminder.status = "cancelled"
             reminder.locked_at = None
             self.db.commit()
@@ -294,11 +313,11 @@ class TaskEmailReminderService:
                 f"<td style=\"padding: 6px 0;\">{customer_name}</td></tr>"
             )
         return (
-            "<p>Diese Aufgabe ist fällig:</p>"
+            "<p>Erinnerung an Ihre Aktivität:</p>"
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
             'style="border-collapse: collapse;">'
             "<tbody>"
-            "<tr><td style=\"padding: 6px 0; color: #555; vertical-align: top; width: 150px;\"><strong>Aufgabe</strong></td>"
+            "<tr><td style=\"padding: 6px 0; color: #555; vertical-align: top; width: 150px;\"><strong>Aktivität</strong></td>"
             f"<td style=\"padding: 6px 0;\">{task_name}</td></tr>"
             f"{customer_row}"
             "<tr><td style=\"padding: 6px 0; color: #555; vertical-align: top;\"><strong>Fällig</strong></td>"
@@ -314,6 +333,8 @@ class TaskEmailReminderService:
         return f"{self.public_base_url}/customers/{reminder.customer_id}"
 
     def _task_url(self, reminder: CustomerTaskEmailReminder) -> str | None:
+        if reminder.activity_kind != "task":
+            return f"{self.public_base_url}/activities/{reminder.activity_kind}/{reminder.activity_id}" if self.public_base_url and reminder.activity_id else None
         customer_url = self._customer_url(reminder)
         if reminder.task_id is None or not self.public_base_url:
             return None

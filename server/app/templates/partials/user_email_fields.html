@@ -1,0 +1,9 @@
+<label><span>Persönliche E-Mail-Adresse <small>(optional)</small></span><input type="email" name="email_address" value="{{ account_user.email_address or '' }}" maxlength="320" autocomplete="email"><small class="subtle">Kontaktadresse, keine automatische Postfachfreigabe.</small></label>
+<label><span>Standard-Absenderpostfach</span><select name="default_sender_account_id">
+  <option value="">Automatisch aus erlaubten Postfächern</option>
+  {% if mailbox_access is defined %}{% for mailbox in mailbox_access.accounts %}
+    {% if mailbox.enabled and mailbox.verified and mailbox_access.effective.get(account_user.id, {}).get(mailbox.id, {}).get('send') %}
+    <option value="{{ mailbox.id }}" {% if account_user.default_sender_account_id == mailbox.id %}selected{% endif %}>{{ mailbox.email }}</option>
+    {% endif %}
+  {% endfor %}{% endif %}
+</select><small class="subtle">Nur eingerichtete Postfächer mit Sendeberechtigung. Freigaben gegebenenfalls zuerst speichern.</small></label>

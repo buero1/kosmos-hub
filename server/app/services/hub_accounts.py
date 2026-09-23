@@ -24,6 +24,7 @@ from app.models.styling_settings import StylingSettings
 from app.models.zoho_connection import ZohoConnection
 from app.models.hub_setup_token import HubSetupToken
 from app.models.hub_user import HubUser
+from app.models.hub_access_control import HubAccessRole, HubRecordAccessGrant, HubRecordAssignment, HubTeam
 
 _PASSWORD_ITERATIONS = 600_000
 _SETUP_TOKEN_LIFETIME = timedelta(minutes=20)
@@ -46,6 +47,12 @@ class HubAccountService:
     def list_users(self) -> list[HubUser]:
         return list(self.db.scalars(select(HubUser).order_by(HubUser.created_at.asc(), HubUser.id.asc())))
 
+    def list_roles(self) -> list[HubAccessRole]:
+        return list(self.db.scalars(select(HubAccessRole).where(HubAccessRole.is_active.is_(True)).order_by(HubAccessRole.name)))
+
+    def list_teams(self) -> list[HubTeam]:
+        return list(self.db.scalars(select(HubTeam).where(HubTeam.is_active.is_(True)).order_by(HubTeam.name)))
+
     def admin_count(self) -> int:
         return self._admin_count()
 
@@ -56,14 +63,19 @@ class HubAccountService:
         password: str,
         password_confirmation: str,
         role: str,
+        team_id: int | None = None,
+        email_address: str = "",
+        first_name: str = "",
+        last_name: str = "",
     ) -> HubUser:
         if password != password_confirmation:
             raise ValueError("Die Passwortbestätigung stimmt nicht überein.")
         self.validate_password(password)
         normalized_username = self.normalize_username(username)
         normalized_role = role.strip().casefold()
-        if normalized_role not in HUB_USER_ROLES:
+        if not self._is_valid_role(normalized_role):
             raise ValueError("Bitte eine gültige Benutzerrolle auswählen.")
+        self._validate_team(team_id)
         if self.db.scalar(select(HubUser.id).where(HubUser.username == normalized_username)) is not None:
             raise ValueError("Dieser Benutzername ist bereits vergeben.")
 
@@ -71,7 +83,11 @@ class HubAccountService:
             username=normalized_username,
             password_hash=hash_password(password),
             role=normalized_role,
+            team_id=team_id,
             is_active=True,
+            email_address=self._normalize_personal_email(email_address),
+            first_name=self._normalize_person_name(first_name),
+            last_name=self._normalize_person_name(last_name),
         )
         self.db.add(user)
         self.db.flush()
@@ -83,9 +99,14 @@ class HubAccountService:
         user_id: int,
         username: str,
         role: str,
+        team_id: int | None = None,
         password: str = "",
         password_confirmation: str = "",
         reminder_email: str | None = None,
+        email_address: str | None = None,
+        default_sender_account_id: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> HubUser:
         user = self.get_user(user_id)
         if user is None:
@@ -93,8 +114,9 @@ class HubAccountService:
 
         normalized_username = self.normalize_username(username)
         normalized_role = role.strip().casefold()
-        if normalized_role not in HUB_USER_ROLES:
+        if not self._is_valid_role(normalized_role):
             raise ValueError("Bitte eine gültige Benutzerrolle auswählen.")
+        self._validate_team(team_id)
         normalized_reminder_email = (
             self._normalize_reminder_email(reminder_email, allow_empty=True)
             if reminder_email is not None
@@ -113,12 +135,53 @@ class HubAccountService:
             user.password_hash = hash_password(password)
             user.session_version += 1
 
+        normalized_first_name = self._normalize_person_name(first_name) if first_name is not None else user.first_name
+        normalized_last_name = self._normalize_person_name(last_name) if last_name is not None else user.last_name
+        access_changed = user.role != normalized_role or user.team_id != team_id
+        user.first_name = normalized_first_name
+        user.last_name = normalized_last_name
         user.username = normalized_username
         user.role = normalized_role
+        user.team_id = team_id
+        if access_changed and not (password or password_confirmation):
+            user.session_version += 1
         if reminder_email is not None:
             user.reminder_email = normalized_reminder_email
+        if email_address is not None:
+            user.email_address = self._normalize_personal_email(email_address)
+        if default_sender_account_id is not None:
+            raw = str(default_sender_account_id).strip()
+            if raw and (not raw.isdecimal() or int(raw) < 1):
+                raise ValueError("Bitte ein gültiges Standard-Absenderpostfach auswählen.")
+            if raw:
+                from app.services.hub_mailbox_permissions import MailboxPermissions
+                account = self.db.get(HubMailboxAccount, int(raw))
+                if account is None or not account.enabled or not account.verified_at or not MailboxPermissions(db=self.db, user=user).can(account.id, "send"):
+                    if str(user.default_sender_account_id) == raw:
+                        raw = ""
+                    else:
+                        raise ValueError("Für das Standard-Absenderpostfach fehlt die Sendeberechtigung.")
+            user.default_sender_account_id = int(raw) if raw else None
         self.db.flush()
         return user
+
+    @staticmethod
+    def _normalize_person_name(value):
+        if not isinstance(value, str) or any(ord(char) < 32 for char in value):
+            raise ValueError("Bitte einen gültigen Namen eingeben.")
+        value = " ".join(value.split())
+        if len(value) > 100:
+            raise ValueError("Vorname und Nachname dürfen jeweils höchstens 100 Zeichen enthalten.")
+        return value or None
+
+    @staticmethod
+    def _normalize_personal_email(value):
+        value = value.strip().casefold()
+        if not value:
+            return None
+        if len(value) > 320 or parseaddr(value)[1] != value or not re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", value):
+            raise ValueError("Bitte eine gültige persönliche E-Mail-Adresse eingeben.")
+        return value
 
     def delete_user(self, *, user_id: int) -> tuple[str, tuple[str, ...]]:
         user = self.get_user(user_id)
@@ -135,6 +198,14 @@ class HubAccountService:
         self.db.execute(delete(HubDesktopDevice).where(HubDesktopDevice.user_id == user.id))
         self.db.execute(delete(CustomerActivityReminderNotification).where(CustomerActivityReminderNotification.user_id == user.id))
         self.db.execute(delete(EmailComposeImage).where(EmailComposeImage.created_by_user_id == user.id))
+        self.db.execute(delete(HubRecordAccessGrant).where(HubRecordAccessGrant.user_id == user.id))
+        from app.models.hub_mailbox_permission import HubMailboxPermission
+        self.db.execute(delete(HubMailboxPermission).where(HubMailboxPermission.user_id == user.id))
+        self.db.execute(
+            update(HubRecordAssignment)
+            .where(HubRecordAssignment.owner_user_id == user.id)
+            .values(owner_user_id=None)
+        )
 
         # Shared settings remain available; only their former editor is cleared.
         for model in (
@@ -156,6 +227,17 @@ class HubAccountService:
         self.db.delete(user)
         self.db.flush()
         return username, image_storage_keys
+
+    def _is_valid_role(self, role: str) -> bool:
+        if role in HUB_USER_ROLES:
+            return True
+        return self.db.scalar(
+            select(HubAccessRole.key).where(HubAccessRole.key == role, HubAccessRole.is_active.is_(True))
+        ) is not None
+
+    def _validate_team(self, team_id: int | None) -> None:
+        if team_id is not None and self.db.get(HubTeam, team_id) is None:
+            raise ValueError("Bitte ein gültiges Team auswählen.")
 
     def authenticate(self, username: str, password: str) -> HubUser | None:
         user = self.db.scalar(select(HubUser).where(HubUser.username == self.normalize_username(username)))

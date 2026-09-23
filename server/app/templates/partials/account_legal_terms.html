@@ -19,13 +19,13 @@
 
   <form class="legal-terms-create-form" method="post" action="/account/legal-terms">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Neue AGB<input name="name" placeholder="z. B. Standard-AGB Websites" maxlength="255" required></label>
+    <label>Neue AGB<input name="name" placeholder="z. B. Standard-AGB Websites" minlength="{{ document_template_name_min_length }}" maxlength="{{ document_template_name_field.max_length }}"{% if document_template_name_field.required %} required{% endif %}></label>
     <button class="button button-secondary" type="submit">Neu anlegen</button>
   </form>
 
   <nav class="legal-terms-tabs" aria-label="Gespeicherte AGBs">
     {% for legal_item in legal_terms %}
-      <a href="/account?legal_terms={{ legal_item.id }}#account-legal-terms"{% if selected_legal_terms and selected_legal_terms.id == legal_item.id %} aria-current="page"{% endif %}>
+      <a href="/settings?legal_terms={{ legal_item.id }}#account-legal-terms"{% if selected_legal_terms and selected_legal_terms.id == legal_item.id %} aria-current="page"{% endif %}>
         <strong>{{ legal_item.name }}</strong>
         <span>Version {{ legal_item.version }}</span>
       </a>
@@ -42,7 +42,7 @@
     </div>
     <form class="legal-terms-editor-form" method="post" action="/account/legal-terms/{{ selected_legal_terms.id }}" data-legal-terms-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Bezeichnung<input name="name" value="{{ selected_legal_terms.name }}" maxlength="255" required></label>
+      <label>Bezeichnung<input name="name" value="{{ selected_legal_terms.name }}" minlength="{{ document_template_name_min_length }}" maxlength="{{ document_template_name_field.max_length }}"{% if document_template_name_field.required %} required{% endif %}></label>
       <label>AGB-Inhalt
         <div class="email-rich-editor legal-terms-rich-editor" data-email-rich-editor>
           <textarea class="email-rich-editor-content" aria-label="AGB-Inhalt" data-email-compose-content>{{ selected_legal_terms.content_html }}</textarea>

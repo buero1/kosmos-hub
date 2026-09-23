@@ -11,6 +11,7 @@ class HubFinanceField:
     required: bool = False
     read_only: bool = False
     options: tuple[tuple[str, str], ...] = ()
+    section: str = "fields"
 
 
 FINANCE_POSITION_UNITS = ("Monatlich", "Einmalig", "Jährlich")
@@ -34,9 +35,10 @@ OFFER_FIELDS = (
     HubFinanceField("status", "Status", "Auswahlliste", required=True, options=(("draft", "Entwurf"), ("sent", "Versendet"), ("accepted", "Angenommen"), ("declined", "Abgelehnt"), ("expired", "Abgelaufen"))),
     HubFinanceField("offer_date", "Angebotsdatum", "Datum", required=True),
     HubFinanceField("valid_until", "Gültig bis", "Datum", required=True),
-    HubFinanceField("customer", "Kunde", "Verknuepfung", required=True),
+    HubFinanceField("customer", "Kunde oder Lead", "Verknuepfung", required=True),
     HubFinanceField("contact", "Ansprechpartner", "Verknuepfung", required=True),
     HubFinanceField("reference", "Referenz", "Text"),
     HubFinanceField("currency", "Währung", "Auswahlliste", required=True, options=(("EUR", "EUR"), ("CHF", "CHF"), ("USD", "USD"))),
     HubFinanceField("payment_terms", "Zahlungsbedingungen", "Auswahlliste", options=(("due_on_receipt", "Sofort fällig"), ("14_days", "14 Tage"), ("30_days", "30 Tage"))),
+    HubFinanceField("notes", "Anmerkungen", "HTML", section="notes"),
 )

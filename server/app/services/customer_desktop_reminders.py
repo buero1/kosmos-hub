@@ -29,7 +29,7 @@ class DesktopReminderError(ValueError):
 
 @dataclass(frozen=True)
 class DesktopReminderView:
-    id: int
+    id: int | None
     customer_id: int | None
     activity_kind: str
     activity_id: int
@@ -42,10 +42,12 @@ class DesktopReminderView:
     starts_at: datetime
     remind_at: datetime
     due_at: datetime
+    reference: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
             "id": self.id,
+            "reference": self.reference,
             "customer_id": self.customer_id,
             "activity_kind": self.activity_kind,
             "activity_id": self.activity_id,
@@ -67,15 +69,18 @@ class CustomerDesktopReminderService:
     def __init__(self, *, db: Session):
         self.db = db
 
-    def list_due_reminders(self, *, user: HubUser) -> tuple[DesktopReminderView, ...]:
+    def list_due_reminders(self, *, user: HubUser, materialize: bool = True) -> tuple[DesktopReminderView, ...]:
         now = self._utc_now()
-        self._materialize_due_popup_reminders(user=user, now=now)
+        candidates = self._materialize_due_popup_reminders(user=user, now=now, persist=materialize)
         notifications = self.db.scalars(
             select(CustomerActivityReminderNotification)
             .where(CustomerActivityReminderNotification.user_id == user.id)
             .where(CustomerActivityReminderNotification.completed_at.is_(None))
             .order_by(CustomerActivityReminderNotification.remind_at.asc(), CustomerActivityReminderNotification.id.asc())
         ).all()
+        if not materialize:
+            notifications.extend(item for item in candidates if item.id is None)
+            notifications.sort(key=lambda item: (item.remind_at, item.id or 0))
         customer_names: dict[int, str] = {}
         views: list[DesktopReminderView] = []
         for notification in notifications:
@@ -84,11 +89,14 @@ class CustomerDesktopReminderService:
                 continue
             activity = self._activity_for_notification(notification)
             if activity is None or activity.status != "planned":
-                notification.completed_at = now
-                notification.snoozed_until = None
+                if materialize:
+                    notification.completed_at = now
+                    notification.snoozed_until = None
+                continue
+            if not self._can_access(user, activity):
                 continue
             customer_id = activity.customer_id
-            if notification.customer_id != customer_id:
+            if materialize and notification.customer_id != customer_id:
                 notification.customer_id = customer_id
             if customer_id is None:
                 customer_name = ""
@@ -100,7 +108,8 @@ class CustomerDesktopReminderService:
                     customer_names[customer_id] = customer_name
             starts_at = self._activity_starts_at(activity)
             if starts_at is None:
-                notification.completed_at = now
+                if materialize:
+                    notification.completed_at = now
                 continue
             related_label = None
             related_url = None
@@ -125,9 +134,11 @@ class CustomerDesktopReminderService:
                     starts_at=starts_at,
                     remind_at=notification.remind_at,
                     due_at=due_at,
+                    reference=f"{notification.activity_kind}:{notification.activity_id}:{notification.reminder_key}",
                 )
             )
-        self.db.flush()
+        if materialize:
+            self.db.flush()
         return tuple(views)
 
     def snooze_reminders(self, *, user: HubUser, notification_ids: list[int], minutes: int) -> int:
@@ -172,7 +183,11 @@ class CustomerDesktopReminderService:
                 continue
             activity = self._activity_for_notification(notification)
             if activity is not None:
-                activity.status = "completed"
+                from app.core.security import get_secret_cipher
+                from app.services.hub_operations import HubOperationService
+                from app.services.hub_operation_activities import _execute
+                _execute(HubOperationService(db=self.db, cipher=get_secret_cipher(), actor=user.username),
+                         {"activity_id": str(activity.id)}, kind=notification.activity_kind, action="complete")
             completed_sources.add(source)
 
         for activity_kind, activity_id in completed_sources:
@@ -187,21 +202,25 @@ class CustomerDesktopReminderService:
         self.db.flush()
         return len(notifications)
 
-    def _materialize_due_popup_reminders(self, *, user: HubUser, now: datetime) -> None:
+    def _materialize_due_popup_reminders(self, *, user: HubUser, now: datetime, persist: bool = True) -> list[CustomerActivityReminderNotification]:
+        result = []
         calls = self.db.scalars(
             select(CustomerCallActivity)
             .options(selectinload(CustomerCallActivity.reminders))
-            .where(CustomerCallActivity.created_by_username == user.username)
+            .where(CustomerCallActivity.assignee_user_id == user.id)
             .where(CustomerCallActivity.status == "planned")
         ).all()
         for call in calls:
+            if not self._can_access(user, call):
+                continue
             reminders = tuple(
                 (str(reminder.sort_order), reminder.channel, reminder.minutes_before)
                 for reminder in call.reminders
             )
             if not reminders and call.reminder_channel and call.reminder_minutes_before is not None:
                 reminders = (("legacy", call.reminder_channel, call.reminder_minutes_before),)
-            self._materialize_activity_reminders(
+            result.extend(self._materialize_activity_reminders(
+                persist=persist,
                 user=user,
                 now=now,
                 activity_kind="call",
@@ -209,16 +228,19 @@ class CustomerDesktopReminderService:
                 customer_id=call.customer_id,
                 starts_at=call.starts_at,
                 reminders=reminders,
-            )
+            ))
 
         meetings = self.db.scalars(
             select(CustomerMeetingActivity)
             .options(selectinload(CustomerMeetingActivity.reminders))
-            .where(CustomerMeetingActivity.created_by_username == user.username)
+            .where(CustomerMeetingActivity.assignee_user_id == user.id)
             .where(CustomerMeetingActivity.status == "planned")
         ).all()
         for meeting in meetings:
-            self._materialize_activity_reminders(
+            if not self._can_access(user, meeting):
+                continue
+            result.extend(self._materialize_activity_reminders(
+                persist=persist,
                 user=user,
                 now=now,
                 activity_kind="meeting",
@@ -229,17 +251,20 @@ class CustomerDesktopReminderService:
                     (str(reminder.sort_order), reminder.channel, reminder.minutes_before)
                     for reminder in meeting.reminders
                 ),
-            )
+            ))
 
         tasks = self.db.scalars(
             select(CustomerTaskActivity)
-            .where(CustomerTaskActivity.created_by_username == user.username)
+            .where(CustomerTaskActivity.assignee_user_id == user.id)
             .where(CustomerTaskActivity.status == "planned")
         ).all()
         for task in tasks:
+            if not self._can_access(user, task):
+                continue
             if task.reminder_channel is None or task.reminder_minutes_before is None:
                 continue
-            self._materialize_activity_reminders(
+            result.extend(self._materialize_activity_reminders(
+                persist=persist,
                 user=user,
                 now=now,
                 activity_kind="task",
@@ -247,7 +272,8 @@ class CustomerDesktopReminderService:
                 customer_id=task.customer_id,
                 starts_at=task.due_at,
                 reminders=(("primary", task.reminder_channel, task.reminder_minutes_before),),
-            )
+            ))
+        return result
 
     def _materialize_activity_reminders(
         self,
@@ -259,9 +285,11 @@ class CustomerDesktopReminderService:
         customer_id: int | None,
         starts_at: datetime | None,
         reminders: tuple[tuple[str, str, int], ...],
-    ) -> None:
+        persist: bool = True,
+    ) -> list[CustomerActivityReminderNotification]:
+        result = []
         if starts_at is None:
-            return
+            return result
         for reminder_key, channel, minutes_before in reminders:
             if channel != "popup":
                 continue
@@ -277,16 +305,20 @@ class CustomerDesktopReminderService:
                 )
             )
             if notification is None:
-                self.db.add(
-                    CustomerActivityReminderNotification(
+                notification = CustomerActivityReminderNotification(
                         user_id=user.id,
                         customer_id=customer_id,
                         activity_kind=activity_kind,
                         activity_id=activity_id,
                         reminder_key=reminder_key,
                         remind_at=remind_at,
-                    )
                 )
+                if persist:
+                    self.db.add(notification)
+            result.append(notification)
+        if persist:
+            self.db.flush()
+        return result
 
     def _active_notifications_for_user(
         self,
@@ -307,7 +339,15 @@ class CustomerDesktopReminderService:
         )
         if len(notifications) != len(normalized_ids):
             raise DesktopReminderError("Eine oder mehrere Erinnerungen sind nicht mehr verfügbar.")
+        for notification in notifications:
+            activity = self._activity_for_notification(notification)
+            if activity is None or activity.status != "planned" or not self._can_access(user, activity, action="edit"):
+                raise DesktopReminderError("Eine oder mehrere Erinnerungen sind nicht mehr verfügbar.")
         return notifications
+
+    def _can_access(self, user, activity, *, action="view"):
+        from app.services.hub_activity_responsibility import ActivityResponsibility
+        return activity.assignee_user_id == user.id and ActivityResponsibility(self.db, user).allowed(activity, action)
 
     @staticmethod
     def _utc_now() -> datetime:

@@ -177,6 +177,9 @@ class FleetInventoryService:
 
     def list_items(self, *, limit: int = 1000) -> list[FleetInventoryItem]:
         sites = self.repository.list_sites(limit=limit)
+        return self.items_for_sites(sites)
+
+    def items_for_sites(self, sites: list[Site]) -> list[FleetInventoryItem]:
         snapshots = self.repository.get_latest_snapshots_by_site_ids([site.id for site in sites])
         update_snapshots = self.repository.get_latest_update_snapshots_by_site_ids([site.id for site in sites])
         return [self._build_item(site, snapshots.get(site.id), update_snapshots.get(site.id)) for site in sites]

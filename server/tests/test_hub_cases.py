@@ -330,6 +330,57 @@ def test_hub_case_returns_the_case_for_one_email_and_rejects_a_second_case_link(
         assert service.linked_case_for_source_email(source_email_key=f"unassigned-{mailbox_email.id}") is None
 
 
+def test_hub_case_lists_linked_cases_for_all_customer_emails():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="E-Mail Kunde", is_visible=True)
+        other_customer = Customer(name="Anderer Kunde", is_visible=True)
+        open_email = CustomerZohoEmail(
+            customer=customer,
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt('{"subject":"Offene Anfrage"}'),
+        )
+        closed_email = CustomerZohoEmail(
+            customer=customer,
+            source="zoho",
+            direction="outbound",
+            is_unread=False,
+            encrypted_payload_json=cipher.encrypt('{"subject":"Erledigte Anfrage"}'),
+        )
+        other_email = CustomerZohoEmail(
+            customer=other_customer,
+            source="zoho",
+            direction="inbound",
+            is_unread=True,
+            encrypted_payload_json=cipher.encrypt('{"subject":"Andere Anfrage"}'),
+        )
+        db.add_all([customer, other_customer, open_email, closed_email, other_email])
+        db.flush()
+        service = _service(db)
+        open_case = service.create_case(customer_id=customer.id, submitted_values=_submitted_values())
+        closed_case = service.create_case(
+            customer_id=customer.id,
+            submitted_values=_submitted_values(**{"case_field__status": "Abgeschlossen"}),
+        )
+        other_case = service.create_case(customer_id=other_customer.id, submitted_values=_submitted_values())
+        service.link_email(case_id=open_case.id, source_email_key=f"linked-{customer.id}-{open_email.id}")
+        service.link_email(case_id=closed_case.id, source_email_key=f"linked-{customer.id}-{closed_email.id}")
+        service.link_email(case_id=other_case.id, source_email_key=f"linked-{other_customer.id}-{other_email.id}")
+
+        linked_cases = service.linked_cases_for_customer_emails(customer_id=customer.id)
+
+        assert set(linked_cases) == {open_email.id, closed_email.id}
+        assert linked_cases[open_email.id].case.id == open_case.id
+        assert linked_cases[open_email.id].status == "Neu"
+        assert linked_cases[closed_email.id].case.id == closed_case.id
+        assert linked_cases[closed_email.id].status == "Abgeschlossen"
+
+
 def test_hub_case_rejects_linking_a_customer_email_to_another_customer_case():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

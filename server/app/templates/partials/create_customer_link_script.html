@@ -3,6 +3,7 @@
     document.querySelectorAll('[data-create-customer-link-panel]').forEach(function (panel) {
       var form = document.getElementById(panel.dataset.createCustomerLinkForm);
       var customerField = form && form.querySelector('[name="customer_id"]');
+      var leadField = form && form.querySelector('[name="lead_id"]');
       var link = panel.querySelector('[data-create-customer-link]');
       var empty = panel.querySelector('[data-create-customer-link-empty]');
       if (!customerField || !link || !empty) return;
@@ -19,17 +20,28 @@
         return '';
       }
 
+      function partyOption(type, id) {
+        var options = form.querySelectorAll('[data-finance-party-option]');
+        for (var index = 0; index < options.length; index += 1) {
+          if (options[index].dataset.partyType === type && options[index].dataset.partyId === id) return options[index];
+        }
+        return null;
+      }
+
       function updateLink() {
         var customerId = customerField.value;
-        var name = customerName(customerId);
-        var isLinked = Boolean(customerId && name);
+        var leadId = leadField ? leadField.value : '';
+        var option = customerId ? partyOption('customer', customerId) : partyOption('lead', leadId);
+        var name = option ? option.dataset.partyLabel : customerName(customerId);
+        var isLinked = Boolean((customerId || leadId) && name);
         link.hidden = !isLinked;
         empty.hidden = isLinked;
-        link.href = isLinked ? '/customers/' + customerId : '';
+        link.href = isLinked ? (customerId ? '/customers/' + customerId : '/leads/' + leadId) : '';
         link.textContent = isLinked ? name : '';
       }
 
       customerField.addEventListener('change', updateLink);
+      if (leadField) leadField.addEventListener('change', updateLink);
       updateLink();
     });
   }());

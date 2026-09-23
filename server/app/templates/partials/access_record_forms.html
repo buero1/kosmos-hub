@@ -1,0 +1,61 @@
+<link rel="stylesheet" href="/static/access-record-picker.css?v=1">
+<div class="access-record-forms">
+  {% for kind in ['assign', 'grant'] %}
+  <form method="post" action="/account/access/records/batch" class="access-record-form" data-access-record-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="record_ids" value="[]">
+    {% if kind == 'assign' %}<input type="hidden" name="previous_record_ids" value="[]" disabled>{% endif %}
+    <h4>{{ 'Datensätze zuweisen' if kind == 'assign' else 'Zusätzlich freigeben' }}</h4>
+    <label><span>Modul</span><select name="module_key">{% for module in access_record_modules %}<option value="{{ module.key }}">{{ module.label }}</option>{% endfor %}</select></label>
+    {% if kind == 'assign' %}
+    <label><span>Verantwortlicher</span><select name="owner_user_id"><option value="__keep__">Unverändert lassen</option><option value="">Zuweisung entfernen</option>{% for account_user in hub_users %}<option value="{{ account_user.id }}">{{ account_user.display_name or account_user.username }}</option>{% endfor %}</select></label>
+    <label><span>Team</span><select name="team_id"><option value="__keep__">Unverändert lassen</option><option value="">Teamzuweisung entfernen</option>{% for team in hub_teams %}<option value="{{ team.id }}">{{ team.name }}</option>{% endfor %}</select></label>
+    <p class="subtle">Zuerst das Team wählen, dann „Datensätze auswählen“ öffnen. Vorhandene Teamzuweisungen sind angehakt. Abgewählte Datensätze werden beim Speichern aus diesem Team entfernt, neu ausgewählte diesem Team zugewiesen. Verantwortliche und zusätzliche Freigaben bleiben unverändert, sofern nicht ausdrücklich geändert.</p>
+    {% else %}
+    <label><span>Benutzer</span><select name="user_id"><option value="">Kein Benutzer</option>{% for account_user in hub_users %}<option value="{{ account_user.id }}">{{ account_user.display_name or account_user.username }}</option>{% endfor %}</select></label>
+    <label><span>oder Team</span><select name="team_id"><option value="">Kein Team</option>{% for team in hub_teams %}<option value="{{ team.id }}">{{ team.name }}</option>{% endfor %}</select></label>
+    <label class="checkbox-label"><input name="can_edit" type="checkbox" value="true"> Bearbeitung einschließen</label>
+    {% endif %}
+    <button class="button button-secondary" type="button" data-access-record-open aria-haspopup="dialog">Datensätze auswählen</button>
+    <p class="subtle access-selection-summary" data-access-record-summary aria-live="polite">Noch keine Datensätze ausgewählt.</p>
+    <p class="notice-error" role="alert" data-access-record-error hidden></p>
+    <button class="button button-secondary" type="submit">{{ 'Zuweisung speichern' if kind == 'assign' else 'Freigabe speichern' }}</button>
+  </form>
+  {% endfor %}
+</div>
+<noscript><p class="notice-error">Bitte JavaScript aktivieren, um Datensätze auszuwählen.</p></noscript>
+<div class="pdf-template-edit-layer access-record-layer" data-access-record-layer hidden>
+  <button class="pdf-template-edit-backdrop" type="button" data-access-record-close aria-label="Auswahl abbrechen" tabindex="-1"></button>
+  <aside class="pdf-template-edit-drawer access-record-drawer" role="dialog" aria-modal="true" aria-labelledby="access-record-title" tabindex="-1">
+    <header class="email-compose-header">
+      <div><p class="eyebrow">Datensatzrechte</p><h2 id="access-record-title">Datensätze auswählen</h2></div>
+      <button class="email-compose-close" type="button" data-access-record-close aria-label="Auswahl schließen">&times;</button>
+    </header>
+    <label class="access-record-search"><span>Suchen</span><input type="search" data-access-record-search placeholder="Name, Firma, Website oder Status" maxlength="100" autocomplete="off"></label>
+    <p class="subtle">Zeile oder Checkbox anklicken: einzeln an-/abwählen, auch mit Strg/Cmd. Umschalt-Klick: Bereich an-/abwählen. Die übrige Auswahl bleibt erhalten. 100 Datensätze pro Seite.</p>
+    <div class="access-record-toolbar">
+      <label class="checkbox-label"><input type="checkbox" data-access-record-all> Alle Treffer auswählen</label>
+      <button type="button" class="button button-secondary" data-access-record-clear>Auswahl leeren</button>
+    </div>
+    <p data-access-record-status role="status" aria-live="polite"></p>
+    <div class="table-scroll access-record-table-wrap">
+      <table class="access-picker-table">
+        <thead><tr><th>Auswahl</th><th>Name</th><th>Firma / Website / E-Mail</th><th>Status</th><th>Verantwortlicher</th><th>Team</th></tr></thead>
+        <tbody data-access-record-rows></tbody>
+      </table>
+    </div>
+    <div class="access-record-pagination">
+      <button class="button button-secondary" type="button" data-access-record-prev>Zurück</button>
+      <span data-access-record-page></span>
+      <button class="button button-secondary" type="button" data-access-record-next>Weiter</button>
+    </div>
+    <footer class="access-record-footer">
+      <span data-access-record-count aria-live="polite">0 ausgewählt</span>
+      <button class="button button-secondary" type="button" data-access-record-close>Abbrechen</button>
+      <button class="button" type="button" data-access-record-apply>Auswahl übernehmen</button>
+      <p class="subtle">Die Rechte werden erst mit „Zuweisung speichern“ oder „Freigabe speichern“ geändert.</p>
+    </footer>
+  </aside>
+</div>
+<script src="/static/access-record-picker.js?v=3" defer></script>

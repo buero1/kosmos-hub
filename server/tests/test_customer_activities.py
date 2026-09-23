@@ -63,11 +63,13 @@ def test_activity_permalink_targets_the_exact_customer_entry_or_calendar_event()
             ends_at=datetime(2026, 9, 14, 0),
             duration_minutes=30,
         )
-        db.add_all([linked_task, unlinked_call])
+        actor = HubUser(username="hub-admin", password_hash="hash", role="admin")
+        db.add_all([linked_task, unlinked_call, actor])
         db.flush()
 
-        task_response = web.customer_activity_permalink("task", linked_task.id, None, db)
-        call_response = web.customer_activity_permalink("call", unlinked_call.id, None, db)
+        request = SimpleNamespace(state=SimpleNamespace(hub_user=actor))
+        task_response = web.customer_activity_permalink("task", linked_task.id, request, db)
+        call_response = web.customer_activity_permalink("call", unlinked_call.id, request, db)
 
         assert task_response.headers["location"] == f"/customers/{customer.id}#task-{linked_task.id}"
         assert call_response.headers["location"] == f"/calendar?week=2026-09-14#call-{unlinked_call.id}"
@@ -98,6 +100,7 @@ def test_global_task_entry_uses_calendar_form_and_saves_to_customer(monkeypatch)
     with Session(engine) as db:
         customer = Customer(name="Test-Kunde", is_visible=True)
         db.add(customer)
+        db.add(HubUser(username="hub-admin", password_hash="hash", role="admin"))
         db.flush()
         response = web.schedule_calendar_activity(
             request=None,
@@ -126,6 +129,50 @@ def test_global_task_entry_uses_calendar_form_and_saves_to_customer(monkeypatch)
         assert task.customer_id == customer.id
         assert response.status_code == 303
         assert response.headers["location"].startswith(f"/customers/{customer.id}?")
+
+
+def test_calendar_task_can_be_saved_without_a_customer(monkeypatch):
+    monkeypatch.setattr(web, "require_csrf", lambda request, token: None)
+    monkeypatch.setattr(web, "_require_hub_admin", lambda request: SimpleNamespace(username="hub-admin"))
+    monkeypatch.setattr(web, "write_audit_log", lambda *args, **kwargs: None)
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        db.add(HubUser(username="hub-admin", password_hash="hash", reminder_email="team@example.de"))
+        db.flush()
+        response = web.schedule_calendar_activity(
+            request=None,
+            db=db,
+            customer_id="",
+            activity_kind="task",
+            name="Interne Aufgabe",
+            status="planned",
+            direction="outbound",
+            start_date="",
+            start_time="",
+            due_date="2026-09-16",
+            due_time="09:00",
+            duration_minutes="60",
+            reminder_channels=[],
+            reminder_minutes_before=[],
+            reminder_channel="email",
+            task_reminder_minutes_before="0",
+            description="Ohne Kundenbezug",
+            week="2026-09-14",
+            csrf_token="",
+        )
+
+        task = db.scalar(select(CustomerTaskActivity))
+        assert task is not None
+        assert task.customer_id is None
+        assert task.lead_id is None
+        assert task.name == "Interne Aufgabe"
+        reminder = db.scalar(select(CustomerTaskEmailReminder))
+        assert reminder is not None
+        assert reminder.customer_id is None
+        assert response.status_code == 303
+        assert response.headers["location"] == f"/activities/task/{task.id}"
 
 
 def test_suggested_call_start_skips_a_slot_with_less_than_ten_minutes_remaining_at_any_time():

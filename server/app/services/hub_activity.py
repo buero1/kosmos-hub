@@ -7,7 +7,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.hub_activity_event import HubActivityEvent
@@ -55,13 +55,21 @@ class ActivityRequestContext:
     path: str
     method: str
     recorded: bool = False
+    actor_user_id: int | None = None
+    actor_name: str | None = None
+    origin: str = "web"
 
 
 _request_context: ContextVar[ActivityRequestContext | None] = ContextVar("hub_activity_request", default=None)
 
 
-def begin_activity_request(actor: str, path: str, method: str) -> Token:
-    return _request_context.set(ActivityRequestContext(actor=actor[:64], path=path, method=method))
+def begin_activity_request(actor: str, path: str, method: str, *, user=None) -> Token:
+    return _request_context.set(ActivityRequestContext(
+        actor=actor[:64], path=path, method=method,
+        actor_user_id=getattr(user, "id", None),
+        actor_name=getattr(user, "display_name", None) or getattr(user, "username", None),
+        origin="agent" if path.startswith(("/agent/", "/assistant/")) else "web",
+    ))
 
 
 def end_activity_request(token: Token) -> None:
@@ -160,13 +168,27 @@ def record_http_activity(
 
 def activity_resource_url(event: HubActivityEvent) -> str | None:
     if event.resource_id and event.resource_id.isdigit() and event.module_key in RESOURCE_ROOTS:
-        return f"{RESOURCE_ROOTS[event.module_key]}/{event.resource_id}"
-    if event.module_key in RESOURCE_ROOTS:
-        return RESOURCE_ROOTS[event.module_key]
-    if event.module_key in {"account", "legal-terms", "pdf-templates", "users"}:
+        url = f"{RESOURCE_ROOTS[event.module_key]}/{event.resource_id}"
+    elif event.module_key in RESOURCE_ROOTS:
+        url = RESOURCE_ROOTS[event.module_key]
+    elif event.module_key in {"account", "legal-terms", "pdf-templates", "users"}:
         section = {"legal-terms": "legal-terms", "pdf-templates": "pdf-templates", "users": "users"}.get(event.module_key)
-        return f"/account#account-{section}" if section else "/account"
-    return None
+        url = f"/account#account-{section}" if section else "/account"
+    else:
+        return None
+    path, separator, fragment = url.partition("#")
+    return f"{path}?from_protocol=1{separator}{fragment}"
+
+
+def is_protocol_resource_path(path: str) -> bool:
+    """Only list/detail navigation, never downloads or action endpoints."""
+    path = path.rstrip("/")
+    if path in {"/account", "/settings"}:
+        return True
+    return any(
+        path == root or (path.startswith(root + "/") and path[len(root) + 1:].isdigit())
+        for root in RESOURCE_ROOTS.values()
+    )
 
 
 def list_activity_events(db: Session, params, *, page_size: int = 50) -> dict:
@@ -183,7 +205,12 @@ def list_activity_events(db: Session, params, *, page_size: int = 50) -> dict:
     if module_key:
         query = query.where(HubActivityEvent.module_key == module_key)
     if actor:
-        query = query.where(HubActivityEvent.actor == actor)
+        from app.models.hub_user import HubUser
+        user_id = db.scalar(select(HubUser.id).where(HubUser.username == actor))
+        query = query.where(or_(
+            HubActivityEvent.actor_user_id == user_id if user_id is not None else False,
+            (HubActivityEvent.actor_user_id.is_(None)) & (HubActivityEvent.actor == actor),
+        ))
     if category:
         query = query.where(HubActivityEvent.category == category)
     try:

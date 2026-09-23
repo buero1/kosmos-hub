@@ -1,12 +1,24 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, declared_attr
 
 from app.models.base import Base, TimestampMixin
 
 
-class CustomerCallActivity(TimestampMixin, Base):
+class ActivityResponsibilityMixin:
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    assignee_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    completed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True)
+    completed_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+
+    @declared_attr
+    def assignee_user(cls):
+        return relationship("HubUser", foreign_keys=[cls.assignee_user_id])
+
+
+class CustomerCallActivity(ActivityResponsibilityMixin, TimestampMixin, Base):
     """A call planned for a customer in the Hub."""
 
     __tablename__ = "customer_call_activities"
@@ -59,7 +71,7 @@ class CustomerCallReminder(TimestampMixin, Base):
     call = relationship("CustomerCallActivity", back_populates="reminders")
 
 
-class CustomerTaskActivity(TimestampMixin, Base):
+class CustomerTaskActivity(ActivityResponsibilityMixin, TimestampMixin, Base):
     """A task planned for a customer in the Hub."""
 
     __tablename__ = "customer_task_activities"
@@ -83,7 +95,7 @@ class CustomerTaskActivity(TimestampMixin, Base):
     customer = relationship("Customer", back_populates="task_activities")
 
 
-class CustomerMeetingActivity(TimestampMixin, Base):
+class CustomerMeetingActivity(ActivityResponsibilityMixin, TimestampMixin, Base):
     """A meeting planned for a customer in the Hub."""
 
     __tablename__ = "customer_meeting_activities"
