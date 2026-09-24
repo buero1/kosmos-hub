@@ -834,7 +834,7 @@ class HubMailboxService:
             recipient_email = sender_addresses[0]
             if not re.match(r"^\s*re\s*:", subject, flags=re.IGNORECASE):
                 subject = f"Re: {subject}"
-            signature_html = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
+            signature_html = EmailComposerSettingsService(db=self.db).render_signature(actor=self.actor)
             signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
             quoted_content = self.communications._sanitized_email_content(original_content) if original_content else ""
             content = (

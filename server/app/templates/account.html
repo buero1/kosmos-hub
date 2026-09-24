@@ -1108,6 +1108,10 @@
             </div>
             <textarea name="signature_html" hidden data-email-compose-content-value>{{ email_composer_settings.signature_html }}</textarea>
           </label>
+          {% with placeholder_options=signature_placeholders, placeholder_picker_id="signature-placeholder-results" %}
+            {% include "partials/template_placeholder_picker.html" %}
+          {% endwith %}
+          <p class="subtle"><code>${User.Name}</code> setzt den vollständigen Namen des schreibenden Benutzers ein, auch bei gemeinsamen Postfächern. <code>${User.FirstName}</code> und <code>${User.LastName}</code> stehen einzeln zur Verfügung. Der Name wird beim Einfügen der Signatur aufgelöst und bleibt im Entwurf erhalten.</p>
           <p class="subtle">Für ein Logo in der Werkzeugleiste auf das Bild-Symbol klicken. Das Bild wird lokal im Hub gespeichert und beim Versand eingebettet.</p>
           <button class="button button-secondary" type="submit">Signatur speichern</button>
         </form>

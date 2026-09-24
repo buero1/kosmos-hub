@@ -66,6 +66,7 @@ from app.services.styling_settings import (
 )
 from app.services.email_attachment_storage import EmailAttachmentStorageError
 from app.services.email_compose_images import EmailComposeImageService
+from app.services.template_placeholders import USER_PLACEHOLDERS
 from app.services.maintenance_worker import (
     schedule_pending_zoho_email_attachment_import,
     schedule_pending_zoho_email_content_import,
@@ -3100,6 +3101,7 @@ def _account_context(
             public_base_url=get_settings().public_base_url,
         ).status(),
         "email_composer_settings": runtime_settings(service.db, "email_composer"),
+        "signature_placeholders": USER_PLACEHOLDERS,
         "email_composer_font_options": FONT_FAMILY_OPTIONS,
         "email_composer_font_size_options": FONT_SIZE_OPTIONS,
         "email_composer_line_height_options": LINE_HEIGHT_OPTIONS,

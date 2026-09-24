@@ -680,6 +680,7 @@ class CustomerCommunicationService:
             text = self._text(value)
             if text:
                 context[self._normalized_template_key(key)] = text
+        context.update(self._template_user_context())
         subject, subject_placeholders = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "",
             context=context,
@@ -717,6 +718,7 @@ class CustomerCommunicationService:
         payload = self._payload(template.encrypted_payload_json)
         name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
         context = {self._normalized_template_key(key): str(value) for key, value in (template_values or {}).items() if value not in (None, "")}
+        context.update(self._template_user_context())
         subject, subject_placeholders = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "",
             context=context,
@@ -758,6 +760,7 @@ class CustomerCommunicationService:
         context = self._email_template_context(customer=customer, recipient=recipient)
         for key, value in invoice_values.items():
             context[self._normalized_template_key(key)] = value
+        context.update(self._template_user_context())
         subject, subject_unresolved = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "", context=context, html=False,
         )
@@ -1557,7 +1560,7 @@ class CustomerCommunicationService:
             subject = f"Re: {subject}"
         original_sender = self._people_text(payload.get("from")) or "Unbekannt"
         original_time = email.zoho_sent_at or email.created_at
-        signature_html = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
+        signature_html = EmailComposerSettingsService(db=self.db).render_signature(actor=self.actor)
         signature_section = f"{signature_html}<p><br><br></p>" if signature_html else ""
         content = (
             "<br><br>"
@@ -2671,9 +2674,13 @@ class CustomerCommunicationService:
         )
         return resolved, tuple(unresolved)
 
+    def _template_user_context(self) -> dict[str, str]:
+        return {self._normalized_template_key(key): value for key, value in
+                EmailComposerSettingsService(db=self.db).user_template_values(actor=self.actor).items()}
+
     def _template_html_replacements(self) -> dict[str, str]:
         """Return Hub-authored HTML that is safe to inject into a template body."""
-        signature = EmailComposerSettingsService(db=self.db).get_runtime_settings().signature_html
+        signature = EmailComposerSettingsService(db=self.db).render_signature(actor=self.actor)
         return {
             self._normalized_template_key("userSignature"): signature,
             self._normalized_template_key("Company.EmailSignature"): signature,

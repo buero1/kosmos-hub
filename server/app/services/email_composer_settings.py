@@ -1,10 +1,15 @@
 """Hub-wide defaults for the rich-text email composer."""
 
 from dataclasses import dataclass
+from html import escape
+import re
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.mailbox_actor import resolve_mailbox_actor
 from app.models.email_composer_settings import EmailComposerSettings
+from app.models.hub_user import HubUser
 
 
 FONT_FAMILY_OPTIONS = (
@@ -20,6 +25,10 @@ DEFAULT_FONT_FAMILY_KEY = "verdana"
 DEFAULT_FONT_FAMILY = _FONT_FAMILIES[DEFAULT_FONT_FAMILY_KEY]
 DEFAULT_FONT_SIZE = 12
 DEFAULT_LINE_HEIGHT = 1.1
+_USER_TOKEN = re.compile(
+    r"\$\{\s*(User\.(?:Name|FirstName|LastName))\s*\}|\{\{\s*(User\.(?:Name|FirstName|LastName))\s*\}\}",
+    re.IGNORECASE,
+)
 
 
 class EmailComposerSettingsError(ValueError):
@@ -93,6 +102,25 @@ class EmailComposerSettingsService:
         stored.signature_html = signature_html
         self.db.flush()
         return self.get_runtime_settings()
+
+    def user_template_values(self, *, actor: str | None = None) -> dict[str, str]:
+        username = resolve_mailbox_actor(actor)
+        user = self.db.scalar(select(HubUser).where(
+            HubUser.username == username, HubUser.is_active.is_(True),
+        )) if username else None
+        return {
+            "User.Name": user.display_name if user else "Ihr Kosmos Team",
+            "User.FirstName": (user.first_name or "") if user else "",
+            "User.LastName": (user.last_name or "") if user else "",
+        }
+
+    def render_signature(self, *, actor: str | None = None) -> str:
+        """Resolve at composition time, never when a stored draft is sent later."""
+        signature = self.get_runtime_settings().signature_html
+        if not _USER_TOKEN.search(signature):
+            return signature
+        values = {key.casefold(): value for key, value in self.user_template_values(actor=actor).items()}
+        return _USER_TOKEN.sub(lambda match: escape(values[(match[1] or match[2]).casefold()]), signature)
 
     def apply_default_style(self, content: str) -> str:
         """Keep the configured default in sent HTML while allowing child styles to override it."""

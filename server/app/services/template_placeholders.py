@@ -70,6 +70,12 @@ EMAIL_SIGNATURE_PLACEHOLDER = TemplatePlaceholder(
     "${Company.EmailSignature}", "E-Mail-Signatur", "Mit freundlichen Grüßen", "Firma & globale Werte", hint="Nur im E-Mail-Inhalt",
 )
 
+USER_PLACEHOLDERS = (
+    TemplatePlaceholder("${User.Name}", "Vollständiger Name", "Max Muster", "Schreibender Benutzer"),
+    TemplatePlaceholder("${User.FirstName}", "Vorname", "Max", "Schreibender Benutzer"),
+    TemplatePlaceholder("${User.LastName}", "Nachname", "Muster", "Schreibender Benutzer"),
+)
+
 CUSTOMER_PLACEHOLDERS = (
     TemplatePlaceholder("${Customer.Name}", "Kundenname", "Schreinerei Muster", "Kunde"),
     TemplatePlaceholder("${Customer.CustomerNumber}", "Kundennummer", "10042", "Kunde", "customer_number"),
@@ -416,6 +422,7 @@ def email_placeholders() -> tuple[TemplatePlaceholder, ...]:
         *MEETING_PLACEHOLDERS,
         *SITE_PLACEHOLDERS,
         *COMPANY_PLACEHOLDERS,
+        *USER_PLACEHOLDERS,
         EMAIL_SIGNATURE_PLACEHOLDER,
     )
 
