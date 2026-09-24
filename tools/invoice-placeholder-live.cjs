@@ -60,11 +60,11 @@ const auth = [
         assert.ok((await editor.textContent()).includes(token));
       }
       await drawer.getByRole('button', {name: 'Abbrechen', exact: true}).click();
-      assert.equal(await drawer.isVisible(), false);
+      await drawer.waitFor({state: 'hidden'});
       results.push({width, customer_fields: 4, inserted_locally: true, cancelled: true});
       await page.close();
     }
     assert.equal(writes, 0);
     console.log(JSON.stringify({results, writes}));
   } finally {await browser.close();}
-})().catch(error => {console.error(error.message); process.exitCode = 1;});
+})().catch(error => {console.error(error.stack); process.exitCode = 1;});

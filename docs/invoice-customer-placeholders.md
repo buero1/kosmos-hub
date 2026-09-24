@@ -29,3 +29,12 @@ Kein neuer vollstaendiger Regressionstestlauf.
 `tools/invoice-placeholder-live.cjs` prueft Suche und lokales Einfuegen aller
 vier Platzhalter bei Desktop- und Mobilbreite. Schreibrequests werden blockiert;
 die Vorschau wird abgebrochen, ohne bestehende Vorlagen zu speichern.
+
+Release `68437a9` als vollstaendiges App-Archiv deployt: 391 Laufzeitdateien
+gegen den vorherigen Commit geprueft, ausschliesslich die zwei beabsichtigten
+Service-Dateien geaendert. Keine laufenden Wartungs-, Refresh-, WordPress- oder
+PDF-Jobs vor dem Neustart; keine Migration. Dienst aktiv, internes und
+oeffentliches healthz erfolgreich. Sicherung: `app-before-invoice-placeholders-20260924-152947`.
+
+Live-Test bestanden bei 1263 und 390 Pixeln: alle vier Kundeneintraege gesucht,
+lokal in den Editor eingefuegt und abgebrochen. Null Schreibrequests.
