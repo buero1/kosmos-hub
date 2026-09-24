@@ -146,3 +146,10 @@ Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
   mit2070 bestandenen Tests bezieht sich auf den Stand vor der Kontaktwahl.
 - Vor Release normalisierter Vergleich aller391 Laufzeitdateien: nur6 erwartete
   Dateien geaendert. Keine Migration und kein neues Content-Kit-Release erforderlich.
+- Release d0feb77 auf privatem Release-Branch gepusht und als vollstaendiges
+  App-Archiv deployt. SHA geprueft, keine aktiven Wartungs-/WordPress-Jobs vor
+  Neustart, Dienst aktiv, internes/oeffentliches healthz ok. Vorheriger Stand
+  gesichert unter app-before-profile-contact-d0feb77.
+- Live-Kunde1: Vorschau200, Suchauswahl erfolgreich, Kontakt-E-Mail korrekt
+  vorausgefuellt und manuell bearbeitbar; Desktop/Mobil im vorhandenen Drawer.
+  Browser-Sendetraffic gesperrt: null Sendeanfragen, keine Website-Daten geaendert.
