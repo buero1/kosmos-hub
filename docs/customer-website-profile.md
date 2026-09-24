@@ -54,3 +54,28 @@ Unklare Ergebnisse werden nicht automatisch erneut gesendet.
 Grenzen: keine automatische Zuordnung frei erfundener Website-Felder, keine
 Medien-/Gruppen-/Elementor-Strukturaenderung. Multisite/DB-Cluster nicht freigegeben.
 Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
+
+## Abschlussvermerk
+
+- Hub-Release-Snapshot3aa0a7a auf release/customer-website-profile-20260924,
+  privates Remote gepusht. Isolierter Git-Index erhielt den vorhandenen
+  main-Arbeitsstand; keine fremden Aenderungen verworfen oder mitgestagt.
+- Vor Release normalisierte Laufzeitdateien mit Produktion verglichen:
+  nur16 eigene neue/geaenderte Dateien. Vollstaendiges App-Archiv deployt,
+  keine Migration. Vor Neustart keine laufenden Wartungs-/WordPress-Jobs.
+- Erster Gesundheitscheck benutzte irrtuemlich Port8000 und loeste den
+  vorgesehenen Rueckfall aus. Neuer Start mit tatsaechlichem Dienstport8102
+  erfolgreich; /healthz meldet ok, Dienst aktiv. Vorherige App gesichert.
+- Live-Kunde8: Menue vorhanden, altes Feld unsichtbar, Sidebar auf Desktop/Mobil
+  sichtbar, Abbruch erzeugt null Sendeanfragen. Fehlende neue Content-Kit-Ability
+  ergibt sicheren Versionshinweis/409 und deaktivierte Uebertragung.
+- Gesamtlauf:2032 bestanden,6 uebersprungen,2 veraltete Prueferwartungen.
+  Feldzaehlung60->59 korrigiert; Mail-Send-Verbot auf emails.* beschraenkt, statt
+  die neue Firmenprofil-Sendeaktion mitzusperren. Beide betroffenen Testdateien
+  danach45 bestanden. Kein zweiter vollstaendiger Lauf behauptet.
+- Zusaetzliche Transport-Negativtests: keine Redirects, begrenzte Antworten,
+  keine vom Remote zurueckgespiegelten Privatwerte in Fehler/Audit. Zusammen
+  mit Architekturtests14 bestanden; bisherige gezielte112 sowie Browserchecks
+  ebenfalls bestanden.
+- Content Kit0.3.3 oeffentlich veroeffentlicht, aber auf Kundenwebsites nicht
+  automatisch installiert. Auf Testsite2 getestet, Originalwerte wiederhergestellt.
