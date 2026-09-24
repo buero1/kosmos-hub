@@ -26,6 +26,7 @@ from app.models.hub_finance_offer import HubFinanceOffer
 from app.models.hub_legal_terms import HubLegalTermsRevision
 from app.models.hub_pdf_template import HubPdfTemplate
 from app.services.customer_directory import CustomerDirectoryDetail, CustomerDirectoryService
+from app.services.customer_profile import resolve_customer_fields
 from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
@@ -33,7 +34,7 @@ from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, O
 from app.services.hub_leads import HubLeadService
 from app.services.hub_pdf_templates import HubPdfTemplateError, HubPdfTemplateService
 from app.services.hub_offer_notes import OFFER_NOTES_TOKEN, sanitize_offer_notes
-from app.services.template_placeholders import DOCUMENT_NAMES, contact_greeting, profile_placeholders
+from app.services.template_placeholders import DOCUMENT_NAMES, INVOICE_CUSTOMER_BANK_PLACEHOLDERS, contact_greeting, profile_placeholders
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
@@ -341,6 +342,14 @@ class HubFinancePdfService:
                 customer_labels.get(field.label, "website" if field.label == "Webseite" else field.key): field.value or ""
                 for field in customer_detail.profile_fields
             }
+            if document_type == "invoices":
+                # Invoice output explicitly allows these bank fields, not other protected CRM data.
+                bank_keys = {item.profile_key for item in INVOICE_CUSTOMER_BANK_PLACEHOLDERS}
+                customer_fields.update({
+                    field.key: field.value.strip() if isinstance(field.value, str) else ""
+                    for field in resolve_customer_fields(directory._profile_data(customer_detail.entry.customer))
+                    if field.key in bank_keys
+                })
         if document.customer_id is not None and document.contact_id is not None:
             contact_detail = directory.get_contact_detail(customer_id=document.customer_id, contact_id=document.contact_id)
             if contact_detail is not None:
@@ -473,7 +482,7 @@ class HubFinancePdfService:
             f"${{{namespace}.TaxTotal}}": self._money(snapshot.totals.tax_total, snapshot.currency),
             f"${{{namespace}.GrossTotal}}": self._money(snapshot.totals.total_gross, snapshot.currency),
         })
-        replacements.update(profile_placeholders("Customer", snapshot.customer_fields))
+        replacements.update(profile_placeholders("Customer", snapshot.customer_fields, document_type=snapshot.document_type))
         replacements.update(profile_placeholders("Contact", snapshot.contact_fields))
         replacements["${Customer.BillingStreet}"] = snapshot.billing_street
         replacements["${Customer.BillingPostalCode}"] = snapshot.billing_postal_code

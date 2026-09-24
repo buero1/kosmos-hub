@@ -80,6 +80,12 @@ CUSTOMER_PLACEHOLDERS = (
     TemplatePlaceholder("${Customer.Website}", "Website", "https://beispiel.de", "Kunde", "website"),
 )
 
+INVOICE_CUSTOMER_BANK_PLACEHOLDERS = (
+    TemplatePlaceholder("${Customer.Iban}", "IBAN", "DE89 3704 0044 0532 0130 00", "Kunde", "iban"),
+    TemplatePlaceholder("${Customer.Bic}", "BIC", "COBADEFFXXX", "Kunde", "bic"),
+    TemplatePlaceholder("${Customer.Bank}", "Bankname", "Beispielbank", "Kunde", "bank"),
+)
+
 CONTACT_PLACEHOLDERS = (
     TemplatePlaceholder("${Contact.Name}", "Name", "Max Muster", "Verknüpfter Kontakt"),
     TemplatePlaceholder("${Contact.Greeting}", "Briefanrede", "Sehr geehrter Herr Muster", "Verknüpfter Kontakt"),
@@ -384,9 +390,14 @@ def email_document_placeholders(document_type: str) -> tuple[TemplatePlaceholder
     )
 
 
+def pdf_customer_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
+    bank = INVOICE_CUSTOMER_BANK_PLACEHOLDERS if document_type == "invoices" else ()
+    return (*CUSTOMER_PLACEHOLDERS, *bank)
+
+
 def pdf_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
     notes = (TemplatePlaceholder("${Offer.Notes}", "Anmerkungen", "Individuelle Anmerkungen zum Angebot.", "Aktuelles Angebot"),) if document_type == "offers" else ()
-    return (*document_placeholders(document_type), *notes, *CONTACT_PLACEHOLDERS, *CUSTOMER_PLACEHOLDERS, *COMPANY_PLACEHOLDERS)
+    return (*document_placeholders(document_type), *notes, *CONTACT_PLACEHOLDERS, *pdf_customer_placeholders(document_type), *COMPANY_PLACEHOLDERS)
 
 
 def email_placeholders() -> tuple[TemplatePlaceholder, ...]:
@@ -409,8 +420,8 @@ def email_placeholders() -> tuple[TemplatePlaceholder, ...]:
     )
 
 
-def profile_placeholders(namespace: str, values: dict[str, str]) -> dict[str, str]:
-    definitions = CONTACT_PLACEHOLDERS if namespace == "Contact" else CUSTOMER_PLACEHOLDERS
+def profile_placeholders(namespace: str, values: dict[str, str], *, document_type: str = "") -> dict[str, str]:
+    definitions = CONTACT_PLACEHOLDERS if namespace == "Contact" else pdf_customer_placeholders(document_type)
     return {item.token: values.get(item.profile_key, "") for item in definitions if item.profile_key}
 
 
