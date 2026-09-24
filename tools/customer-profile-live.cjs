@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const base = 'https://kosmos-hub.31-70-92-95.sslip.io';
+const customerId = process.argv[2] || '8';
+assert.match(customerId, /^[1-9][0-9]*$/);
 const auth = [
   "import os,sys,json,base64",
   "from dotenv import load_dotenv",
@@ -34,7 +36,7 @@ const auth = [
     let writes=0; const errors=[];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/website-profile/send', route => {writes++; return route.abort();});
-    await page.goto(base+'/customers/8', {waitUntil:'domcontentloaded'});
+    await page.goto(base+'/customers/'+customerId, {waitUntil:'domcontentloaded'});
     assert.equal(await page.getByText('Options an WP senden', {exact:true}).count(), 0);
     const button=page.locator('[data-website-profile-open]');
     await button.locator('xpath=ancestor::details/summary').click();
@@ -49,6 +51,22 @@ const auth = [
     if(result.status()===409) {
       await page.locator('[data-website-profile-error]:not([hidden])').waitFor();
       assert.equal(await page.locator('[data-website-profile-send]').isEnabled(), false);
+    } else {
+      const data = await result.json();
+      const values = Object.fromEntries(data.rows.map(row => [row.id, row]));
+      const editable = id => page.locator('[data-field-id="'+id+'"]');
+      await editable('company_name').waitFor();
+      assert.equal(values.legal_name.proposed, values.company_name.proposed);
+      const address = values.field_dddda53799ea71160555d834 || values.company_name_address;
+      assert.ok(address.proposed.startsWith(values.company_name.proposed+', '));
+      assert.ok(!address.proposed.startsWith('null,'));
+      assert.equal(await editable('legal_name').inputValue(), values.company_name.proposed);
+      assert.equal(await editable('contact_person').inputValue(), values.contact_person.proposed);
+      assert.equal(await editable('contact_person').isEditable(), true);
+      await editable('legal_name').fill('Local draft only, never transmitted');
+      assert.equal(await page.locator('input[type=checkbox][value=legal_name]').isChecked(), true);
+      // Restore the visible suggestion for the screenshot; no send button is pressed.
+      await editable('legal_name').fill(values.company_name.proposed);
     }
     const out=path.resolve(__dirname,'../server/outputs');
     fs.mkdirSync(out,{recursive:true});
@@ -64,6 +82,6 @@ const auth = [
     await page.keyboard.press('Escape');
     assert.equal(writes,0);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({customer_id:8,menu:true,retired_field_hidden:true,preview_status:result.status(),desktop:true,mobile:true,cancel_writes:0}));
+    console.log(JSON.stringify({customer_id:Number(customerId),menu:true,retired_field_hidden:true,preview_status:result.status(),editable_values:result.status()===200,desktop:true,mobile:true,cancel_writes:0}));
   } finally {await browser.close();}
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

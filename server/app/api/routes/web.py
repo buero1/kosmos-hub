@@ -4500,7 +4500,8 @@ def customer_website_profile_preview(customer_id: int, request: Request, db: Ann
 def customer_website_profile_send(customer_id: int, request: Request, db: Annotated[Session, Depends(get_db)],
     site_id: Annotated[int, Form()], preview_token: Annotated[str, Form()],
     field_ids: Annotated[list[str], Form()] = [], confirmed: Annotated[str, Form()] = "",
-    csrf_token: Annotated[str, Form()] = ""):
+    csrf_token: Annotated[str, Form()] = "", edited_values_json: Annotated[str, Form()] = "{}"):
+    from app.services.customer_website_profile import ProfileFieldValidationError
     require_csrf(request, csrf_token)
     user = getattr(request.state, "hub_user", None)
     if user is None:
@@ -4510,8 +4511,11 @@ def customer_website_profile_send(customer_id: int, request: Request, db: Annota
     try:
         result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
             "wordpress.company_profile.send", {"customer_id": str(customer_id), "site_id": str(site_id),
-                "preview_token": preview_token, "field_ids": json.dumps(field_ids)})
+                "preview_token": preview_token, "field_ids": json.dumps(field_ids), "edited_values_json": edited_values_json})
         db.commit()
+    except ProfileFieldValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HubOperationError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

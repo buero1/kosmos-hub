@@ -17,7 +17,10 @@
   function message(value) { error.textContent = value; error.hidden = !value; }
   async function json(response) {
     const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Die Anfrage wurde abgewiesen.');
+    if (!response.ok) {
+      const failure = new Error(typeof data.detail === 'string' ? data.detail : 'Die Anfrage wurde abgewiesen.');
+      failure.status = response.status; throw failure;
+    }
     return data;
   }
   async function load(site = '') {
@@ -36,11 +39,25 @@
       find('source').textContent = `Ziel aus: ${data.target_source}. Keine automatische Ausweich-Website bei Verbindungsfehlern.`;
       for (const row of data.rows) {
         const tr = document.createElement('tr'), cell = document.createElement('td'), checkbox = document.createElement('input');
-        checkbox.type = 'checkbox'; checkbox.value = row.id; checkbox.disabled = !row.selectable; checkbox.checked = row.selectable;
+        checkbox.type = 'checkbox'; checkbox.value = row.id;
+        checkbox.disabled = !row.editable || !row.proposed.trim(); checkbox.checked = row.selectable;
         checkbox.setAttribute('aria-label', row.label + ' übertragen'); cell.append(checkbox); tr.append(cell);
-        for (const value of [row.label, String(row.current || '-'), row.proposed || '-']) {
+        for (const value of [row.label, String(row.current || '-')]) {
           const td = document.createElement('td'); td.textContent = value; tr.append(td);
         }
+        const valueCell = document.createElement('td'); tr.append(valueCell);
+        if (row.editable) {
+          const input = document.createElement(row.type === 'textarea' ? 'textarea' : 'input');
+          if (row.type !== 'textarea') input.type = ({email: 'email', url: 'url', date: 'date', datetime: 'datetime-local'})[row.type] || 'text';
+          input.value = row.proposed; input.maxLength = row.max_length;
+          input.className = 'website-profile-value'; input.dataset.fieldId = row.id;
+          input.setAttribute('aria-label', row.label + ': Neuer Wert');
+          input.placeholder = 'Optional ergänzen';
+          input.addEventListener('input', () => {
+            checkbox.disabled = !input.value.trim(); checkbox.checked = !checkbox.disabled; selection();
+          });
+          valueCell.append(input);
+        } else valueCell.textContent = row.proposed || '-';
         const hint = document.createElement('small'); hint.className = 'subtle'; hint.textContent = row.reason || row.source;
         tr.lastElementChild.append(hint); rows.append(tr);
       }
@@ -68,7 +85,7 @@
   layer.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); close(); }
     if (event.key !== 'Tab') return;
-    const focusable = Array.from(layer.querySelectorAll('aside button, aside input, aside select, aside a[href]')).filter(el => !el.disabled && el.offsetParent !== null);
+    const focusable = Array.from(layer.querySelectorAll('aside button, aside input, aside textarea, aside select, aside a[href]')).filter(el => !el.disabled && el.offsetParent !== null);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement.matches('[role=dialog]'))) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -76,10 +93,19 @@
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (busy || !preview || send.disabled) return;
+    const selected = boxes().filter(box => box.checked), edited = Object.create(null);
+    for (const box of selected) {
+      const input = box.closest('tr').querySelector('.website-profile-value');
+      if (!input.reportValidity()) return;
+      edited[box.value] = input.value;
+    }
     busy = true; selection(); message(''); target.disabled = true; find('reload').disabled = true;
     status.textContent = 'Bestätigte Übertragung wird beauftragt ...';
     const body = new URLSearchParams({csrf_token: form.elements.csrf_token.value, confirmed: 'yes', site_id: preview.site_id, preview_token: preview.preview_token});
-    boxes().filter(box => box.checked).forEach(box => body.append('field_ids', box.value));
+    selected.forEach(box => body.append('field_ids', box.value));
+    body.set('edited_values_json', JSON.stringify(edited));
+    const controls = Array.from(rows.querySelectorAll('input, textarea')).map(el => [el, el.disabled]);
+    controls.forEach(([el]) => { el.disabled = true; });
     try {
       const data = await fetch(`${base}/send`, {method: 'POST', body}).then(json);
       preview = null;
@@ -87,10 +113,12 @@
       const link = document.createElement('a'); link.href = `/wordpress/jobs/${Number(data.job_id)}`; link.textContent = 'Ergebnis und Protokoll ansehen'; status.append(link);
     } catch (e) {
       message(e.message || 'Ergebnis unklar. Zuerst das Firmenprofil und die WordPress-Aufträge prüfen; nicht ungeprüft erneut senden.');
-      // A transport error may follow a committed job: invalidate confirmation instead of offering blind retries.
-      preview = null;
+      // Only a known validation rejection is safe to correct and resubmit. A transport error may follow a committed job.
+      if (e.status !== 422) preview = null;
+      status.textContent = e.status === 422 ? 'Nicht gesendet. Bitte Eingaben korrigieren; alle Änderungen bleiben erhalten.' : 'Nicht erneut senden, bevor Vorschau bzw. Auftragsstatus geprüft wurde.';
     } finally {
-      busy = false; find('reload').disabled = false; selection();
+      controls.forEach(([el, disabled]) => { el.disabled = disabled; });
+      busy = false; target.disabled = !preview || preview.options.length < 2; find('reload').disabled = false; selection();
     }
   });
 })();

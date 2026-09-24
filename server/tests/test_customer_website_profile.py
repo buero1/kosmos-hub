@@ -9,11 +9,12 @@ from sqlalchemy.orm import sessionmaker
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.customer_contact import CustomerContact
 from app.models.hub_user import HubUser
 from app.models.hub_wordpress_job import HubWordPressJob
 from app.models.site import Site
 from app.models.site_connection import SiteConnection
-from app.services.customer_website_profile import preview, prepare, TEXT_IDS, READ_ABILITY, WRITE_ABILITY
+from app.services.customer_website_profile import preview, prepare, validate_field, ProfileFieldValidationError, TEXT_IDS, READ_ABILITY, WRITE_ABILITY
 from app.services.hub_operations import HubOperationService, HubOperationError, get_operation
 from app.services.site_mcp_proxy import SiteMcpProxyService, SiteMcpProxyError, NoBridgeRedirect
 from app.services.wordpress_jobs import process_next
@@ -256,3 +257,143 @@ def test_partial_template_escapes_customer_and_uses_shared_drawer():
         detail={"entry": {"customer": {"id": 1, "name": "<img src=x onerror=alert(1)>"}}}, csrf_token="safe")
     assert "&lt;img" in html and "<img" not in html
     assert 'role="dialog"' in html and 'data-customer-id="1"' in html
+
+
+def test_company_defaults_ignore_stale_formula_and_use_first_visible_contact(context, monkeypatch):
+    from app.services.hub_access_control import HubAccessControlService
+    sessions, cipher, _, remote = context
+    for key in ("legal_name", "contact_person", "company_name_address"):
+        remote["schema"]["fields"][key] = {"label": key, "type": "text", "max_length": 500}
+    with sessions() as db:
+        db.get(Customer, 1).encrypted_profile_json = cipher.encrypt(json.dumps({"fields": {
+            **PROFILE, "customer_name_address": "null, Example Street 1, 12345 Example City"}}))
+        for number, name in enumerate(("Zoe Example", "Anna Example", "Hidden Contact"), 1):
+            db.add(CustomerContact(id=number, customer_id=1, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": name}}))))
+        db.flush()
+        monkeypatch.setattr(HubAccessControlService, "can_access_contact", lambda self, *, user, contact: contact.id != 3)
+        data = preview(service(db, cipher), 1)
+        rows = {row["id"]: row for row in data["rows"]}
+        assert rows["legal_name"]["proposed"] == "Example Customer"
+        assert rows["company_name_address"]["proposed"] == "Example Customer, Example Street 1, 12345 Example City"
+        assert rows["contact_person"]["proposed"] == "Anna Example"
+        monkeypatch.setattr(HubAccessControlService, "can_access_contact", lambda *args, **kwargs: False)
+        assert next(row for row in preview(service(db, cipher), 1)["rows"] if row["id"] == "contact_person")["proposed"] == ""
+        with pytest.raises(HubOperationError):
+            prepare(service(db, cipher), customer_id=1, site_id=1, preview_token=data["preview_token"], field_ids=["contact_person"])
+
+
+@pytest.mark.parametrize("change", ["rename", "unlink"])
+def test_changed_contact_invalidates_confirmation(context, change):
+    sessions, cipher, _, _ = context
+    with sessions() as db:
+        contact = CustomerContact(customer_id=1, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Original Contact"}})))
+        db.add(contact); db.flush()
+        data = preview(service(db, cipher), 1)
+        if change == "rename":
+            contact.encrypted_profile_json = cipher.encrypt(json.dumps({"fields": {"Name": "Changed Contact"}}))
+        else:
+            contact.customer_id = None
+        with pytest.raises(HubOperationError):
+            prepare(service(db, cipher), customer_id=1, site_id=1, preview_token=data["preview_token"], field_ids=["company_name"])
+
+
+def test_edited_values_use_shared_queue_without_changing_customer_or_unselected_fields(context):
+    from app.models.audit_log import AuditLog
+    sessions, cipher, calls, remote = context
+    edits = {"company_name": "Edited Example GmbH", "email": "new@example.test", "custom": "Manually added value"}
+    with sessions() as db:
+        original = db.get(Customer, 1).encrypted_profile_json
+        data = preview(service(db, cipher), 1)
+        rows = {row["id"]: row for row in data["rows"]}
+        assert rows["email"]["editable"] and rows["custom"]["editable"]
+        assert not rows["logo"]["editable"]
+        args = {**inputs(data, list(edits)), "edited_values_json": json.dumps(edits)}
+        result = service(db, cipher).execute("wordpress.company_profile.send", args)
+        job_id = result.record_id
+        job = db.get(HubWordPressJob, job_id)
+        assert "Edited Example" not in job.encrypted_input
+        assert json.loads(cipher.decrypt(job.encrypted_input))["edited_values_json"] == json.dumps(edits)
+        db.commit()
+    assert process_next(sessions, cipher)
+    with sessions() as db:
+        assert db.get(HubWordPressJob, job_id).status == "succeeded"
+        assert db.get(HubWordPressJob, job_id).encrypted_input is None
+        assert db.get(Customer, 1).encrypted_profile_json == original
+        assert all("Edited Example" not in (entry.detail or "") for entry in db.scalars(select(AuditLog)))
+    assert calls[-1][2]["values"] == edits
+    assert remote["values"]["logo"] == 2 and "phone" not in calls[-1][2]["values"]
+
+
+@pytest.mark.parametrize("edits, selected", [
+    ({"invented": "Not permitted"}, ["company_name"]),
+    ({"logo": "3"}, ["logo"]),
+    ({"company_name": ""}, ["company_name"]),
+    ({"company_name": None}, ["company_name"]),
+    ({"company_name": ["Nested"]}, ["company_name"]),
+    ({"company_name": "x" * 501}, ["company_name"]),
+    ({"company_name": "<script>alert(1)</script>"}, ["company_name"]),
+    ({"email": "invalid"}, ["email"]),
+    ([], ["company_name"]),
+])
+def test_invalid_edits_never_enqueue_or_call_remote_writer(context, edits, selected):
+    sessions, cipher, calls, _ = context
+    with sessions() as db:
+        data = preview(service(db, cipher), 1)
+        with pytest.raises(HubOperationError):
+            service(db, cipher).execute("wordpress.company_profile.send", {
+                **inputs(data, selected), "edited_values_json": json.dumps(edits)})
+        assert not db.scalars(select(HubWordPressJob)).all()
+        assert len(calls) == 1
+
+
+@pytest.mark.parametrize("kind, value", [
+    ("email", "valid@example.test"), ("email_link", "mailto:valid@example.test"),
+    ("url", "https://example.test/path"), ("phone", "+49 (89) 12-34"), ("phone_link", "tel:+49891234"),
+    ("date", "2028-02-29"), ("datetime", "2026-09-24T09:30"), ("textarea", "Line one\nLine two"),
+])
+def test_field_types_accept_valid_values(kind, value):
+    assert validate_field(value, {"type": kind, "max_length": 500, "label": "Example"}) == value
+
+
+@pytest.mark.parametrize("kind, value", [
+    ("email", "a@b"), ("email_link", "mailto:bad"), ("url", "javascript:alert(1)"),
+    ("url", "https://user:pass@example.test"), ("url", "https://[invalid"),
+    ("phone", "call me"), ("phone_link", "tel:---"), ("date", "2026-02-29"),
+    ("date", "2026-2-01"), ("datetime", "2026-09-24T25:30"), ("text", "A\u0000B"),
+])
+def test_field_types_reject_invalid_values_without_reflecting_them(kind, value):
+    with pytest.raises(ProfileFieldValidationError) as exc:
+        validate_field(value, {"type": kind, "max_length": 500, "label": "Example"})
+    assert value not in str(exc.value)
+
+
+def test_payload_size_limit_is_checked_before_queueing(context):
+    sessions, cipher, _, remote = context
+    edits = {f"large_{number}": "\u00e4" * 10000 for number in range(3)}
+    remote["schema"]["fields"].update({key: {"label": key, "type": "textarea", "max_length": 10000} for key in edits})
+    with sessions() as db:
+        data = preview(service(db, cipher), 1)
+        with pytest.raises(ProfileFieldValidationError, match="zusammen zu lang"):
+            prepare(service(db, cipher), customer_id=1, site_id=1, preview_token=data["preview_token"], field_ids=list(edits),
+                    edited_values_json=json.dumps(edits, ensure_ascii=False))
+
+
+def test_route_accepts_edits_and_rejects_invalid_values_before_queue(context, monkeypatch):
+    from app.api.routes import web
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    sessions, cipher, calls, _ = context
+    with sessions() as db:
+        request = Request({"type": "http", "method": "POST", "path": "/customers/1/website-profile/send", "headers": []})
+        request.state.hub_user = db.scalar(select(HubUser).where(HubUser.username == "admin"))
+        monkeypatch.setattr(web, "get_secret_cipher", lambda: cipher)
+        monkeypatch.setattr(web, "require_csrf", lambda *_: None)
+        data = preview(service(db, cipher), 1)
+        with pytest.raises(HTTPException) as exc:
+            web.customer_website_profile_send(1, request, db, 1, data["preview_token"], ["email"], "yes", "token", '{"email":"invalid"}')
+        assert exc.value.status_code == 422
+        assert not db.scalars(select(HubWordPressJob)).all()
+        response = web.customer_website_profile_send(1, request, db, 1, data["preview_token"], ["email"], "yes", "token", '{"email":"edited@example.test"}')
+        job = db.get(HubWordPressJob, json.loads(response.body)["job_id"])
+        assert json.loads(cipher.decrypt(job.encrypted_input))["edited_values_json"] == '{"email":"edited@example.test"}'
+        assert len(calls) == 1

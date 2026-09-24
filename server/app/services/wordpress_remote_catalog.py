@@ -61,8 +61,8 @@ class RemoteAction:
             if name == "role":
                 options = tuple((role, role) for role in SiteUserService.ROLE_OPTIONS)
             fields.append(Field(name, name.replace("_", " "), required=param.default is inspect.Parameter.empty,
-                options=options, max_length=120_000 if name == "preview_token" else 40_000 if get_origin(hints.get(name)) is list else 4096,
-                encoding="JSON array" if get_origin(hints.get(name)) is list else ""))
+                options=options, max_length=120_000 if name in {"preview_token", "edited_values_json"} else 40_000 if get_origin(hints.get(name)) is list else 4096,
+                encoding="JSON object: selected field ID -> edited text" if name == "edited_values_json" else "JSON array" if get_origin(hints.get(name)) is list else ""))
         return tuple(fields)
 
     def defaults(self, _values):

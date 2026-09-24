@@ -21,12 +21,21 @@ Kein pauschaler Plugin-Rollout und keine automatische Synchronisation.
 
 Rechte Sidebar zeigt Feld, bestehenden Website-Wert und geplanten Kundenwert.
 Veraenderte zuordenbare Felder vorgewaehlt; Auswahl/Abwahl, Abbruch ohne Versand.
-Unbekannte/entfernte Felder, leere Werte, Bilder und Struktur bleiben unveraendert.
+Neue Werte sind bearbeitbar, auch ohne automatisch passende Kundenangabe.
+Bestehende unbekannte Textfelder duerfen manuell befuellt werden; nicht im
+authentifizierten Schema vorhandene Felder, leere Werte, Bilder und Struktur
+bleiben unveraendert. Nur ausgewaehlte Werte werden uebertragen.
 Zuordnung ueber stabile IDs, einschliesslich der drei Referenz-Textfelder, nicht
 ueber veraenderbare Beschriftungen. Kundenname, Rechnungsadresse, Telefon,
 Website und daraus ableitbare Adress-/Telefonlink-Felder werden zugeordnet.
 E-Mail nur bei eindeutigen eigenen Kundenfeldern email/secondary_email, nicht
 aus Zugangsdaten oder willkuerlich aus mehreren Kontakten geraten.
+Vollstaendige Firmierung verwendet standardmaessig den Firmennamen.
+Firmenname-Anschrift wird frisch aus Firmenname und Anschrift zusammengesetzt,
+nicht aus einem importierten Formelwert. Ansprechpartner ist der erste fuer
+den Benutzer sichtbare verknuepfte Kontakt, alphabetisch wie in der Kontaktliste
+(bei gleichen Namen nach ID). Ohne lesbaren Kontakt bleibt das Feld leer.
+Manuelle Aenderungen im Dialog gelten nur fuer die Website, nicht fuer das CRM.
 
 UI und Agent benutzen customers.website_profile.preview und
 wordpress.company_profile.send. Bestaetigungstoken verschluesselt, 30 Minuten,
@@ -36,6 +45,14 @@ Store prueft atomar unter DB-Sperre. Keine globalen WP-Administratorrechte.
 TLS, feste gespeicherte Bridge, keine Redirects, Antworten auf4MiB begrenzt.
 Remote-Fehler im neuen Transportweg redigiert; Job/Audit enthaelt IDs statt Werte.
 Unklare Ergebnisse werden nicht automatisch erneut gesendet.
+
+Erweiterung24.09.2026: Vorschautokenv2 bindet auch erlaubte Feldtypen/Laengen
+und die Kontaktquelle. Optionale edited_values_json enthalten ausschliesslich
+ausgewaehlte Feld-IDs und Texte. Gemeinsame Validierung vor Queue und Versand,
+inklusive Email/URL/Telefon/Datum/Datum-Zeit und Payload-Limit. Eingabefehler422
+lassen den Dialog samt Entwurf korrigierbar offen; bei unklarem Transportergebnis
+bleiben die Eingaben sichtbar, aber Wiederholung ist gesperrt. Content Kit0.3.3
+unterstuetzt diese Werte bereits; keine neue Plugin-Version erforderlich.
 
 ## Nachweise
 

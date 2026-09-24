@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/static/customer-website-profile.css?v=1">
+<link rel="stylesheet" href="/static/customer-website-profile.css?v=2">
 <div class="pdf-template-edit-layer website-profile-layer" data-website-profile-layer data-customer-id="{{ detail.entry.customer.id }}" hidden>
   <button class="pdf-template-edit-backdrop" type="button" data-website-profile-close aria-label="Schließen" tabindex="-1"></button>
   <aside class="pdf-template-edit-drawer website-profile-drawer" role="dialog" aria-modal="true" aria-labelledby="website-profile-title" tabindex="-1">
@@ -10,7 +10,7 @@
     <label>Zielwebsite<select data-website-profile-target aria-label="Zielwebsite" disabled></select></label>
     <p data-website-profile-source class="subtle"></p>
     <p data-website-profile-status role="status" aria-live="polite"></p>
-    <form data-website-profile-form>
+    <form data-website-profile-form novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="table-scroll website-profile-table-wrap">
         <table class="website-profile-table">
@@ -18,7 +18,7 @@
           <tbody data-website-profile-rows></tbody>
         </table>
       </div>
-      <p class="subtle">Leere oder nicht eindeutig zugeordnete Kundenangaben bleiben unberücksichtigt. Felder, Gruppen, Logo und Elementor-Verknüpfungen werden nicht verändert.</p>
+      <p class="subtle">Neue Werte können vor dem Senden bearbeitet oder ergänzt werden. Änderungen gelten nur für das Firmenprofil, nicht für die Kundenstammdaten im Hub. Leere oder abgewählte Felder bleiben auf der Website unverändert. Gruppen, Logo und Elementor-Verknüpfungen werden nicht verändert.</p>
       <p data-website-profile-error class="notice-error" role="alert" hidden></p>
       <footer class="website-profile-footer">
         <button class="button button-secondary" type="button" data-website-profile-reload>Vorschau neu laden</button>
@@ -28,4 +28,4 @@
     </form>
   </aside>
 </div>
-<script src="/static/customer-website-profile.js?v=1" defer></script>
+<script src="/static/customer-website-profile.js?v=2" defer></script>

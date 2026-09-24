@@ -6,6 +6,8 @@ from app.services.customer_website_profile import preview
 
 register_query(HubQuery("customers.website_profile.preview",
     "Firmenprofil-Vorschau lesen, nichts senden. Standardziel: Website, sonst Arbeitsdomain, sonst Arbeitsdomain-Login. "
-    "Vorschautoken und ausgewaehlte Feld-IDs fuer wordpress.company_profile.send verwenden. Leere Werte loeschen nichts.",
+    "Vorschautoken und ausgewaehlte Feld-IDs fuer wordpress.company_profile.send verwenden. "
+    "Optional edited_values_json (JSON-Objekt Feld-ID zu Text) fuer bestaetigte Anpassungen der editierbaren Felder. "
+    "Nur das Firmenprofil wird geaendert, nicht der Kunde. Leere Werte loeschen nichts.",
     (Field("customer_id", "Kunden-ID", required=True, max_length=18), Field("site_id", "Optionales alternatives Ziel aus der Vorschau", max_length=18)),
     lambda service, values: preview(service, identifier(values.get("customer_id", "")), identifier(values["site_id"]) if values.get("site_id") else None)))

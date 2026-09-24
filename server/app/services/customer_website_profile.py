@@ -10,6 +10,7 @@ from cryptography.fernet import InvalidToken
 from sqlalchemy import select
 
 from app.models.customer import Customer
+from app.models.customer_contact import CustomerContact
 from app.models.site import Site
 from app.services.audit import write_audit_log
 from app.services.customer_profile import resolve_customer_fields
@@ -32,6 +33,11 @@ SOURCES = {
     "country": ("billing_country", "Rechnungsadresse - Land"),
     "email": ("email", "E-Mail"), "email_secondary": ("secondary_email", "Zweite E-Mail-Adresse"),
 }
+EDITABLE_TYPES = {"text", "textarea", "url", "email", "phone", "phone_link", "email_link", "date", "datetime"}
+
+
+class ProfileFieldValidationError(HubOperationError):
+    """No job was queued; the user can correct values without losing the draft."""
 
 
 def text(value):
@@ -41,13 +47,15 @@ def text(value):
 def profile_sources(fields, customer, site):
     result = {key: (text(fields.get(source)), label) for key, (source, label) in SOURCES.items()}
     result["company_name"] = (text(fields.get("customer_name")) or customer.name, "Kunde-Name")
+    result["legal_name"] = (result["company_name"][0], "Firmenname")
+    result["contact_person"] = (fields["_profile_contact"]["name"], "Erster verknuepfter Kontakt (Reihenfolge der Kontaktliste)")
     result["website"] = (site.home_url, "Zielwebsite")
     city = " ".join(filter(None, [text(fields.get("billing_postal_code")), text(fields.get("billing_city"))]))
     result["postal_code_city"] = (city, "PLZ + Ort")
     address = text(fields.get("customer_address")) or ", ".join(filter(None, [text(fields.get("billing_street")), city]))
     result["address"] = (address, "Kunde-Anschrift / Strasse, PLZ, Ort")
-    result["company_name_address"] = (text(fields.get("customer_name_address")) or
-        ", ".join(filter(None, [result["company_name"][0], address])), "Kunde-Name-Anschrift / Name + Anschrift")
+    # Imported formula results may contain a literal 'null' instead of the company name.
+    result["company_name_address"] = (", ".join(filter(None, [result["company_name"][0], address])), "Firmenname + Anschrift")
     phone = result["phone"][0]
     result["phone_link"] = ("tel:" + re.sub(r"[^+0-9]", "", phone) if phone else "", "Tel. als Telefon-Link")
     email = result["email"][0]
@@ -72,6 +80,17 @@ def customer_context(service, customer_id):
     fields = {f.key: f.value for f in resolve_customer_fields(profile) if not f.definition.get("sensitive")}
     if "website" not in fields:
         fields["website"] = customer.website_domain
+    from app.services.customer_directory import CustomerDirectoryService
+    records = list(service.db.scalars(select(CustomerContact).where(CustomerContact.customer_id == customer.id).order_by(CustomerContact.id)))
+    records = [contact for contact in records if access.can_access_contact(user=user, contact=contact)]
+    try:
+        # Use the same alphabetical order and display names as the customer's contact panel.
+        contacts = CustomerDirectoryService(db=service.db, cipher=service.cipher)._contact_profiles_from_records(records)
+    except InvalidToken:
+        raise HubOperationError("Die verknuepften Kontakte konnten nicht sicher gelesen werden.") from None
+    first = contacts[0] if contacts else None
+    fields["_profile_contact"] = {"id": first.id if first else None,
+        "name": first.name if first and first.name != "Unnamed Zoho contact" else ""}
     fingerprint = hashlib.sha256(json.dumps([customer.name, fields], sort_keys=True, ensure_ascii=True).encode()).hexdigest()
     return customer, fields, fingerprint
 
@@ -128,51 +147,110 @@ def preview(service, customer_id, site_id=None):
         if not isinstance(schema, dict) or not isinstance(current, dict) or len(schema) > 300 or not re.fullmatch(r"[a-f0-9]{64}", revision):
             raise ValueError()
         sources = profile_sources(fields, customer, site)
-        rows, writable = [], {}
+        rows, writable, constraints = [], {}, {}
         for key, definition in schema.items():
             label, kind = definition["label"], definition["type"]
-            if not isinstance(key, str) or not isinstance(label, str) or len(label) > 250:
+            if not isinstance(key, str) or not 1 <= len(key) <= 128 or not isinstance(label, str) or len(label) > 250:
                 raise ValueError()
             value, origin = sources.get(TEXT_IDS.get(key, key), ("", "Keine eindeutige Kundenangabe"))
             old = current.get(key, "")
             if not isinstance(old, (str, int)) or len(str(old)) > 10000:
                 raise ValueError()
-            allowed = bool(value) and kind in {"text", "textarea", "url", "email", "phone", "phone_link", "email_link"}
-            if allowed and len(value) <= min(int(definition.get("max_length", 500)), 10000):
-                writable[key] = value
-            else:
-                allowed = False
+            limit = min(int(definition.get("max_length", 500)), 10000)
+            editable = kind in EDITABLE_TYPES and limit > 0
+            allowed = False
+            if editable:
+                constraints[key] = {"type": kind, "max_length": limit, "label": label}
+                try:
+                    value = validate_field(value, constraints[key])
+                    writable[key], allowed = value, True
+                except ProfileFieldValidationError:
+                    pass
             rows.append({"id": key, "label": label, "type": kind, "source": origin,
                 "current": old, "proposed": value if allowed else "", "selectable": allowed and value != old,
-                "reason": "Unveraendert" if allowed and value == old else "" if allowed else "Keine passende Kundenangabe; bleibt unveraendert"})
+                "editable": editable, "max_length": limit,
+                "reason": "Unveraendert" if allowed and value == old else "" if allowed else
+                    "Keine passende Kundenangabe; kann manuell eingetragen werden" if editable else "Nicht uebertragbar; bleibt unveraendert"})
     except (KeyError, ValueError, TypeError, AttributeError):
         raise HubOperationError("Das Firmenprofil hat eine ungueltige Antwort geliefert. Es wurde nichts gesendet.") from None
-    token = service.cipher.encrypt(json.dumps({"purpose": "customer-website-profile-v1", "actor": service.actor,
+    token = service.cipher.encrypt(json.dumps({"purpose": "customer-website-profile-v2", "actor": service.actor,
         "expires": (datetime.now(UTC) + timedelta(minutes=30)).timestamp(), "customer_id": customer_id,
         "site_id": site.id, "uuid": site.uuid, "domain": normalized_domain(site.domain), "fingerprint": fingerprint,
-        "revision": revision, "values": writable}))
+        "revision": revision, "values": writable, "fields": constraints}))
     return {"customer_id": str(customer_id), "site_id": str(site.id), "domain": site.domain, "target_source": source,
         "options": options, "rows": rows, "preview_token": token}
 
 
-def prepare(service, *, customer_id, site_id, preview_token, field_ids):
+def validate_field(raw, definition):
+    label, kind = definition["label"], definition["type"]
+    def invalid(reason):
+        raise ProfileFieldValidationError(f"{label}: {reason}")
+    if not isinstance(raw, str) or not raw.strip():
+        invalid("Bitte einen Wert eingeben oder das Feld abwaehlen. Leere Werte werden nicht uebertragen.")
+    value = raw.strip().replace("\r\n", "\n").replace("\r", "\n")
+    if len(value) > definition["max_length"]:
+        invalid(f"Maximal {definition['max_length']} Zeichen erlaubt.")
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]|<[^>]*>", value):
+        invalid("Bitte nur Text ohne HTML oder Steuerzeichen eingeben.")
+    if kind != "textarea":
+        value = re.sub(r"[\r\n\t ]+", " ", value)
+    if kind in {"email", "email_link"}:
+        email = re.sub(r"^mailto:", "", value, flags=re.I) if kind == "email_link" else value
+        if not re.fullmatch(r"[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?", email):
+            invalid("Bitte eine gueltige E-Mail-Adresse eingeben.")
+    elif kind == "url":
+        try:
+            parsed = urlsplit(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or re.search(r"\s|\\", value):
+                raise ValueError()
+            parsed.port
+        except ValueError:
+            invalid("Bitte eine Adresse mit https:// oder http:// ohne Zugangsdaten eingeben.")
+    elif kind in {"phone", "phone_link"}:
+        number = re.sub(r"^tel:", "", value, flags=re.I) if kind == "phone_link" else value
+        if not re.fullmatch(r"\+?[0-9 ()/.\-]+", number) or not re.search(r"[0-9]", number):
+            invalid("Bitte eine Telefonnummer eingeben.")
+    elif kind in {"date", "datetime"}:
+        pattern = r"[0-9]{4}-[0-9]{2}-[0-9]{2}" + (r"T[0-9]{2}:[0-9]{2}" if kind == "datetime" else "")
+        try:
+            if not re.fullmatch(pattern, value):
+                raise ValueError()
+            datetime.strptime(value, "%Y-%m-%dT%H:%M" if kind == "datetime" else "%Y-%m-%d")
+        except ValueError:
+            invalid("Bitte ein gueltiges Datum" + (" mit Uhrzeit" if kind == "datetime" else "") + " eingeben.")
+    return value
+
+
+def prepare(service, *, customer_id, site_id, preview_token, field_ids, edited_values_json="{}"):
     customer, fields, fingerprint = customer_context(service, customer_id)
     site, _options, _source = target_site(service, customer, fields, site_id)
     try:
         if not isinstance(preview_token, str) or len(preview_token) > 120000:
             raise ValueError()
         proof = json.loads(service.cipher.decrypt(preview_token))
-        if (proof["purpose"] != "customer-website-profile-v1" or proof["actor"] != service.actor or
+        if (proof["purpose"] != "customer-website-profile-v2" or proof["actor"] != service.actor or
                 proof["expires"] < datetime.now(UTC).timestamp() or proof["customer_id"] != customer_id or
                 proof["site_id"] != site_id or proof["uuid"] != site.uuid or proof["domain"] != normalized_domain(site.domain) or
                 proof["fingerprint"] != fingerprint):
             raise ValueError()
         if (not isinstance(field_ids, list) or not 1 <= len(field_ids) <= 100 or
-                any(not isinstance(key, str) or key not in proof["values"] for key in field_ids) or len(set(field_ids)) != len(field_ids)):
+                any(not isinstance(key, str) or key not in proof["fields"] for key in field_ids) or len(set(field_ids)) != len(field_ids)):
             raise ValueError()
     except (ValueError, KeyError, TypeError, InvalidToken):
         raise HubOperationError("Vorschau ungueltig, abgelaufen oder Kundendaten geaendert. Bitte neu laden und mindestens ein Feld auswaehlen.") from None
-    return site, {key: proof["values"][key] for key in field_ids}, proof["revision"]
+    try:
+        if not isinstance(edited_values_json, str) or len(edited_values_json) > 120000:
+            raise ValueError()
+        edited = json.loads(edited_values_json)
+        if not isinstance(edited, dict) or set(edited) - set(field_ids):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ProfileFieldValidationError("Nur Werte fuer ausgewaehlte Vorschau-Felder sind erlaubt.") from None
+    values = {key: validate_field(edited.get(key, proof["values"].get(key, "")), proof["fields"][key]) for key in field_ids}
+    # Match the plugin's encoded payload limit, including Unicode and JSON overhead.
+    if len(json.dumps({"values": values, "revision": proof["revision"]}, ensure_ascii=True).replace("/", "\\/")) > 131072:
+        raise ProfileFieldValidationError("Die ausgewaehlten Texte sind zusammen zu lang. Bitte weniger Felder uebertragen.")
+    return site, values, proof["revision"]
 
 
 @dataclass
@@ -184,9 +262,10 @@ class CustomerWebsiteProfileService:
     def __init__(self, *, db, cipher):
         self.db, self.cipher = db, cipher
 
-    def send(self, *, customer_id: int, site_id: int, preview_token: str, field_ids: list[str], actor: str):
+    def send(self, *, customer_id: int, site_id: int, preview_token: str, field_ids: list[str], actor: str, edited_values_json: str = "{}"):
         service = HubOperationService(db=self.db, cipher=self.cipher, actor=actor)
-        site, values, revision = prepare(service, customer_id=customer_id, site_id=site_id, preview_token=preview_token, field_ids=field_ids)
+        site, values, revision = prepare(service, customer_id=customer_id, site_id=site_id, preview_token=preview_token,
+            field_ids=field_ids, edited_values_json=edited_values_json)
         status, message = "uncertain", "Uebertragung nicht sicher bestaetigt. Firmenprofil pruefen; nicht ungeprueft erneut senden."
         try:
             data = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(site_id, WRITE_ABILITY,
