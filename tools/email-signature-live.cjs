@@ -30,7 +30,7 @@ const auth = [
   ' template_id=None',
   ' for row in db.scalars(select(ZohoEmailTemplate).where(ZohoEmailTemplate.is_active.is_(True))):',
   "  payload=json.loads(get_secret_cipher().decrypt(row.encrypted_payload_json))",
-  "  if re.search(r'\$\{(?:Company.EmailSignature|userSignature)\}', str(payload.get('content',''))):",
+  "  if any(token in str(payload.get('content','')) for token in ('${Company.EmailSignature}','${userSignature}')):",
   '   template_id=row.zoho_template_id;break',
   " print(json.dumps({'sessions':sessions,'template_id':template_id}))",
 ].join('\n');

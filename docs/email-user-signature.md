@@ -19,7 +19,7 @@ Gespeicherte Entwuerfe und geplante E-Mails behalten den sichtbaren Text,
 einschliesslich manueller Anpassungen. Zitate werden nicht umgeschrieben.
 Es wird keine zusaetzliche Signatur in bisher signaturlose Inhalte eingefuegt.
 
-308 gezielte Tests bestanden: Personalisierung, HTML-Sicherheit, Kontextbindung,
+352 gezielte Tests bestanden: Personalisierung, HTML-Sicherheit, Kontextbindung,
 Vorlagen, Antworten, Entwurfserhalt, simulierter zeitversetzter Versand,
 Mailbox-/Account-Rechte und Architekturkontrolle. Kein neuer Gesamtlauf.
 Die Architekturkontrolle verlangte Review der Accounts-Import-/Kontextaenderung:
@@ -31,3 +31,18 @@ personalisierte Vorlagenvorschau. Optionales `--configure` ersetzt ausschliessli
 eine exakt vorhandene Zeile Ihr Kosmos Team durch `${User.Name}` ueber die
 normale authentifizierte Settings-Route, mit CSRF und vorheriger HTML-Sicherung.
 Kein E-Mail-Versand und keine Aenderung bestehender E-Mail-Vorlagen.
+
+## Live-Stand
+
+- Release `f351d30`, 24.09.2026: vollstaendiges App-Archiv, SHA geprueft;
+  Vergleich aller391 Laufzeitdateien zeigte nur die sechs vorgesehenen Aenderungen.
+- Keine aktiven Wartungs-/Refresh-/WordPress-/PDF-Jobs beim Neustart, keine
+  Migration. Dienst aktiv, internes und oeffentliches healthz erfolgreich.
+  Sicherung: `app-before-user-signature-20260924-161305`.
+- Desktop1263/Mobil390: alle drei Platzhalter gesucht und lokal eingefuegt.
+- Vorhandene Abschlusszeile Ihr Kosmos Team einmalig durch `${User.Name}`
+  ersetzt, ausschliesslich ueber die CSRF-geschuetzte und auditierte Settings-Route.
+  Urspruengliche Signatur lokal unter ignoriertem `server/outputs/` gesichert.
+- Bestehende Vorlagenvorschau separat mit Admin- und Mitarbeiterkonto geprueft:
+  jeweils korrekter hinterlegter Name, keine offenen Benutzer-Platzhalter.
+  Keine E-Mails gesendet, keine Entwuerfe oder Vorlagen fuer Tests gespeichert.
