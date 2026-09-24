@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
 from app.models.hub_lead import HubLead
+from app.services.google_search import business_google_search_url
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS, HubLeadField, HubLeadSubform
 from app.services.hub_workflows import HubWorkflowService
 from app.services.module_layouts import ModuleLayoutService
@@ -70,6 +71,16 @@ class HubLeadDetail:
     fields: tuple[HubLeadFieldValue, ...]
     subforms: tuple[HubLeadSubformValue, ...]
     show_more_index: int
+
+    @property
+    def google_search_url(self) -> str:
+        values = {field.key: field.form_value for field in self.fields if isinstance(field.form_value, str)}
+        return business_google_search_url(
+            values.get("company", "").strip() or self.name,
+            values.get("street"),
+            values.get("postal_code"),
+            values.get("city"),
+        )
 
 
 class HubLeadService:

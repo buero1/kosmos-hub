@@ -240,6 +240,7 @@
           <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
+              <a class="button button-secondary button-variant-1 detail-actions-menu-item" href="{{ detail.google_search_url }}" target="_blank" rel="noopener noreferrer">Google Suche</a>
               {% if can_send_website_profile %}<button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-website-profile-open>Daten ans Firmenprofil senden</button>{% endif %}
               <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
               {% if can_manage_communications and detail.entry.customer.zoho_id %}
@@ -255,6 +256,7 @@
           <details class="detail-actions-menu" data-customer-actions-menu>
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
+              <a class="button button-secondary button-variant-1 detail-actions-menu-item" href="{{ detail.google_search_url }}" target="_blank" rel="noopener noreferrer">Google Suche</a>
               <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
             </div>
           </details>

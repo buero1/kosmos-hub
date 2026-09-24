@@ -18,6 +18,7 @@ from app.models.site import Site
 from app.services.hub_cases import HubCaseListEntry, HubCaseService
 from app.services.module_layouts import ModuleLayoutService
 from app.services.customer_profile import resolve_customer_fields
+from app.services.google_search import business_google_search_url
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS, contact_fields
 from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmService
@@ -110,6 +111,16 @@ class CustomerDirectoryDetail:
     following_profile_fields: tuple[CustomerProfileField, ...] = ()
     profile_field_tabs: tuple[CustomerProfileFieldTab, ...] = ()
     show_more_index: int = 0
+
+    @property
+    def google_search_url(self) -> str:
+        values = {field.key: field.form_value for field in self.profile_fields if not field.sensitive}
+        return business_google_search_url(
+            self.entry.customer.name,
+            values.get("billing_street"),
+            values.get("billing_postal_code"),
+            values.get("billing_city"),
+        )
 
 
 @dataclass(frozen=True)

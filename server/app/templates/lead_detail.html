@@ -96,14 +96,15 @@
         <button class="button button-variant-1" type="submit" form="lead-fields-layout-form">Speichern</button>
       </div>
       {% endif %}
-      {% if can_delete_lead %}
       <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
         <summary class="detail-actions-menu-trigger" aria-label="Weitere Leadactionen">&#8942;</summary>
         <div class="detail-actions-menu-popover">
+          <a class="button button-secondary button-variant-1 detail-actions-menu-item" href="{{ detail.google_search_url }}" target="_blank" rel="noopener noreferrer">Google Suche</a>
+          {% if can_delete_lead %}
           <button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-lead-delete-open>Lead löschen</button>
+          {% endif %}
         </div>
       </details>
-      {% endif %}
     {% endcall %}
 
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
