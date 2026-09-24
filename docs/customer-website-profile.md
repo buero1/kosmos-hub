@@ -96,3 +96,25 @@ Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
   ebenfalls bestanden.
 - Content Kit0.3.3 oeffentlich veroeffentlicht, aber auf Kundenwebsites nicht
   automatisch installiert. Auf Testsite2 getestet, Originalwerte wiederhergestellt.
+
+## Nachtrag: Editierbare Vorschau
+
+- Release8be8573 vom24.09.2026: Werte im Dialog editierbar, Firmierung aus
+  Firmenname, Firmenname-Anschrift ohne alten Formelwert, Ansprechpartner aus
+  erstem erlaubten Kontakt. Nur Website-Werte werden angepasst, keine CRM-Daten.
+-84 gezielte Python-Tests und11 Architekturtests bestanden. Die Architekturkontrolle
+  verlangte zunaechst explizit den Review der geaenderten Send-Route; gemeinsamer
+  Gateway, CSRF, Schema-Grenzen, Validierung vor Queue und Datenschutz geprueft.
+- Gesamtlauf nach der Aenderung:2070 bestanden,6 uebersprungen (535,06 Sekunden).
+- Desktop1300/Mobil390: editierbare Texte, Mehrzeiler, Email/Datum, Auswahl,
+  selektive Sendedaten, Entwurfserhalt bei422, kein Wiederholen bei unklarem
+  Transportergebnis, Abbruch und Zielwechsel bestanden.
+- Normalisierter Produktionsvergleich: nur7 beabsichtigte Laufzeitdateien
+  unterschieden sich. Vollstaendiges App-Archiv mit gepruefter SHA deployt,
+  vorher keine laufenden Wartungs-/WordPress-Jobs, keine Migration.
+  Vorheriger App-Stand als app-before-profile-editable-8be8573 gesichert.
+- Privater Release-Branch gepusht; vorhandener main-Index unveraendert.
+  Lokales und oeffentliches /healthz ok. Live-Dialog Kunde1: Vorschau200,
+  Firmen-/Kontaktvorgaben geprueft, Felder editierbar, Desktop/Mobil erreichbar.
+  Alle Sendeanfragen im Browsertest gesperrt; null Sendeanfragen ausgelöst.
+  Kein Kunden-Firmenprofil geaendert. Kein neues Plugin-Release notwendig.
