@@ -102,7 +102,7 @@ Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
 - Release8be8573 vom24.09.2026: Werte im Dialog editierbar, Firmierung aus
   Firmenname, Firmenname-Anschrift ohne alten Formelwert, Ansprechpartner aus
   erstem erlaubten Kontakt. Nur Website-Werte werden angepasst, keine CRM-Daten.
--84 gezielte Python-Tests und11 Architekturtests bestanden. Die Architekturkontrolle
+- 84 gezielte Python-Tests und11 Architekturtests bestanden. Die Architekturkontrolle
   verlangte zunaechst explizit den Review der geaenderten Send-Route; gemeinsamer
   Gateway, CSRF, Schema-Grenzen, Validierung vor Queue und Datenschutz geprueft.
 - Gesamtlauf nach der Aenderung:2070 bestanden,6 uebersprungen (535,06 Sekunden).
@@ -116,5 +116,5 @@ Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
 - Privater Release-Branch gepusht; vorhandener main-Index unveraendert.
   Lokales und oeffentliches /healthz ok. Live-Dialog Kunde1: Vorschau200,
   Firmen-/Kontaktvorgaben geprueft, Felder editierbar, Desktop/Mobil erreichbar.
-  Alle Sendeanfragen im Browsertest gesperrt; null Sendeanfragen ausgelöst.
+  Alle Sendeanfragen im Browsertest gesperrt; null Sendeanfragen ausgeloest.
   Kein Kunden-Firmenprofil geaendert. Kein neues Plugin-Release notwendig.
