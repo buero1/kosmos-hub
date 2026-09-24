@@ -1,7 +1,6 @@
 <?php
 namespace KosmosBridge\Security;
 
-use KosmosBridge\Options;
 use KosmosBridge\Registration\SecretStore;
 use WP_Error;
 
@@ -30,8 +29,9 @@ class SiteAuth {
 		$body_hash    = strtolower( (string) $request->get_header( 'x-kosmos-body-sha256' ) );
 		$signature    = strtolower( (string) $request->get_header( 'x-kosmos-signature' ) );
 		$raw_body     = (string) $request->get_body();
-		$local_uuid   = Options::get_site_uuid();
-		$local_secret = Options::get_site_secret();
+		$identity     = SecretStore::get_identity();
+		$local_uuid   = isset( $identity['uuid'] ) ? $identity['uuid'] : '';
+		$local_secret = isset( $identity['secret'] ) ? $identity['secret'] : '';
 
 		if ( '' === $site_uuid || '' === $timestamp || '' === $nonce || '' === $body_hash || '' === $signature ) {
 			return self::unauthorized( 'Missing Kosmos HMAC headers.' );

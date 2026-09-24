@@ -11,7 +11,12 @@ class RegistrationClient {
 	 * @param array $payload Registration payload.
 	 * @return array|WP_Error
 	 */
-	public function post( array $payload ) {
+	public function post( array $payload, array $identity ) {
+		if ( empty( $identity['uuid'] ) || empty( $identity['secret'] ) || ! isset( $payload['site_uuid'] )
+			|| $payload['site_uuid'] !== $identity['uuid']
+			|| ( isset( $payload['site_secret'] ) && $payload['site_secret'] !== $identity['secret'] ) ) {
+			return new WP_Error( 'kosmos_bridge_identity_changed', 'Registration identity is inconsistent.' );
+		}
 		$base_url = Options::get_server_base_url();
 
 		if ( '' === $base_url ) {
@@ -38,13 +43,13 @@ class RegistrationClient {
 			implode(
 				'.',
 				array(
-					Options::get_site_uuid(),
+					$identity['uuid'],
 					$timestamp,
 					$nonce,
 					$body_hash,
 				)
 			),
-			Options::get_site_secret()
+			$identity['secret']
 		);
 
 		$response = wp_remote_post(
@@ -55,7 +60,7 @@ class RegistrationClient {
 					'Content-Type'         => 'application/json',
 					'Accept'               => 'application/json',
 					'X-Request-Id'         => $request_id,
-					'X-Kosmos-Site-UUID'   => Options::get_site_uuid(),
+					'X-Kosmos-Site-UUID'   => $identity['uuid'],
 					'X-Kosmos-Timestamp'   => $timestamp,
 					'X-Kosmos-Nonce'       => $nonce,
 					'X-Kosmos-Body-SHA256' => $body_hash,

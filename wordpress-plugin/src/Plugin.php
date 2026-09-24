@@ -117,7 +117,7 @@ class Plugin {
 	 * @return void
 	 */
 	public static function maybe_retry_registration() {
-		if ( '' !== Options::get_last_success_at() ) {
+		if ( \KosmosBridge\Registration\RegistrationState::is_registered() ) {
 			return;
 		}
 

@@ -30,8 +30,19 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch hash-pinned WordPress Options API fixture
+        run: |
+          mkdir -p tmp
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/WordPress/WordPress/6.9/wp-includes/option.php \
+            --output tmp/wordpress-6.9-option.php
+          echo "cde15dc93f943de5884c87b26f0786011c6e43b93440cde1792428029ced9e37  tmp/wordpress-6.9-option.php" | sha256sum --check
+
       - name: Check Bridge domain identity contracts
         run: php tools/test-bridge-identity.php
+
+      - name: Check concurrent registration and automatic recovery
+        run: php tools/test-bridge-registration.php
 
       - name: Check scoped plugin auto-update policy
         run: php tools/test-bridge-auto-updates.php

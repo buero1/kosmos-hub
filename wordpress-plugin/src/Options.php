@@ -1,6 +1,9 @@
 <?php
 namespace KosmosBridge;
 
+use KosmosBridge\Registration\RegistrationState;
+use KosmosBridge\Registration\SecretStore;
+
 defined( 'ABSPATH' ) || exit;
 
 class Options {
@@ -13,29 +16,23 @@ class Options {
 	const LAST_SUCCESS_AT           = 'kosmos_bridge_last_success_at';
 	const LAST_REQUEST_ID           = 'kosmos_bridge_last_request_id';
 	const SERVER_BASE_URL           = 'kosmos_bridge_server_base_url';
-	const BRIDGE_VERSION            = '0.3.68';
+	const BRIDGE_VERSION            = '0.3.69';
 	const DEFAULT_SERVER_BASE_URL   = 'https://kosmos-hub.31-70-92-95.sslip.io';
 
 	/**
 	 * @return string
 	 */
 	public static function get_site_uuid() {
-		$identity = get_option( self::IDENTITY, array() );
-		if ( is_array( $identity ) && ! empty( $identity['uuid'] ) ) {
-			return (string) $identity['uuid'];
-		}
-		return (string) get_option( self::SITE_UUID, '' );
+		$identity = SecretStore::get_identity();
+		return isset( $identity['uuid'] ) ? $identity['uuid'] : '';
 	}
 
 	/**
 	 * @return string
 	 */
 	public static function get_site_secret() {
-		$identity = get_option( self::IDENTITY, array() );
-		if ( is_array( $identity ) && ! empty( $identity['secret'] ) ) {
-			return (string) $identity['secret'];
-		}
-		return (string) get_option( self::SITE_SECRET, '' );
+		$identity = SecretStore::get_identity();
+		return isset( $identity['secret'] ) ? $identity['secret'] : '';
 	}
 
 	/**
@@ -58,35 +55,40 @@ class Options {
 	 * @return string
 	 */
 	public static function get_registration_status() {
-		return (string) get_option( self::REGISTRATION_STATUS, 'pending' );
+		$state = RegistrationState::current();
+		return isset( $state['status'] ) ? (string) $state['status'] : 'pending';
 	}
 
 	/**
 	 * @return string
 	 */
 	public static function get_registration_message() {
-		return (string) get_option( self::REGISTRATION_MESSAGE, '' );
+		$state = RegistrationState::current();
+		return isset( $state['message'] ) ? (string) $state['message'] : 'Current identity requires confirmation by the Hub.';
 	}
 
 	/**
 	 * @return string
 	 */
 	public static function get_last_registered_at() {
-		return (string) get_option( self::LAST_REGISTERED_AT, '' );
+		$state = RegistrationState::current();
+		return isset( $state['last_attempt_at'] ) ? (string) $state['last_attempt_at'] : '';
 	}
 
 	/**
 	 * @return string
 	 */
 	public static function get_last_success_at() {
-		return (string) get_option( self::LAST_SUCCESS_AT, '' );
+		$state = RegistrationState::current();
+		return isset( $state['last_success_at'] ) ? (string) $state['last_success_at'] : '';
 	}
 
 	/**
 	 * @return string
 	 */
 	public static function get_last_request_id() {
-		return (string) get_option( self::LAST_REQUEST_ID, '' );
+		$state = RegistrationState::current();
+		return isset( $state['request_id'] ) ? (string) $state['request_id'] : '';
 	}
 
 	/**
@@ -103,23 +105,4 @@ class Options {
 		return rest_url( 'kosmos-bridge/v1/mcp' );
 	}
 
-	/**
-	 * @param string $status Registration status.
-	 * @param string $message Human-readable message.
-	 * @param string $request_id Request id.
-	 * @return void
-	 */
-	public static function set_registration_result( $status, $message, $request_id = '' ) {
-		update_option( self::REGISTRATION_STATUS, (string) $status, false );
-		update_option( self::REGISTRATION_MESSAGE, (string) $message, false );
-		update_option( self::LAST_REGISTERED_AT, gmdate( 'c' ), false );
-
-		if ( 'ok' === $status ) {
-			update_option( self::LAST_SUCCESS_AT, gmdate( 'c' ), false );
-		}
-
-		if ( '' !== $request_id ) {
-			update_option( self::LAST_REQUEST_ID, (string) $request_id, false );
-		}
-	}
 }

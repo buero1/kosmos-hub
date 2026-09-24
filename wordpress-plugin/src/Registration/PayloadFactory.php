@@ -10,9 +10,9 @@ class PayloadFactory {
 	 * @param bool $heartbeat Whether this payload is a heartbeat.
 	 * @return array
 	 */
-	public function make( $heartbeat = false ) {
+	public function make( $heartbeat, array $identity ) {
 		$payload = array(
-			'site_uuid'               => Options::get_site_uuid(),
+			'site_uuid'               => $identity['uuid'],
 			'home_url'                => home_url( '/' ),
 			'site_url'                => site_url( '/' ),
 			'wordpress_version'       => get_bloginfo( 'version' ),
@@ -23,22 +23,11 @@ class PayloadFactory {
 			'heartbeat'               => (bool) $heartbeat,
 		);
 
-		if ( self::should_include_secret( $heartbeat ) ) {
-			$payload['site_secret'] = Options::get_site_secret();
+		if ( ! $heartbeat ) {
+			$payload['site_secret'] = $identity['secret'];
 		}
 
 		return $payload;
 	}
 
-	/**
-	 * @param bool $heartbeat Whether this payload is a heartbeat.
-	 * @return bool
-	 */
-	private static function should_include_secret( $heartbeat ) {
-		if ( $heartbeat ) {
-			return false;
-		}
-
-		return '' === Options::get_last_success_at() || 'ok' !== Options::get_registration_status();
-	}
 }

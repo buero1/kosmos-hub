@@ -2,6 +2,7 @@
 namespace KosmosBridge\Http;
 
 use KosmosBridge\Options;
+use KosmosBridge\Registration\SecretStore;
 use WP_Error;
 
 defined( 'ABSPATH' ) || exit;
@@ -25,14 +26,18 @@ class HubPackageClient {
 		if ( '' === $base_url || ! self::is_allowed_hub_url( $base_url ) ) {
 			return new WP_Error( 'kosmos_bridge_invalid_hub_url', 'The configured Kosmos Hub URL is not allowed for package downloads.', array( 'status' => 500 ) );
 		}
+		$identity = SecretStore::get_identity();
+		if ( empty( $identity ) ) {
+			return new WP_Error( 'kosmos_bridge_missing_identity', 'Site identity is not initialized.', array( 'status' => 503 ) );
+		}
 
 		$timestamp = gmdate( 'c' );
 		$nonce     = self::generate_nonce();
 		$body_hash = hash( 'sha256', '' );
 		$signature = hash_hmac(
 			'sha256',
-			implode( '.', array( Options::get_site_uuid(), $timestamp, $nonce, $body_hash ) ),
-			Options::get_site_secret()
+			implode( '.', array( $identity['uuid'], $timestamp, $nonce, $body_hash ) ),
+			$identity['secret']
 		);
 		$response  = wp_remote_get(
 			trailingslashit( $base_url ) . 'api/v1/plugin-packages/' . $package_id . '/download',
@@ -42,7 +47,7 @@ class HubPackageClient {
 				'sslverify'   => true,
 				'headers'     => array(
 					'Accept'               => 'application/zip',
-					'X-Kosmos-Site-UUID'   => Options::get_site_uuid(),
+					'X-Kosmos-Site-UUID'   => $identity['uuid'],
 					'X-Kosmos-Timestamp'   => $timestamp,
 					'X-Kosmos-Nonce'       => $nonce,
 					'X-Kosmos-Body-SHA256' => $body_hash,
