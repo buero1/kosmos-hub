@@ -2,6 +2,8 @@
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const base = 'https://kosmos-hub.31-70-92-95.sslip.io';
 const auth = [
   'import os,sys,json,base64',
@@ -48,7 +50,7 @@ const auth = [
         await page.setViewportSize({width, height: 912});
         const response = await page.goto(base + pathname, {waitUntil: 'domcontentloaded'});
         assert.equal(response.status(), 200);
-        const menu = page.locator('.detail-actions-menu').filter({has: page.getByRole('link', {name: 'Google Suche', exact: true})});
+        const menu = page.locator('.detail-actions-menu').filter({has: page.locator('a[href^="https://www.google.com/search?"]')});
         await menu.locator('summary').click();
         const link = menu.getByRole('link', {name: 'Google Suche', exact: true});
         assert.equal(await link.isVisible(), true);
@@ -59,6 +61,16 @@ const auth = [
         assert.equal(await link.getAttribute('target'), '_blank');
         assert.deepEqual((await link.getAttribute('rel')).split(' ').sort(), ['noopener', 'noreferrer']);
         const bounds = await link.boundingBox();
+        if (bounds.x < 0 || bounds.x + bounds.width > width + 1) {
+          const output = path.resolve(__dirname, '../server/outputs/google-search-mobile.png');
+          fs.mkdirSync(path.dirname(output), {recursive: true});
+          await page.screenshot({path: output});
+          console.log(JSON.stringify({bounds, layout: await menu.evaluate(element => ({
+            viewport: innerWidth, document: document.documentElement.scrollWidth,
+            menu: element.getBoundingClientRect().toJSON(),
+            popover: element.querySelector('.detail-actions-menu-popover').getBoundingClientRect().toJSON(),
+          }))}));
+        }
         assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1);
         const popupPromise = context.waitForEvent('page');
         await link.click();

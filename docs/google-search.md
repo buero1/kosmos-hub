@@ -9,6 +9,9 @@
 - Der Hub sendet beim Laden der Seite keine Suchanfrage; nur ein ausdruecklicher Klick oeffnet Google.
 - Es werden keine E-Mails, Notizen, Bankdaten oder internen Kennungen in den Suchtext aufgenommen.
 - Bearbeitungs-/Loeschrechte und bestehende Menueaktionen bleiben unveraendert.
+- Am bestehenden mobilen Umbruchpunkt (720px) wird das Detailmenue links an der
+  Aktionszeile ausgerichtet und auf deren Breite begrenzt. So wird es nicht mehr
+  links ausserhalb des Bildschirms abgeschnitten. Desktop-Stile bleiben unveraendert.
 
 ## Pruefung
 
