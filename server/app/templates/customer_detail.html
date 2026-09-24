@@ -236,10 +236,11 @@
             <button class="button button-variant-1" type="submit" form="customer-fields-layout-form">Speichern</button>
           </div>
         {% endif %}
-        {% if can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields) %}
+        {% if can_send_website_profile or can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields) %}
           <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
+              {% if can_send_website_profile %}<button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-website-profile-open>Daten ans Firmenprofil senden</button>{% endif %}
               <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
               {% if can_manage_communications and detail.entry.customer.zoho_id %}
                 <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
@@ -250,7 +251,7 @@
             </div>
           </details>
         {% endif %}
-        {% if not (can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields)) %}
+        {% if not (can_send_website_profile or can_manage_communications or (can_manage_customer_fields and detail.display_profile_fields)) %}
           <details class="detail-actions-menu" data-customer-actions-menu>
             <summary class="detail-actions-menu-trigger" aria-label="Weitere Kundenaktionen">&#8942;</summary>
             <div class="detail-actions-menu-popover">
@@ -259,6 +260,7 @@
           </details>
         {% endif %}
     {% endcall %}
+    {% if can_send_website_profile %}{% include "partials/customer_website_profile.html" %}{% endif %}
 
     {% if communication_state and communication_message %}
       <p class="notice-{{ communication_state }}">{{ communication_message }}</p>

@@ -219,7 +219,9 @@ def test_reads_page_large_drafts_and_do_not_enable_send_or_schedule(env):
     for extra in ({"scheduled_at": "2099-01-01T12:00"}, {"unknown": "x"}):
         with pytest.raises(ValueError):
             env.service.execute("emails.drafts.update", {**values, **extra})
-    assert not any(("schedule" in op.key and op.key != "emails.scheduled.cancel") or op.key.endswith(".send") for op in agent_operations())
+    assert not any(op.key.startswith("emails.") and
+        (("schedule" in op.key and op.key != "emails.scheduled.cancel") or op.key.endswith(".send"))
+        for op in agent_operations())
     with pytest.raises(ValueError):
         HubOperationService(db=env.db, cipher=env.cipher, actor="viewer").query("emails.list", {})
 

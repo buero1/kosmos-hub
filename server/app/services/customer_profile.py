@@ -7,6 +7,7 @@ from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 
 _CATALOG = {field.key: field for field in ZOHO_ACCOUNT_FIELDS if not field.subform_parent}
 _SUBFORMS = {field.key for field in ZOHO_ACCOUNT_FIELDS if field.subform_parent}
+_RETIRED = {"send_options_to_wordpress", "Options an WP senden", "Options_an_WP_senden"}
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,8 @@ def resolve_customer_fields(profile: dict[str, object]) -> tuple[ResolvedCustome
     for stored_label, value in values.items():
         candidates = aliases.get(str(stored_label), set())
         key = next(iter(candidates)) if len(candidates) == 1 else str(stored_label)
+        if key in _RETIRED or stored_label in _RETIRED:
+            continue
         catalog = _CATALOG.get(key)
         if key in _SUBFORMS:
             continue
@@ -65,6 +68,8 @@ def resolve_customer_fields(profile: dict[str, object]) -> tuple[ResolvedCustome
 
     # Declared fields must keep their layout slot even when no value was stored.
     for key, definition in metadata.items():
+        if key in _RETIRED or definition.get("label") in _RETIRED:
+            continue
         if key in resolved or key in _SUBFORMS or definition.get("subform_parent"):
             continue
         catalog = _CATALOG.get(key)

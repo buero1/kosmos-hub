@@ -12,7 +12,7 @@ for spec in ACTIONS.values():
         description=spec.label + ". Identische Fachfunktion wie die Hub-Maske; nach Bestaetigung als dauerhafter Auftrag.",
         input_guide="Konkrete IDs/Auswahlschluessel aus den Lesezugriffen verwenden. Bestehende Sicherheitspruefungen bleiben aktiv. queued/submitted bedeutet nicht fertig; wordpress.jobs.read und Wartungslaeufe nachlesen. Unklare Ergebnisse nicht automatisch wiederholen.",
         input_fields=spec.fields, defaults=spec.defaults,
-        preview_fields=tuple((field.name, field.label) for field in spec.fields() if field.name != "password"),
+        preview_fields=tuple((field.name, field.label) for field in spec.fields() if field.name not in {"password", "preview_token"}),
         execute=partial(enqueue, key=spec.key), result_fields=(("job_id", "WordPress-Auftrags-ID"), ("status", "Auftragsstatus"))))
 
 JOB_FIELDS = (Field("job_id", "WordPress-Auftrags-ID", required=True, max_length=18),)

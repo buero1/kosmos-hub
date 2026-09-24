@@ -63,9 +63,6 @@ def _customer_fields() -> tuple[ModuleLayoutField, ...]:
     )
     ordered = [by_key.pop(key) for key in priority_keys if key in by_key]
     ordered.append(ModuleLayoutField("hub_postal_city", "PLZ Ort", "Hub-Feld"))
-    send_to_wordpress = by_key.pop("send_options_to_wordpress", None)
-    if send_to_wordpress is not None:
-        ordered.append(send_to_wordpress)
     ordered.extend(by_key.values())
     return tuple(ordered)
 
@@ -90,7 +87,7 @@ _LAYOUTS = {
         back_href="/customers",
         back_label="Zurück zu Customers",
         fields=_customer_fields(),
-        default_show_more_after="send_options_to_wordpress",
+        default_show_more_after="hub_postal_city",
     ),
     CONTACT_FIELDS_LAYOUT_KEY: ModuleLayoutDefinition(
         layout_key=CONTACT_FIELDS_LAYOUT_KEY,

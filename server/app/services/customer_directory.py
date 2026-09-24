@@ -706,10 +706,7 @@ class CustomerDirectoryService:
         priority_fields = tuple(fields_by_key[key] for key in priority_keys if key in fields_by_key)
         if postal_city is not None:
             priority_fields += (postal_city,)
-        if "send_options_to_wordpress" in fields_by_key:
-            priority_fields += (fields_by_key["send_options_to_wordpress"],)
-
-        placed_keys = set(priority_keys) | {"send_options_to_wordpress"}
+        placed_keys = set(priority_keys)
         if postal_city is not None:
             placed_keys.update(("billing_postal_code", "billing_city"))
         default_fields = priority_fields + tuple(field for field in profile_fields if field.key not in placed_keys)
@@ -717,7 +714,7 @@ class CustomerDirectoryService:
         ordered_keys, show_more_index = ModuleLayoutService(db=self.db).ordered_keys_with_show_more(
             layout_key=CUSTOMER_FIELDS_LAYOUT_KEY,
             default_keys=tuple(fields_by_key),
-            default_show_more_after="send_options_to_wordpress",
+            default_show_more_after="hub_postal_city",
         )
         return tuple(fields_by_key[key] for key in ordered_keys), show_more_index
 

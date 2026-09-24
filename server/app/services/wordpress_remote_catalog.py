@@ -17,6 +17,7 @@ from app.services.site_updates import SiteUpdateService
 from app.services.site_users import SiteUserService
 from app.services.site_inventory import SiteInventoryService
 from app.services.plugin_auto_updates import PluginAutoUpdateService
+from app.services.customer_website_profile import CustomerWebsiteProfileService, prepare as prepare_profile
 from app.services.user_deletion_batches import UserDeletionBatchService
 
 
@@ -60,7 +61,7 @@ class RemoteAction:
             if name == "role":
                 options = tuple((role, role) for role in SiteUserService.ROLE_OPTIONS)
             fields.append(Field(name, name.replace("_", " "), required=param.default is inspect.Parameter.empty,
-                options=options, max_length=40_000 if get_origin(hints.get(name)) is list else 4096,
+                options=options, max_length=120_000 if name == "preview_token" else 40_000 if get_origin(hints.get(name)) is list else 4096,
                 encoding="JSON array" if get_origin(hints.get(name)) is list else ""))
         return tuple(fields)
 
@@ -74,6 +75,7 @@ def encode(value):
 
 
 ACTIONS = {action.key: action for action in (
+    RemoteAction("wordpress.company_profile.send", "Gepruefte Kundendaten ans Firmenprofil senden", CustomerWebsiteProfileService, "send", False),
     RemoteAction("wordpress.inventory.refresh", "Website-Inventar aktualisieren", SiteInventoryService, "refresh_site_state", False),
     RemoteAction("wordpress.capabilities.refresh", "Bridge-Faehigkeiten aktualisieren", SiteInventoryService, "refresh_site_inventory", False),
     RemoteAction("wordpress.users.refresh", "WordPress-Benutzer aktualisieren", SiteUserService, "refresh_site_users"),
@@ -182,6 +184,8 @@ def prepare_remote(service, key, values):
             domain._validated_password(kwargs["password"])
     if key == "wordpress.plugins.auto_updates":
         PluginAutoUpdateService.validate(kwargs["site_ids"], kwargs["plugin_files"], kwargs["blocked"])
+    if key == "wordpress.company_profile.send":
+        prepare_profile(service, **kwargs)
     return spec, kwargs, sorted(site_ids)
 
 

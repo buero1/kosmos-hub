@@ -26,7 +26,7 @@ def customer_fields():
     with Session(engine) as db:
         definitions = tuple(field for field in ZOHO_ACCOUNT_FIELDS if not field.subform_parent)
         values = {field.label: None for field in definitions}
-        values.update({"Kunde-Name": "Example Customer", "Options an WP senden": False, "Dauer in Minuten": 0})
+        values.update({"Kunde-Name": "Example Customer", "Options an WP senden": False, "Bankverbindung zeigen": False, "Dauer in Minuten": 0})
         customer = Customer(name="Example Customer", encrypted_profile_json=cipher.encrypt(json.dumps({
             "fields": values,
             "field_metadata": {field.key: {
@@ -61,7 +61,8 @@ def test_empty_fields_keep_saved_order_and_show_more_position(customer_fields):
     assert fields["contract_start"].value is None
     assert not fields["hub_postal_city"].value
     assert "billing_postal_code" not in fields and "billing_city" not in fields
-    assert fields["send_options_to_wordpress"].value == "False"
+    assert "send_options_to_wordpress" not in fields
+    assert next(field for field in detail.profile_fields if field.key == "show_bank_details").value == "False"
     assert fields["duration_minutes"].value == "0"
     assert [field.key for field in detail.editable_profile_fields[:3]] == list(first[:3])
     assert all(field.form_value == "" for field in detail.editable_profile_fields if field.key in {"website", "contract_start"})
@@ -99,7 +100,7 @@ def test_postal_city_is_kept_even_when_both_parts_are_empty(customer_fields, pos
 @pytest.mark.parametrize("key, value, expected", [
     ("website", None, "\u2013"), ("work_domain_login", "", "\u2013"),
     ("hub_postal_city", "", "\u2013"), ("contract_start", None, "\u2013"),
-    ("duration_minutes", "0", "0"), ("send_options_to_wordpress", "Nein", "Nein"),
+    ("duration_minutes", "0", "0"), ("show_bank_details", "Nein", "Nein"),
     ("important_info", "<script>example</script>", "<script>example</script>"),
 ])
 def test_customer_value_macro_renders_empty_placeholder_without_links(key, value, expected):

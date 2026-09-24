@@ -1,0 +1,31 @@
+<link rel="stylesheet" href="/static/customer-website-profile.css?v=1">
+<div class="pdf-template-edit-layer website-profile-layer" data-website-profile-layer data-customer-id="{{ detail.entry.customer.id }}" hidden>
+  <button class="pdf-template-edit-backdrop" type="button" data-website-profile-close aria-label="Schließen" tabindex="-1"></button>
+  <aside class="pdf-template-edit-drawer website-profile-drawer" role="dialog" aria-modal="true" aria-labelledby="website-profile-title" tabindex="-1">
+    <header class="email-compose-header">
+      <div><p class="eyebrow">Kosmos Content Kit</p><h2 id="website-profile-title">Daten ans Firmenprofil senden</h2></div>
+      <button class="email-compose-close" type="button" data-website-profile-close aria-label="Schließen">&times;</button>
+    </header>
+    <p class="subtle">{{ detail.entry.customer.name }}: Prüfe Ziel und Werte. Die Änderungen können direkt auf der Website sichtbar werden.</p>
+    <label>Zielwebsite<select data-website-profile-target aria-label="Zielwebsite" disabled></select></label>
+    <p data-website-profile-source class="subtle"></p>
+    <p data-website-profile-status role="status" aria-live="polite"></p>
+    <form data-website-profile-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="table-scroll website-profile-table-wrap">
+        <table class="website-profile-table">
+          <thead><tr><th><input type="checkbox" data-website-profile-all aria-label="Alle übertragbaren Felder auswählen"></th><th>Firmenprofil-Feld</th><th>Bisher auf der Website</th><th>Neuer Wert aus dem Hub</th></tr></thead>
+          <tbody data-website-profile-rows></tbody>
+        </table>
+      </div>
+      <p class="subtle">Leere oder nicht eindeutig zugeordnete Kundenangaben bleiben unberücksichtigt. Felder, Gruppen, Logo und Elementor-Verknüpfungen werden nicht verändert.</p>
+      <p data-website-profile-error class="notice-error" role="alert" hidden></p>
+      <footer class="website-profile-footer">
+        <button class="button button-secondary" type="button" data-website-profile-reload>Vorschau neu laden</button>
+        <button class="button button-secondary" type="button" data-website-profile-close>Abbrechen</button>
+        <button class="button" type="submit" data-website-profile-send disabled>Ausgewählte Werte übertragen</button>
+      </footer>
+    </form>
+  </aside>
+</div>
+<script src="/static/customer-website-profile.js?v=1" defer></script>

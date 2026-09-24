@@ -36,6 +36,11 @@ class RemoteResult:
     request_id: str
 
 
+class NoBridgeRedirect(request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class SiteMcpProxyService:
     def __init__(self, *, db: Session, cipher: SecretCipher):
         self.db = db
@@ -61,6 +66,7 @@ class SiteMcpProxyService:
         ability_input: dict[str, Any] | None,
         *,
         timeout_seconds: int = 20,
+        strict_transport: bool = False,
     ) -> dict[str, Any]:
         site, connection = self._get_site_and_connection(site_id)
         result = self._send(
@@ -69,6 +75,7 @@ class SiteMcpProxyService:
             "execute-ability",
             {"ability_name": ability_name, "input": ability_input},
             timeout_seconds=timeout_seconds,
+            strict_transport=strict_transport,
         )
         self._record_success(site, "execute-ability", f"Executed {ability_name}.", result.request_id)
         return result.payload
@@ -126,6 +133,7 @@ class SiteMcpProxyService:
         payload: dict[str, Any],
         *,
         timeout_seconds: int = 20,
+        strict_transport: bool = False,
     ) -> RemoteResult:
         endpoint = connection.endpoint.rstrip("/")
         url = f"{endpoint}/{action}"
@@ -154,8 +162,11 @@ class SiteMcpProxyService:
         )
 
         try:
-            with request.urlopen(req, timeout=timeout_seconds) as response:
-                response_body = response.read()
+            opener = request.build_opener(NoBridgeRedirect()).open if strict_transport else request.urlopen
+            with opener(req, timeout=timeout_seconds) as response:
+                response_body = response.read(4194305) if strict_transport else response.read()
+                if strict_transport and len(response_body) > 4194304:
+                    raise SiteMcpProxyError("REMOTE_INVALID_RESPONSE", "Bridge response exceeds limit.", status_code=502)
                 try:
                     parsed = json.loads(response_body.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -174,13 +185,15 @@ class SiteMcpProxyService:
                         details={"response_length": len(response_body)},
                     ) from exc
         except error.HTTPError as exc:
-            parsed = self._read_error_body(exc)
-            self._record_error(site, action, parsed.get("message", str(exc)), request_id)
+            parsed = self._read_error_body(exc, limit=4194305 if strict_transport else None)
+            # A remote error may echo submitted profile values. Do not log or expose them.
+            safe_message = f"Bridge request rejected (HTTP {exc.code})." if strict_transport else parsed.get("message", str(exc))
+            self._record_error(site, action, safe_message, request_id)
             raise SiteMcpProxyError(
                 parsed.get("code", "REMOTE_HTTP_ERROR").upper(),
-                parsed.get("message", str(exc)),
+                safe_message,
                 status_code=exc.code,
-                details=parsed.get("data") if isinstance(parsed.get("data"), dict) else None,
+                details=parsed.get("data") if not strict_transport and isinstance(parsed.get("data"), dict) else None,
             ) from exc
         except error.URLError as exc:
             self._record_error(site, action, str(exc.reason), request_id)
@@ -217,9 +230,9 @@ class SiteMcpProxyService:
         )
         self.db.commit()
 
-    def _read_error_body(self, exc: error.HTTPError) -> dict[str, Any]:
+    def _read_error_body(self, exc: error.HTTPError, *, limit: int | None = None) -> dict[str, Any]:
         try:
-            data = json.loads(exc.read().decode("utf-8"))
+            data = json.loads((exc.read(limit) if limit else exc.read()).decode("utf-8"))
         except Exception:
             return {"code": "REMOTE_HTTP_ERROR", "message": str(exc)}
 

@@ -1531,7 +1531,7 @@
       "reader_method": "contact_detail"
     },
     "app/api/routes/web.py:customer_detail_page:GET:/customers/{customer_id}": {
-      "fingerprint": "b0d91a95d06a0f90db57a71596629a8a8e65a340d9318c070cfe370e7be9b762",
+      "fingerprint": "50aae93ed8e4cd40ebca2216b03e075568d054d326af0ad9c9aef8a0c6532ebf",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -1541,6 +1541,20 @@
         "read_customer_detail"
       ],
       "reader_method": "customer_detail"
+    },
+    "app/api/routes/web.py:customer_website_profile_preview:GET:/customers/{customer_id}/website-profile/preview": {
+      "fingerprint": "4ae085ebd6ff0202cf4d55e2a6f10a5cc7d593d29089fb6f9e990243c9de3dfb",
+      "state": "shared",
+      "reason": "Authenticated UI and agent share target priority, customer/website record permissions, signed read-only Bridge projection and expiring actor-bound confirmation. No remote writes; Cache-Control no-store. See test_customer_website_profile.",
+      "contracts": ["customers.website_profile.preview"],
+      "boundary": ["HubOperationService", "query"]
+    },
+    "app/api/routes/web.py:customer_website_profile_send:POST:/customers/{customer_id}/website-profile/send": {
+      "fingerprint": "9da3e377141320077c2e15597b81b55919c5883e88d9d927290a02b9951cb3a5",
+      "state": "shared",
+      "reason": "Authenticated, CSRF-protected explicit selection/confirmation queues the same durable wordpress.company_profile.send action as the agent. Worker rechecks actor/record rights, source fingerprint, target identity and preview expiry. Bridge writer uses shared Store validation/locking/revision. No blind retry; no profile values in job audit.",
+      "contracts": ["wordpress.company_profile.send"],
+      "boundary": ["HubOperationService", "execute"]
     },
     "app/api/routes/web.py:customer_suggestions:GET:/customers/suggestions": {
       "fingerprint": "bc3a46497d72e3bee40be4c168d6fa9ed108e7f30b36c9e929e82642adf50d18",

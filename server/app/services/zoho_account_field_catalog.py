@@ -66,7 +66,6 @@ ZOHO_ACCOUNT_FIELDS = (
     ZohoAccountField("cancellation_date", "Kündigungsdatum", "kuendigungsdatum", "Datum"),
     ZohoAccountField("lead_creator", "Lead-Ersteller", "Lead_Ersteller", "Einzelzeile"),
     ZohoAccountField("last_update_date", "Letztes Update-Datum", "Letztes_Update_Datum", "Datum"),
-    ZohoAccountField("send_options_to_wordpress", "Options an WP senden", "Options_an_WP_senden", "Boolesch"),
     ZohoAccountField("source", "Quelle", "Quelle", "Einzelzeile"),
     ZohoAccountField("real_cookie_done", "Real Cookie erledigt", "Real_Cookie_erledigt", "Boolesch"),
     ZohoAccountField("billing_state", "Rechnungsadresse - Bundesland", "Billing_State", "Einzelzeile"),

@@ -4483,6 +4483,41 @@ def load_linked_mailbox_email_content(
     )
 
 
+@router.get("/customers/{customer_id}/website-profile/preview", response_class=JSONResponse)
+def customer_website_profile_preview(customer_id: int, request: Request, db: Annotated[Session, Depends(get_db)], site_id: str = ""):
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        data = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).query(
+            "customers.website_profile.preview", {"customer_id": str(customer_id), "site_id": site_id})
+    except HubOperationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(data, headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/customers/{customer_id}/website-profile/send", response_class=JSONResponse)
+def customer_website_profile_send(customer_id: int, request: Request, db: Annotated[Session, Depends(get_db)],
+    site_id: Annotated[int, Form()], preview_token: Annotated[str, Form()],
+    field_ids: Annotated[list[str], Form()] = [], confirmed: Annotated[str, Form()] = "",
+    csrf_token: Annotated[str, Form()] = ""):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if confirmed != "yes":
+        raise HTTPException(status_code=422, detail="Bitte die Uebertragung bestaetigen.")
+    try:
+        result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
+            "wordpress.company_profile.send", {"customer_id": str(customer_id), "site_id": str(site_id),
+                "preview_token": preview_token, "field_ids": json.dumps(field_ids)})
+        db.commit()
+    except HubOperationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse({"job_id": result.record_id, "href": result.href, "status": "queued"})
+
+
 @router.get("/customers/{customer_id}", response_class=HTMLResponse)
 def customer_detail_page(
     customer_id: int,
@@ -4548,6 +4583,7 @@ def customer_detail_page(
             "communication_message": message[:500] if communication_state else "",
             "can_manage_communications": can_manage_communications,
             "can_manage_customer_fields": can_manage_customer_fields,
+            "can_send_website_profile": can_manage_customer_fields and access.can(current_user, "websites", "edit"),
             "can_view_emails": can_view_emails,
             "can_view_contacts": can_view_contacts,
             "can_create_contacts": can_view_contacts and access.can(current_user, "contacts", "create"),

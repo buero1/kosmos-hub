@@ -549,11 +549,10 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Arbeitsdomain-Login",
             "Rechnungsadresse - Straße",
             "PLZ Ort",
-            "Options an WP senden",
             "Branche",
         ]
-        assert detail.display_profile_fields[-3].value == "82319 Starnberg"
-        assert detail.display_profile_fields[-3].display_type == "Hub-Feld"
+        assert detail.display_profile_fields[-2].value == "82319 Starnberg"
+        assert detail.display_profile_fields[-2].display_type == "Hub-Feld"
         assert [field.label for field in detail.summary_profile_fields] == [
             "Kunde-Name",
             "Tel.",
@@ -563,7 +562,6 @@ def test_customer_directory_prioritizes_core_fields_and_combines_postal_city_for
             "Arbeitsdomain-Login",
             "Rechnungsadresse - Straße",
             "PLZ Ort",
-            "Options an WP senden",
         ]
         assert [field.label for field in detail.following_profile_fields] == ["Branche"]
         assert [field.key for field in detail.editable_profile_fields] == ["customer_name", "website", "industry"]

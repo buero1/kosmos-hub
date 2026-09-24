@@ -7,6 +7,11 @@
   </div>
   <p>{{ job.operation }}</p>
   <p role="status"><strong>{{ job.status }}</strong>: {{ job.message }}</p>
+  {% if job.result is defined and job.result.get('company_profile') %}
+  <p>Firmenprofil: <a href="/sites/{{ job.result.company_profile.site_id }}">{{ job.result.company_profile.domain }}</a>
+    · {{ job.result.company_profile.field_count }} ausgewählte Felder.
+    <a href="/customers/{{ job.result.company_profile.customer_id }}">Zurück zum Kunden</a></p>
+  {% endif %}
   {% if job.can_cancel %}
   <form method="post" action="/wordpress/jobs/{{ job.job_id }}/cancel">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

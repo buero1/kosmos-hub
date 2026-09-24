@@ -116,7 +116,8 @@ def test_zoho_account_catalog_matches_the_reviewed_field_selection():
     root_fields = tuple(field for field in ZOHO_ACCOUNT_FIELDS if field.key != "record_id" and not field.subform_parent)
     from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_SUBFORMS
 
-    assert len(root_fields) == 60
+    assert len(root_fields) == 59
+    assert "send_options_to_wordpress" not in {field.key for field in root_fields}
     assert sum(len(subform.fields) for subform in ZOHO_ACCOUNT_SUBFORMS) == 7
 
 

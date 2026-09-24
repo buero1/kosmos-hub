@@ -14,6 +14,7 @@ from app.services.hub_operation_websites import website_site
 from app.services.hub_record_access import identifier, require_actor
 from app.services.wordpress_remote_catalog import prepare_remote, execute_remote
 from app.services.plugin_auto_updates import PluginAutoUpdateResult
+from app.services.customer_website_profile import ProfileSendResult
 
 
 def enqueue(service, values, *, key):
@@ -70,6 +71,8 @@ def cancel_job(service, values):
 
 
 def safe_outcome(result, service=None):
+    if isinstance(result, ProfileSendResult):
+        return {"company_profile": result.data}
     if isinstance(result, PluginAutoUpdateResult):
         return result.outcome()
     if isinstance(result, UserDeletionBatch):
@@ -125,7 +128,10 @@ def process_next(session_factory, cipher):
                 outcome = safe_outcome(result, service)
                 job = db.get(HubWordPressJob, job_id)
                 job.result_json = outcome
-                if outcome.get("outcome") in {"blocked", "error", "failed"}:
+                if outcome.get("company_profile"):
+                    job.status = outcome["company_profile"]["status"]
+                    job.message = outcome["company_profile"]["message"]
+                elif outcome.get("outcome") in {"blocked", "error", "failed"}:
                     job.status, job.message = "failed", "Der Fachdienst hat den Auftrag abgewiesen. Wartungsprotokoll pruefen."
                 elif outcome.get("run_ids") or outcome.get("batch_id") or outcome.get("batch_status") in {"queued", "running"}:
                     job.status, job.message = "submitted", "An Wartung uebergeben. Das ist noch kein Abschluss; siehe Status der einzelnen Laeufe."
