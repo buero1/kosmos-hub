@@ -33,7 +33,7 @@ const auth = [
     await context.addCookies([{name:'kosmos_hub_session', value:cookie, url:base, secure:true, httpOnly:true}]);
     const page = await context.newPage();
     page.setDefaultTimeout(45000);
-    let writes=0; const errors=[];
+    let writes=0, contactEmailPrefilled=false; const errors=[];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/website-profile/send', route => {writes++; return route.abort();});
     await page.goto(base+'/customers/'+customerId, {waitUntil:'domcontentloaded'});
@@ -63,6 +63,18 @@ const auth = [
       assert.equal(await editable('legal_name').inputValue(), values.company_name.proposed);
       assert.equal(await editable('contact_person').inputValue(), values.contact_person.proposed);
       assert.equal(await editable('contact_person').isEditable(), true);
+      assert.equal(await editable('contact_person').getAttribute('role'), 'combobox');
+      const contact = data.contacts.find(item => item.id === data.contact_id);
+      assert.ok(contact, 'Default linked contact exists');
+      assert.equal(values.email.proposed, contact.values.email);
+      assert.equal(await editable('email').inputValue(), contact.values.email);
+      contactEmailPrefilled = !!contact.email && contact.values.email === contact.email;
+      await editable('contact_person').fill(contact.name.slice(0, 4));
+      await page.getByRole('option').filter({hasText: contact.email || contact.name}).first().click();
+      assert.equal(await editable('contact_person').inputValue(), contact.name);
+      await editable('email').fill('local-draft@example.test');
+      assert.equal(await editable('email').inputValue(), 'local-draft@example.test');
+      await editable('email').fill(contact.values.email);
       await editable('legal_name').fill('Local draft only, never transmitted');
       assert.equal(await page.locator('input[type=checkbox][value=legal_name]').isChecked(), true);
       // Restore the visible suggestion for the screenshot; no send button is pressed.
@@ -82,6 +94,6 @@ const auth = [
     await page.keyboard.press('Escape');
     assert.equal(writes,0);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({customer_id:Number(customerId),menu:true,retired_field_hidden:true,preview_status:result.status(),editable_values:result.status()===200,desktop:true,mobile:true,cancel_writes:0}));
+    console.log(JSON.stringify({customer_id:Number(customerId),menu:true,retired_field_hidden:true,preview_status:result.status(),editable_values:result.status()===200,contact_email_prefilled:contactEmailPrefilled,desktop:true,mobile:true,cancel_writes:0}));
   } finally {await browser.close();}
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

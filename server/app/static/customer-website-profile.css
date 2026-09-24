@@ -9,6 +9,8 @@ body.website-profile-open { overflow: hidden; }
 .website-profile-table td:last-child { width: 44%; min-width: 16rem; }
 .website-profile-table .website-profile-value { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .website-profile-table textarea.website-profile-value { min-height: 5rem; resize: vertical; }
+/* Keep suggestions inside the scrolling table instead of clipping an absolute popup. */
+.website-profile-contact-options { position: static; max-height: 12rem; margin-top: .3rem; box-shadow: none; }
 .website-profile-table-wrap { max-height: 55vh; overflow: auto; }
 .website-profile-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 @media (max-width: 600px) { .website-profile-layer .website-profile-drawer { padding: 1rem; } }

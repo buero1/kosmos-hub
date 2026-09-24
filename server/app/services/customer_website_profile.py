@@ -31,7 +31,6 @@ SOURCES = {
     "street": ("billing_street", "Rechnungsadresse - Strasse"),
     "postal_code": ("billing_postal_code", "Rechnungsadresse - PLZ"), "city": ("billing_city", "Rechnungsadresse - Stadt"),
     "country": ("billing_country", "Rechnungsadresse - Land"),
-    "email": ("email", "E-Mail"), "email_secondary": ("secondary_email", "Zweite E-Mail-Adresse"),
 }
 EDITABLE_TYPES = {"text", "textarea", "url", "email", "phone", "phone_link", "email_link", "date", "datetime"}
 
@@ -44,11 +43,22 @@ def text(value):
     return value.strip() if isinstance(value, str) else ""
 
 
+def contact_sources(contact):
+    email = contact.get("email", "")
+    return {
+        "contact_person": (contact.get("name", ""), "Ausgewaehlter verknuepfter Kontakt"),
+        "email": (email, "E-Mail des ausgewaehlten Kontakts"),
+        "email_secondary": (contact.get("secondary_email", ""), "Zweite E-Mail-Adresse des ausgewaehlten Kontakts"),
+        "email_link": ("mailto:" + email if email else "", "E-Mail des Kontakts als Email-Link"),
+        "email_break": (email, "E-Mail des Kontakts als Anzeigetext"),
+    }
+
+
 def profile_sources(fields, customer, site):
     result = {key: (text(fields.get(source)), label) for key, (source, label) in SOURCES.items()}
     result["company_name"] = (text(fields.get("customer_name")) or customer.name, "Kunde-Name")
     result["legal_name"] = (result["company_name"][0], "Firmenname")
-    result["contact_person"] = (fields["_profile_contact"]["name"], "Erster verknuepfter Kontakt (Reihenfolge der Kontaktliste)")
+    result.update(contact_sources(fields["_profile_contacts"][0] if fields["_profile_contacts"] else {}))
     result["website"] = (site.home_url, "Zielwebsite")
     city = " ".join(filter(None, [text(fields.get("billing_postal_code")), text(fields.get("billing_city"))]))
     result["postal_code_city"] = (city, "PLZ + Ort")
@@ -58,9 +68,6 @@ def profile_sources(fields, customer, site):
     result["company_name_address"] = (", ".join(filter(None, [result["company_name"][0], address])), "Firmenname + Anschrift")
     phone = result["phone"][0]
     result["phone_link"] = ("tel:" + re.sub(r"[^+0-9]", "", phone) if phone else "", "Tel. als Telefon-Link")
-    email = result["email"][0]
-    result["email_link"] = ("mailto:" + email if email else "", "E-Mail als Email-Link")
-    result["email_break"] = (email, "E-Mail als Anzeigetext")
     return result
 
 
@@ -88,9 +95,9 @@ def customer_context(service, customer_id):
         contacts = CustomerDirectoryService(db=service.db, cipher=service.cipher)._contact_profiles_from_records(records)
     except InvalidToken:
         raise HubOperationError("Die verknuepften Kontakte konnten nicht sicher gelesen werden.") from None
-    first = contacts[0] if contacts else None
-    fields["_profile_contact"] = {"id": first.id if first else None,
-        "name": first.name if first and first.name != "Unnamed Zoho contact" else ""}
+    fields["_profile_contacts"] = [{"id": str(contact.id),
+        "name": contact.name if contact.name != "Unnamed Zoho contact" else "",
+        "email": text(contact.email), "secondary_email": text(contact.secondary_email)} for contact in contacts]
     fingerprint = hashlib.sha256(json.dumps([customer.name, fields], sort_keys=True, ensure_ascii=True).encode()).hexdigest()
     return customer, fields, fingerprint
 
@@ -167,18 +174,32 @@ def preview(service, customer_id, site_id=None):
                 except ProfileFieldValidationError:
                     pass
             rows.append({"id": key, "label": label, "type": kind, "source": origin,
+                "contact_field": TEXT_IDS.get(key, key) if TEXT_IDS.get(key, key) in contact_sources({}) else "",
                 "current": old, "proposed": value if allowed else "", "selectable": allowed and value != old,
                 "editable": editable, "max_length": limit,
                 "reason": "Unveraendert" if allowed and value == old else "" if allowed else
                     "Keine passende Kundenangabe; kann manuell eingetragen werden" if editable else "Nicht uebertragbar; bleibt unveraendert"})
     except (KeyError, ValueError, TypeError, AttributeError):
         raise HubOperationError("Das Firmenprofil hat eine ungueltige Antwort geliefert. Es wurde nichts gesendet.") from None
-    token = service.cipher.encrypt(json.dumps({"purpose": "customer-website-profile-v2", "actor": service.actor,
+    contacts = []
+    for contact in fields["_profile_contacts"]:
+        projected = {}
+        for key, definition in constraints.items():
+            contact_source = contact_sources(contact).get(TEXT_IDS.get(key, key))
+            if contact_source is None:
+                continue
+            try:
+                projected[key] = validate_field(contact_source[0], definition)
+            except ProfileFieldValidationError:
+                projected[key] = ""
+        contacts.append({**contact, "values": projected})
+    token = service.cipher.encrypt(json.dumps({"purpose": "customer-website-profile-v3", "actor": service.actor,
         "expires": (datetime.now(UTC) + timedelta(minutes=30)).timestamp(), "customer_id": customer_id,
         "site_id": site.id, "uuid": site.uuid, "domain": normalized_domain(site.domain), "fingerprint": fingerprint,
         "revision": revision, "values": writable, "fields": constraints}))
     return {"customer_id": str(customer_id), "site_id": str(site.id), "domain": site.domain, "target_source": source,
-        "options": options, "rows": rows, "preview_token": token}
+        "options": options, "rows": rows, "preview_token": token, "contacts": contacts,
+        "contact_id": contacts[0]["id"] if contacts else ""}
 
 
 def validate_field(raw, definition):
@@ -221,14 +242,14 @@ def validate_field(raw, definition):
     return value
 
 
-def prepare(service, *, customer_id, site_id, preview_token, field_ids, edited_values_json="{}"):
+def prepare(service, *, customer_id, site_id, preview_token, field_ids, edited_values_json="{}", contact_id=""):
     customer, fields, fingerprint = customer_context(service, customer_id)
     site, _options, _source = target_site(service, customer, fields, site_id)
     try:
         if not isinstance(preview_token, str) or len(preview_token) > 120000:
             raise ValueError()
         proof = json.loads(service.cipher.decrypt(preview_token))
-        if (proof["purpose"] != "customer-website-profile-v2" or proof["actor"] != service.actor or
+        if (proof["purpose"] != "customer-website-profile-v3" or proof["actor"] != service.actor or
                 proof["expires"] < datetime.now(UTC).timestamp() or proof["customer_id"] != customer_id or
                 proof["site_id"] != site_id or proof["uuid"] != site.uuid or proof["domain"] != normalized_domain(site.domain) or
                 proof["fingerprint"] != fingerprint):
@@ -246,7 +267,16 @@ def prepare(service, *, customer_id, site_id, preview_token, field_ids, edited_v
             raise ValueError()
     except (ValueError, TypeError):
         raise ProfileFieldValidationError("Nur Werte fuer ausgewaehlte Vorschau-Felder sind erlaubt.") from None
-    values = {key: validate_field(edited.get(key, proof["values"].get(key, "")), proof["fields"][key]) for key in field_ids}
+    contacts = fields["_profile_contacts"]
+    if not isinstance(contact_id, str) or (contact_id and not any(c["id"] == contact_id for c in contacts)):
+        raise ProfileFieldValidationError("Bitte einen erlaubten, mit diesem Kunden verknuepften Kontakt auswaehlen.")
+    contact = next((c for c in contacts if c["id"] == contact_id), contacts[0] if contacts else {})
+    defaults = dict(proof["values"])
+    contact_defaults = contact_sources(contact)
+    for key in proof["fields"]:
+        if TEXT_IDS.get(key, key) in contact_defaults:
+            defaults[key] = contact_defaults[TEXT_IDS.get(key, key)][0]
+    values = {key: validate_field(edited.get(key, defaults.get(key, "")), proof["fields"][key]) for key in field_ids}
     # Match the plugin's encoded payload limit, including Unicode and JSON overhead.
     if len(json.dumps({"values": values, "revision": proof["revision"]}, ensure_ascii=True).replace("/", "\\/")) > 131072:
         raise ProfileFieldValidationError("Die ausgewaehlten Texte sind zusammen zu lang. Bitte weniger Felder uebertragen.")
@@ -262,10 +292,11 @@ class CustomerWebsiteProfileService:
     def __init__(self, *, db, cipher):
         self.db, self.cipher = db, cipher
 
-    def send(self, *, customer_id: int, site_id: int, preview_token: str, field_ids: list[str], actor: str, edited_values_json: str = "{}"):
+    def send(self, *, customer_id: int, site_id: int, preview_token: str, field_ids: list[str], actor: str,
+             edited_values_json: str = "{}", contact_id: str = ""):
         service = HubOperationService(db=self.db, cipher=self.cipher, actor=actor)
         site, values, revision = prepare(service, customer_id=customer_id, site_id=site_id, preview_token=preview_token,
-            field_ids=field_ids, edited_values_json=edited_values_json)
+            field_ids=field_ids, edited_values_json=edited_values_json, contact_id=contact_id)
         status, message = "uncertain", "Uebertragung nicht sicher bestaetigt. Firmenprofil pruefen; nicht ungeprueft erneut senden."
         try:
             data = SiteMcpProxyService(db=self.db, cipher=self.cipher).execute_ability(site_id, WRITE_ABILITY,

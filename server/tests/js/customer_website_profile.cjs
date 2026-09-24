@@ -9,13 +9,26 @@ const partial = fs.readFileSync(path.join(root, 'app/templates/partials/customer
 const script = fs.readFileSync(path.join(root, 'app/static/customer-website-profile.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'app/static/customer-website-profile.css'), 'utf8');
 const sharedCss = fs.readFileSync(path.join(root, 'app/templates/base.html'), 'utf8')
-  .match(/\.pdf-template-edit-layer \{[\s\S]*?(?=body\.finance-position-preset-open)/)[0];
+  .match(/\.pdf-template-edit-layer \{[\s\S]*?(?=body\.finance-position-preset-open)/)[0]
+  + fs.readFileSync(path.join(root, 'app/templates/base.html'), 'utf8')
+    .match(/\.finance-customer-options \{[\s\S]*?\.finance-customer-empty \{[^}]+\}/)[0];
+const contacts = [
+  {id: '10', name: 'Anna Example', email: 'anna@example.test'},
+  {id: '20', name: 'Zoe Example', email: 'zoe@example.test'},
+  {id: '40', name: 'Zoe Example', email: 'other-zoe@example.test'},
+  {id: '50', name: 'Without Email', email: ''},
+].map(contact => ({...contact, values: {contact_person: contact.name, email: contact.email,
+  email_link: contact.email ? 'mailto:' + contact.email : '', email_break: contact.email}}));
 const preview = {site_id: '1', domain: 'main.example', target_source: 'Website URL', preview_token: 'proof',
+  contacts, contact_id: '10',
   options: [{site_id: '1', domain: 'main.example', source: 'Website URL'}, {site_id: '2', domain: 'work.example', source: 'Arbeitsdomain URL'}],
   rows: [
     {id: 'company_name', label: 'Firma', type: 'text', editable: true, max_length: 500, current: 'Alt', proposed: '<img src=x onerror=alert(1)>', selectable: true, source: 'Kunde-Name'},
     {id: 'phone', label: 'Telefon', type: 'phone', editable: true, max_length: 500, current: '', proposed: '+49 123', selectable: true, source: 'Tel.'},
-    {id: 'email', label: 'Email', type: 'email', editable: true, max_length: 254, current: 'keep@example.test', proposed: '', selectable: false, reason: 'Keine Kundenangabe'},
+    {id: 'contact_person', label: 'Ansprechpartner', type: 'text', editable: true, max_length: 500, current: '', proposed: 'Anna Example', selectable: true, contact_field: 'contact_person'},
+    {id: 'email', label: 'Email', type: 'email', editable: true, max_length: 254, current: 'keep@example.test', proposed: 'anna@example.test', selectable: true, contact_field: 'email'},
+    {id: 'email_link', label: 'Email-Link', type: 'text', editable: true, max_length: 500, current: '', proposed: 'mailto:anna@example.test', selectable: true, contact_field: 'email_link'},
+    {id: 'email_break', label: 'Email_break', type: 'textarea', editable: true, max_length: 500, current: '', proposed: 'anna@example.test', selectable: true, contact_field: 'email_break'},
     {id: 'notes', label: 'Zeiten', type: 'textarea', editable: true, max_length: 10000, current: '', proposed: '', selectable: false},
     {id: 'date', label: 'Datum', type: 'date', editable: true, max_length: 500, current: '', proposed: '', selectable: false},
     {id: 'logo', label: 'Logo', type: 'image', editable: false, current: 2, proposed: '', selectable: false},
@@ -103,16 +116,53 @@ const preview = {site_id: '1', domain: 'main.example', target_source: 'Website U
       await page.getByRole('button', {name: 'Abbrechen', exact: true}).click();
       await open(); await rows.locator('tr').last().waitFor();
       assert.equal(reads.at(-1), null, 'Each opening resolves the default again');
+      const contact = value('contact_person');
+      assert.equal(await contact.getAttribute('role'), 'combobox');
+      assert.equal(await value('email').inputValue(), 'anna@example.test');
+      await value('company_name').fill('Keep this company draft');
+      await contact.fill('zoe');
+      assert.equal(await send.isEnabled(), false, 'Unconfirmed search text cannot be transmitted');
+      await page.getByRole('option', {name: 'Zoe Example · zoe@example.test', exact: true}).click();
+      assert.equal(await value('email').inputValue(), 'zoe@example.test');
+      assert.equal(await value('email_link').inputValue(), 'mailto:zoe@example.test');
+      assert.equal(await value('email_break').inputValue(), 'zoe@example.test');
+      assert.equal(await value('company_name').inputValue(), 'Keep this company draft');
+      await value('email').fill('manually-edited@example.test');
+      await contact.fill('not a linked contact');
+      await page.getByText('Keine passenden verknüpften Kontakte gefunden.', {exact: true}).waitFor();
+      assert.equal(await send.isEnabled(), false);
+      await contact.press('Escape');
+      assert.equal(await contact.inputValue(), 'Zoe Example');
+      assert.equal(await value('email').inputValue(), 'manually-edited@example.test');
+      assert.equal(await page.locator('[role=dialog]').isVisible(), true, 'Escape closes suggestions before the drawer');
+      await contact.click();
+      await page.getByRole('option', {name: 'Zoe Example · zoe@example.test', exact: true}).click();
+      assert.equal(await value('email').inputValue(), 'manually-edited@example.test', 'Reselecting the same contact preserves manual email');
+      await contact.fill('other-zoe@');
+      await contact.press('ArrowDown'); await contact.press('Enter');
+      assert.equal(await value('email').inputValue(), 'other-zoe@example.test', 'Duplicate names are distinguished by ID and email');
+      await contact.fill('Without');
+      await contact.press('Enter');
+      assert.equal(await value('email').inputValue(), '');
+      assert.equal(await value('email_link').inputValue(), '');
+      assert.equal(await rows.locator('input[value=email]').isChecked(), false);
+      assert.equal(await rows.locator('input[value=email]').isEnabled(), false, 'Missing email never keeps the previous contact email');
+      await contact.fill('Anna'); await contact.press('ArrowDown'); await contact.press('Enter');
+      await value('email').fill('manual-final@example.test');
+      await all.uncheck(); await rows.locator('input[value=email]').check();
+      fail = 0; await send.click(); await page.locator('a[href="/wordpress/jobs/7"]').waitFor();
+      assert.equal(sends.at(-1).get('contact_id'), '10');
+      assert.deepEqual(JSON.parse(sends.at(-1).get('edited_values_json')), {email: 'manual-final@example.test'});
       const bounds = await page.locator('[role=dialog]').boundingBox();
       assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= width + 1);
       await page.keyboard.press('Escape');
-      assert.equal(sends.length, before, 'Cancel sends nothing');
+      assert.equal(sends.length, before + 1, 'Only the explicit send above, never search or cancellation, submits');
       rejectPreview = true; await open();
       await page.getByText('Keine Bridge-Verbindung.', {exact: true}).waitFor();
       assert.equal(await send.isEnabled(), false);
       assert.deepEqual(errors, []);
       await page.close();
     }
-    console.log('Desktop/mobile: editable values/types, selective payload, validation preserves drafts, safe output, target switch, cancellation and uncertain outcomes passed.');
+    console.log('Desktop/mobile: contact search, duplicate names, missing email, editable values, selective payload, draft preservation, cancellation and uncertain outcomes passed.');
   } finally { await browser.close(); }
 })().catch(e => {console.error(e); process.exitCode = 1;});

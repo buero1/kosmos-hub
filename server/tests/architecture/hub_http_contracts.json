@@ -1550,9 +1550,9 @@
       "boundary": ["HubOperationService", "query"]
     },
     "app/api/routes/web.py:customer_website_profile_send:POST:/customers/{customer_id}/website-profile/send": {
-      "fingerprint": "ec6a42c74486f428169a58fed8e807905e9e5403edd0ea016e35da680ed2baa6",
+      "fingerprint": "539c458e99cf2c5b81c61655d6f9f7f11695be5c5b1a9b6b707696ab39656ff8",
       "state": "shared",
-      "reason": "Authenticated, CSRF-protected explicit selection/confirmation queues the same durable wordpress.company_profile.send action as the agent. Edited values are limited to selected schema fields with types and limits bound into the encrypted preview. Shared validation rejects invalid drafts before queueing (422), preserving edits in the drawer. Worker rechecks actor/record/contact rights, source fingerprint, target identity and preview expiry. Bridge writer uses shared Store validation/locking/revision. No blind retry; no profile values in job audit; no CRM writes.",
+      "reason": "Authenticated, CSRF-protected explicit selection/confirmation queues the same durable wordpress.company_profile.send action as the agent. contact_id must belong to this customer's currently readable linked contacts; shared projection uses that contact's name and emails. Edited values are limited to selected schema fields with types and limits bound into the encrypted preview. Shared validation rejects invalid drafts before queueing (422), preserving edits in the drawer. Worker rechecks actor/record/contact rights, contact emails and customer source fingerprint, target identity and preview expiry. Bridge writer uses shared Store validation/locking/revision. No blind retry; no profile values in job audit; no CRM/contact writes.",
       "contracts": ["wordpress.company_profile.send"],
       "boundary": ["HubOperationService", "execute"]
     },

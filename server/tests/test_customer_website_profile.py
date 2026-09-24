@@ -397,3 +397,123 @@ def test_route_accepts_edits_and_rejects_invalid_values_before_queue(context, mo
         job = db.get(HubWordPressJob, json.loads(response.body)["job_id"])
         assert json.loads(cipher.decrypt(job.encrypted_input))["edited_values_json"] == '{"email":"edited@example.test"}'
         assert len(calls) == 1
+
+
+def add_profile_contacts(db, cipher, remote):
+    for key in ("contact_person", "email_secondary", "email_link", "field_eb207576fddfa3dc1d976027"):
+        remote["schema"]["fields"][key] = {"label": key, "type": "text", "max_length": 500}
+    for number, name, email in ((10, "Anna Example", "anna@example.test"), (20, "Zoe Example", "zoe@example.test")):
+        db.add(CustomerContact(id=number, customer_id=1, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {
+            "Name": name, "E-Mail": email, "Zweite E-Mail-Adresse": "second-" + email}}))))
+    db.add(Customer(id=2, name="Other Customer"))
+    db.add(CustomerContact(id=30, customer_id=2, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {
+        "Name": "Foreign Contact", "E-Mail": "foreign@example.test"}}))))
+    db.flush()
+
+
+def test_contact_defaults_and_candidates_use_only_linked_allowed_contacts(context, monkeypatch):
+    from app.services.hub_access_control import HubAccessControlService
+    sessions, cipher, _, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        db.get(Customer, 1).encrypted_profile_json = cipher.encrypt(json.dumps({"fields": {**PROFILE, "email": "company@example.test"}}))
+        data = preview(service(db, cipher), 1)
+        assert data["contact_id"] == "10"
+        assert [c["id"] for c in data["contacts"]] == ["10", "20"]
+        assert data["target_source"] == "Website URL"
+        rows = {row["id"]: row for row in data["rows"]}
+        assert rows["email"]["proposed"] == "anna@example.test"
+        assert rows["email_secondary"]["proposed"] == "second-anna@example.test"
+        assert rows["email_link"]["proposed"] == "mailto:anna@example.test"
+        assert rows["field_eb207576fddfa3dc1d976027"]["contact_field"] == "email_break"
+        assert data["contacts"][1]["values"]["email"] == "zoe@example.test"
+        monkeypatch.setattr(HubAccessControlService, "can_access_contact", lambda self, *, user, contact: contact.id == 20)
+        data = preview(service(db, cipher), 1)
+        assert data["contact_id"] == "20"
+        assert len(data["contacts"]) == 1
+        assert "anna@example.test" not in json.dumps(data)
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_second_contact_and_editable_email_use_shared_send_path(context, override):
+    sessions, cipher, calls, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        original = db.get(CustomerContact, 20).encrypted_profile_json
+        data = preview(service(db, cipher), 1)
+        args = {**inputs(data, ["contact_person", "email", "email_link", "field_eb207576fddfa3dc1d976027"]), "contact_id": "20"}
+        if override:
+            args["edited_values_json"] = json.dumps({"email": "manual@example.test"})
+        job_id = service(db, cipher).execute("wordpress.company_profile.send", args).record_id
+        db.commit()
+    assert process_next(sessions, cipher)
+    with sessions() as db:
+        assert db.get(HubWordPressJob, job_id).status == "succeeded"
+        assert db.get(CustomerContact, 20).encrypted_profile_json == original
+    values = calls[-1][2]["values"]
+    assert values["contact_person"] == "Zoe Example"
+    assert values["email"] == ("manual@example.test" if override else "zoe@example.test")
+    assert values["email_link"] == "mailto:zoe@example.test"
+    assert values["field_eb207576fddfa3dc1d976027"] == "zoe@example.test"
+
+
+@pytest.mark.parametrize("selected", ["30", "999", "not-an-id"])
+def test_foreign_or_unknown_contact_is_rejected_before_enqueue(context, selected):
+    sessions, cipher, calls, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        data = preview(service(db, cipher), 1)
+        with pytest.raises(ProfileFieldValidationError, match="verknuepften Kontakt"):
+            service(db, cipher).execute("wordpress.company_profile.send", {**inputs(data, ["email"]), "contact_id": selected})
+        assert not db.scalars(select(HubWordPressJob)).all()
+        assert len(calls) == 1
+
+
+@pytest.mark.parametrize("change", ["email", "unlink", "permission"])
+def test_contact_change_after_enqueue_prevents_remote_write(context, change, monkeypatch):
+    from app.services.hub_access_control import HubAccessControlService
+    sessions, cipher, calls, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        data = preview(service(db, cipher), 1)
+        job_id = service(db, cipher).execute("wordpress.company_profile.send", {**inputs(data, ["email"]), "contact_id": "20"}).record_id
+        db.commit()
+        if change == "email":
+            db.get(CustomerContact, 20).encrypted_profile_json = cipher.encrypt(json.dumps({"fields": {"Name": "Zoe Example", "E-Mail": "changed@example.test"}}))
+        elif change == "unlink":
+            db.get(CustomerContact, 20).customer_id = None
+        else:
+            monkeypatch.setattr(HubAccessControlService, "can_access_contact", lambda self, *, user, contact: contact.id != 20)
+        db.commit()
+    assert process_next(sessions, cipher)
+    with sessions() as db:
+        assert db.get(HubWordPressJob, job_id).status == "failed"
+    assert len(calls) == 1
+
+
+def test_contact_without_email_does_not_inherit_previous_or_customer_email(context):
+    sessions, cipher, _, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        db.get(CustomerContact, 20).encrypted_profile_json = cipher.encrypt(json.dumps({"fields": {"Name": "Zoe Example"}}))
+        data = preview(service(db, cipher), 1)
+        assert data["contacts"][1]["values"]["email"] == ""
+        assert data["contacts"][1]["values"]["email_link"] == ""
+        with pytest.raises(ProfileFieldValidationError):
+            prepare(service(db, cipher), customer_id=1, site_id=1, preview_token=data["preview_token"], field_ids=["email"], contact_id="20")
+
+
+def test_http_adapter_passes_selected_contact_to_shared_operation(context, monkeypatch):
+    from app.api.routes import web
+    from starlette.requests import Request
+    sessions, cipher, _, remote = context
+    with sessions() as db:
+        add_profile_contacts(db, cipher, remote)
+        data = preview(service(db, cipher), 1)
+        request = Request({"type": "http", "method": "POST", "path": "/customers/1/website-profile/send", "headers": []})
+        request.state.hub_user = db.scalar(select(HubUser).where(HubUser.username == "admin"))
+        monkeypatch.setattr(web, "get_secret_cipher", lambda: cipher)
+        monkeypatch.setattr(web, "require_csrf", lambda *_: None)
+        response = web.customer_website_profile_send(1, request, db, 1, data["preview_token"], ["email"], "yes", "token", "{}", "20")
+        job = db.get(HubWordPressJob, json.loads(response.body)["job_id"])
+        assert json.loads(cipher.decrypt(job.encrypted_input))["contact_id"] == "20"

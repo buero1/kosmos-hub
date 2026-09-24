@@ -28,13 +28,19 @@ bleiben unveraendert. Nur ausgewaehlte Werte werden uebertragen.
 Zuordnung ueber stabile IDs, einschliesslich der drei Referenz-Textfelder, nicht
 ueber veraenderbare Beschriftungen. Kundenname, Rechnungsadresse, Telefon,
 Website und daraus ableitbare Adress-/Telefonlink-Felder werden zugeordnet.
-E-Mail nur bei eindeutigen eigenen Kundenfeldern email/secondary_email, nicht
-aus Zugangsdaten oder willkuerlich aus mehreren Kontakten geraten.
+E-Mail und zweite E-Mail-Adresse stammen aus dem ausgewaehlten verknuepften
+Kontakt. Email-Link und Email_break werden daraus abgeleitet. Kein Fallback auf
+andere Kontakte oder Kundenfelder, wenn die Adresse leer ist.
 Vollstaendige Firmierung verwendet standardmaessig den Firmennamen.
 Firmenname-Anschrift wird frisch aus Firmenname und Anschrift zusammengesetzt,
 nicht aus einem importierten Formelwert. Ansprechpartner ist der erste fuer
 den Benutzer sichtbare verknuepfte Kontakt, alphabetisch wie in der Kontaktliste
-(bei gleichen Namen nach ID). Ohne lesbaren Kontakt bleibt das Feld leer.
+(bei gleichen Namen nach ID). Das Suchfeld erlaubt die explizite Auswahl eines
+anderen lesbaren verknuepften Kontakts per Name oder E-Mail. Ein Kontaktwechsel
+belegt die kontaktabhaengigen Felder neu, laesst alle anderen Entwuerfe stehen.
+Gleiche Namen bleiben durch Kontakt-ID und E-Mail unterscheidbar. Erneute Auswahl
+desselben Kontakts aendert manuell bearbeitete E-Mail-Werte nicht. Ohne lesbaren
+Kontakt bleibt das Feld leer.
 Manuelle Aenderungen im Dialog gelten nur fuer die Website, nicht fuer das CRM.
 
 UI und Agent benutzen customers.website_profile.preview und
@@ -46,8 +52,10 @@ TLS, feste gespeicherte Bridge, keine Redirects, Antworten auf4MiB begrenzt.
 Remote-Fehler im neuen Transportweg redigiert; Job/Audit enthaelt IDs statt Werte.
 Unklare Ergebnisse werden nicht automatisch erneut gesendet.
 
-Erweiterung24.09.2026: Vorschautokenv2 bindet auch erlaubte Feldtypen/Laengen
-und die Kontaktquelle. Optionale edited_values_json enthalten ausschliesslich
+Erweiterung24.09.2026: Vorschautokenv3 bindet auch erlaubte Feldtypen/Laengen
+und die erlaubten Kontaktquellen inklusive E-Mail-Adressen. Optionale
+contact_id waehlt einen dieser Kontakte; Quelle und Rechte werden vor Queue und
+erneut vor Fernzugriff geprueft. Optionale edited_values_json enthalten ausschliesslich
 ausgewaehlte Feld-IDs und Texte. Gemeinsame Validierung vor Queue und Versand,
 inklusive Email/URL/Telefon/Datum/Datum-Zeit und Payload-Limit. Eingabefehler422
 lassen den Dialog samt Entwurf korrigierbar offen; bei unklarem Transportergebnis
@@ -118,3 +126,23 @@ Volltest und Live-Hub-Abnahme werden im Abschlussvermerk dokumentiert.
   Firmen-/Kontaktvorgaben geprueft, Felder editierbar, Desktop/Mobil erreichbar.
   Alle Sendeanfragen im Browsertest gesperrt; null Sendeanfragen ausgeloest.
   Kein Kunden-Firmenprofil geaendert. Kein neues Plugin-Release notwendig.
+
+## Nachtrag: Kontaktwahl Und E-Mail
+
+- Ansprechpartner ist jetzt ein Suchfeld fuer lesbare, mit dem Kunden verknuepfte
+  Kontakte. Suche nach Name/E-Mail, Auswahl per Maus oder Tastatur. Nur explizite
+  Auswahl aendert den Kontakt; Suchtext wird nicht als Ansprechpartner versendet.
+- Kontaktwechsel belegt Name, E-Mail, zweite E-Mail-Adresse, Email-Link und
+  Email_break aus der gemeinsamen Server-Projektion vor. Andere Entwuerfe bleiben
+  erhalten. Fehlende E-Mail leert/entwaehlt den Vorschlagswert, nicht die Website.
+  Alle E-Mail-Vorgaben bleiben manuell bearbeitbar. CRM/Kontakte unveraendert.
+- 150 gezielte Python-Tests bestanden, einschliesslich Architektur, HTTP-Adapter,
+  Kontakt-Rechte, fremder IDs, Kontaktwechsel in der Queue und manuellem Override.
+  Architekturkontrolle hat den Routenreview vor der Freigabe eingefordert.
+- Desktop1300/Mobil390 bestanden: Suche, gleichnamige Kontakte, Auswahl ohne
+  E-Mail, manuelle Adressen, keine Entwurfsverluste, selektiver Versand und Abbruch.
+  Trefferliste bleibt innerhalb der scrollbaren Tabelle; keine neuen Breakpoints.
+- Kein erneuter Gesamtlauf in diesem Nachtrag; der vorangegangene Gesamtlauf
+  mit2070 bestandenen Tests bezieht sich auf den Stand vor der Kontaktwahl.
+- Vor Release normalisierter Vergleich aller391 Laufzeitdateien: nur6 erwartete
+  Dateien geaendert. Keine Migration und kein neues Content-Kit-Release erforderlich.
