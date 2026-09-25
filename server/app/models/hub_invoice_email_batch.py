@@ -1,6 +1,8 @@
 """Reviewed, individually tracked invoice email deliveries."""
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,5 +31,6 @@ class HubInvoiceEmailBatchItem(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
     encrypted_payload_json: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=False)
     error: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     batch = relationship("HubInvoiceEmailBatch", back_populates="items")

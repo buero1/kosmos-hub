@@ -15,10 +15,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import get_settings
 from app.core.security import SecretCipher, get_secret_cipher
 from app.db.session import SessionLocal
+from app.models.base import utcnow
 from app.models.hub_finance_documents import HubFinanceInvoice
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch, HubInvoiceEmailBatchItem
+from app.services.hub_invoice_email_delivery import invoice_email_deliveries
 from app.services.customer_communications import CustomerCommunicationAttachmentUpload, CustomerCommunicationService
 from app.services.audit import write_audit_log
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
@@ -221,9 +223,12 @@ class HubInvoiceEmailBatchService:
         ))
         if batch is None:
             raise InvoiceEmailBatchError("Versandrunde nicht gefunden.")
+        deliveries = invoice_email_deliveries(self.db, [item.invoice_id for item in batch.items if item.invoice_id is not None])
         return {"status": batch.status, "items": [
             {"invoice_id": item.invoice_id or int(json.loads(self.cipher.decrypt(item.encrypted_payload_json))["invoice_id"]),
-             "status": item.status, "error": item.error or ""}
+             "status": item.status, "error": item.error or "",
+             "delivery_status": deliveries[item.invoice_id].label if item.invoice_id in deliveries else "-",
+             "delivery_sent_at": deliveries[item.invoice_id].sent_at_display if item.invoice_id in deliveries else "-"}
             for item in batch.items
         ]}
 
@@ -281,6 +286,7 @@ def run_invoice_email_batch(batch_id: int) -> None:
                     ),),
                 )
                 item.status = "sent" if result.success else "failed"
+                item.sent_at = utcnow() if result.success else None
                 item.error = None if result.success else "Versand fehlgeschlagen; Details im E-Mail-Protokoll des Kunden prüfen."
                 write_audit_log(
                     db, site=None, actor=batch.actor, source="hub-worker", action="send-invoice-email",

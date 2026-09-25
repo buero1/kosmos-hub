@@ -129,6 +129,38 @@ def test_worker_sends_once_only_after_confirmation(monkeypatch):
     assert sent[0][2] == "Rechnung RE-000042"
     with Session(engine) as db:
         assert HubInvoiceEmailBatchService(db=db, cipher=cipher).status(batch_id=batch_id, actor="admin")["items"][0]["status"] == "sent"
+        from app.models.hub_invoice_email_batch import HubInvoiceEmailBatchItem
+        from sqlalchemy import select
+        item = db.scalar(select(HubInvoiceEmailBatchItem).where(HubInvoiceEmailBatchItem.batch_id == batch_id))
+        assert item.sent_at is not None
+        assert abs((datetime.now(UTC) - item.sent_at.replace(tzinfo=UTC)).total_seconds()) < 60
+        assert json.loads(cipher.decrypt(db.get(HubFinanceInvoice, invoice_id).encrypted_fields_json))["status"] == "draft"
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_failed_or_uncertain_send_has_no_success_timestamp(monkeypatch, raises):
+    from app.models.hub_invoice_email_batch import HubInvoiceEmailBatchItem
+    from sqlalchemy import select
+    engine = _db()
+    with Session(engine) as db:
+        cipher, invoice_id, _contact = _fixture(db)
+        service = HubInvoiceEmailBatchService(db=db, cipher=cipher)
+        batch = service.confirm(token=service.review([invoice_id], actor="admin")["review_token"], actor="admin")
+        batch_id = batch.id
+        db.commit()
+    monkeypatch.setattr("app.services.hub_invoice_email_batches.SessionLocal", lambda: Session(engine))
+    monkeypatch.setattr("app.services.hub_invoice_email_batches.get_secret_cipher", lambda: cipher)
+    monkeypatch.setattr("app.services.hub_invoice_email_batches.FinanceInvoicePdfStorage.load", lambda *_: b"%PDF-fake")
+    def fake_send(_self, **kwargs):
+        if raises:
+            raise RuntimeError("Unknown SMTP result")
+        return type("Result", (), {"success": False})()
+    monkeypatch.setattr("app.services.hub_invoice_email_batches.CustomerCommunicationService.send_email", fake_send)
+    run_invoice_email_batch(batch_id)
+    with Session(engine) as db:
+        item = db.scalar(select(HubInvoiceEmailBatchItem).where(HubInvoiceEmailBatchItem.batch_id == batch_id))
+        assert item.status == ("uncertain" if raises else "failed")
+        assert item.sent_at is None
 
 
 def test_restart_does_not_retry_an_uncertain_delivery(monkeypatch):

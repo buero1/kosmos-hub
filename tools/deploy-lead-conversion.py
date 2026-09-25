@@ -14,6 +14,8 @@ root = Path('/opt/kosmos-hub/app/server')
 release_prefix = 'lead-manual-dates' if '--date-correction' in sys.argv else 'lead-conversion'
 if '--offer-order' in sys.argv:
     release_prefix = 'offer-to-order'
+if '--invoice-delivery' in sys.argv:
+    release_prefix = 'invoice-delivery'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -50,6 +52,13 @@ if '--offer-order' in sys.argv:
         'app/templates/partials/finance_document_positions.html',
     }
 assert old.keys() <= new.keys()
+if '--invoice-delivery' in sys.argv:
+    expected = {
+        'app/main.py', 'app/models/hub_invoice_email_batch.py',
+        'app/services/hub_finance_documents.py', 'app/services/hub_invoice_email_batches.py',
+        'app/services/hub_invoice_email_delivery.py',
+        'app/templates/finance_documents.html', 'app/templates/finance_document_detail.html',
+    }
 changes = {name for name in new if old.get(name) != new[name]}
 assert changes == expected, changes
 for name, data in old.items():
@@ -68,6 +77,7 @@ from app.models.hub_wordpress_job import HubWordPressJob
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.models.customer_task_email_reminder import CustomerTaskEmailReminder
 from app.models.hub_scheduled_email import HubScheduledEmail
+from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch
 
 with SessionLocal() as db:
     db.execute(text('SET TRANSACTION READ ONLY'))
@@ -77,7 +87,8 @@ with SessionLocal() as db:
                                     (HubWordPressJob, ('queued', 'running')),
                                     (HubFinanceGeneratedPdf, ('queued', 'rendering')),
                                     (CustomerTaskEmailReminder, ('sending',)),
-                                    (HubScheduledEmail, ('sending',))]}
+                                    (HubScheduledEmail, ('sending',)),
+                                    (HubInvoiceEmailBatch, ('queued', 'running'))]}
 assert not any(active.values()), 'Active jobs: ' + json.dumps(active)
 print(json.dumps({'verified_runtime_files': len(old), 'changes': sorted(changes), 'active_jobs': active}), flush=True)
 if '--apply' not in sys.argv:

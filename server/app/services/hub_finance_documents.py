@@ -45,6 +45,7 @@ from app.services.hub_finance_document_field_catalog import DUNNING_FIELDS, INVO
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS, HubFinanceField
 from app.services.module_layouts import ModuleLayoutService
 from app.services.hub_pdf_templates import HubPdfTemplateService
+from app.services.hub_invoice_email_delivery import InvoiceEmailDelivery, invoice_email_deliveries
 
 
 ORDER_FIELDS_LAYOUT_KEY = "finance-order-fields"
@@ -190,6 +191,7 @@ class FinanceDocumentEntry:
     customer_name: str
     document_date: str
     total_gross: str
+    email_delivery: InvoiceEmailDelivery | None = None
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,7 @@ class FinanceDocumentDetail:
     billing_address: str = ""
     invoice_pdf: "FinanceInvoicePdfView | None" = None
     order_pdf: "FinanceOrderPdfView | None" = None
+    email_delivery: InvoiceEmailDelivery | None = None
 
 
 @dataclass(frozen=True)
@@ -271,7 +274,8 @@ class HubFinanceDocumentService:
         module: FinanceDocumentModule,
         documents: list[Any],
     ) -> tuple[FinanceDocumentEntry, ...]:
-        entries = [self._entry(module=module, document=document) for document in documents]
+        deliveries = invoice_email_deliveries(self.db, [doc.id for doc in documents]) if module.is_invoice else {}
+        entries = [self._entry(module=module, document=document, email_delivery=deliveries.get(document.id)) for document in documents]
         return tuple(sorted(
             entries,
             key=lambda entry: (
@@ -313,7 +317,8 @@ class HubFinanceDocumentService:
             .where(module.model.id.in_(page_ids))
         ).all()
         by_id = {document.id: document for document in documents}
-        entries = tuple(self._entry(module=module, document=by_id[document_id]) for document_id in page_ids)
+        deliveries = invoice_email_deliveries(self.db, page_ids)
+        entries = tuple(self._entry(module=module, document=by_id[document_id], email_delivery=deliveries[document_id]) for document_id in page_ids)
         return FinanceDocumentPage(entries=entries, page=page, page_count=page_count, total_count=total_count)
 
     def get_detail(self, *, module: FinanceDocumentModule, document_id: int) -> FinanceDocumentDetail | None:
@@ -378,6 +383,7 @@ class HubFinanceDocumentService:
             billing_address=self._text(values.get("billing_address")) if module.is_invoice or module.is_dunning else "",
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
+            email_delivery=invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None,
         )
 
     @staticmethod
@@ -602,7 +608,7 @@ class HubFinanceDocumentService:
             return self._text(getattr(document, module.number_attribute)) or f"{module.number_prefix}-{document.id:06d}"
         return self._text(values.get("name")) or f"Periodische Rechnung {document.id}"
 
-    def _entry(self, *, module: FinanceDocumentModule, document: Any) -> FinanceDocumentEntry:
+    def _entry(self, *, module: FinanceDocumentModule, document: Any, email_delivery: InvoiceEmailDelivery | None = None) -> FinanceDocumentEntry:
         values = self._document_values(module=module, document=document)
         lines = tuple(self._line_view(line) for line in document.lines)
         currency = self._text(values.get("currency")) or "EUR"
@@ -613,6 +619,7 @@ class HubFinanceDocumentService:
             customer_name=document.customer.name if document.customer else "-",
             document_date=self._display_date(self._text(values.get(module.date_key))) or "-",
             total_gross=HubFinanceService.format_money(self._totals(lines).total_gross, currency),
+            email_delivery=email_delivery,
         )
 
     def _document_values(self, *, module: FinanceDocumentModule, document: Any) -> dict[str, str]:

@@ -26,6 +26,7 @@
             <th>Kunde</th>
             <th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% elif module.key == "dunnings" %}Mahnungsdatum{% else %}Nächstes Rechnungsdatum{% endif %}</th>
             <th>Gesamt</th>
+            {% if module.is_invoice %}<th title="Status des letzten E-Mail-Versandversuchs im Hub, keine Zustellbestätigung">Versandstatus</th><th title="Letzter erfolgreicher E-Mail-Versand im Hub">Versendet am</th>{% endif %}
           </tr></thead>
           <tbody>
             {% for entry in entries %}
@@ -36,9 +37,10 @@
                 <td>{% if entry.document.customer %}<a href="/customers/{{ entry.document.customer.id }}">{{ entry.customer_name }}</a>{% else %}-{% endif %}</td>
                 <td>{{ entry.document_date }}</td>
                 <td>{{ entry.total_gross }}</td>
+                {% if module.is_invoice %}<td data-invoice-delivery-status="{{ entry.document.id }}">{{ entry.email_delivery.label }}</td><td data-invoice-delivery-date="{{ entry.document.id }}">{{ entry.email_delivery.sent_at_display }}</td>{% endif %}
               </tr>
             {% else %}
-              <tr><td colspan="{{ 6 if invoice_page else 5 }}">Noch keine {{ module.label|lower }} vorhanden.</td></tr>
+              <tr><td colspan="{{ 5 + (1 if invoice_page else 0) + (2 if module.is_invoice else 0) }}">Noch keine {{ module.label|lower }} vorhanden.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -221,6 +223,14 @@
           try {
             var result = await requestJson("/finance/invoices/email-batches/" + batchId);
             var byId = new Map(result.items.map(function (item) { return [String(item.invoice_id), item]; }));
+            document.querySelectorAll("[data-invoice-delivery-status]").forEach(function (cell) {
+              var item = byId.get(cell.dataset.invoiceDeliveryStatus);
+              if (item) { cell.textContent = item.delivery_status; }
+            });
+            document.querySelectorAll("[data-invoice-delivery-date]").forEach(function (cell) {
+              var item = byId.get(cell.dataset.invoiceDeliveryDate);
+              if (item) { cell.textContent = item.delivery_sent_at; }
+            });
             reviewRows.querySelectorAll("tr").forEach(function (tr) {
               var item = byId.get(tr.dataset.invoiceEmailId);
               if (item) { tr.lastElementChild.textContent = ({ queued: "Wartet", running: "Wird gesendet", sending: "Wird gesendet", sent: "Gesendet", failed: "Fehlgeschlagen", uncertain: "Status unklar" })[item.status] + (item.error ? ": " + item.error : ""); }

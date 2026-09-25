@@ -56,6 +56,15 @@
             {% if pdf_templates %}<div><dt>PDF-Vorlage</dt><dd>{{ pdf_templates | selectattr("id", "equalto", selected_pdf_template_id) | map(attribute="name") | first | default("-") }}</dd></div>{% endif %}
           </dl>
         {% endcall %}
+        {% if module.is_invoice %}
+          <article class="card customer-detail-panel" data-invoice-email-delivery>
+            <div class="customer-detail-panel-heading"><div><p class="eyebrow">Rechnung</p><h3>E-Mail-Versand</h3></div></div>
+            <dl class="customer-fields-grid">
+              <div><dt title="Status des letzten E-Mail-Versandversuchs im Hub, keine Zustellbestätigung">Versandstatus</dt><dd>{{ detail.email_delivery.label }}</dd></div>
+              <div><dt title="Letzter erfolgreicher E-Mail-Versand im Hub">Versendet am</dt><dd>{{ detail.email_delivery.sent_at_display }}</dd></div>
+            </dl>
+          </article>
+        {% endif %}
         {% if module.is_recurring and detail.document.generated_invoices %}
           <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Rechnungen</p><h3>Aus dieser Serie</h3></div></div><ul>{% for invoice in detail.document.generated_invoices[-10:] | reverse %}<li><a href="/finance/invoices/{{ invoice.id }}">{{ invoice.invoice_number }}</a> · {{ invoice.recurring_scheduled_on.strftime("%d.%m.%Y") }}</li>{% endfor %}</ul></article>
         {% endif %}

@@ -351,6 +351,13 @@ def _ensure_phase_one_schema() -> None:
             email_batch_model.__table__.create(bind=engine, checkfirst=True)
             logger.info("Created %s table.", email_batch_model.__tablename__)
 
+    if "hub_invoice_email_batch_items" in table_names:
+        email_item_columns = {column["name"] for column in inspector.get_columns("hub_invoice_email_batch_items")}
+        if "sent_at" not in email_item_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE hub_invoice_email_batch_items ADD COLUMN sent_at DATETIME NULL"))
+            logger.info("Added explicit UTC invoice email dispatch timestamps.")
+
     if "zoho_books_connections" not in table_names:
         ZohoBooksConnection.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created zoho_books_connections table.")
