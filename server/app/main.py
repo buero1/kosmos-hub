@@ -1145,6 +1145,8 @@ async def lifespan(_: FastAPI):
         if settings.auto_create_tables:
             Base.metadata.create_all(bind=engine)
         _ensure_phase_one_schema()
+        from app.models.hub_lead_conversion import HubLeadConversion
+        HubLeadConversion.__table__.create(bind=engine, checkfirst=True)
         from app.services.hub_mailbox_permission_schema import ensure_mailbox_permission_schema
         ensure_mailbox_permission_schema(engine)
         from app.services.hub_record_info_schema import ensure_record_info_schema

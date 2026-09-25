@@ -1,6 +1,7 @@
 """Shared address-based CRM associations for mailbox, record panels and agent reads."""
 from dataclasses import dataclass
-from email.utils import getaddresses
+from datetime import UTC, datetime
+from email.utils import getaddresses, parsedate_to_datetime
 import json
 from cryptography.fernet import InvalidToken
 
@@ -11,6 +12,7 @@ from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
 from app.models.hub_email_address import HubEmailAddress
 from app.models.hub_lead import HubLead
+from app.models.hub_lead_conversion import HubLeadConversion
 from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_email import HubMailboxEmail
 
@@ -60,6 +62,7 @@ class EmailAssociationService:
     def __init__(self, *, db, cipher):
         self.db, self.cipher = db, cipher
         self._index = None
+        self._conversion_cutoffs = None
 
     def _fields(self, record):
         if not record.encrypted_profile_json:
@@ -101,13 +104,48 @@ class EmailAssociationService:
         self._index = index
         return index
 
-    def links(self, payload, direction):
+    def _cutoffs(self):
+        if self._conversion_cutoffs is None:
+            self._conversion_cutoffs = {}
+            for conversion in self.db.scalars(select(HubLeadConversion)):
+                for module, identifier in (("customers", conversion.customer_id), ("contacts", conversion.contact_id)):
+                    if identifier:
+                        self._conversion_cutoffs[module, identifier] = self._utc(conversion.converted_at)
+        return self._conversion_cutoffs
+
+    @staticmethod
+    def _utc(value):
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    value = parsedate_to_datetime(value)
+                except (ValueError, TypeError, OverflowError):
+                    return None
+        if not isinstance(value, datetime):
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    def _after_conversion(self, module, identifier, payload, record=None):
+        cutoff = self._cutoffs().get((module, identifier))
+        if cutoff is None:
+            return True
+        # Do not retroactively expose Lead mail through the newly copied contact addresses.
+        dates = [self._utc(payload.get(key)) for key in ("sent_time", "date", "received_time", "time")]
+        if record is not None:
+            dates.extend(self._utc(getattr(record, key, None)) for key in ("created_at", "zoho_sent_at", "received_at"))
+        known = [value for value in dates if value is not None]
+        return bool(known) and min(known) >= cutoff
+
+    def links(self, payload, direction, *, record=None):
         counterparts = counterpart_addresses(payload, direction)
         if not counterparts:
             return ()
         index = self._records()
         links = set().union(*(index.get(address, set()) for address in counterparts))
-        return tuple(sorted(links, key=lambda link: (link.module, link.name.casefold(), link.id)))
+        return tuple(sorted((link for link in links if self._after_conversion(link.module, link.id, payload, record)),
+                            key=lambda link: (link.module, link.name.casefold(), link.id)))
 
     def records_for(self, module, record_id):
         """Current CRM addresses match historical messages too; no dangling entity links."""
@@ -120,5 +158,8 @@ class EmailAssociationService:
             statement = select(model).where(model.id.in_(select(column).where(HubEmailAddress.address_digest.in_(digests))), model.mailbox_state == "active")
             if model is CustomerZohoEmail:
                 statement = statement.where(model.sync_status.not_in(("failed", "pending")))
-            rows.extend(self.db.scalars(statement))
+            for row in self.db.scalars(statement):
+                payload = json.loads(self.cipher.decrypt(row.encrypted_payload_json)) if (module, record_id) in self._cutoffs() else {}
+                if self._after_conversion(module, record_id, payload, row):
+                    rows.append(row)
         return rows

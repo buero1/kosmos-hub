@@ -31,12 +31,13 @@ def db():
     (datetime(2026, 9, 25, 23, 30), "2026-09-25"),
 ])
 @pytest.mark.parametrize("existing_date", ["", "2020-01-01"])
-def test_transition_stamps_both_dates_with_berlin_change_date(db, now, expected, existing_date):
-    values = {"lead_result": "Vertrag", "order_date": existing_date, "billing_result_date": existing_date}
+@pytest.mark.parametrize("result", ["Vertrag", "Stattgefunden + Auftrag"])
+def test_transition_stamps_both_dates_with_berlin_change_date(db, now, expected, existing_date, result):
+    values = {"lead_result": result, "order_date": existing_date, "billing_result_date": existing_date}
     HubWorkflowService(db=db).apply_lead_field_updates(previous_values={"lead_result": "Offen"}, updated_values=values, now=now)
     assert values["order_date"] == values["billing_result_date"] == expected
     assert values["lead_status"] == "Umgewandelt"
-    assert values["billing_result"] == "Auftrag"
+    assert values["billing_result"] == ("Auftrag" if result == "Vertrag" else result)
 
 
 @pytest.mark.parametrize("existing_date", ["", "2020-01-01"])
@@ -58,7 +59,7 @@ def test_disabled_workflow_does_not_stamp_dates(db):
     assert values["billing_result_date"] == ""
 
 
-@pytest.mark.parametrize("result", ["Offen", "Stattgefunden", "Stattgefunden + Auftrag", "Storniert", "Rücktritt", "Kein Auftrag"])
+@pytest.mark.parametrize("result", ["Offen", "Stattgefunden", "Storniert", "Rücktritt", "Kein Auftrag"])
 def test_other_results_keep_existing_date_behavior(db, result):
     values = {"lead_result": result, "order_date": "2020-01-01", "billing_result_date": "2020-01-02"}
     HubWorkflowService(db=db).apply_lead_field_updates(previous_values={"lead_result": "Vertrag"}, updated_values=values)
@@ -76,6 +77,10 @@ def test_dates_are_persisted_through_shared_lead_service(db, monkeypatch, path):
             return cls.current.astimezone(tz) if tz else cls.current.replace(tzinfo=None)
 
     monkeypatch.setattr(hub_workflows, "datetime", Clock)
+    for workflow in HubWorkflowService(db=db).list_workflows():
+        if workflow.workflow_key == hub_workflows.LEAD_CUSTOMER_CONVERSION_WORKFLOW_KEY:
+            workflow.is_enabled = False
+    db.flush()
     service = HubLeadService(db=db, cipher=SecretCipher("a" * 32))
     if path == "external":
         lead, _ = service.upsert_external_lead(source_system="test", source_external_id="order-date",

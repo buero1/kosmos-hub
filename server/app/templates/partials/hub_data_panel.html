@@ -7,6 +7,17 @@
       <h4 class="hub-data-subheading">Verknüpfungen</h4>
       <div class="hub-data-links">{{ links }}</div>
     {% endif %}
+    {% set conversion = hub_conversion_info(record) %}
+    {% if conversion %}
+      <h4 class="hub-data-subheading">Lead-Umwandlung</h4>
+      <dl class="customer-fields-grid hub-data-metadata">
+        {% for link in conversion.links %}
+          <div><dt>{{ link.label }}</dt><dd><a href="{{ link.href }}">{{ link.name }}</a></dd></div>
+        {% endfor %}
+        <div><dt>Umgewandelt am</dt><dd>{{ conversion.event.converted_at | berlin_time_short }}</dd></div>
+        <div><dt>Umgewandelt von</dt><dd>{{ hub_actor_label(conversion.event.actor_name, conversion.event.actor_origin) }}</dd></div>
+      </dl>
+    {% endif %}
     <h4 class="hub-data-subheading">Erstellung und Änderung</h4>
     <dl class="customer-fields-grid hub-data-metadata">
       <div><dt>{{ info.created_label }}</dt><dd>{{ info.created_at | berlin_time_short if info.created_at else 'Nicht bekannt' }}</dd></div>

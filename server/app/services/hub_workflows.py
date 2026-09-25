@@ -18,6 +18,8 @@ from app.services.task_email_reminders import TaskEmailReminderService
 CASE_OPEN_REMINDER_WORKFLOW_KEY = "case-open-popup-reminder"
 LEAD_RESULT_FIELD_UPDATE_WORKFLOW_KEY = "lead-result-field-updates"
 LEAD_APPOINTMENT_REMINDER_WORKFLOW_KEY = "lead-appointment-reminder"
+LEAD_CUSTOMER_CONVERSION_WORKFLOW_KEY = "lead-customer-conversion"
+ORDER_LEAD_RESULTS = frozenset({"Vertrag", "Stattgefunden + Auftrag"})
 # This Hub-managed template remains stable even if its display name changes later.
 CASE_COMPLETION_EMAIL_TEMPLATE_ID = "hub-template-d183cf19fa8b41a78d32892037fe8f39"
 _BERLIN = ZoneInfo("Europe/Berlin")
@@ -31,7 +33,7 @@ _CASE_OPEN_REMINDER_DESCRIPTION = (
 )
 _LEAD_RESULT_FIELD_UPDATE_DESCRIPTION = (
     "Setzt bei Änderungen am Lead-Ergebnis automatisch den passenden Lead-Status und, "
-    "sofern vorgesehen, das Abrechnungsergebnis. Beim Wechsel auf \"Auftrag\" werden "
+    "sofern vorgesehen, das Abrechnungsergebnis. Beim Wechsel auf \"Auftrag\" oder \"Stattgefunden + Auftrag\" werden "
     "Auftragsdatum und Abrechnungsergebnis-Datum auf das Änderungsdatum in Berliner Zeit gesetzt. "
     "Bei unverändertem Lead-Ergebnis werden diese Datumsfelder nicht überschrieben."
 )
@@ -106,6 +108,16 @@ class HubWorkflowService:
                 "Leads · Termindatum, Lead-Ergebnis",
                 _LEAD_APPOINTMENT_REMINDER_DESCRIPTION,
             ),
+            (
+                LEAD_CUSTOMER_CONVERSION_WORKFLOW_KEY,
+                "Lead in Kunden umwandeln",
+                "Leads · Änderung Lead-Ergebnis",
+                'Beim Wechsel auf "Auftrag" oder "Stattgefunden + Auftrag" einmalig einen Kunden '
+                'mit Status "Neu" und Typ "Kunde" sowie einen verknüpften Kontakt anlegen. '
+                'Notizen kopieren, Aktivitäten ohne doppelte Erinnerungen zuordnen. '
+                'Der Lead mit seinen Notizen und bisherigen E-Mails bleibt erhalten. '
+                'Keine rückwirkende Umwandlung bestehender Auftrag-Leads oder erstmaliger Importe.',
+            ),
         )
         for workflow_key, title, module_label, description in definitions:
             workflow = self.db.scalar(
@@ -169,7 +181,7 @@ class HubWorkflowService:
             and field_updates is not None
         ):
             updated_values.update(field_updates)
-            if updated_result == "Vertrag":  # Stored value of the "Auftrag" option.
+            if updated_result in ORDER_LEAD_RESULTS:
                 changed_at = now or datetime.now(_BERLIN)
                 if changed_at.tzinfo is not None:
                     changed_at = changed_at.astimezone(_BERLIN)

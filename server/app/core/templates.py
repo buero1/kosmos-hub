@@ -235,6 +235,15 @@ def _hub_link_visible(context, owner, module, identifier):
     return True
 
 
+@pass_context
+def _hub_conversion_info(context, record):
+    from app.core.security import get_secret_cipher
+    from app.services.hub_conversion_info import conversion_info
+    request = context.get("request")
+    user = getattr(request.state, "hub_user", None) if request else None
+    return conversion_info(record, user or context.get("user"), get_secret_cipher())
+
+
 def create_templates(*, directory: str) -> Jinja2Templates:
     from app.services.hub_record_info import actor_label, record_info
     from app.services.hub_document_template_catalog import NAME_FIELD, NAME_MIN_LENGTH
@@ -245,6 +254,7 @@ def create_templates(*, directory: str) -> Jinja2Templates:
     templates.env.filters["berlin_time_short"] = format_berlin_time_short
     templates.env.filters["finance_decimal"] = format_finance_decimal
     templates.env.globals["hub_record_info"] = record_info
+    templates.env.globals["hub_conversion_info"] = _hub_conversion_info
     templates.env.globals["hub_actor_label"] = actor_label
     templates.env.globals["hub_link_visible"] = _hub_link_visible
     templates.env.globals["bridge_supports_admin_launch"] = SiteAdminLaunchService.bridge_supports_launch

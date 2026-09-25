@@ -32,6 +32,7 @@ def test_delivery_creates_combined_note_now_and_only_planned_call(monkeypatch):
     monkeypatch.setattr(hub_lead_notes, "datetime", FrozenDatetime)
     cipher = SecretCipher("a" * 32)
     monkeypatch.setattr(integrations, "get_secret_cipher", lambda: cipher)
+    monkeypatch.setattr("app.services.customer_desktop_reminders.get_secret_cipher", lambda: cipher)
     monkeypatch.setattr(integrations, "get_settings", lambda: SimpleNamespace(public_base_url="https://hub.example"))
     user = HubUser(username="hub-admin", password_hash="test", role="admin")
     monkeypatch.setattr(integrations, "_integration_actor", lambda _: ("integration:callapp:test", user))

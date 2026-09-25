@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 from datetime import datetime, timezone
 import json
 from typing import Any
@@ -25,6 +26,19 @@ _BERLIN_TIMEZONE = ZoneInfo("Europe/Berlin")
 
 class HubLeadError(ValueError):
     """A safe validation message for the Leads UI."""
+
+
+def _atomic_lead_write(method):
+    @wraps(method)
+    def write(self, *args, **kwargs):
+        connection = self.db.connection()
+        # sqlite3's legacy transaction mode would otherwise commit an outermost
+        # SAVEPOINT on release, defeating the caller's later rollback.
+        if connection.dialect.name == "sqlite" and not connection.connection.driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN")
+        with self.db.begin_nested():
+            return method(self, *args, **kwargs)
+    return write
 
 
 @dataclass(frozen=True)
@@ -126,6 +140,7 @@ class HubLeadService:
     def new_form_values() -> dict[str, str | tuple[str, ...]]:
         return {"lead_field__lead_status": "Lead erstellt"}
 
+    @_atomic_lead_write
     def create_lead(self, *, submitted_values: dict[str, object]) -> HubLead:
         fields = self._submitted_fields(submitted_values, existing={})
         HubWorkflowService(db=self.db).apply_lead_field_updates(
@@ -141,8 +156,10 @@ class HubLeadService:
         lead = HubLead(encrypted_profile_json=self._encrypt(profile))
         self.db.add(lead)
         self.db.flush()
+        self._convert_on_change(lead, {}, fields)
         return lead
 
+    @_atomic_lead_write
     def upsert_external_lead(
         self,
         *,
@@ -159,7 +176,7 @@ class HubLeadService:
             select(HubLead).where(
                 HubLead.source_system == normalized_source,
                 HubLead.source_external_id == normalized_external_id,
-            )
+            ).with_for_update().execution_options(populate_existing=True)
         )
         created = lead is None
         if lead is None:
@@ -191,10 +208,14 @@ class HubLeadService:
         profile.setdefault("subforms", {})
         lead.encrypted_profile_json = self._encrypt(profile)
         self.db.flush()
+        if not created:
+            self._convert_on_change(lead, existing, updated)
         return lead, created
 
+    @_atomic_lead_write
     def update_lead(self, *, lead_id: int, submitted_values: dict[str, object]) -> HubLead:
-        lead = self.db.get(HubLead, lead_id)
+        lead = self.db.scalar(select(HubLead).where(HubLead.id == lead_id)
+                              .with_for_update().execution_options(populate_existing=True))
         if lead is None:
             raise HubLeadError("Der Lead wurde nicht gefunden.")
         profile = self._profile(lead)
@@ -208,7 +229,15 @@ class HubLeadService:
         profile["subforms"] = self._submitted_subforms(submitted_values, existing=self._subforms(profile))
         lead.encrypted_profile_json = self._encrypt(profile)
         self.db.flush()
+        self._convert_on_change(lead, existing_fields, updated_fields)
         return lead
+
+    def _convert_on_change(self, lead, previous, values):
+        from app.services.hub_lead_conversion import LeadConversionService
+        try:
+            LeadConversionService(db=self.db, cipher=self.cipher).on_change(lead=lead, previous=previous, values=values)
+        except ValueError as exc:
+            raise HubLeadError(str(exc)) from exc
 
     def delete_lead(self, *, lead_id: int) -> HubLead:
         from app.services.hub_deletion import prepare_record_deletion

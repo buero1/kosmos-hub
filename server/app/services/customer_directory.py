@@ -392,6 +392,9 @@ class CustomerDirectoryService:
             raise ValueError("Der Kunde wurde nicht gefunden.")
         if customer.zoho_id or self._profile_data(customer).get("source") != "hub-customers":
             raise ValueError("Dieser Kunde wird nicht im Hub verwaltet.")
+        previous = self._profile_data(customer)
+        for key, label in (("customer_type", "Kunde Typ"), ("order_date", "Auftragsdatum"), ("source", "Quelle")):
+            submitted_values = {f"customer_field__{key}": str(previous.get("fields", {}).get(label) or ""), **submitted_values}
         values = self._hub_customer_values(submitted_values)
         customer.name = values["customer_name"]
         customer.zoho_status = values["account_status"]
@@ -424,6 +427,18 @@ class CustomerDirectoryService:
             or " " in domain
         ):
             raise ValueError("Bitte eine gültige Website-Adresse angeben.")
+        for key in ("customer_type", "order_date", "source"):
+            if f"customer_field__{key}" in submitted_values:
+                value = str(submitted_values[f"customer_field__{key}"] or "").strip()
+                if len(value) > 255:
+                    raise ValueError("Ein Kundenfeld ist zu lang.")
+                if key == "order_date" and value:
+                    from datetime import date
+                    try:
+                        value = date.fromisoformat(value).isoformat()
+                    except ValueError as exc:
+                        raise ValueError("Bitte ein gültiges Auftragsdatum angeben.") from exc
+                values[key] = value
         return values
 
     @staticmethod
@@ -440,10 +455,16 @@ class CustomerDirectoryService:
             {"value": status, "label": status} for status in ZOHO_RELEVANT_ACCOUNT_STATUSES
         ]
         metadata["source"] = {"label": "Quelle", "display_type": "Einzelzeile", "editable": False}
+        extras = {}
+        for key, label, display_type in (("customer_type", "Kunde Typ", "Einzelzeile"),
+                                         ("order_date", "Auftragsdatum", "Datum"), ("source", "Quelle", "Einzelzeile")):
+            if key in values:
+                extras[label] = values[key] or None
+                metadata[key] = {"label": label, "display_type": display_type, "editable": True}
         return {
             "source": "hub-customers",
             "schema_version": 2,
-            "fields": {field.label: values[field.key] or None for field in _HUB_CUSTOMER_FIELDS} | {"Quelle": "Hub"},
+            "fields": {field.label: values[field.key] or None for field in _HUB_CUSTOMER_FIELDS} | {"Quelle": "Hub"} | extras,
             "field_metadata": metadata,
             "subforms": {},
         }

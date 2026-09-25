@@ -83,7 +83,7 @@ class HubMailboxAccess:
             return ((record.customer_id is None or self.customer_visible(record.customer_id))
                     and (record.lead_id is None or self.leads is None or record.lead_id in self.leads))
         if isinstance(record, HubMailboxEmail) and record.mailbox_state != "draft":
-            links = self.associations.links(payload, record.direction)
+            links = self.associations.links(payload, record.direction, record=record)
             return not links or any(self.record_visible(link.module, link.id) for link in links)
         return True
 

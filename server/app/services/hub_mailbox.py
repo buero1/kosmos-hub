@@ -155,8 +155,8 @@ class HubMailboxService:
             actor=actor,
         )
 
-    def _record_links(self, payload, direction):
-        return tuple(link for link in self.associations.links(payload, direction)
+    def _record_links(self, payload, direction, record=None):
+        return tuple(link for link in self.associations.links(payload, direction, record=record)
                      if self.scope is None or self.scope.record_visible(link.module, link.id))
 
     def related_messages(self, *, module, record_id):
@@ -1074,7 +1074,7 @@ class HubMailboxService:
     def _unassigned_list_message(self, email: HubMailboxEmail) -> HubMailboxListItem:
         payload = self._payload(email.encrypted_payload_json)
         kind = self._unassigned_kind(email)
-        links = self._record_links(payload, email.direction) if kind != "draft" else ()
+        links = self._record_links(payload, email.direction, email) if kind != "draft" else ()
         return HubMailboxListItem(
             key=f"unassigned-{email.id}",
             kind="associated" if kind == "unassigned" and links else kind,
@@ -1110,7 +1110,7 @@ class HubMailboxService:
             if restricted and not self.scope.visible(row):
                 continue
             unassigned_rows.append((row.mailbox_state, row.direction, row.source, row.id))
-            if self._unassigned_kind(row) == "unassigned" and not self._record_links(self._payload(row.encrypted_payload_json), row.direction):
+            if self._unassigned_kind(row) == "unassigned" and not self._record_links(self._payload(row.encrypted_payload_json), row.direction, row):
                 unknown_ids.add(row.id)
         active_unassigned_rows = [
             (direction, source, email_id)
@@ -1175,7 +1175,7 @@ class HubMailboxService:
             attachments=view.attachments,
             can_load_content=view.can_load_content,
             last_error=view.last_error,
-            record_links=self._record_links(self._payload(winner.encrypted_payload_json), winner.direction),
+            record_links=self._record_links(self._payload(winner.encrypted_payload_json), winner.direction, winner),
             message_id=winner.zoho_message_id,
         )
 
@@ -1183,7 +1183,7 @@ class HubMailboxService:
         payload = self._payload(email.encrypted_payload_json)
         content = self._unassigned_content(payload)
         kind = self._unassigned_kind(email)
-        links = self._record_links(payload, email.direction) if kind != "draft" else ()
+        links = self._record_links(payload, email.direction, email) if kind != "draft" else ()
         customer = None
         lead = None
         if kind == "draft":
