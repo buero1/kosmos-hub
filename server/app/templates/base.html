@@ -6784,11 +6784,14 @@
               globalMailboxSender.value = action.sender_email;
               globalMailboxTemplate.value = globalMailboxTemplateId.value = action.template_id || "";
               var template = globalMailboxTemplates.find(function (item) { return item.id === action.template_id; });
-              globalMailboxTemplateSearch.value = template ? template.name : (isOrder ? "Auftragsbestätigung" : "Rechnungen senden");
+              globalMailboxTemplateSearch.value = template ? template.name : (isOrder ? (action.template_id ? "Auftragsbestätigung" : "") : "Rechnungen senden");
               globalMailboxStoredAttachments = action.attachments || [];
               globalMailboxSetAttachments([]);
               globalMailboxScheduledAt.closest("label").hidden = true;
               globalMailboxStatusMessage((isOrder ? "Auftragsvorlage" : "Rechnungsvorlage") + " und PDF sind vorbereitet. Bitte prüfen und anschließend selbst senden.");
+              if (isOrder && !action.template_id) {
+                globalMailboxStatusMessage("Empfänger und Auftrags-PDF sind vorbereitet. Keine eindeutige Standardvorlage gefunden. Bitte eine E-Mail-Vorlage auswählen oder den Nachrichtentext ergänzen.");
+              }
               var unresolved = ((action.subject || "") + " " + (action.content || "")).match(/\$\{[^{}]+\}/g) || [];
               if (isOrder && unresolved.length) {
                 globalMailboxStatusMessage("Vorlage und PDF sind vorbereitet. Bitte fehlende Angaben im E-Mail-Text ergänzen oder die Platzhalter entfernen: " + Array.from(new Set(unresolved)).join(", "), true);

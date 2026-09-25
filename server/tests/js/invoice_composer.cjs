@@ -15,7 +15,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
   const browser = await chromium.launch({headless: true, ...(process.platform === 'win32' ? {channel: 'msedge'} : {})});
   try {
     for (const width of [1263, 390]) {
-      for (const scenario of ['success', 'save-error', 'send-error', 'prepare-error', ...(isOrder ? ['placeholders'] : [])]) {
+      for (const scenario of ['success', 'save-error', 'send-error', 'prepare-error', ...(isOrder ? ['placeholders', 'no-template'] : [])]) {
         const page = await browser.newPage({viewport: {width, height: 912}});
         const errors = [], sent = [], saves = [];
         let releaseSave;
@@ -33,7 +33,15 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
             assert.equal(request.method(), 'POST');
             return scenario === 'prepare-error'
               ? route.fulfill({status: 400, json: {detail: 'Keine fertige ZUGFeRD-PDF vorhanden.'}})
-              : route.fulfill({json: scenario === 'placeholders' ? {...data.context, content: '<p>${Customer.AppointmentAt}</p>'} : data.context});
+              : route.fulfill({json: scenario === 'placeholders' ? {...data.context, content: '<p>${Customer.AppointmentAt}</p>'}
+                : scenario === 'no-template' ? {...data.context, template_id: '', content: ''} : data.context});
+          }
+          if (url.pathname === `/emails/compose/templates/${data.context.template_id}`) {
+            assert.equal(request.method(), 'GET');
+            return route.fulfill({json: {...data.context, unresolved_placeholders: [], template_context: {
+              context_module: kind, context_record_id: String(data[noun]), customer_id: String(data.context.customer_id),
+              recipient_key: data.context.recipient.key,
+            }}});
           }
           if (url.pathname === '/emails/drafts') {
             saves.push(request.postData());
@@ -71,11 +79,19 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
         } else {
-          await status.filter({hasText: scenario === 'placeholders' ? 'fehlende Angaben' : isOrder ? 'Auftragsvorlage und PDF' : 'Rechnungsvorlage und PDF'}).waitFor();
+          await status.filter({hasText: scenario === 'no-template' ? 'Keine eindeutige Standardvorlage' : scenario === 'placeholders' ? 'fehlende Angaben' : isOrder ? 'Auftragsvorlage und PDF' : 'Rechnungsvorlage und PDF'}).waitFor();
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
           assert.equal(await drawer.locator('[name="subject"]').inputValue(), data.context.subject);
           assert.equal(await drawer.locator('[name="recipient_email"]').inputValue(), data.context.recipient_email);
+          if (scenario === 'no-template') {
+            assert.equal(await drawer.locator('[data-global-mailbox-template-search]').inputValue(), '');
+            assert.equal(await drawer.locator('[data-email-compose-attachment-list] a').count(), 1);
+            await drawer.locator('[data-global-mailbox-template-search]').fill(templateName);
+            await drawer.getByRole('option').filter({hasText: templateName}).click();
+            await status.filter({hasText: 'Vorlage wurde als bearbeitbarer Entwurf geladen'}).waitFor();
+            assert.equal(await drawer.locator('[name="subject"]').inputValue(), data.context.subject);
+          }
           assert.equal(await drawer.locator('[data-global-mailbox-template-search]').inputValue(), templateName);
           assert.equal(await drawer.locator('[name="recipient_customer_id"]').inputValue(), String(data.context.customer_id));
           assert.equal(await drawer.locator('[data-email-compose-attachment-list] a').count(), 1);
@@ -91,7 +107,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
           // A second submit while the first one is pending must not send again.
           await drawer.locator('form').evaluate(form => form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})));
           releaseSave();
-          if (scenario === 'success' || scenario === 'placeholders') {
+          if (['success', 'placeholders', 'no-template'].includes(scenario)) {
             await page.waitForURL(url => url.searchParams.get('email') === 'success');
             assert.equal(sent.length, 1);
             assert.match(sent[0], /My edited invoice subject/);

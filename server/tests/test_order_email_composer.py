@@ -226,17 +226,69 @@ def test_known_failure_retry_and_unknown_outcome_guard(prepared, monkeypatch):
     assert p.env.db.get(HubMailboxEmail, p.context["draft_id"]) is not None
 
 
-@pytest.mark.parametrize("missing", ["pdf", "contact_email", "customer", "template"])
+@pytest.mark.parametrize("missing", ["pdf", "contact_email", "customer"])
 def test_prepare_missing_requirements(prepared, missing):
     p = prepared
     count = p.env.db.query(HubMailboxEmail).count()
     if missing == "pdf": p.env.db.delete(p.env.db.scalar(select(HubFinanceOrderPdf)))
     if missing == "customer": p.order.customer_id = None
     if missing == "contact_email": p.env.contact.encrypted_profile_json = p.env.cipher.encrypt('{}')
-    if missing == "template": p.env.db.delete(p.env.db.scalar(select(ZohoEmailTemplate)))
     p.env.db.commit()
     with pytest.raises(ValueError): p.env.service.execute("finance.orders.email.prepare", {"record_id": str(p.order.id)})
     assert p.env.db.query(HubMailboxEmail).count() == count and not p.sent
+
+
+@pytest.mark.parametrize("context_module", ["customers", "general", "orders"])
+def test_customer_or_general_template_keeps_order_context_and_pdf(prepared, context_module):
+    p = prepared
+    row = p.env.db.scalar(select(ZohoEmailTemplate))
+    payload = json.loads(p.env.cipher.decrypt(row.encrypted_payload_json))
+    payload["hub_context_module"] = context_module
+    payload["folder_name"] = "Kunden Hub"
+    row.encrypted_payload_json = p.env.cipher.encrypt(json.dumps(payload))
+    p.env.db.commit()
+    result = p.env.service.execute("finance.orders.email.prepare", {"record_id": str(p.order.id)})
+    context = mailbox_for(p.env.service).get_draft_compose_context(draft_id=result.record_id)
+    assert context["template_id"] == row.zoho_template_id
+    assert context["context_module"] == "orders" and context["customer_id"] == p.order.customer_id
+    assert context["subject"] == "Auftrag AU-TEST" and "Test contact" in context["content"]
+    assert len(context["attachments"]) == 1 and not p.sent
+
+
+@pytest.mark.parametrize("mode", ["missing", "duplicate", "unrelated", "inactive"])
+def test_no_unique_template_still_opens_draft_with_customer_and_pdf(prepared, mode):
+    p = prepared
+    row = p.env.db.scalar(select(ZohoEmailTemplate))
+    if mode == "missing": p.env.db.delete(row)
+    if mode == "inactive": row.is_active = False
+    if mode == "duplicate":
+        p.env.db.add(ZohoEmailTemplate(zoho_template_id="duplicate", module="Accounts", is_active=True,
+            zoho_synced_at=datetime.now(UTC), encrypted_payload_json=row.encrypted_payload_json))
+    if mode == "unrelated":
+        payload = json.loads(p.env.cipher.decrypt(row.encrypted_payload_json))
+        payload["hub_context_module"] = "leads"
+        row.encrypted_payload_json = p.env.cipher.encrypt(json.dumps(payload))
+    p.env.db.commit()
+    result = p.env.service.execute("finance.orders.email.prepare", {"record_id": str(p.order.id)})
+    context = mailbox_for(p.env.service).get_draft_compose_context(draft_id=result.record_id)
+    assert context["template_id"] == "" and context["content"] == ""
+    assert context["recipient_email"] == p.data["recipient_email"] and context["customer_id"] == p.order.customer_id
+    assert context["subject"] == "Auftrag AU-TEST" and len(context["attachments"]) == 1
+    data = {**p.data, "draft_id": str(result.record_id), "template_id": "", "content": "",
+        "retained_attachment_ids": json.dumps([item["id"] for item in context["attachments"]])}
+    with pytest.raises(ValueError, match="Inhalt"):
+        p.env.service.execute("finance.orders.email.send", data)
+    assert not p.sent
+    p.env.service.execute("finance.orders.email.send", {**data, "content": "<p>Ihr Auftrag im Anhang.</p>"})
+    assert len(p.sent) == 1
+
+
+def test_dedicated_order_template_preferred_over_customer_template(prepared):
+    from app.services.hub_operation_order_email import _order_template
+    customer = SimpleNamespace(id="customer", context_module="customers", name="Auftragsbestätigung")
+    order = SimpleNamespace(id="order", context_module="orders", name="Auftragsbestätigung")
+    assert _order_template([customer, order]) is order
+    assert _order_template([order, customer]) is order
 
 
 def test_button_endpoint_csrf_and_browser_fixture(prepared, monkeypatch):

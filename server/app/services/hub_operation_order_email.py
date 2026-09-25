@@ -46,6 +46,14 @@ def _fingerprint(service, order):
         [(line.position_index, line.article_id, line.encrypted_fields_json) for line in lines]]).encode()).hexdigest()
 
 
+def _order_template(templates):
+    matches = [item for item in templates if item.context_module in {"orders", "customers", "general"}
+               and item.name.strip().casefold() == "auftragsbestätigung"]
+    dedicated = [item for item in matches if item.context_module == "orders"]
+    candidates = dedicated or matches
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def prepare_order_email(service, values):
     if set(values) != {"record_id"}:
         raise HubOperationError("Ungültige Auftragsauswahl.")
@@ -65,19 +73,18 @@ def prepare_order_email(service, values):
     recipient = recipient or next(iter(recipients), None)
     if recipient is None:
         raise HubOperationError("Bitte zuerst eine E-Mail-Adresse beim Kunden oder Ansprechpartner hinterlegen.")
-    templates = [item for item in mailbox.communications.list_email_templates()
-                 if item.context_module == "orders" and item.name.casefold() == "auftragsbestätigung"]
-    if len(templates) != 1:
-        raise HubOperationError('Die aktive Auftragsvorlage „Auftragsbestätigung“ muss genau einmal vorhanden sein.')
+    template = _order_template(mailbox.communications.list_email_templates())
     values = {"customer_id": str(order.customer_id), "recipient_key": recipient.key,
               "recipient_email": recipient.email, "recipient_name": recipient.name,
-              "context_module": "orders", "context_record_id": str(order.id), "template_id": templates[0].id}
-    rendered = render_template(service, values)
+              "context_module": "orders", "context_record_id": str(order.id), "template_id": template.id if template else ""}
+    rendered = render_template(service, values) if template else None
     pdf, content = load_pdf(service, "orders", order.id, source="available")
     attachment = HubArtifact(filename=pdf.filename or f"{order.order_number}.pdf", content=content, content_type="application/pdf")
     drafts = HubOperationService(db=service.db, cipher=service.cipher, actor=service.actor, input_files=(attachment,))
-    result = drafts.execute("emails.drafts.create", {**values, "sender_email": sender,
-        "subject": rendered.subject, "content": rendered.content})
+    # A template choice must not prevent preparing the recipient and PDF.
+    result = drafts.execute("emails.drafts.save", {**values, "sender_email": sender,
+        "subject": rendered.subject if rendered else f"Auftrag {order.order_number}",
+        "content": rendered.content if rendered else ""})
     draft = service.db.get(HubMailboxEmail, result.record_id)
     payload = mailbox._payload(draft.encrypted_payload_json)
     payload["order_dispatch"] = {"order_id": order.id, "customer_id": order.customer_id,

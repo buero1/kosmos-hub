@@ -2,12 +2,16 @@
 
 - Orders have the same header button and shared right-hand composer as invoices.
 - Preparing requires email view/create/edit, finance view, customer scope and a
-  permitted sending mailbox. The existing active orders template named
+  permitted sending mailbox. The existing active template named
   `Auftragsbestaetigung` (German umlaut in the UI) is rendered with the order,
   customer, selected contact and current sender signature context.
+- The standard may be categorized as orders, customers or general, independent
+  of its folder. An unambiguous orders-specific template takes precedence. A
+  missing/ambiguous standard does not block the recipient/PDF: an unsent draft
+  opens without preselected template, ready for manual template selection/text.
 - The order's selected contact supplies the recipient. Without a selected
   contact, the first available customer recipient is proposed. Missing customer,
-  recipient, template or PDF yields an actionable error, not an empty send.
+  recipient or PDF yields an actionable error, not an empty send.
 - Missing template values remain editable in the draft with a warning. Sending
   is blocked until remaining `${...}` placeholders are completed or removed.
 - The latest generated PDF is preferred. The imported original is used only
