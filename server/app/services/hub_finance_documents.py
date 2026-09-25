@@ -476,6 +476,7 @@ class HubFinanceDocumentService:
         if module is ORDER_MODULE:
             values["created_time"] = existing_values.get("created_time") or (document.created_at.isoformat() if document.created_at else "")
             values["modified_time"] = datetime.now(UTC).isoformat()
+            values["currency"] = existing_values.get("currency") or "EUR"
         if module.is_invoice or module.is_dunning:
             values["billing_address"] = existing_values.get("billing_address") or self._billing_address(customer)
         if module.is_recurring:
@@ -488,6 +489,8 @@ class HubFinanceDocumentService:
             setattr(document, module.link_attribute, linked_record)
         document.encrypted_fields_json = self._encrypt(values)
         self._replace_lines(module=module, document=document, submitted_values=submitted_values)
+        if module is ORDER_MODULE:
+            document.unassigned_owner_user_id = None
         self.db.flush()
         return document
 
@@ -876,7 +879,8 @@ class HubFinanceDocumentService:
                 raise HubFinanceDocumentError(f"{self._field(module.fields, module.link_key).label} ist erforderlich.")
             return None
         record = self.db.get(module.link_model, link_id)
-        if record is None or record.customer_id != customer_id:
+        lead_offer = module is ORDER_MODULE and record is not None and record.customer_id is None and record.lead_id is not None
+        if record is None or (record.customer_id != customer_id and not lead_offer):
             raise HubFinanceDocumentError("Der verknüpfte Beleg gehört nicht zum ausgewählten Kunden.")
         return record
 

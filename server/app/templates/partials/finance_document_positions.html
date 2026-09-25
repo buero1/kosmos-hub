@@ -1,4 +1,4 @@
-<article class="card customer-detail-panel finance-positions-panel" data-finance-document-position-editor{% if finance_positions_form_id %} data-finance-document-position-form="{{ finance_positions_form_id }}" data-customer-edit-position-editor data-customer-edit-form="{{ finance_positions_form_id }}" hidden{% endif %}>
+<article class="card customer-detail-panel finance-positions-panel" data-finance-document-position-editor data-finance-document-currency="{{ detail.totals.currency if detail is defined else 'EUR' }}"{% if finance_positions_form_id %} data-finance-document-position-form="{{ finance_positions_form_id }}" data-customer-edit-position-editor data-customer-edit-form="{{ finance_positions_form_id }}" hidden{% endif %}>
   <div class="customer-detail-panel-heading"><div><p class="eyebrow">Repeater</p><h3>Positionen</h3></div>{% if finance_position_preset_library_key %}<div class="finance-position-preset-open-actions"><button class="button button-secondary button-variant-1" type="button" data-finance-position-preset-open="load">Laden</button><button class="button button-secondary button-variant-1" type="button" data-finance-position-preset-open="save">Speichern</button></div>{% endif %}</div>
   <div class="table-scroll">
     <table class="finance-positions-table">
@@ -49,7 +49,7 @@
       if (!form) { return; }
       var rows = editor.querySelector('[data-finance-document-position-rows]');
       var template = editor.querySelector('[data-finance-document-position-template]');
-      var currency = function () { var field = form.querySelector('select[name="document_field__currency"]'); return field && field.value ? field.value : 'EUR'; };
+      var currency = function () { var field = form.querySelector('select[name="document_field__currency"]'); return field && field.value ? field.value : editor.dataset.financeDocumentCurrency || 'EUR'; };
       function update() {
         var sums = { subtotal: 0, net: 0, tax: 0 };
         rows.querySelectorAll('[data-finance-document-position-row]').forEach(function (row) {

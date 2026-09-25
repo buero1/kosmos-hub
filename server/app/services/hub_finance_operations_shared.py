@@ -6,6 +6,7 @@ from typing import Mapping
 
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer
+from app.models.hub_finance_documents import HubFinanceOrder
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES, HubFinanceDocumentService
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
@@ -47,7 +48,7 @@ def parent_visible(record, user, access):
     # Only the creator can access their unassigned copy; old orphans stay admin-only.
     if not parents:
         return user.role == "admin" or (
-            isinstance(record, HubFinanceOffer) and record.unassigned_owner_user_id == user.id
+            isinstance(record, (HubFinanceOffer, HubFinanceOrder)) and record.unassigned_owner_user_id == user.id
         )
     return all(access.can_access_record(user=user, module_key=module, record_id=record_id)
                for module, record_id in parents)
@@ -107,6 +108,10 @@ def finance_options(service, kind):
         links = tuple(item for item in HubFinanceDocumentService(db=service.db, cipher=service.cipher).link_options(
             module=FINANCE_DOCUMENT_MODULES[kind],
         ) if item.customer_id in allowed_customers)
+        if kind == "orders":
+            from app.services.hub_finance_documents import FinanceDocumentLinkOption
+            links = tuple(FinanceDocumentLinkOption(entry.offer.id, entry.offer_number, entry.offer.customer_id)
+                          for entry in domain.list_offers() if parent_visible(entry.offer, user, access))
     return {"customers": customers, "contacts": contacts, "leads": leads, "link_options": links}
 
 

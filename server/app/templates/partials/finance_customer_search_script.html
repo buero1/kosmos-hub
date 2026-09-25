@@ -25,7 +25,7 @@
         });
       }
       function filterLinkedRecords() {
-        if (!linkedRecord) return;
+        if (!linkedRecord || !selectedId.value) return;
         Array.from(linkedRecord.options).forEach(function (option) {
           if (!option.dataset.customerId) return;
           var available = option.dataset.customerId === selectedId.value;

@@ -1819,6 +1819,23 @@ async def discard_finance_offer_copy(offer_id: int, request: Request, db: Annota
     return RedirectResponse(url=result.href, status_code=303)
 
 
+@router.post("/finance/offers/{offer_id}/convert-to-order")
+async def convert_finance_offer_to_order(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = _require_hub_admin(request)
+    try:
+        result = _finance_gateway(request, db).execute("finance.offers.convert_to_order", {"record_id": str(offer_id)})
+    except ValueError as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/offers/{offer_id}?{query}", status_code=303)
+    write_audit_log(db, site=None, actor=user.username, source="hub-web", action="convert-finance-offer-to-order", result="ok",
+                    detail=f"Opened Finance Order draft {result.record_id} from Offer {offer_id}; source unchanged.")
+    db.commit()
+    return RedirectResponse(url=result.href, status_code=303)
+
+
 @router.post("/finance/offers/{offer_id}/delete")
 async def delete_finance_offer(offer_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     form = await request.form()
@@ -7677,8 +7694,11 @@ def _finance_offer_detail_context(
         line_rows = _finance_offer_line_form_rows(service.new_offer_values())
     options = finance_options(_finance_gateway(request, service.db), "offers")
     pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type="offers")
+    user = _require_hub_admin(request)
+    access = HubAccessControlService(db=service.db)
     return {
         "detail": detail,
+        "can_convert_to_order": access.can(user, "finance", "create") and access.can(user, "finance", "edit"),
         "articles": service.article_options(),
         "customers": options["customers"],
         "leads": options["leads"],

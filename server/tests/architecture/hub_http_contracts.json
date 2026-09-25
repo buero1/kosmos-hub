@@ -2026,7 +2026,7 @@
       "reader_method": "load_pdf"
     },
     "app/api/routes/web.py:finance_offer_detail_page:GET:/finance/offers/{offer_id}": {
-      "fingerprint": "d103915b9b1fb0c9c75a680a6b4f15135d2b7f4aef7c8ec6898ef24caf726e25",
+      "fingerprint": "13e328b49cc3ad9b80367688e0e072bae07be97c9f2ad03c4d918b7f680a3731",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -3391,6 +3391,14 @@
       "reason": "Admin-only, CSRF-protected and explicitly confirmed plugin policy queues the same durable wordpress.plugins.auto_updates operation as the agent. Validated explicit site/plugin lists, execution-time permissions, signed Bridge verification and per-site persisted results; no writes in the HTTP request and no automatic retry. Covered by Python, PHP and browser tests.",
       "contracts": ["wordpress.plugins.auto_updates"],
       "boundary": ["HubOperationService", "execute"]
+    },
+    "app/api/routes/web.py:convert_finance_offer_to_order:POST:/finance/offers/{offer_id}/convert-to-order": {
+      "fingerprint": "de925729570e6e16e038b4cf64ab73a3947f440e8adcb5a060d2e089a8d4d58a",
+      "state": "shared",
+      "reason": "CSRF-protected menu and confirmed agent use the same operation. Finance view/create/edit plus source visibility required, private unfinished order drafts, copied line snapshots, unchanged source, edit-mode redirect, no PDF or mail generation, rollback and repeat-click safety.",
+      "contracts": ["finance.offers.convert_to_order"],
+      "boundary": ["_finance_gateway", "execute"],
+      "reader_method": "convert_offer_to_order"
     },
     "app/api/routes/accounts.py:select_openai_model:POST:/openai/model": {
       "fingerprint": "fd5aaa98542f7a9655efbebe4332c242268a657fd9fb320f1a5a9797833d8e5a",

@@ -12,6 +12,7 @@ from app.models.hub_user import HubUser
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.hub_access_control import HubAccessControlService
 from app.services.hub_finance import HubFinanceService
+from app.services.hub_finance_offer_conversion import convert_offer_to_order
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS, OFFER_FIELDS
 from app.services.hub_finance_operations_shared import merge_form, require_record
 from app.services.hub_finance_pdf_readers import load_pdf
@@ -106,6 +107,21 @@ def _duplicate_offer(service: HubOperationService, values: Mapping[str, str]) ->
     offer = HubFinanceService(db=service.db, cipher=service.cipher).duplicate_offer(offer_id=source.id, owner_user_id=user.id)
     return HubOperationResult("Kopie bearbeiten", f"/finance/offers/{offer.id}?edit=true", offer.id,
                               outputs={"offer_number": offer.offer_number, "customer_id": "", "lead_id": ""})
+
+
+def _convert_offer_to_order(service: HubOperationService, values: Mapping[str, str]) -> HubOperationResult:
+    user, access = require_actor(service, "finance", "create")
+    if not access.can(user, "finance", "edit"):
+        raise HubOperationError("Zum Bearbeiten des Auftrags fehlt die Berechtigung.")
+    if set(values) != {"record_id"} or not isinstance(values["record_id"], str):
+        raise HubOperationError("Bitte nur die ID des umzuwandelnden Angebots angeben.")
+    offer_id = identifier(values["record_id"])
+    service.db.scalar(select(HubFinanceOffer).where(HubFinanceOffer.id == offer_id)
+                      .with_for_update().execution_options(populate_existing=True))
+    source = require_record(service, "offers", offer_id)
+    order = convert_offer_to_order(db=service.db, cipher=service.cipher, offer_id=source.id, owner_user_id=user.id)
+    return HubOperationResult("Auftrag bearbeiten", f"/finance/orders/{order.id}?edit=true", order.id,
+                              outputs={"order_number": order.order_number, "offer_id": str(source.id)})
 
 
 def _offer_recipient(service: HubOperationService, offer: HubFinanceOffer) -> tuple[str, str]:
@@ -271,4 +287,13 @@ register_operation(HubOperation(
     input_fields=lambda: (HubOperationInputField("record_id", "Angebotskopie-ID", required=True),),
     preview_fields=(("record_id", "Zu verwerfende Angebotskopie-ID"),),
     execute=_discard_offer_copy,
+))
+
+register_operation(HubOperation(
+    key="finance.offers.convert_to_order", module="finance", label="In Auftrag umwandeln",
+    description="Kopiert alle Angebotspositionen in einen neuen Auftragsentwurf. Das Angebot bleibt unveraendert; weitere Auftragsdaten werden manuell ergaenzt. Keine PDF oder E-Mail wird erzeugt.",
+    input_guide="record_id des lesbaren Quellangebots. Finance-Lese-, Anlege- und Bearbeitungsrecht erforderlich. Ein eigener noch unfertiger Entwurf wird erneut geoeffnet statt dupliziert.",
+    input_fields=lambda: (HubOperationInputField("record_id", "Quellangebot-ID", required=True),),
+    preview_fields=(("record_id", "Quellangebot-ID"),), execute=_convert_offer_to_order,
+    result_fields=(("order_number", "Auftragsnummer"), ("offer_id", "Unveraendertes Quellangebot")),
 ))

@@ -13,6 +13,7 @@ class HubFinanceOrder(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     order_number: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    unassigned_owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id", ondelete="SET NULL"), nullable=True, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
     contact_id: Mapped[int | None] = mapped_column(ForeignKey("customer_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
     offer_id: Mapped[int | None] = mapped_column(ForeignKey("hub_finance_offers.id", ondelete="SET NULL"), nullable=True, index=True)

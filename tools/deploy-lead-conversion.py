@@ -1,4 +1,4 @@
-"""Guarded conversion release (or --date-correction); deploy only Git archives."""
+"""Guarded conversion releases; deploy only verified Git archives."""
 import hashlib
 import json
 import os
@@ -12,6 +12,8 @@ from urllib.request import urlopen
 
 root = Path('/opt/kosmos-hub/app/server')
 release_prefix = 'lead-manual-dates' if '--date-correction' in sys.argv else 'lead-conversion'
+if '--offer-order' in sys.argv:
+    release_prefix = 'offer-to-order'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -38,6 +40,15 @@ expected = {
 }
 if '--date-correction' in sys.argv:
     expected = {'app/services/hub_workflows.py'}
+if '--offer-order' in sys.argv:
+    expected = {
+        'app/api/routes/web.py', 'app/main.py', 'app/models/hub_finance_documents.py',
+        'app/services/hub_finance_documents.py', 'app/services/hub_finance_offer_conversion.py',
+        'app/services/hub_finance_operations_shared.py', 'app/services/hub_operation_offers.py',
+        'app/templates/finance_document_detail.html', 'app/templates/finance_offer_detail.html',
+        'app/templates/partials/finance_customer_search_script.html',
+        'app/templates/partials/finance_document_positions.html',
+    }
 assert old.keys() <= new.keys()
 changes = {name for name in new if old.get(name) != new[name]}
 assert changes == expected, changes

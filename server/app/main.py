@@ -484,6 +484,16 @@ def _ensure_phase_one_schema() -> None:
 
     if "hub_finance_orders" in table_names:
         order_columns = {column["name"] for column in inspector.get_columns("hub_finance_orders")}
+        if "unassigned_owner_user_id" not in order_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_finance_orders "
+                    "ADD COLUMN unassigned_owner_user_id INT NULL, "
+                    "ADD INDEX ix_hub_finance_orders_unassigned_owner_user_id (unassigned_owner_user_id), "
+                    "ADD CONSTRAINT fk_hub_finance_orders_unassigned_owner "
+                    "FOREIGN KEY (unassigned_owner_user_id) REFERENCES hub_users (id) ON DELETE SET NULL"
+                ))
+            logger.info("Added private ownership for unfinished order conversions.")
         if "zoho_crm_id" not in order_columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE hub_finance_orders ADD COLUMN zoho_crm_id VARCHAR(255) NULL"))
