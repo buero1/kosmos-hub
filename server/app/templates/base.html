@@ -6705,7 +6705,11 @@
                 globalMailboxLoadSuggestedRecipients(customerId);
               }
               globalMailboxUpdateSubmit();
-              window.setTimeout(function () { (globalMailboxRecipient || globalMailboxSubject).focus(); }, 230);
+              window.setTimeout(function () {
+                if (globalMailboxComposer.classList.contains("is-open") && !globalMailboxDrawer.contains(document.activeElement)) {
+                  (globalMailboxRecipient || globalMailboxSubject).focus();
+                }
+              }, 230);
             });
           }
 
@@ -6753,6 +6757,9 @@
           }
 
           function globalMailboxPrepareInvoice(button) {
+            var isOrder = Boolean(button.dataset.orderEmailCompose);
+            var kind = isOrder ? "orders" : "invoices";
+            var recordId = isOrder ? button.dataset.orderEmailCompose : button.dataset.invoiceEmailCompose;
             button.disabled = true;
             globalMailboxResetAction(false);
             globalMailboxOpen(button);
@@ -6762,12 +6769,12 @@
             globalMailboxLoadOptions().then(function () {
               var body = new FormData();
               body.set("csrf_token", globalMailboxForm.querySelector('[name="csrf_token"]').value);
-              return window.fetch("/finance/invoices/" + encodeURIComponent(button.dataset.invoiceEmailCompose) + "/email-compose", {
+              return window.fetch("/finance/" + kind + "/" + encodeURIComponent(recordId) + "/email-compose", {
                 method: "POST", body: body, credentials: "same-origin", headers: { Accept: "application/json" }
               });
             }).then(function (response) {
               return response.json().then(function (payload) {
-                if (!response.ok) throw new Error(payload.detail || "Die Rechnungs-E-Mail konnte nicht vorbereitet werden.");
+                if (!response.ok) throw new Error(payload.detail || "Die Beleg-E-Mail konnte nicht vorbereitet werden.");
                 return payload;
               });
             }).then(function (action) {
@@ -6777,11 +6784,11 @@
               globalMailboxSender.value = action.sender_email;
               globalMailboxTemplate.value = globalMailboxTemplateId.value = action.template_id || "";
               var template = globalMailboxTemplates.find(function (item) { return item.id === action.template_id; });
-              globalMailboxTemplateSearch.value = template ? template.name : "Rechnungen senden";
+              globalMailboxTemplateSearch.value = template ? template.name : (isOrder ? "Auftragsbestätigung" : "Rechnungen senden");
               globalMailboxStoredAttachments = action.attachments || [];
               globalMailboxSetAttachments([]);
               globalMailboxScheduledAt.closest("label").hidden = true;
-              globalMailboxStatusMessage("Rechnungsvorlage und PDF sind vorbereitet. Bitte prüfen und anschließend selbst senden.");
+              globalMailboxStatusMessage((isOrder ? "Auftragsvorlage" : "Rechnungsvorlage") + " und PDF sind vorbereitet. Bitte prüfen und anschließend selbst senden.");
             }).catch(function (error) {
               if (session === globalMailboxDraftSession) globalMailboxStatusMessage(error.message, true);
             }).finally(function () {
@@ -6895,7 +6902,7 @@
           });
           globalMailboxContent.addEventListener("input", globalMailboxScheduleDraftSave);
           document.addEventListener("click", function (event) {
-            var invoiceButton = event.target.closest("[data-invoice-email-compose]");
+            var invoiceButton = event.target.closest("[data-invoice-email-compose], [data-order-email-compose]");
             if (invoiceButton) {
               event.preventDefault();
               globalMailboxPrepareInvoice(invoiceButton);

@@ -24,6 +24,8 @@ if '--recurring-status' in sys.argv:
     release_prefix = 'recurring-status'
 if '--order-placeholders' in sys.argv:
     release_prefix = 'order-placeholders'
+if '--order-compose' in sys.argv:
+    release_prefix = 'order-compose'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -90,6 +92,14 @@ if '--recurring-status' in sys.argv:
 if '--order-placeholders' in sys.argv:
     expected = {
         'app/services/template_placeholders.py', 'app/services/hub_finance_pdf_generation.py',
+    }
+if '--order-compose' in sys.argv:
+    expected = {
+        'app/api/routes/web.py', 'app/services/hub_access_control.py',
+        'app/services/customer_communications.py', 'app/services/hub_mailbox.py',
+        'app/services/hub_operation_order_email.py', 'app/templates/base.html',
+        'app/services/hub_template_contexts.py',
+        'app/templates/emails.html', 'app/templates/finance_document_detail.html',
     }
 assert changes == expected, changes
 for name, data in old.items():

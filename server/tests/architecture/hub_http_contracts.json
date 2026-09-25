@@ -1966,7 +1966,7 @@
       "reader_method": "finance_entries"
     },
     "app/api/routes/web.py:finance_document_detail_page:GET:/finance/{module_key}/{document_id}": {
-      "fingerprint": "484d22a44fc97dc33c5b45d18adc5890016ad024281e56fd0a006e71c68b8161",
+      "fingerprint": "08d312527470262ceaf4e6db3a21c1b103b32dcadd9d788f6043241a175b7786",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2641,14 +2641,14 @@
       ]
     },
     "app/api/routes/web.py:send_customer_communication_email:POST:/customers/{customer_id}/communications/emails": {
-      "fingerprint": "6688c27d4008af04673808ab3d631cdfd8da7b20e9dabc1c9c0a5dc68d80e1f4",
+      "fingerprint": "4bc4969fd2138cf3e1e24c2e13bf3a8b3f724c0c38d352bf33ebb89d31e5357e",
       "state": "human_only",
-      "reason": "Human-only send. Invoice drafts delegate to finance.invoices.email.send (not agent-enabled) with current record/mailbox permissions, protected PDF metadata and durable delivery journal; regular customer mail remains unchanged."
+      "reason": "Human-only send. Invoice and order drafts delegate to non-agent send operations with record/mailbox permissions, protected PDF metadata and durable send claims. Order messages retain their explicit customer link even with edited recipient addresses; regular customer mail remains unchanged."
     },
     "app/api/routes/web.py:send_direct_mailbox_email:POST:/emails/send": {
-      "fingerprint": "7a72d80f22d2add8e099ca143764c462d3f770b4c43aad9629b79db46cd02b34",
+      "fingerprint": "563b63f5d1aebde9e357f2861c319eb606ab52ad6dd4fee73fc3272d0dd18c4e",
       "state": "human_only",
-      "reason": "Sending/scheduling stays human-only. Invoice drafts use the non-agent invoice send operation with durable tracking even after reopening; lead ID propagation and parent locks, scheduled FK, sent-mail JSON links and shared deletion guards are preserved."
+      "reason": "Sending/scheduling stays human-only. Invoice/order drafts delegate to protected non-agent send operations even after reopening or entering free recipient addresses. Order mail retains its explicit customer link; regular lead, scheduling and deletion semantics are preserved."
     },
     "app/api/routes/web.py:deletion_preview:GET:/deletion-preview": {
       "fingerprint": "9662653ac69a1141292986254073b67a1d467fff3de2bf67ae6490ee521ecd30",
@@ -3399,6 +3399,13 @@
       "contracts": ["finance.offers.convert_to_order"],
       "boundary": ["_finance_gateway", "execute"],
       "reader_method": "convert_offer_to_order"
+    },
+    "app/api/routes/web.py:prepare_finance_order_email:POST:/finance/orders/{order_id}/email-compose": {
+      "fingerprint": "cc4cf77b25f0ea6299b43374590c416018da42578a6aeab6b4346c3041981589",
+      "state": "shared",
+      "reason": "CSRF-protected order draft preparation; finance/customer scope, mailbox send permission, order template and local PDF required. Manual send delegates from both existing send routes to the non-agent order operation with durable claim, PDF validation and explicit customer link including edited recipient addresses.",
+      "contracts": ["finance.orders.email.prepare"],
+      "boundary": ["_finance_gateway", "execute"]
     },
     "app/api/routes/web.py:prepare_finance_invoice_email:POST:/finance/invoices/{invoice_id}/email-compose": {
       "fingerprint": "2225f03c9d4a28d10fafb1af9115b9f7a0841185d215ab6c8c8a1aa5f8de9eee",

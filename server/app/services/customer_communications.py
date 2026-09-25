@@ -1226,6 +1226,7 @@ class CustomerCommunicationService:
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
         message_id: str | None = None,
         dunning_id: int | None = None,
+        recipient_override: CustomerCommunicationRecipient | None = None,
     ) -> CustomerCommunicationActionResult:
         from app.services.hub_mailbox_permissions import MailboxPermissions
         from app.core.mailbox_actor import resolve_mailbox_actor
@@ -1248,6 +1249,7 @@ class CustomerCommunicationService:
                 attachments=attachments,
                 message_id=message_id,
                 dunning_id=dunning_id,
+                recipient_override=recipient_override,
             )
         customer = self._require_zoho_customer(customer_id)
         sender = next(
@@ -1256,7 +1258,7 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle eine aktuell von Zoho erlaubte Absenderadresse aus.")
-        recipient = next((item for item in self._recipients_for_customer(
+        recipient = recipient_override or next((item for item in self._recipients_for_customer(
             customer, include_account_email=not recipient_key.startswith("contact:")
         ) if item.key == recipient_key), None)
         if recipient is None:
@@ -1382,6 +1384,7 @@ class CustomerCommunicationService:
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
         message_id: str | None,
         dunning_id: int | None,
+        recipient_override: CustomerCommunicationRecipient | None = None,
     ) -> CustomerCommunicationActionResult:
         """Send through Mittwald and save the exact outgoing message before IMAP sees Sent."""
         customer = self._require_customer(customer_id)
@@ -1391,7 +1394,7 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
-        recipient = next((item for item in self._recipients_for_customer(
+        recipient = recipient_override or next((item for item in self._recipients_for_customer(
             customer, include_account_email=not recipient_key.startswith("contact:")
         ) if item.key == recipient_key), None)
         if recipient is None:

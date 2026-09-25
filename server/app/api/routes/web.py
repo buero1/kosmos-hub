@@ -1981,6 +1981,25 @@ def prepare_finance_invoice_email(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/finance/orders/{order_id}/email-compose", response_class=JSONResponse)
+def prepare_finance_order_email(
+    order_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _finance_gateway(request, db).execute("finance.orders.email.prepare", {"record_id": str(order_id)})
+        db.commit()
+        return HubMailboxService(db=db, cipher=get_secret_cipher(), actor=user.username,
+            public_base_url=get_settings().public_base_url).get_draft_compose_context(draft_id=result.record_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/finance/{module_key}", response_class=HTMLResponse)
 def finance_documents_page(
     module_key: str,
@@ -7941,6 +7960,10 @@ def _finance_document_detail_context(
             module.is_invoice and current_user is not None
             and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
         ),
+        "can_create_order_email": bool(
+            module.key == "orders" and current_user is not None
+            and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
+        ),
         "can_create_dunning_email": bool(
             can_view_dunning_emails
             and detail.document.customer_id is not None
@@ -8138,9 +8161,11 @@ def _contact_detail_context(
 
 async def _dispatch_invoice_draft(request, db, user, draft_id, attachments, *, customer_id=None):
     from app.services.hub_operation_invoice_email import SEND_FIELDS, invoice_draft_metadata
+    from app.services.hub_operation_order_email import order_draft_metadata
     gateway = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username,
         input_files=tuple(HubArtifact(filename=item.filename, content=item.content, content_type=item.content_type) for item in attachments))
-    if not invoice_draft_metadata(gateway, draft_id):
+    is_order = bool(order_draft_metadata(gateway, draft_id))
+    if not is_order and not invoice_draft_metadata(gateway, draft_id):
         return None
     form = await request.form()
     values = {key: str(form.get(key, "")) for key in SEND_FIELDS}
@@ -8148,7 +8173,7 @@ async def _dispatch_invoice_draft(request, db, user, draft_id, attachments, *, c
         if values["recipient_customer_id"] not in ("", str(customer_id)):
             raise ValueError("Der Entwurf gehört zu einem anderen Kunden.")
         values["recipient_customer_id"] = str(customer_id)
-    result = gateway.execute("finance.invoices.email.send", values)
+    result = gateway.execute("finance.orders.email.send" if is_order else "finance.invoices.email.send", values)
     return _email_compose_response(request, RedirectResponse(url=result.href, status_code=303))
 
 

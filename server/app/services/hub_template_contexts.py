@@ -3,7 +3,9 @@
 from datetime import UTC, datetime
 import re
 from zoneinfo import ZoneInfo
+from sqlalchemy import select
 
+from app.models.hub_lead_conversion import HubLeadConversion
 from app.models.site import Site
 from app.services.customer_activities import CALL_STATUS_OPTIONS, CALL_DIRECTION_OPTIONS, CALL_REMINDER_CHANNEL_OPTIONS
 from app.services.hub_crm_readers import HubCrmReadService
@@ -135,8 +137,12 @@ def record_values(service, kind, record_id):
         module = FINANCE_DOCUMENT_MODULES.get(kind)
         linked = getattr(row, module.link_attribute, None) if module and module.link_attribute else None
         if linked is not None:
-            related, parent, _ = record_values(service, module.link_attribute + "s", linked.id)
-            if parent != row.customer_id:
+            related, parent, related_lead = record_values(service, module.link_attribute + "s", linked.id)
+            converted_offer = kind == "orders" and parent is None and related_lead is not None and row.customer_id is not None and service.db.scalar(
+                select(HubLeadConversion.id).where(HubLeadConversion.lead_id == related_lead,
+                                                   HubLeadConversion.customer_id == row.customer_id)
+            ) is not None
+            if parent != row.customer_id and not converted_offer:
                 raise HubOperationError("Der verknuepfte Beleg gehoert zu einem anderen Kunden.")
             tokens.update(related)
         lead = getattr(row, "lead_id", None)

@@ -3,9 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
-const root = path.resolve('tmp/invoice-composer-browser');
+const isOrder = process.argv.includes('--orders');
+const kind = isOrder ? 'orders' : 'invoices';
+const noun = isOrder ? 'order' : 'invoice';
+const templateName = isOrder ? 'Auftragsbestätigung' : 'Rechnungen senden';
+const root = path.resolve(`tmp/${noun}-composer-browser`);
 const data = JSON.parse(fs.readFileSync(path.join(root, 'data.json'), 'utf8'));
-const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
 
 (async () => {
   const browser = await chromium.launch({headless: true, ...(process.platform === 'win32' ? {channel: 'msedge'} : {})});
@@ -22,7 +26,7 @@ const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
           if (url.hostname !== 'hub.test') return route.abort();
           if (url.pathname === '/emails/compose/options') return route.fulfill({json: {
             senders: [{email: data.context.sender_email, name: 'Test sender', can_send: true}],
-            templates: [{id: data.context.template_id, name: 'Rechnungen senden', module: 'Accounts'}],
+            templates: [{id: data.context.template_id, name: templateName, module: 'Accounts'}],
             default_sender_email: data.context.sender_email,
           }});
           if (url.pathname.endsWith('/email-compose')) {
@@ -42,9 +46,9 @@ const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
             sent.push(request.postData());
             return scenario === 'send-error'
               ? route.fulfill({status: 400, json: {detail: 'Versand fehlgeschlagen. Der Entwurf bleibt erhalten.'}})
-              : route.fulfill({json: {redirect_url: `/finance/invoices/${data.invoice}?email=success`}});
+              : route.fulfill({json: {redirect_url: `/finance/${kind}/${data[noun]}?email=success`}});
           }
-          if (url.pathname === `/finance/invoices/${data.invoice}`) return route.fulfill({contentType: 'text/html', body: html});
+          if (url.pathname === `/finance/${kind}/${data[noun]}`) return route.fulfill({contentType: 'text/html', body: html});
           if (url.pathname.startsWith('/static/')) {
             const file = path.resolve('app', '.' + url.pathname);
             if (file.startsWith(path.resolve('app/static') + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
@@ -55,8 +59,8 @@ const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
           }
           return route.fulfill({json: {items: [], notifications: [], recipients: [], count: 0}});
         });
-        await page.goto(`http://hub.test/finance/invoices/${data.invoice}`);
-        await page.locator('[data-invoice-email-compose]').click();
+        await page.goto(`http://hub.test/finance/${kind}/${data[noun]}`);
+        await page.locator(`[data-${noun}-email-compose]`).click();
         const drawer = page.locator('[data-global-mailbox-composer]');
         const status = drawer.locator('[data-email-compose-template-status]');
         if (scenario === 'prepare-error') {
@@ -64,14 +68,15 @@ const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
         } else {
-          await status.filter({hasText: 'Rechnungsvorlage und PDF'}).waitFor();
+          await status.filter({hasText: isOrder ? 'Auftragsvorlage und PDF' : 'Rechnungsvorlage und PDF'}).waitFor();
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
           assert.equal(await drawer.locator('[name="subject"]').inputValue(), data.context.subject);
           assert.equal(await drawer.locator('[name="recipient_email"]').inputValue(), data.context.recipient_email);
-          assert.equal(await drawer.locator('[data-global-mailbox-template-search]').inputValue(), 'Rechnungen senden');
+          assert.equal(await drawer.locator('[data-global-mailbox-template-search]').inputValue(), templateName);
+          assert.equal(await drawer.locator('[name="recipient_customer_id"]').inputValue(), String(data.context.customer_id));
           assert.equal(await drawer.locator('[data-email-compose-attachment-list] a').count(), 1);
-          assert.match(await drawer.locator('[data-email-compose-attachment-list]').innerText(), /RE-TEST.pdf/);
+          assert.match(await drawer.locator('[data-email-compose-attachment-list]').innerText(), isOrder ? /AU-TEST.pdf/ : /RE-TEST.pdf/);
           assert.equal(await drawer.locator('[name="scheduled_at"]').isVisible(), false);
           await drawer.locator('[name="subject"]').fill('My edited invoice subject');
           const editor = drawer.frameLocator('.jodit-wysiwyg_iframe').locator('body');
@@ -103,7 +108,7 @@ const html = fs.readFileSync(path.join(root, 'invoice.html'), 'utf8');
         await page.close();
       }
     }
-    console.log('Invoice composer: template/PDF, edited manual send, duplicate guard and recoverable errors passed at 1263/390px.');
+    console.log(`${noun} composer: template/PDF, customer link, edited manual send, duplicate guard and recoverable errors passed at 1263/390px.`);
   } finally {
     await browser.close();
   }

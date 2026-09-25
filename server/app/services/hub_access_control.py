@@ -529,6 +529,8 @@ class HubAccessControlService:
 
 
 def permission_target(path: str, method: str) -> tuple[str, str] | None:
+    if method.upper() == "POST" and re.fullmatch(r"/finance/(?:orders|invoices)/\d+/email-compose", path):
+        return "emails", "create"
     if path == "/":
         module_key = "dashboard"
     elif re.match(r"^/customers/\d+/communications/emails", path):

@@ -461,6 +461,14 @@ class HubMailboxService:
                 raise ValueError("Der Entwurf wurde nicht gefunden.")
 
         existing_payload = self._payload(draft.encrypted_payload_json) if draft_id is not None else {}
+        if existing_payload.get("order_dispatch"):
+            from app.services.hub_operation_order_email import require_editable_order_draft
+            metadata = existing_payload["order_dispatch"]
+            require_editable_order_draft(metadata)
+            if recipient_customer_id not in (None, metadata["customer_id"]) or recipient_lead_id is not None:
+                raise ValueError("Der Auftragsentwurf gehört zu einem anderen Kunden.")
+            recipient_customer_id = metadata["customer_id"]
+            context_module, context_record_id = "orders", str(metadata["order_id"])
         if existing_payload.get("invoice_dispatch"):
             from app.services.hub_operation_invoice_email import require_editable_invoice_draft
             require_editable_invoice_draft(self.db, existing_payload["invoice_dispatch"])
@@ -541,6 +549,8 @@ class HubMailboxService:
         draft.direction = "outbound"
         if existing_payload.get("invoice_dispatch"):
             payload["invoice_dispatch"] = existing_payload["invoice_dispatch"]
+        if existing_payload.get("order_dispatch"):
+            payload["order_dispatch"] = existing_payload["order_dispatch"]
         draft.is_unread = False
         draft.mailbox_state = _DRAFT_MAILBOX_STATE
         draft.encrypted_payload_json = self.cipher.encrypt(json.dumps(payload, ensure_ascii=False))
@@ -755,6 +765,7 @@ class HubMailboxService:
             "action": "draft",
             "draft_id": draft.id,
             "invoice_id": (payload.get("invoice_dispatch") or {}).get("invoice_id"),
+            "order_id": (payload.get("order_dispatch") or {}).get("order_id"),
             "sender_email": self._text(payload.get("sender")) or "",
             "recipient": recipient,
             "recipient_email": recipient_email,
