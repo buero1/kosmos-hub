@@ -203,7 +203,11 @@ ipcMain.handle("notifier:complete", async function (_event, notificationIds) {
   return result;
 });
 
-ipcMain.handle("notifier:open-customer", function (_event, customerId) {
+ipcMain.handle("notifier:open-hub-path", function (_event, hubPath) {
   const config = readConfig();
-  if (config) shell.openExternal(`${config.serverUrl}/customers/${customerId}#customer-activities`);
+  if (!config) throw new Error("Bitte zuerst den Hub verbinden.");
+  if (typeof hubPath !== "string" || !/^\/(?:activities\/(?:call|meeting|task)\/\d+|customers\/\d+|contacts\/\d+|leads\/\d+|cases\/\d+)$/.test(hubPath)) {
+    throw new Error("Dieser Hub-Link ist ungültig.");
+  }
+  return shell.openExternal(`${config.serverUrl}${hubPath}`);
 });

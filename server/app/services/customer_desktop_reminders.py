@@ -4,10 +4,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.security import get_secret_cipher
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerCallActivity, CustomerMeetingActivity, CustomerTaskActivity
 from app.models.customer_activity_reminder_notification import CustomerActivityReminderNotification
 from app.models.hub_user import HubUser
+from app.services.hub_leads import HubLeadService
 
 
 SNOOZE_MINUTES_OPTIONS = (1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440, 2880, 4320, 5760, 10080, 20160)
@@ -43,6 +45,7 @@ class DesktopReminderView:
     remind_at: datetime
     due_at: datetime
     reference: str = ""
+    related_name: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +58,7 @@ class DesktopReminderView:
             "activity_url": self.activity_url,
             "related_label": self.related_label,
             "related_url": self.related_url,
+            "related_name": self.related_name,
             "activity_name": self.activity_name,
             "customer_name": self.customer_name,
             "starts_at": self.starts_at.replace(tzinfo=UTC).isoformat(),
@@ -82,6 +86,7 @@ class CustomerDesktopReminderService:
             notifications.extend(item for item in candidates if item.id is None)
             notifications.sort(key=lambda item: (item.remind_at, item.id or 0))
         customer_names: dict[int, str] = {}
+        lead_names: dict[int, str] = {}
         views: list[DesktopReminderView] = []
         for notification in notifications:
             due_at = notification.snoozed_until or notification.remind_at
@@ -113,10 +118,16 @@ class CustomerDesktopReminderService:
                 continue
             related_label = None
             related_url = None
+            related_name = None
             if customer_id is not None:
                 related_label, related_url = "Kunde", f"/customers/{customer_id}"
+                related_name = customer_name
             elif activity.lead_id is not None:
                 related_label, related_url = "Lead", f"/leads/{activity.lead_id}"
+                if activity.lead_id not in lead_names:
+                    lead = HubLeadService(db=self.db, cipher=get_secret_cipher()).get_detail(lead_id=activity.lead_id)
+                    lead_names[activity.lead_id] = lead.name if lead is not None else f"Lead {activity.lead_id}"
+                related_name = lead_names[activity.lead_id]
             elif isinstance(activity, CustomerTaskActivity) and activity.case_id is not None:
                 related_label, related_url = "Fall", f"/cases/{activity.case_id}"
             views.append(
@@ -129,6 +140,7 @@ class CustomerDesktopReminderService:
                     activity_url=f"/activities/{notification.activity_kind}/{notification.activity_id}",
                     related_label=related_label,
                     related_url=related_url,
+                    related_name=related_name,
                     activity_name=activity.name,
                     customer_name=customer_name,
                     starts_at=starts_at,

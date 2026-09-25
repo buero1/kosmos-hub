@@ -69,6 +69,7 @@ def test_lead_calls_are_separate_from_customer_calls_and_link_back_to_lead(monke
 
         due = CustomerDesktopReminderService(db=db).list_due_reminders(user=user)
         assert due[0].as_dict()["related_label"] == "Lead"
+        assert due[0].as_dict()["related_name"] == "Erika Test"
         assert due[0].as_dict()["related_url"] == f"/leads/{lead.id}"
         assert due[0].as_dict()["activity_url"] == f"/activities/call/{call.id}"
 

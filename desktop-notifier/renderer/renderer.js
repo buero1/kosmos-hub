@@ -67,20 +67,31 @@ function formatAppointment(startsAt) {
 function render(payload) {
   // A successful reminder update confirms that the saved device pairing is usable.
   showConfiguredView();
+  const previousReminders = reminders;
   reminders = payload.reminders || [];
   const availableIds = new Set(reminders.map(function (reminder) { return reminder.id; }));
   selectedReminderIds = new Set([...selectedReminderIds].filter(function (id) { return availableIds.has(id); }));
+  // Select a newly sole reminder, but preserve a deliberate deselection on refresh.
+  if (reminders.length === 1 && (previousReminders.length !== 1 || previousReminders[0].id !== reminders[0].id)) {
+    selectedReminderIds.add(reminders[0].id);
+  }
   reminderList.innerHTML = reminders.map(function (reminder) {
     const selected = selectedReminderIds.has(reminder.id);
-    const hubLink = reminder.customer_id
-      ? `<button class="hub-link" type="button" data-row-open-button data-customer-id="${reminder.customer_id}">Im Hub öffnen</button>`
+    const relatedName = reminder.related_name || (reminder.related_label === "Kunde" ? reminder.customer_name : "");
+    const relatedText = relatedName || (reminder.related_label ? `${reminder.related_label} öffnen` : "");
+    const relatedLink = reminder.related_url && relatedText
+      ? `<button class="hub-link reminder-related-link" type="button" data-hub-path="${escapeHtml(reminder.related_url)}">${escapeHtml(relatedText)}</button>`
+      : "";
+    const activityLink = reminder.activity_url
+      ? `<button class="hub-link" type="button" data-hub-path="${escapeHtml(reminder.activity_url)}">${escapeHtml(reminder.activity_label)} öffnen</button>`
       : "";
     return `<article class="reminder${selected ? " is-selected" : ""}" data-reminder-row data-id="${reminder.id}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="${escapeHtml(reminder.activity_name)} auswählen">
       <input class="reminder-select" type="checkbox" value="${reminder.id}" data-reminder-select aria-label="${escapeHtml(reminder.activity_name)} auswählen"${selected ? " checked" : ""}>
       <h2>${escapeHtml(reminder.activity_name)}</h2>
+      ${relatedLink}
       <div class="reminder-meta">
         <span>${overdueSince(reminder.starts_at)}</span>
-        ${hubLink}
+        ${activityLink}
       </div>
     </article>`;
   }).join("");
@@ -185,10 +196,10 @@ document.querySelector("#bulk-complete-button").addEventListener("click", functi
 });
 
 reminderList.addEventListener("click", function (event) {
-  const openButton = event.target.closest("[data-row-open-button]");
+  const openButton = event.target.closest("[data-hub-path]");
   if (openButton) {
     event.stopPropagation();
-    return window.kosmosNotifier.openCustomer(Number(openButton.dataset.customerId));
+    return act(function () { return window.kosmosNotifier.openHubPath(openButton.dataset.hubPath); });
   }
   if (event.target.closest("[data-reminder-select]")) return;
   const row = event.target.closest("[data-reminder-row]");
@@ -206,7 +217,7 @@ reminderList.addEventListener("change", function (event) {
 
 reminderList.addEventListener("keydown", function (event) {
   if (event.key !== "Enter" && event.key !== " ") return;
-  if (event.target.closest("[data-row-open-button], [data-reminder-select]")) return;
+  if (event.target.closest("[data-hub-path], [data-reminder-select]")) return;
   const row = event.target.closest("[data-reminder-row]");
   if (!row) return;
   event.preventDefault();

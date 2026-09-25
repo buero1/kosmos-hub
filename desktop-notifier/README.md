@@ -12,6 +12,14 @@ The application keeps running in the Windows tray. It polls the Hub for due `Pop
 
 The pairing code is encrypted with the Windows credential store by Electron and can be revoked at any time in the Hub account.
 
+## Version 0.1.3
+
+- Related customer/lead links show the record name; activity links keep their existing target.
+- A sole reminder is preselected on arrival or when other reminders disappear.
+- Explicit deselection is preserved across polling; multiple reminders keep manual selection.
+- Older Hub payloads retain the customer name or the generic record link as a fallback.
+- `npm test` exercises rendering and selection without contacting the Hub or modifying reminders.
+
 ## Development start
 
 On the development computer, double-click `Start-Kosmos-Notifier-Entwicklung.cmd`. It starts the app directly from the source files, so a restart after a code change takes seconds and does not require creating a new `.exe`.
