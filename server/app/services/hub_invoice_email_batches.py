@@ -51,11 +51,12 @@ class InvoiceEmailReviewRow:
 
 
 class HubInvoiceEmailBatchService:
-    def __init__(self, *, db: Session, cipher: SecretCipher):
+    def __init__(self, *, db: Session, cipher: SecretCipher, actor: str | None = None):
         self.db = db
         self.cipher = cipher
+        self.actor = actor
         self.communications = CustomerCommunicationService(
-            db=db, cipher=cipher, public_base_url=get_settings().public_base_url,
+            db=db, cipher=cipher, public_base_url=get_settings().public_base_url, actor=actor,
         )
         self.documents = HubFinanceDocumentService(db=db, cipher=cipher)
 
@@ -71,18 +72,18 @@ class HubInvoiceEmailBatchService:
             raise InvoiceEmailBatchError("Die Rechnungsauswahl ist ungültig.")
         return sorted(raw_ids)
 
-    def _template_and_sender(self) -> tuple[str, str, str]:
+    def _template_and_sender(self, sender_email: str | None = None) -> tuple[str, str, str]:
         matches = [item for item in self.communications.list_email_templates() if item.name.casefold() == _TEMPLATE_NAME.casefold()]
         if len(matches) != 1:
             raise InvoiceEmailBatchError(f'Die aktive E-Mail-Vorlage „{_TEMPLATE_NAME}“ muss genau einmal vorhanden sein.')
-        sender = DEFAULT_HUB_MAILBOX_SENDER_EMAIL
-        if not any(item.email.casefold() == sender for item in HubMailboxTransportService(db=self.db, cipher=self.cipher).list_senders()):
+        sender = sender_email or DEFAULT_HUB_MAILBOX_SENDER_EMAIL
+        if not any(item.email.casefold() == sender.casefold() for item in HubMailboxTransportService(db=self.db, cipher=self.cipher, actor=self.actor).list_senders()):
             raise InvoiceEmailBatchError(f"Das Absenderpostfach {sender} ist nicht verifiziert und aktiviert.")
         template = self.communications._stored_email_template(matches[0].id)
         return matches[0].id, sender, sha256(template.encrypted_payload_json.encode("utf-8")).hexdigest()
 
-    def _rows(self, ids: list[int]) -> tuple[list[InvoiceEmailReviewRow], str, str, str]:
-        template_id, sender, template_hash = self._template_and_sender()
+    def _rows(self, ids: list[int], *, sender_email: str | None = None) -> tuple[list[InvoiceEmailReviewRow], str, str, str]:
+        template_id, sender, template_hash = self._template_and_sender(sender_email)
         invoices = {invoice.id: invoice for invoice in self.db.scalars(
             select(HubFinanceInvoice).where(HubFinanceInvoice.id.in_(ids))
         )}
@@ -165,6 +166,13 @@ class HubInvoiceEmailBatchService:
                 pdf=(selected_pdf.filename or "-") if selected_pdf else "-", issue=issue, payload=payload,
             ))
         return rows, template_id, sender, template_hash
+
+    def prepare_message(self, invoice_id: int, *, sender_email: str) -> tuple[dict[str, str], str]:
+        rows, template_id, _sender, _hash = self._rows([invoice_id], sender_email=sender_email)
+        row = rows[0]
+        if row.issue or row.payload is None:
+            raise InvoiceEmailBatchError(row.issue or "Die Rechnung konnte nicht vorbereitet werden.")
+        return {**row.payload, "recipient_name": row.contact}, template_id
 
     @staticmethod
     def _digest(rows: list[InvoiceEmailReviewRow], template_hash: str) -> str:

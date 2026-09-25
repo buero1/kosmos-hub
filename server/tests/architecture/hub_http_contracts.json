@@ -1966,7 +1966,7 @@
       "reader_method": "finance_entries"
     },
     "app/api/routes/web.py:finance_document_detail_page:GET:/finance/{module_key}/{document_id}": {
-      "fingerprint": "711c389a5771181d78bed0252403fc727e9afc4baa73c7e3149bbff32e5153ac",
+      "fingerprint": "447b5afffb50557a7881a05d96f79eba86fb0af13c567c5a6c5c35231741b0b4",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2641,14 +2641,14 @@
       ]
     },
     "app/api/routes/web.py:send_customer_communication_email:POST:/customers/{customer_id}/communications/emails": {
-      "fingerprint": "abdf42364e209563ae659f1662b32a312bbc9ebe834f1d5a0ba3c21ad3e81cfe",
+      "fingerprint": "6688c27d4008af04673808ab3d631cdfd8da7b20e9dabc1c9c0a5dc68d80e1f4",
       "state": "human_only",
-      "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
+      "reason": "Human-only send. Invoice drafts delegate to finance.invoices.email.send (not agent-enabled) with current record/mailbox permissions, protected PDF metadata and durable delivery journal; regular customer mail remains unchanged."
     },
     "app/api/routes/web.py:send_direct_mailbox_email:POST:/emails/send": {
-      "fingerprint": "a860db463421c15f750a327c550254a330ce6ac14a6f923b35fcea15b664ad76",
+      "fingerprint": "7a72d80f22d2add8e099ca143764c462d3f770b4c43aad9629b79db46cd02b34",
       "state": "human_only",
-      "reason": "Sending/scheduling stays human-only. Reviewed lead ID propagation: current access and parent lock before send/schedule, scheduled FK plus sent-mail JSON link; shared deletion guard prevents pending delivery and removes retained mail references."
+      "reason": "Sending/scheduling stays human-only. Invoice drafts use the non-agent invoice send operation with durable tracking even after reopening; lead ID propagation and parent locks, scheduled FK, sent-mail JSON links and shared deletion guards are preserved."
     },
     "app/api/routes/web.py:deletion_preview:GET:/deletion-preview": {
       "fingerprint": "9662653ac69a1141292986254073b67a1d467fff3de2bf67ae6490ee521ecd30",
@@ -3399,6 +3399,13 @@
       "contracts": ["finance.offers.convert_to_order"],
       "boundary": ["_finance_gateway", "execute"],
       "reader_method": "convert_offer_to_order"
+    },
+    "app/api/routes/web.py:prepare_finance_invoice_email:POST:/finance/invoices/{invoice_id}/email-compose": {
+      "fingerprint": "2225f03c9d4a28d10fafb1af9115b9f7a0841185d215ab6c8c8a1aa5f8de9eee",
+      "state": "shared",
+      "reason": "CSRF-protected preparation of an unsent editable invoice draft. Current finance/customer and mailbox permissions, existing invoice template and finished PDF required; sending is a separate human-only operation.",
+      "contracts": ["finance.invoices.email.prepare"],
+      "boundary": ["_finance_gateway", "execute"]
     },
     "app/api/routes/accounts.py:select_openai_model:POST:/openai/model": {
       "fingerprint": "fd5aaa98542f7a9655efbebe4332c242268a657fd9fb320f1a5a9797833d8e5a",

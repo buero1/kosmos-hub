@@ -8,11 +8,13 @@
   <section>
     {% call module_detail_header("/finance/" ~ module.key, "Zurück zu " ~ module.label, module.eyebrow, detail.identifier, status=detail.status, has_actions=true) %}
       <button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>
+      {% if can_create_invoice_email %}<button class="button button-secondary button-variant-1" type="button" data-invoice-email-compose="{{ detail.document.id }}" data-layout-hide-while-editing>Per E-Mail versenden</button>{% endif %}
       <div class="customer-edit-heading-actions" data-customer-edit-actions hidden><button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button><button class="button button-variant-1" type="submit" form="finance-document-fields-form">Speichern</button></div>
       <div class="customer-edit-heading-actions" data-layout-edit-actions="{{ module.layout_key }}" hidden><button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="{{ module.layout_key }}">Abbrechen</button><button class="button button-variant-1" type="submit" form="finance-document-layout-form">Speichern</button></div>
       <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing><summary class="detail-actions-menu-trigger" aria-label="Weitere {{ module.singular }}aktionen">&#8942;</summary><div class="detail-actions-menu-popover">{% if module.is_invoice %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/dunnings/new?invoice_id={{ detail.document.id }}">Mahnung anlegen</a>{% endif %}<button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-finance-delete-open>{{ module.singular }} löschen</button></div></details>
     {% endcall %}
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
+    {% if module.is_invoice and email_state and email_message %}<p class="notice-{{ email_state }}">{{ email_message }}</p>{% endif %}
     {% if layout_state and layout_message %}<p class="notice-{{ layout_state }}">{{ layout_message }}</p>{% endif %}
     {% if module.key == 'orders' and detail.document.unassigned_owner_user_id is not none %}<p class="notice-success">Die Angebotspositionen wurden übernommen. Bitte ergänze die übrigen Auftragsdaten und speichere den Entwurf. Das Angebot bleibt unverändert.</p>{% endif %}
     <div class="customer-detail-layout">

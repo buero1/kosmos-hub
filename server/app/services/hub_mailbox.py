@@ -461,6 +461,9 @@ class HubMailboxService:
                 raise ValueError("Der Entwurf wurde nicht gefunden.")
 
         existing_payload = self._payload(draft.encrypted_payload_json) if draft_id is not None else {}
+        if existing_payload.get("invoice_dispatch"):
+            from app.services.hub_operation_invoice_email import require_editable_invoice_draft
+            require_editable_invoice_draft(self.db, existing_payload["invoice_dispatch"])
         existing_attachments = existing_payload.get("attachments")
         payload_attachments = list(existing_attachments) if isinstance(existing_attachments, list) else []
         if retained_attachment_ids is not None:
@@ -536,6 +539,8 @@ class HubMailboxService:
             "attachments": payload_attachments,
         }
         draft.direction = "outbound"
+        if existing_payload.get("invoice_dispatch"):
+            payload["invoice_dispatch"] = existing_payload["invoice_dispatch"]
         draft.is_unread = False
         draft.mailbox_state = _DRAFT_MAILBOX_STATE
         draft.encrypted_payload_json = self.cipher.encrypt(json.dumps(payload, ensure_ascii=False))
@@ -749,6 +754,7 @@ class HubMailboxService:
         return {
             "action": "draft",
             "draft_id": draft.id,
+            "invoice_id": (payload.get("invoice_dispatch") or {}).get("invoice_id"),
             "sender_email": self._text(payload.get("sender")) or "",
             "recipient": recipient,
             "recipient_email": recipient_email,

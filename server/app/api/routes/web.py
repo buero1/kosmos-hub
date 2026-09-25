@@ -1962,6 +1962,25 @@ def invoice_email_batch_status(batch_id: int, request: Request, db: Annotated[Se
     return JSONResponse(status, headers={"Cache-Control": "private, no-store"})
 
 
+@router.post("/finance/invoices/{invoice_id}/email-compose", response_class=JSONResponse)
+def prepare_finance_invoice_email(
+    invoice_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _finance_gateway(request, db).execute("finance.invoices.email.prepare", {"record_id": str(invoice_id)})
+        db.commit()
+        return HubMailboxService(db=db, cipher=get_secret_cipher(), actor=user.username,
+            public_base_url=get_settings().public_base_url).get_draft_compose_context(draft_id=result.record_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/finance/{module_key}", response_class=HTMLResponse)
 def finance_documents_page(
     module_key: str,
@@ -4230,6 +4249,9 @@ async def send_direct_mailbox_email(
                 )
             )
         if draft_id.strip().isdigit():
+            invoice_response = await _dispatch_invoice_draft(request, db, user, draft_id, uploaded_attachments)
+            if invoice_response is not None:
+                return invoice_response
             uploaded_attachments.extend(mailbox.prepare_draft_delivery_attachments(
                 draft_id=int(draft_id), retained_attachment_ids=mailbox.parse_retained_attachment_ids(retained_attachment_ids),
             ))
@@ -5356,6 +5378,9 @@ async def send_customer_communication_email(
                 )
             )
         if draft_id.strip().isdigit():
+            invoice_response = await _dispatch_invoice_draft(request, db, user, draft_id, uploaded_attachments, customer_id=customer_id)
+            if invoice_response is not None:
+                return invoice_response
             draft_mailbox = HubMailboxService(
                 actor=_require_hub_admin(request).username,
                 db=db, cipher=get_secret_cipher(), public_base_url=get_settings().public_base_url,
@@ -7912,6 +7937,10 @@ def _finance_document_detail_context(
             else ()
         ),
         "can_view_dunning_emails": can_view_dunning_emails,
+        "can_create_invoice_email": bool(
+            module.is_invoice and current_user is not None
+            and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
+        ),
         "can_create_dunning_email": bool(
             can_view_dunning_emails
             and detail.document.customer_id is not None
@@ -8105,6 +8134,22 @@ def _contact_detail_context(
         "layout_message": layout_message[:500] if layout in {"success", "error"} else "",
         "csrf_token": get_csrf_token(request),
     }
+
+
+async def _dispatch_invoice_draft(request, db, user, draft_id, attachments, *, customer_id=None):
+    from app.services.hub_operation_invoice_email import SEND_FIELDS, invoice_draft_metadata
+    gateway = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username,
+        input_files=tuple(HubArtifact(filename=item.filename, content=item.content, content_type=item.content_type) for item in attachments))
+    if not invoice_draft_metadata(gateway, draft_id):
+        return None
+    form = await request.form()
+    values = {key: str(form.get(key, "")) for key in SEND_FIELDS}
+    if customer_id is not None:
+        if values["recipient_customer_id"] not in ("", str(customer_id)):
+            raise ValueError("Der Entwurf gehört zu einem anderen Kunden.")
+        values["recipient_customer_id"] = str(customer_id)
+    result = gateway.execute("finance.invoices.email.send", values)
+    return _email_compose_response(request, RedirectResponse(url=result.href, status_code=303))
 
 
 def _email_compose_response(request: Request, redirect: RedirectResponse, *, error: str | None = None) -> Response:

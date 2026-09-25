@@ -4124,6 +4124,7 @@
       }
       .email-compose-close:hover { border-color: var(--accent); color: var(--accent); }
       .email-compose-form { flex: 1; align-content: start; }
+      .email-compose-form .email-compose-schedule[hidden] { display: none; }
       .email-compose-template-status { min-height: 1.25rem; margin: -0.25rem 0 0; }
       .email-compose-template-status[data-status="error"] { color: var(--danger, #b42318); }
       .email-recipient-search { position: relative; }
@@ -6332,6 +6333,7 @@
             if (globalMailboxReplyTo) globalMailboxReplyTo.value = "";
             if (globalMailboxForwardFrom) globalMailboxForwardFrom.value = "";
             if (globalMailboxScheduledAt) globalMailboxScheduledAt.value = "";
+            if (globalMailboxScheduledAt) globalMailboxScheduledAt.closest("label").hidden = false;
             if (globalMailboxDunningId) globalMailboxDunningId.value = "";
             globalMailboxContextModule.value = "";
             globalMailboxContextRecordId.value = "";
@@ -6750,6 +6752,45 @@
             globalMailboxScheduleDraftSave();
           }
 
+          function globalMailboxPrepareInvoice(button) {
+            button.disabled = true;
+            globalMailboxResetAction(false);
+            globalMailboxOpen(button);
+            var session = globalMailboxDraftSession;
+            globalMailboxSubmitting = true;
+            globalMailboxUpdateSubmit();
+            globalMailboxLoadOptions().then(function () {
+              var body = new FormData();
+              body.set("csrf_token", globalMailboxForm.querySelector('[name="csrf_token"]').value);
+              return window.fetch("/finance/invoices/" + encodeURIComponent(button.dataset.invoiceEmailCompose) + "/email-compose", {
+                method: "POST", body: body, credentials: "same-origin", headers: { Accept: "application/json" }
+              });
+            }).then(function (response) {
+              return response.json().then(function (payload) {
+                if (!response.ok) throw new Error(payload.detail || "Die Rechnungs-E-Mail konnte nicht vorbereitet werden.");
+                return payload;
+              });
+            }).then(function (action) {
+              if (session !== globalMailboxDraftSession || !globalMailboxComposer.classList.contains("is-open")) return;
+              globalMailboxApplyAction(action);
+              globalMailboxDraftId.value = String(action.draft_id);
+              globalMailboxSender.value = action.sender_email;
+              globalMailboxTemplate.value = globalMailboxTemplateId.value = action.template_id || "";
+              var template = globalMailboxTemplates.find(function (item) { return item.id === action.template_id; });
+              globalMailboxTemplateSearch.value = template ? template.name : "Rechnungen senden";
+              globalMailboxStoredAttachments = action.attachments || [];
+              globalMailboxSetAttachments([]);
+              globalMailboxScheduledAt.closest("label").hidden = true;
+              globalMailboxStatusMessage("Rechnungsvorlage und PDF sind vorbereitet. Bitte prüfen und anschließend selbst senden.");
+            }).catch(function (error) {
+              if (session === globalMailboxDraftSession) globalMailboxStatusMessage(error.message, true);
+            }).finally(function () {
+              button.disabled = false;
+              globalMailboxSubmitting = false;
+              globalMailboxUpdateSubmit();
+            });
+          }
+
           function globalMailboxPrepareAction(button) {
             var action = button.dataset.globalMailboxComposeAction || "";
             var customerId = button.dataset.mailboxComposeCustomerId || "";
@@ -6834,7 +6875,8 @@
             globalMailboxSubmit.disabled = true;
             globalMailboxSaveDraft.disabled = true;
             globalMailboxStatusMessage("E-Mail wird übermittelt ...");
-            return saveGlobalMailboxDraft({ force: true, quiet: true, beforeSend: true }).then(function () {
+            return saveGlobalMailboxDraft({ force: true, quiet: true, beforeSend: true }).then(function (saved) {
+              if (!saved) throw new Error("Der Entwurf konnte nicht gespeichert werden. Es wurde keine E-Mail versendet.");
               return window.KosmosEmailDelivery.submit(globalMailboxForm);
             }).then(function (url) {
               window.location.assign(url);
@@ -6853,6 +6895,12 @@
           });
           globalMailboxContent.addEventListener("input", globalMailboxScheduleDraftSave);
           document.addEventListener("click", function (event) {
+            var invoiceButton = event.target.closest("[data-invoice-email-compose]");
+            if (invoiceButton) {
+              event.preventDefault();
+              globalMailboxPrepareInvoice(invoiceButton);
+              return;
+            }
             var action = event.target.closest("[data-global-mailbox-compose-action]");
             if (action) {
               event.preventDefault();

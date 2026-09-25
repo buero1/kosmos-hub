@@ -15,6 +15,7 @@ function loadFunctions(path, names) {
     context[name] = functions.includes(name + '(') ? () => {} : {
       value: '', dataset: {}, options: [], classList: {add() {}},
       setAttribute() {}, focus() {}, replaceChildren() {}, dispatchEvent() {},
+      closest() { return this.label || (this.label = {hidden: false}); },
     };
   }
   vm.createContext(context);
@@ -97,7 +98,11 @@ function loadFunctions(path, names) {
   mailbox.applyMailboxComposerPendingAction();
   assert.equal(mailbox.mailboxComposerLeadId.value, '', 'An unrelated draft has no stale lead');
   assert.equal(mailbox.mailboxComposerContextRecordId.value, '', 'An unrelated draft has no stale template context');
+  mailbox.mailboxComposerPendingAction = {action: 'draft', draft_id: 14, invoice_id: 5};
+  mailbox.applyMailboxComposerPendingAction();
+  assert.equal(mailbox.mailboxComposerScheduledAt.closest('label').hidden, true);
   mailbox.mailboxComposerLeadId.value = 42;
   mailbox.clearMailboxComposerActionFields();
   assert.equal(mailbox.mailboxComposerLeadId.value, '');
+  assert.equal(mailbox.mailboxComposerScheduledAt.closest('label').hidden, false, 'Normal mail keeps scheduling');
 })().catch(error => { console.error(error); process.exitCode = 1; });

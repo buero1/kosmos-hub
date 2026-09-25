@@ -719,6 +719,7 @@
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = '';
         if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.value = '';
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.closest('label').hidden = false;
         if (mailboxComposerCc) mailboxComposerCc.value = '';
         if (mailboxComposerCcField) mailboxComposerCcField.hidden = true;
         if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.required = false;
@@ -895,6 +896,7 @@
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = action.reply_to_email_id || '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = action.forward_from_email_id || '';
         if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.value = action.scheduled_at || '';
+        if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.closest('label').hidden = Boolean(action.invoice_id);
         if (mailboxComposerScheduledAt) mailboxComposerScheduledAt.required = action.action === 'scheduled';
         if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.hidden = action.action === 'scheduled';
         mailboxComposerStoredAttachments = (action.action === 'scheduled' || action.action === 'draft') && Array.isArray(action.attachments) ? action.attachments : [];
