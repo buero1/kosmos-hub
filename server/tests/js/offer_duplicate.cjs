@@ -62,8 +62,8 @@ const html = name => fs.readFileSync(path.join(directory, name + '.html'), 'utf8
       assert.equal(await form.locator('[name="lead_id"]').inputValue(), '');
       assert.equal(await form.locator('[name="contact_id"]').inputValue(), '');
       assert.equal(await form.locator('[name="offer_field__status"]').inputValue(), 'draft');
-      assert.equal(await page.locator('[data-customer-edit-position-editor]').isVisible(), true);
-      assert.equal(await page.locator('[data-customer-edit-position-readonly]').isVisible(), false);
+      assert.equal(await page.locator('[data-finance-position-editor]').isVisible(), true);
+      assert.equal(await page.locator('article[data-customer-edit-position-readonly]').isVisible(), false);
       assert.equal(await page.locator('[data-customer-edit-actions]').isVisible(), true);
       assert.equal(await page.locator('[data-customer-edit-open]').isVisible(), false);
       await page.screenshot({path: path.join(directory, `edit-${width}.png`), fullPage: false});
