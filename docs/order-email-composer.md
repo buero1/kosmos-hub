@@ -8,6 +8,8 @@
 - The order's selected contact supplies the recipient. Without a selected
   contact, the first available customer recipient is proposed. Missing customer,
   recipient, template or PDF yields an actionable error, not an empty send.
+- Missing template values remain editable in the draft with a warning. Sending
+  is blocked until remaining `${...}` placeholders are completed or removed.
 - The latest generated PDF is preferred. The imported original is used only
   when no generated PDF exists; pending/failed generation is not bypassed.
 - Opening only stores an encrypted draft, never sends. Subject, content,

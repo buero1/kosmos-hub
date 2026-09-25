@@ -161,6 +161,24 @@ def test_prepare_and_send_respect_revoked_customer_scope(prepared, monkeypatch):
     assert not p.sent
 
 
+def test_missing_template_values_can_be_completed_manually(prepared):
+    p = prepared
+    template = p.env.db.scalar(select(ZohoEmailTemplate))
+    template.encrypted_payload_json = p.env.cipher.encrypt(json.dumps({"name": "Auftragsbestätigung", "hub_context_module": "orders",
+        "subject": "Auftrag ${Order.Number}", "content": "<p>${Contact.LetterSalutation}, Termin: ${Customer.AppointmentAt}</p>"}))
+    p.env.db.commit()
+    result = p.env.service.execute("finance.orders.email.prepare", {"record_id": str(p.order.id)})
+    context = mailbox_for(p.env.service).get_draft_compose_context(draft_id=result.record_id)
+    assert "${Customer.AppointmentAt}" in context["content"] and not p.sent
+    data = {**p.data, "draft_id": str(result.record_id), "content": context["content"],
+        "retained_attachment_ids": json.dumps([item["id"] for item in context["attachments"]])}
+    with pytest.raises(ValueError, match="offenen Platzhalter"):
+        p.env.service.execute("finance.orders.email.send", data)
+    assert not p.sent
+    p.env.service.execute("finance.orders.email.send", {**data, "content": "<p>Guten Tag, Termin 01.10.2026.</p>"})
+    assert len(p.sent) == 1
+
+
 def test_converted_lead_offer_requires_matching_customer_conversion(prepared):
     from app.models.hub_finance_offer import HubFinanceOffer
     from app.models.hub_lead import HubLead

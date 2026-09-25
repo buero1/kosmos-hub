@@ -15,7 +15,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
   const browser = await chromium.launch({headless: true, ...(process.platform === 'win32' ? {channel: 'msedge'} : {})});
   try {
     for (const width of [1263, 390]) {
-      for (const scenario of ['success', 'save-error', 'send-error', 'prepare-error']) {
+      for (const scenario of ['success', 'save-error', 'send-error', 'prepare-error', ...(isOrder ? ['placeholders'] : [])]) {
         const page = await browser.newPage({viewport: {width, height: 912}});
         const errors = [], sent = [], saves = [];
         let releaseSave;
@@ -33,7 +33,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
             assert.equal(request.method(), 'POST');
             return scenario === 'prepare-error'
               ? route.fulfill({status: 400, json: {detail: 'Keine fertige ZUGFeRD-PDF vorhanden.'}})
-              : route.fulfill({json: data.context});
+              : route.fulfill({json: scenario === 'placeholders' ? {...data.context, content: '<p>${Customer.AppointmentAt}</p>'} : data.context});
           }
           if (url.pathname === '/emails/drafts') {
             saves.push(request.postData());
@@ -60,6 +60,9 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
           return route.fulfill({json: {items: [], notifications: [], recipients: [], count: 0}});
         });
         await page.goto(`http://hub.test/finance/${kind}/${data[noun]}`);
+        await page.locator('[data-customer-edit-open]').click();
+        assert.equal(await page.locator(`[data-${noun}-email-compose]`).isVisible(), false);
+        await page.locator('[data-customer-edit-cancel]').click();
         await page.locator(`[data-${noun}-email-compose]`).click();
         const drawer = page.locator('[data-global-mailbox-composer]');
         const status = drawer.locator('[data-email-compose-template-status]');
@@ -68,7 +71,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
         } else {
-          await status.filter({hasText: isOrder ? 'Auftragsvorlage und PDF' : 'Rechnungsvorlage und PDF'}).waitFor();
+          await status.filter({hasText: scenario === 'placeholders' ? 'fehlende Angaben' : isOrder ? 'Auftragsvorlage und PDF' : 'Rechnungsvorlage und PDF'}).waitFor();
           assert.equal(sent.length, 0);
           assert.equal(saves.length, 0);
           assert.equal(await drawer.locator('[name="subject"]').inputValue(), data.context.subject);
@@ -88,7 +91,7 @@ const html = fs.readFileSync(path.join(root, `${noun}.html`), 'utf8');
           // A second submit while the first one is pending must not send again.
           await drawer.locator('form').evaluate(form => form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})));
           releaseSave();
-          if (scenario === 'success') {
+          if (scenario === 'success' || scenario === 'placeholders') {
             await page.waitForURL(url => url.searchParams.get('email') === 'success');
             assert.equal(sent.length, 1);
             assert.match(sent[0], /My edited invoice subject/);

@@ -26,6 +26,8 @@ if '--order-placeholders' in sys.argv:
     release_prefix = 'order-placeholders'
 if '--order-compose' in sys.argv:
     release_prefix = 'order-compose'
+if '--order-compose-polish' in sys.argv:
+    release_prefix = 'order-compose-polish'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -101,6 +103,8 @@ if '--order-compose' in sys.argv:
         'app/services/hub_template_contexts.py',
         'app/templates/emails.html', 'app/templates/finance_document_detail.html',
     }
+if '--order-compose-polish' in sys.argv:
+    expected = {'app/services/hub_operation_order_email.py', 'app/templates/base.html'}
 assert changes == expected, changes
 for name, data in old.items():
     assert (root / name).read_bytes().replace(b'\r\n', b'\n') == data.replace(b'\r\n', b'\n'), name + ': production changed'

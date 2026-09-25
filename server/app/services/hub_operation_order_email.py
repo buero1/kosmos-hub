@@ -1,6 +1,7 @@
 """Manual order mail: editable customer-linked draft with a verified PDF."""
 
 import json
+import re
 from hashlib import sha256
 from urllib.parse import urlencode
 
@@ -72,8 +73,6 @@ def prepare_order_email(service, values):
               "recipient_email": recipient.email, "recipient_name": recipient.name,
               "context_module": "orders", "context_record_id": str(order.id), "template_id": templates[0].id}
     rendered = render_template(service, values)
-    if rendered.unresolved_placeholders:
-        raise HubOperationError("Unbekannte Platzhalter: " + ", ".join(rendered.unresolved_placeholders[:4]))
     pdf, content = load_pdf(service, "orders", order.id, source="available")
     attachment = HubArtifact(filename=pdf.filename or f"{order.order_number}.pdf", content=content, content_type="application/pdf")
     drafts = HubOperationService(db=service.db, cipher=service.cipher, actor=service.actor, input_files=(attachment,))
@@ -118,6 +117,9 @@ def send_order_email(service, values):
     _save_draft(service, {**values, "customer_id": str(order.customer_id),
         "context_module": "orders", "context_record_id": str(order.id)}, complete=True)
     context = mailbox.get_draft_compose_context(draft_id=draft_id)
+    unresolved = sorted(set(re.findall(r"\$\{[^{}]+\}", context["subject"] + " " + context["content"])))
+    if unresolved:
+        raise HubOperationError("Bitte die offenen Platzhalter vor dem Senden ergänzen oder entfernen: " + ", ".join(unresolved[:4]))
     mailbox.scope.mailboxes.require_sender(context["sender_email"], "send")
     attachments = mailbox.prepare_draft_delivery_attachments(draft_id=draft_id, retained_attachment_ids=None)
     if not any(sha256(item.content).hexdigest() == metadata["pdf_sha256"] for item in attachments):
