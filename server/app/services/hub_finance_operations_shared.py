@@ -93,12 +93,17 @@ def finance_invoice_page(service, page):
     )
 
 
-def finance_options(service, kind):
+def finance_options(service, kind, *, record_id=None):
     model_for(kind)
     user, access = require_actor(service, "finance", "view")
+    record = require_record(service, kind, record_id) if record_id is not None else None
     domain = HubFinanceService(db=service.db, cipher=service.cipher)
     customers = tuple(item for item in domain.list_linkable_customers()
                       if access.can_access_record(user=user, module_key="customers", record_id=item.id))
+    # A listing filter must not erase an existing, authorized document relation.
+    linked_customer = getattr(record, "customer", None)
+    if linked_customer is not None and not any(item.id == linked_customer.id for item in customers):
+        customers = (*customers, linked_customer)
     allowed_customers = {item.id for item in customers}
     contacts = tuple(item for item in domain.list_linkable_contacts() if item.customer_id in allowed_customers)
     leads = tuple(item for item in domain.list_linkable_leads()

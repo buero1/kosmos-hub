@@ -18,6 +18,8 @@ if '--invoice-delivery' in sys.argv:
     release_prefix = 'invoice-delivery'
 if '--invoice-compose' in sys.argv:
     release_prefix = 'invoice-compose'
+if '--finance-relations' in sys.argv:
+    release_prefix = 'finance-relations'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -69,6 +71,12 @@ if '--invoice-compose' in sys.argv:
         'app/templates/emails.html',
     }
 changes = {name for name in new if old.get(name) != new[name]}
+if '--finance-relations' in sys.argv:
+    expected = {
+        'app/api/routes/web.py', 'app/services/hub_finance_operations_shared.py',
+        'app/services/hub_operation_finance.py',
+        'app/templates/partials/finance_customer_search_script.html',
+    }
 assert changes == expected, changes
 for name, data in old.items():
     assert (root / name).read_bytes().replace(b'\r\n', b'\n') == data.replace(b'\r\n', b'\n'), name + ': production changed'

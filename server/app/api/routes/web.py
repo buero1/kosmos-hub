@@ -7717,7 +7717,7 @@ def _finance_offer_detail_context(
         })
     if not line_rows:
         line_rows = _finance_offer_line_form_rows(service.new_offer_values())
-    options = finance_options(_finance_gateway(request, service.db), "offers")
+    options = finance_options(_finance_gateway(request, service.db), "offers", record_id=detail.offer.id)
     pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type="offers")
     user = _require_hub_admin(request)
     access = HubAccessControlService(db=service.db)
@@ -7905,7 +7905,7 @@ def _finance_document_detail_context(
     selected_link_id = getattr(detail.document, f"{module.link_attribute}_id", None) if module.link_attribute else None
     template_type = "invoices" if module.is_recurring else module.key
     pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings"} else ()
-    options = finance_options(_finance_gateway(request, service.db), module.key)
+    options = finance_options(_finance_gateway(request, service.db), module.key, record_id=detail.document.id)
     current_user = getattr(request.state, "hub_user", None)
     access = HubAccessControlService(db=service.db)
     can_view_dunning_emails = bool(

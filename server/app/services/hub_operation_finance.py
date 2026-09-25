@@ -233,7 +233,7 @@ def read_options(service, values):
         templates = service.db.scalars(select(HubPdfTemplate).where(HubPdfTemplate.document_type == template_type).order_by(HubPdfTemplate.is_default.desc(), HubPdfTemplate.name, HubPdfTemplate.id)) if template_type in PDF_KINDS else ()
         entries = [{"id": str(item.id), "name": item.name, "is_default": item.is_default} for item in templates]
     else:
-        options = finance_options(service, kind)
+        options = finance_options(service, kind, record_id=identifier(values.get("record_id", "")))
         entries = []
         for item in options[category]:
             if values.get("customer_id") and str(getattr(item, "customer_id", item.id if category == "customers" else "")) != values["customer_id"]:
@@ -277,5 +277,5 @@ register_artifact("finance.document.pdf", load_document_pdf)
 _KIND_FIELD = Field("kind", "Finance-Modul", required=True, options=tuple((kind, _LABELS[kind]) for kind in FINANCE_KINDS))
 register_query(HubQuery("finance.list", "Finance-Datensaetze suchen, nur sichtbare Kunden/Leads; 25 Treffer pro Seite.", (_KIND_FIELD, Field("query", "Suche"), Field("customer_id", "Kunde"), Field("lead_id", "Lead"), Field("offset", "Seitenbeginn, Standard 0")), read_list))
 register_query(HubQuery("finance.read", "Finance-Details und Eingabewerte lesen, inklusive 20 Positionen pro Seite, Summen, Beziehungen und PDF-Verweis. Lange Texte sind markiert; mit field (voller Eingabeschluessel) und text_offset separat nachladen.", (_KIND_FIELD, Field("record_id", "Datensatz-ID", required=True), Field("line_offset", "Positionsbeginn, Standard 0"), Field("field", "Einzelner Eingabeschluessel fuer langen Text"), Field("text_offset", "Textbeginn, Standard 0")), read_detail))
-register_query(HubQuery("finance.options", "Zulaessige Verknuepfungen und PDF-Vorlagen der Finance-Maske suchen; Artikel ueber finance.list suchen.", (_KIND_FIELD, Field("category", "Auswahlliste", required=True, options=tuple((key, key) for key in ("customers", "leads", "contacts", "link_options", "pdf_templates"))), Field("customer_id", "Nach Kunde filtern"), Field("query", "Namenssuche"), Field("offset", "Seitenbeginn")), read_options))
+register_query(HubQuery("finance.options", "Zulaessige Verknuepfungen und PDF-Vorlagen der Finance-Maske suchen; record_id behaelt bestehende berechtigte Verknuepfungen beim Bearbeiten. Artikel ueber finance.list suchen.", (_KIND_FIELD, Field("category", "Auswahlliste", required=True, options=tuple((key, key) for key in ("customers", "leads", "contacts", "link_options", "pdf_templates"))), Field("record_id", "Optional: vorhandener Finance-Datensatz beim Bearbeiten"), Field("customer_id", "Nach Kunde filtern"), Field("query", "Namenssuche"), Field("offset", "Seitenbeginn")), read_options))
 register_query(HubQuery("finance.dunning_source", "Liest die Vorbelegung fuer eine Mahnung aus einer Rechnung, wie in der Maske; erstellt noch keinen Datensatz.", (Field("record_id", "Rechnungs-ID", required=True),), dunning_source))

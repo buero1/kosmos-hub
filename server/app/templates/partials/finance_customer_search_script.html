@@ -1,9 +1,16 @@
 <script>
   (function () {
+    function restoreDefaultSelection(select) {
+      if (!select) return;
+      // Reset can skip the original option while a temporary customer filter disables it.
+      var option = Array.from(select.options).find(function (item) { return item.defaultSelected && !item.disabled; });
+      select.value = option ? option.value : '';
+    }
     document.querySelectorAll('[data-finance-customer-search]').forEach(function (root) {
       var form = root.closest('form');
       var input = root.querySelector('[data-finance-customer-input]');
       var selectedId = root.querySelector('[data-finance-customer]');
+      var initialCustomerId = selectedId.value;
       var list = root.querySelector('.finance-customer-options');
       var empty = root.querySelector('[data-finance-customer-empty]');
       var options = Array.from(root.querySelectorAll('[data-finance-customer-option]'));
@@ -99,6 +106,22 @@
         filterContacts();
         filterLinkedRecords();
       });
+      if (form) form.addEventListener('reset', function () {
+        // Native form reset restores values after the reset event has fired.
+        window.queueMicrotask(function () {
+          // Hidden inputs change their reset value when their value is assigned.
+          selectedId.value = initialCustomerId;
+          input.setCustomValidity('');
+          options.forEach(function (option) {
+            option.setAttribute('aria-selected', String(option.dataset.customerId === selectedId.value));
+          });
+          filterContacts();
+          filterLinkedRecords();
+          restoreDefaultSelection(contact);
+          restoreDefaultSelection(linkedRecord);
+          closeList();
+        });
+      });
       filterContacts();
       filterLinkedRecords();
     });
@@ -110,6 +133,8 @@
       var input = root.querySelector('[data-finance-party-input]');
       var customerId = root.querySelector('[data-finance-customer]');
       var leadId = root.querySelector('[data-finance-lead]');
+      var initialCustomerId = customerId.value;
+      var initialLeadId = leadId.value;
       var list = root.querySelector('.finance-customer-options');
       var empty = root.querySelector('[data-finance-party-empty]');
       var options = Array.from(root.querySelectorAll('[data-finance-party-option]'));
@@ -201,10 +226,17 @@
         closeList();
       });
       if (form) form.addEventListener('reset', function () {
-        root.dataset.selectedPartyName = '';
-        input.setCustomValidity('');
-        options.forEach(function (option) { option.setAttribute('aria-selected', 'false'); });
-        closeList();
+        window.queueMicrotask(function () {
+          customerId.value = initialCustomerId;
+          leadId.value = initialLeadId;
+          var selected = selectedOption();
+          root.dataset.selectedPartyName = selected ? (selected.dataset.partyLabel || selected.textContent.trim()) : '';
+          input.setCustomValidity('');
+          options.forEach(function (option) { option.setAttribute('aria-selected', String(option === selected)); });
+          updateContact();
+          restoreDefaultSelection(contact);
+          closeList();
+        });
       });
 
       input.addEventListener('focus', showMatches);

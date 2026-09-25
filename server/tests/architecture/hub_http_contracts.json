@@ -1966,7 +1966,7 @@
       "reader_method": "finance_entries"
     },
     "app/api/routes/web.py:finance_document_detail_page:GET:/finance/{module_key}/{document_id}": {
-      "fingerprint": "447b5afffb50557a7881a05d96f79eba86fb0af13c567c5a6c5c35231741b0b4",
+      "fingerprint": "484d22a44fc97dc33c5b45d18adc5890016ad024281e56fd0a006e71c68b8161",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2026,7 +2026,7 @@
       "reader_method": "load_pdf"
     },
     "app/api/routes/web.py:finance_offer_detail_page:GET:/finance/offers/{offer_id}": {
-      "fingerprint": "13e328b49cc3ad9b80367688e0e072bae07be97c9f2ad03c4d918b7f680a3731",
+      "fingerprint": "8f37645278107e9527866f6d497dbb6e2491b959949758d65e183d62d1ab8614",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
