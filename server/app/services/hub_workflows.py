@@ -31,7 +31,9 @@ _CASE_OPEN_REMINDER_DESCRIPTION = (
 )
 _LEAD_RESULT_FIELD_UPDATE_DESCRIPTION = (
     "Setzt bei Änderungen am Lead-Ergebnis automatisch den passenden Lead-Status und, "
-    "sofern vorgesehen, das Abrechnungsergebnis."
+    "sofern vorgesehen, das Abrechnungsergebnis. Beim Wechsel auf \"Auftrag\" werden "
+    "Auftragsdatum und Abrechnungsergebnis-Datum auf das Änderungsdatum in Berliner Zeit gesetzt. "
+    "Bei unverändertem Lead-Ergebnis werden diese Datumsfelder nicht überschrieben."
 )
 _LEAD_APPOINTMENT_REMINDER_DESCRIPTION = (
     "Setzt die Termin-Erinnerung bei Beratungsterminen mit mehr als 60 Stunden Vorlauf und "
@@ -167,6 +169,12 @@ class HubWorkflowService:
             and field_updates is not None
         ):
             updated_values.update(field_updates)
+            if updated_result == "Vertrag":  # Stored value of the "Auftrag" option.
+                changed_at = now or datetime.now(_BERLIN)
+                if changed_at.tzinfo is not None:
+                    changed_at = changed_at.astimezone(_BERLIN)
+                changed_date = changed_at.date().isoformat()
+                updated_values.update(order_date=changed_date, billing_result_date=changed_date)
             changed = True
 
         reminder_workflow = workflows.get(LEAD_APPOINTMENT_REMINDER_WORKFLOW_KEY)

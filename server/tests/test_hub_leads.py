@@ -241,7 +241,9 @@ def test_lead_result_workflow_runs_only_for_a_change_and_can_be_disabled():
         assert workflow.module_label == "Leads · Änderung Lead-Ergebnis"
         assert workflow.description == (
             "Setzt bei Änderungen am Lead-Ergebnis automatisch den passenden Lead-Status und, "
-            "sofern vorgesehen, das Abrechnungsergebnis."
+            "sofern vorgesehen, das Abrechnungsergebnis. Beim Wechsel auf \"Auftrag\" werden "
+            "Auftragsdatum und Abrechnungsergebnis-Datum auf das Änderungsdatum in Berliner Zeit gesetzt. "
+            "Bei unverändertem Lead-Ergebnis werden diese Datumsfelder nicht überschrieben."
         )
         workflow.is_enabled = False
         db.flush()
