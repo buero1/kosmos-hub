@@ -34,7 +34,7 @@ from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, O
 from app.services.hub_leads import HubLeadService
 from app.services.hub_pdf_templates import HubPdfTemplateError, HubPdfTemplateService
 from app.services.hub_offer_notes import OFFER_NOTES_TOKEN, sanitize_offer_notes
-from app.services.template_placeholders import DOCUMENT_NAMES, INVOICE_CUSTOMER_BANK_PLACEHOLDERS, contact_greeting, profile_placeholders
+from app.services.template_placeholders import DOCUMENT_NAMES, INVOICE_CUSTOMER_BANK_PLACEHOLDERS, contact_greeting, pdf_document_placeholders, profile_placeholders
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
 
@@ -104,6 +104,7 @@ class FinancePdfSnapshot:
     customer_fields: dict[str, str] = field(default_factory=dict)
     contact_fields: dict[str, str] = field(default_factory=dict)
     notes_html: str = ""
+    document_fields: dict[str, str] = field(default_factory=dict)
 
 
 class HubFinancePdfService:
@@ -413,6 +414,7 @@ class HubFinancePdfService:
             customer_fields=customer_fields,
             contact_fields=contact_fields,
             notes_html=detail.notes_html if document_type == "offers" else "",
+            document_fields={key: self._field_display_value(fields, key) for key in fields} if document_type == "orders" else {},
         )
 
     def _render_html(
@@ -482,6 +484,9 @@ class HubFinancePdfService:
             f"${{{namespace}.TaxTotal}}": self._money(snapshot.totals.tax_total, snapshot.currency),
             f"${{{namespace}.GrossTotal}}": self._money(snapshot.totals.total_gross, snapshot.currency),
         })
+        for placeholder in pdf_document_placeholders(snapshot.document_type):
+            if placeholder.profile_key:
+                replacements.setdefault(placeholder.token, snapshot.document_fields.get(placeholder.profile_key, ""))
         replacements.update(profile_placeholders("Customer", snapshot.customer_fields, document_type=snapshot.document_type))
         replacements.update(profile_placeholders("Contact", snapshot.contact_fields))
         replacements["${Customer.BillingStreet}"] = snapshot.billing_street
@@ -504,11 +509,8 @@ class HubFinancePdfService:
                 lambda match: notes_html if match.group(0) == OFFER_NOTES_TOKEN else escape(replacements.get(match.group(0), "") or ""),
                 rendered,
             )
-        rendered_legal_terms = legal_terms_html
-        for token, value in replacements.items():
-            rendered_legal_terms = rendered_legal_terms.replace(token, escape(value or ""))
         rendered_blocks["legal"] = (
-            _PLACEHOLDER_PATTERN.sub("", rendered_legal_terms)
+            _PLACEHOLDER_PATTERN.sub(lambda match: escape(replacements.get(match.group(0), "") or ""), legal_terms_html)
             if snapshot.document_type in {"offers", "orders"}
             else ""
         )

@@ -380,11 +380,11 @@ _DOCUMENT_FIELD_TOKENS = {
 }
 
 
-def email_document_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
+def _all_document_placeholders(document_type: str, *, email: bool) -> tuple[TemplatePlaceholder, ...]:
     namespace, group = DOCUMENT_NAMES[document_type]
-    contexts = _DOCUMENT_EMAIL_CONTEXTS[document_type]
+    contexts = _DOCUMENT_EMAIL_CONTEXTS[document_type] if email else ()
     return _prefer_placeholder_definitions(
-        document_placeholders(document_type, email=True),
+        document_placeholders(document_type, email=email),
         _catalog_placeholders(
             namespace,
             group,
@@ -396,6 +396,20 @@ def email_document_placeholders(document_type: str) -> tuple[TemplatePlaceholder
     )
 
 
+def email_document_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
+    return _all_document_placeholders(document_type, email=True)
+
+
+def pdf_document_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
+    if document_type != "orders":
+        return document_placeholders(document_type)
+    fields = {field.key: field for field in ORDER_FIELDS}
+    return tuple(
+        replace(item, label=fields[item.profile_key].label) if item.profile_key in fields else item
+        for item in _all_document_placeholders(document_type, email=False)
+    )
+
+
 def pdf_customer_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
     bank = INVOICE_CUSTOMER_BANK_PLACEHOLDERS if document_type == "invoices" else ()
     return (*CUSTOMER_PLACEHOLDERS, *bank)
@@ -403,7 +417,7 @@ def pdf_customer_placeholders(document_type: str) -> tuple[TemplatePlaceholder, 
 
 def pdf_placeholders(document_type: str) -> tuple[TemplatePlaceholder, ...]:
     notes = (TemplatePlaceholder("${Offer.Notes}", "Anmerkungen", "Individuelle Anmerkungen zum Angebot.", "Aktuelles Angebot"),) if document_type == "offers" else ()
-    return (*document_placeholders(document_type), *notes, *CONTACT_PLACEHOLDERS, *pdf_customer_placeholders(document_type), *COMPANY_PLACEHOLDERS)
+    return (*pdf_document_placeholders(document_type), *notes, *CONTACT_PLACEHOLDERS, *pdf_customer_placeholders(document_type), *COMPANY_PLACEHOLDERS)
 
 
 def email_placeholders() -> tuple[TemplatePlaceholder, ...]:
