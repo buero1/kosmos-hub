@@ -447,7 +447,7 @@ class HubFinanceDocumentService:
             constructor[module.link_attribute] = linked_record
         document = module.model(**constructor)
         if module.is_recurring:
-            document.hub_next_run_on = date.fromisoformat(values["next_invoice_date"])
+            document.hub_next_run_on = date.fromisoformat(values["next_invoice_date"]) if values["next_invoice_date"] else None
         self.db.add(document)
         self.db.flush()
         if module.number_attribute and module.number_prefix:
@@ -467,7 +467,10 @@ class HubFinanceDocumentService:
         submitted_values: dict[str, str],
         pdf_template_id: int | None = None,
     ) -> Any:
-        document = self.db.scalar(select(module.model).options(selectinload(module.model.lines)).where(module.model.id == document_id))
+        query = select(module.model).options(selectinload(module.model.lines)).where(module.model.id == document_id)
+        if module.is_recurring:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        document = self.db.scalar(query)
         if document is None:
             raise HubFinanceDocumentError(f"{module.singular} wurde nicht gefunden.")
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
@@ -486,7 +489,7 @@ class HubFinanceDocumentService:
         if module.is_invoice or module.is_dunning:
             values["billing_address"] = existing_values.get("billing_address") or self._billing_address(customer)
         if module.is_recurring:
-            document.hub_next_run_on = date.fromisoformat(values["next_invoice_date"])
+            document.hub_next_run_on = date.fromisoformat(values["next_invoice_date"]) if values["next_invoice_date"] else None
         document.customer = customer
         document.contact = contact
         if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, RECURRING_INVOICE_MODULE):
@@ -624,8 +627,11 @@ class HubFinanceDocumentService:
 
     def _document_values(self, *, module: FinanceDocumentModule, document: Any) -> dict[str, str]:
         values = self._values(document.encrypted_fields_json)
-        if module.is_recurring and document.hub_next_run_on is not None:
-            values["next_invoice_date"] = document.hub_next_run_on.isoformat()
+        if module.is_recurring:
+            if values.get("status") in {"paused", "ended"}:
+                values["next_invoice_date"] = ""
+            elif document.hub_next_run_on is not None:
+                values["next_invoice_date"] = document.hub_next_run_on.isoformat()
         return values
 
     def _field_values(
@@ -702,7 +708,7 @@ class HubFinanceDocumentService:
                 display_type=definition.display_type,
                 value=value,
                 form_value=value if definition.read_only else form_value,
-                required=definition.required,
+                required=(values.get("status") == "active") if module.is_recurring and key == "next_invoice_date" else definition.required,
                 read_only=definition.read_only,
                 options=options,
             ))
@@ -718,6 +724,10 @@ class HubFinanceDocumentService:
         values: dict[str, str] = {}
         for definition in module.fields:
             if definition.read_only or definition.key in {"customer", "contact", module.link_key} or (module.is_recurring and definition.key in {"custom_interval", "payment_due"}):
+                continue
+            if module.is_recurring and definition.key == "next_invoice_date" and self._text(submitted_values.get("document_field__status")).strip() in {"paused", "ended"}:
+                # Ignore even stale submitted dates when the schedule is stopped.
+                values[definition.key] = ""
                 continue
             raw = self._limited_text(submitted_values.get(f"document_field__{definition.key}"), definition.label)
             if definition.display_type == "Boolesch":

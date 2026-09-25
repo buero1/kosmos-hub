@@ -20,6 +20,8 @@ if '--invoice-compose' in sys.argv:
     release_prefix = 'invoice-compose'
 if '--finance-relations' in sys.argv:
     release_prefix = 'finance-relations'
+if '--recurring-status' in sys.argv:
+    release_prefix = 'recurring-status'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -76,6 +78,12 @@ if '--finance-relations' in sys.argv:
         'app/api/routes/web.py', 'app/services/hub_finance_operations_shared.py',
         'app/services/hub_operation_finance.py',
         'app/templates/partials/finance_customer_search_script.html',
+    }
+if '--recurring-status' in sys.argv:
+    expected = {
+        'app/services/hub_finance_documents.py', 'app/services/hub_recurring_invoice_generation.py',
+        'app/services/zoho_books_recurring_invoice_import.py', 'app/services/hub_operation_finance.py',
+        'app/templates/partials/finance_recurring_interval_script.html',
     }
 assert changes == expected, changes
 for name, data in old.items():

@@ -226,7 +226,10 @@ class ZohoBooksRecurringInvoiceImportService:
         recurring_invoice.customer = customer
         recurring_invoice.contact = contact
         values = self._recurring_invoice_values(payload)
-        if recurring_invoice.hub_next_run_on is None and values["next_invoice_date"]:
+        if values["status"] in {"paused", "ended"}:
+            values["next_invoice_date"] = ""
+            recurring_invoice.hub_next_run_on = None
+        elif recurring_invoice.hub_next_run_on is None and values["next_invoice_date"]:
             recurring_invoice.hub_next_run_on = date.fromisoformat(values["next_invoice_date"])
         if recurring_invoice.hub_next_run_on is not None:
             values["next_invoice_date"] = recurring_invoice.hub_next_run_on.isoformat()

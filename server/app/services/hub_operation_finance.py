@@ -111,7 +111,7 @@ def input_fields(kind, action):
             units = ("day", "week", "month", "year") if field.key == "custom_interval" else ("day", "week", "year")
             result.extend((Field(f"{prefix}_field__{field.key}_count", field.label + ": Anzahl"), Field(f"{prefix}_field__{field.key}_unit", field.label + ": Zeiteinheit", options=tuple((unit, unit) for unit in units))))
         else:
-            result.append(Field(f"{prefix}_field__{field.key}", field.label, required=field.required and action == "create", options=field.options,
+            result.append(Field(f"{prefix}_field__{field.key}", field.label, required=field.required and action == "create" and not (kind == "recurring-invoices" and field.key == "next_invoice_date"), options=field.options,
                                 encoding="HTML" if field.display_type == "HTML" else ""))
     if kind != "articles":
         result.extend((Field("pdf_template_id", "PDF-Vorlage (leer: Standard)"), Field("lines_mode", "Positionen: patch erhaelt nicht angegebene Zeilen, replace ersetzt alle", options=(("patch", "Teilweise aendern"), ("replace", "Alle ersetzen")))))
@@ -138,7 +138,7 @@ def input_guide(kind, action):
     if kind == "offers":
         guide += "Genau ein Kunde oder Lead; bei Lead muss contact_id leer sein. Beim Wechsel der Zuordnung alte Gegenverknuepfung explizit leeren. "
     if kind == "recurring-invoices":
-        guide += "custom_interval_count/unit nur bei interval_unit=custom erforderlich; payment_due_count/unit optional zusammen. Aktiv setzt den periodischen Rechnungsplan aktiv; keine E-Mail wird dadurch versendet."
+        guide += "custom_interval_count/unit nur bei interval_unit=custom erforderlich; payment_due_count/unit optional zusammen. Aktiv setzt den periodischen Rechnungsplan aktiv; keine E-Mail wird dadurch versendet. Pausiert/Beendet leert next_invoice_date und stoppt die Erstellung. Beim erneuten Aktivieren muss next_invoice_date explizit gesetzt werden."
     return guide
 
 

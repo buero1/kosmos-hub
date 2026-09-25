@@ -100,18 +100,37 @@ class HubRecurringInvoiceGenerationService:
         self.cipher = cipher
 
     def backfill_missing_cursors(self) -> int:
-        rows = self.db.scalars(
-            select(HubFinanceRecurringInvoice).where(HubFinanceRecurringInvoice.hub_next_run_on.is_(None))
+        rows = self.db.execute(
+            select(HubFinanceRecurringInvoice.id, HubFinanceRecurringInvoice.encrypted_fields_json, HubFinanceRecurringInvoice.hub_next_run_on)
         ).all()
         count = 0
-        for recurring in rows:
+        for row in rows:
+            if not self._needs_cursor_sync(self._values(row.encrypted_fields_json), row.hub_next_run_on):
+                continue
+            # Recheck under the same row lock used by editing and generation.
+            recurring = self.db.scalar(select(HubFinanceRecurringInvoice)
+                .where(HubFinanceRecurringInvoice.id == row.id)
+                .with_for_update().execution_options(populate_existing=True))
+            if recurring is None:
+                self.db.rollback()
+                continue
             values = self._values(recurring.encrypted_fields_json)
-            raw_date = values.get("next_invoice_date") or ""
-            if raw_date:
-                recurring.hub_next_run_on = date.fromisoformat(raw_date)
+            if self._needs_cursor_sync(values, recurring.hub_next_run_on):
+                if values.get("status") in {"paused", "ended"}:
+                    values["next_invoice_date"] = ""
+                    recurring.hub_next_run_on = None
+                    recurring.encrypted_fields_json = self._encrypt(values)
+                else:
+                    recurring.hub_next_run_on = date.fromisoformat(values["next_invoice_date"])
                 count += 1
-        self.db.commit()
+            self.db.commit()
         return count
+
+    @staticmethod
+    def _needs_cursor_sync(values: dict[str, str], cursor: date | None) -> bool:
+        if values.get("status") in {"paused", "ended"}:
+            return bool(cursor or values.get("next_invoice_date"))
+        return values.get("status") == "active" and cursor is None and bool(values.get("next_invoice_date"))
 
     def create_due(self, *, today: date, limit: int = 25) -> RecurringInvoiceRunResult:
         candidate_ids = self.db.scalars(
@@ -145,6 +164,7 @@ class HubRecurringInvoiceGenerationService:
             .options(selectinload(HubFinanceRecurringInvoice.lines))
             .where(HubFinanceRecurringInvoice.id == recurring_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if recurring is None or recurring.hub_next_run_on is None or recurring.hub_next_run_on > today:
             self.db.rollback()
@@ -158,6 +178,8 @@ class HubRecurringInvoiceGenerationService:
         end_date = date.fromisoformat(values["end_date"]) if values.get("end_date") else None
         if end_date is not None and scheduled_on > end_date:
             values["status"] = "ended"
+            values["next_invoice_date"] = ""
+            recurring.hub_next_run_on = None
             recurring.encrypted_fields_json = self._encrypt(values)
             self.db.commit()
             return None
@@ -213,6 +235,8 @@ class HubRecurringInvoiceGenerationService:
         values["next_invoice_date"] = next_on.isoformat()
         if end_date is not None and next_on > end_date:
             values["status"] = "ended"
+            values["next_invoice_date"] = ""
+            recurring.hub_next_run_on = None
         recurring.encrypted_fields_json = self._encrypt(values)
         self.db.commit()
         return invoice_id, was_created

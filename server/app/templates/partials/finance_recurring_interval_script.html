@@ -1,6 +1,27 @@
 <script>
   (function () {
     document.querySelectorAll('[data-finance-document-form]').forEach(function (form) {
+      var status = form.querySelector('[name="document_field__status"]');
+      var nextDate = form.querySelector('[name="document_field__next_invoice_date"]');
+      if (status && nextDate) {
+        var label = nextDate.closest('label').querySelector('span');
+        var requiredLabel = label.querySelector('small');
+        if (!requiredLabel) {
+          requiredLabel = document.createElement('small');
+          requiredLabel.textContent = ' erforderlich';
+          label.appendChild(requiredLabel);
+        }
+        function syncNextDate() {
+          var stopped = status.value === 'paused' || status.value === 'ended';
+          if (stopped) nextDate.value = '';
+          nextDate.readOnly = stopped;
+          nextDate.required = status.value === 'active';
+          requiredLabel.hidden = !nextDate.required;
+        }
+        status.addEventListener('change', syncNextDate);
+        form.addEventListener('reset', function () { window.queueMicrotask(syncNextDate); });
+        syncNextDate();
+      }
       var rhythm = form.querySelector('[data-recurring-interval]');
       var customField = form.querySelector('[data-recurring-custom-field]');
       if (!rhythm || !customField) return;

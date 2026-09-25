@@ -190,7 +190,8 @@ def test_catalog_optional_fields_defaults_and_recurring_contract(env):
             if field.read_only:
                 assert name not in create
             elif name in create:
-                assert create[name]["required"] == field.required
+                conditional = kind == "recurring-invoices" and field.key == "next_invoice_date"
+                assert create[name]["required"] == (field.required and not conditional)
                 assert update[name]["required"] is False
     assert get_operation("finance.invoices.create").input_contract()["document_field__payment_terms"]["required"] is False
     assert get_operation("finance.recurring-invoices.create").input_contract()["document_field__status"]["default"] == "active"
