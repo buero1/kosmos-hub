@@ -3,7 +3,9 @@
 `lead-customer-conversion` is enabled by default and independently switchable in
 Settings / Workflows. Trigger: a real change of the main Lead result to `Vertrag`
 (displayed as Auftrag) or `Stattgefunden + Auftrag`. The existing field-update
-workflow stamps both order/billing-result dates in Europe/Berlin for either result.
+workflow preserves populated order/billing-result dates for either result, fills an
+empty order date with the Berlin change date and an empty billing-result date with
+the order date. The resulting order date is passed unchanged to the customer.
 
 ## Transaction and mapping
 

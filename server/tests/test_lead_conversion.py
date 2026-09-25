@@ -109,6 +109,17 @@ def test_mapping_and_once_only_across_result_changes(env, result):
     assert profile(env, customer)["Auftragsdatum"] == customer_values["Auftragsdatum"]
 
 
+@pytest.mark.parametrize("result", ["Vertrag", "Stattgefunden + Auftrag"])
+@pytest.mark.parametrize("billing_date", ["", "2026-09-03"])
+def test_conversion_keeps_manual_order_date_for_customer(env, result, billing_date):
+    lead = env.service.create_lead(submitted_values=fields(order_date="2026-09-01", billing_result_date=billing_date))
+    conversion = convert(env, lead, result)
+    env.db.commit()
+    customer = env.db.get(Customer, conversion.customer_id)
+    assert profile(env, customer)["Auftragsdatum"] == profile(env, lead)["order_date"] == "2026-09-01"
+    assert profile(env, lead)["billing_result_date"] == (billing_date or "2026-09-01")
+
+
 def test_notes_are_independent_copies_with_original_author_and_dates(env):
     lead = env.service.create_lead(submitted_values=fields())
     notes = HubLeadNoteService(db=env.db, cipher=env.cipher)

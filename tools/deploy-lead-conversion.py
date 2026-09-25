@@ -1,4 +1,4 @@
-"""Guarded additive-schema release; all application files come from Git archives."""
+"""Guarded conversion release (or --date-correction); deploy only Git archives."""
 import hashlib
 import json
 import os
@@ -11,8 +11,9 @@ import time
 from urllib.request import urlopen
 
 root = Path('/opt/kosmos-hub/app/server')
-before = Path('/tmp/lead-conversion-before.tar')
-after = Path('/tmp/lead-conversion-release.tar')
+release_prefix = 'lead-manual-dates' if '--date-correction' in sys.argv else 'lead-conversion'
+before = Path('/tmp/' + release_prefix + '-before.tar')
+after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
 
 
@@ -35,6 +36,8 @@ expected = {
     'app/services/hub_leads.py', 'app/services/hub_mailbox.py', 'app/services/hub_mailbox_access.py',
     'app/services/hub_workflows.py', 'app/templates/partials/hub_data_panel.html',
 }
+if '--date-correction' in sys.argv:
+    expected = {'app/services/hub_workflows.py'}
 assert old.keys() <= new.keys()
 changes = {name for name in new if old.get(name) != new[name]}
 assert changes == expected, changes
@@ -46,6 +49,7 @@ sys.path.insert(0, str(root))
 from dotenv import load_dotenv
 load_dotenv('/etc/kosmos-hub/kosmos-hub.env')
 from sqlalchemy import select, func, text
+from app.db.base import Base
 from app.db.session import SessionLocal
 from app.models.maintenance_run import MaintenanceRun
 from app.models.fleet_refresh_run import FleetRefreshRun
@@ -68,7 +72,7 @@ print(json.dumps({'verified_runtime_files': len(old), 'changes': sorted(changes)
 if '--apply' not in sys.argv:
     raise SystemExit(0)
 
-release = 'lead-conversion-' + time.strftime('%Y%m%d-%H%M%S')
+release = release_prefix + '-' + time.strftime('%Y%m%d-%H%M%S')
 stage = Path('/opt/kosmos-hub/staging') / release
 backup = Path('/opt/kosmos-hub/backups') / ('app-before-' + release)
 stage.mkdir(parents=True)

@@ -30,7 +30,7 @@ def db():
     (datetime(2026, 10, 24, 22, 30, tzinfo=timezone.utc), "2026-10-25"),
     (datetime(2026, 9, 25, 23, 30), "2026-09-25"),
 ])
-@pytest.mark.parametrize("existing_date", ["", "2020-01-01"])
+@pytest.mark.parametrize("existing_date", ["", None])
 @pytest.mark.parametrize("result", ["Vertrag", "Stattgefunden + Auftrag"])
 def test_transition_stamps_both_dates_with_berlin_change_date(db, now, expected, existing_date, result):
     values = {"lead_result": result, "order_date": existing_date, "billing_result_date": existing_date}
@@ -38,6 +38,23 @@ def test_transition_stamps_both_dates_with_berlin_change_date(db, now, expected,
     assert values["order_date"] == values["billing_result_date"] == expected
     assert values["lead_status"] == "Umgewandelt"
     assert values["billing_result"] == ("Auftrag" if result == "Vertrag" else result)
+
+
+@pytest.mark.parametrize("result", ["Vertrag", "Stattgefunden + Auftrag"])
+@pytest.mark.parametrize(("order_date", "billing_date", "expected"), [
+    ("2026-09-01", "2026-09-03", ("2026-09-01", "2026-09-03")),
+    ("2026-09-01", "", ("2026-09-01", "2026-09-01")),
+    ("2026-09-01", None, ("2026-09-01", "2026-09-01")),
+    ("", "2026-09-03", ("2026-09-26", "2026-09-03")),
+    (None, "2026-09-03", ("2026-09-26", "2026-09-03")),
+])
+def test_transition_preserves_entered_dates(db, result, order_date, billing_date, expected):
+    values = {"lead_result": result, "order_date": order_date, "billing_result_date": billing_date}
+    HubWorkflowService(db=db).apply_lead_field_updates(
+        previous_values={"lead_result": "Offen"}, updated_values=values,
+        now=datetime(2026, 9, 25, 22, 30, tzinfo=timezone.utc),
+    )
+    assert (values["order_date"], values["billing_result_date"]) == expected
 
 
 @pytest.mark.parametrize("existing_date", ["", "2020-01-01"])
@@ -103,4 +120,44 @@ def test_dates_are_persisted_through_shared_lead_service(db, monkeypatch, path):
     assert dates() == ("2026-09-26", "2026-09-26")
     service.update_lead(lead_id=lead.id, submitted_values={"lead_field__lead_result": "Rücktritt"})
     service.update_lead(lead_id=lead.id, submitted_values={"lead_field__lead_result": "Vertrag"})
+    assert dates() == ("2026-09-26", "2026-09-26")
+    service.update_lead(lead_id=lead.id, submitted_values={"lead_field__lead_result": "Rücktritt"})
+    service.update_lead(lead_id=lead.id, submitted_values={
+        "lead_field__lead_result": "Vertrag", "lead_field__order_date": "", "lead_field__billing_result_date": "",
+    })
     assert dates() == ("2026-10-01", "2026-10-01")
+
+
+@pytest.mark.parametrize("result", ["Vertrag", "Stattgefunden + Auftrag"])
+@pytest.mark.parametrize("path", ["create", "update", "stored", "external", "external_stored"])
+@pytest.mark.parametrize("billing_date", ["", "2026-09-03"])
+def test_manual_dates_survive_shared_lead_service(db, path, result, billing_date):
+    for workflow in HubWorkflowService(db=db).list_workflows():
+        if workflow.workflow_key == hub_workflows.LEAD_CUSTOMER_CONVERSION_WORKFLOW_KEY:
+            workflow.is_enabled = False
+    db.flush()
+    service = HubLeadService(db=db, cipher=SecretCipher("a" * 32))
+    manual = {"order_date": "2026-09-01", "billing_result_date": billing_date}
+    initial = {"last_name": "Example", "lead_result": "Offen"}
+    if path in {"stored", "external_stored"}:
+        initial.update(manual)
+    transition = {"lead_result": result}
+    if path in {"create", "update", "external"}:
+        transition.update(manual)
+
+    def submitted(values):
+        return {"lead_field__" + key: value for key, value in values.items()}
+
+    if path.startswith("external"):
+        lead, _ = service.upsert_external_lead(source_system="test", source_external_id="manual-dates", field_values=initial)
+        service.upsert_external_lead(source_system="test", source_external_id="manual-dates", field_values=transition)
+    elif path == "create":
+        lead = service.create_lead(submitted_values=submitted(initial | transition))
+    else:
+        lead = service.create_lead(submitted_values=submitted(initial))
+        service.update_lead(lead_id=lead.id, submitted_values=submitted(transition))
+    db.commit()
+    db.expire_all()
+    values = {field.key: field.form_value for field in service.get_detail(lead_id=lead.id).fields}
+    assert values["order_date"] == "2026-09-01"
+    assert values["billing_result_date"] == (billing_date or "2026-09-01")

@@ -2,12 +2,17 @@
 
 The existing `lead-result-field-updates` workflow now sets `order_date` and
 `billing_result_date` when the main Lead result changes to the displayed option
-"Auftrag" (stored key `Vertrag`) or `Stattgefunden + Auftrag`. Both dates use the current Berlin calendar date
-and are stored as ISO dates, including across UTC midnight and DST boundaries.
+"Auftrag" (stored key `Vertrag`) or `Stattgefunden + Auftrag`. Dates are stored as
+ISO dates. Existing values, including values entered in the same save, take priority.
 
-- Existing date values are replaced on an actual transition to Auftrag.
+- Populated dates are preserved, even when the two dates differ.
+- An empty order date receives the current Berlin calendar date, including across
+  UTC midnight and DST boundaries. An empty billing-result date takes the order date.
+- If only the billing-result date is populated, it is preserved and the empty order
+  date receives the Berlin change date. If both are empty, both receive that date.
 - Subsequent unrelated saves do not overwrite or backfill dates.
-- A later transition away and back to Auftrag records the new transition date.
+- A later transition away and back also preserves populated dates. Clearing both
+  dates explicitly when changing the result uses the new transition date again.
 - Disabling the existing workflow disables the new date updates as well.
 - Other results retain their existing behavior.
 - No historical Lead data is backfilled. Customer creation is handled separately by
