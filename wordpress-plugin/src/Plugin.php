@@ -59,13 +59,16 @@ class Plugin {
 	 * @return void
 	 */
 	public static function activate() {
-		SecretStore::ensure_identity();
-
 		if ( ! wp_next_scheduled( self::HEARTBEAT_HOOK ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::HEARTBEAT_HOOK );
 		}
 
 		self::schedule_registration_retry( time() + MINUTE_IN_SECONDS );
+
+		if ( ! Runtime::is_current() ) {
+			return;
+		}
+		SecretStore::ensure_identity();
 
 		// Try the first registration immediately so mass activation needs no
 		// follow-up click. The scheduled retry remains as a fallback.

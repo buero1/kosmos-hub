@@ -30,6 +30,8 @@ if '--order-compose-polish' in sys.argv:
     release_prefix = 'order-compose-polish'
 if '--order-compose-template' in sys.argv:
     release_prefix = 'order-compose-template'
+if '--bridge-recovery' in sys.argv:
+    release_prefix = 'bridge-recovery'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -109,6 +111,8 @@ if '--order-compose-polish' in sys.argv:
     expected = {'app/services/hub_operation_order_email.py', 'app/templates/base.html'}
 if '--order-compose-template' in sys.argv:
     expected = {'app/services/hub_operation_order_email.py', 'app/templates/base.html'}
+if '--bridge-recovery' in sys.argv:
+    expected = {'app/services/maintenance_runs.py'}
 assert changes == expected, changes
 for name, data in old.items():
     assert (root / name).read_bytes().replace(b'\r\n', b'\n') == data.replace(b'\r\n', b'\n'), name + ': production changed'

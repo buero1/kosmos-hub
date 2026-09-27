@@ -158,4 +158,12 @@ $responses=array(function($url,$args) use ($identity) {
 });
 check(KosmosBridge\Http\HubPackageClient::download(1)==='offline-package', 'Authenticated package download contract preserved');
 check(is_wp_error(KosmosBridge\Security\SiteAuth::authorize_request($incoming)), 'Old identity rejected after rotation');
+reset_fixture(array(Options::IDENTITY=>array('uuid'=>'existing-site', 'secret'=>'existing-key', 'domain'=>'template.example')));
+$responses=array($success);
+Plugin::activate();
+check(RegistrationState::is_registered(), 'Fresh-version activation completes deferred registration');
+check(SecretStore::get_identity()['uuid']==='existing-site', 'Fresh activation preserves UUID');
+check(SecretStore::get_identity()['secret']==='existing-key', 'Fresh activation preserves secret');
+check(isset($scheduled[Plugin::HEARTBEAT_HOOK]), 'Fresh activation retains heartbeat');
+
 echo "Bridge registration contracts (real WordPress Options API): $checks passed\n";

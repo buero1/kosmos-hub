@@ -24,6 +24,7 @@ function wp_doing_cron() { return false; }
 function wp_doing_ajax() { return false; }
 function wp_next_scheduled($hook) { global $scheduled; return $scheduled[$hook] ?? false; }
 function wp_schedule_single_event($when,$hook) { global $scheduled; $scheduled[$hook]=$when; }
+function wp_schedule_event($when,$frequency,$hook) { global $scheduled; $scheduled[$hook]=$when; }
 function wp_clear_scheduled_hook($hook) { global $scheduled; unset($scheduled[$hook]); }
 function wp_using_ext_object_cache() { return true; }
 function sanitize_option($name, $value) { return $value; }
@@ -46,6 +47,10 @@ function wp_parse_url($url,$component=-1) { return parse_url($url,$component); }
 function wp_generate_uuid4() { global $counter; return sprintf('00000000-0000-4000-8000-%012d',++$counter); }
 function wp_generate_password($length,...$args) { return str_repeat('x',$length); }
 function get_bloginfo($key) { return '6.9'; }
+function get_file_data($file, $headers) {
+    preg_match('/^ \* Version:\s*(\S+)/m', file_get_contents($file), $match);
+    return array('Version' => $match[1] ?? '');
+}
 function wp_json_encode($value) { return json_encode($value); }
 function trailingslashit($value) { return rtrim($value,'/').'/'; }
 function __($value,...$args) { return $value; }
@@ -169,9 +174,18 @@ if (!is_file($fixture) || hash_file('sha256',$fixture)!=='cde15dc93f943de5884c87
 }
 reset_fixture();
 require $fixture;
-foreach (array('Options','Registration/OptionStore','Registration/SecretStore','Registration/RegistrationState',
+$source = getenv('BRIDGE_TARGET_DIR') ?: __DIR__.'/../../wordpress-plugin';
+$previous = getenv('BRIDGE_PRELOADED_DIR');
+if ($previous) {
+    foreach (array('Options', 'Registration/SecretStore', 'Plugin') as $class) {
+        require $previous.'/src/'.$class.'.php';
+    }
+}
+foreach (array('Options','Runtime','Registration/OptionStore','Registration/SecretStore','Registration/RegistrationState',
                'Registration/PayloadFactory','Http/RegistrationClient','Registration/Registrar','Plugin') as $class) {
-    require __DIR__.'/../../wordpress-plugin/src/'.$class.'.php';
+    if (!class_exists('KosmosBridge\\'.str_replace('/', '\\', $class), false) && is_file($source.'/src/'.$class.'.php')) {
+        require $source.'/src/'.$class.'.php';
+    }
 }
 $success=function($payload) {
     return array('code'=>200,'body'=>json_encode(array('site_uuid'=>$payload['site_uuid'],'status'=>'verified')));

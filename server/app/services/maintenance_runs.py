@@ -1306,6 +1306,10 @@ class MaintenanceRunService:
 
                 entries, refresh_error = self._fresh_complete_site_update_entries(run, phase=phase, wave=wave)
                 if refresh_error:
+                    if (run.result_json or {}).get("bridge_unavailable"):
+                        return self._stop_complete_site_update_for_bridge_loss(
+                            run, wave=wave, remaining=[], failure=run.result_json["bridge_unavailable"],
+                        )
                     return self._finish_complete_site_update(
                         run,
                         status=MaintenanceRunStatus.failed.value,
@@ -1381,6 +1385,12 @@ class MaintenanceRunService:
                     )
 
                     if outcome == "failed":
+                        if child_result.get("bridge_unavailable"):
+                            return self._stop_complete_site_update_for_bridge_loss(
+                                run, wave=wave,
+                                remaining=executable_entries[position:],
+                                failure=child_result["bridge_unavailable"],
+                            )
                         health_failure = self._post_update_health_failure_kind(child_result.get("post_update_health"))
                         if health_failure is not None:
                             return self._finish_complete_site_update(
@@ -1521,6 +1531,7 @@ class MaintenanceRunService:
         try:
             SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
         except SiteMcpProxyError as exc:
+            self._record_bridge_connection_failure(run, exc)
             self._complete_complete_site_update_step(run, step_key, "failed", f"Fresh update check failed: {exc.message}")
             return [], f"Fresh update check before {label} failed: {exc.message}"
 
@@ -1530,6 +1541,15 @@ class MaintenanceRunService:
             for entry in inventory.build_update_workbench(inventory.list_items(limit=1000))
             if entry.site.id == run.site_id
         ]
+        phases = ("wordpress", "theme", "plugin")
+        remaining_phases = phases if phase == "verification" else phases[phases.index(phase):]
+        run.result_json = {
+            **(run.result_json or {}),
+            "pending_updates": [
+                self._complete_site_update_entry_summary(entry) for entry in entries
+                if entry.update_available and entry.kind in remaining_phases
+            ],
+        }
         if phase != "verification":
             entries = [entry for entry in entries if entry.kind == phase]
         available_count = sum(entry.update_available for entry in entries)
@@ -1649,6 +1669,10 @@ class MaintenanceRunService:
             "skipped": "skipped_updates",
         }.get(outcome, "failed_updates")
         result[counter_key] = int(result.get(counter_key, 0) or 0) + 1
+        result["pending_updates"] = [
+            pending for pending in result.get("pending_updates", [])
+            if (pending["kind"], pending["identifier"]) != (entry.kind, entry.identifier)
+        ]
         run.result_json = result
         self._append_complete_site_update_event(
             run,
@@ -1657,6 +1681,27 @@ class MaintenanceRunService:
             status=outcome,
             detail=detail,
             update={**self._complete_site_update_entry_summary(entry), "run_id": child_run_id},
+        )
+
+    def _stop_complete_site_update_for_bridge_loss(
+        self, run: MaintenanceRun, *, wave: int,
+        remaining: list[UpdateWorkbenchEntry], failure: dict[str, Any],
+    ) -> str:
+        message = "Nicht ausgeführt: Bridge nicht erreichbar."
+        pending = (run.result_json or {}).get("pending_updates") or [
+            self._complete_site_update_entry_summary(entry) for entry in remaining
+        ]
+        run.result_json = {
+            **(run.result_json or {}), "bridge_unavailable": failure, "pending_updates": [],
+            "skipped_updates": int((run.result_json or {}).get("skipped_updates", 0)) + len(pending),
+        }
+        for update in pending:
+            self._append_complete_site_update_event(
+                run, phase=update["kind"], wave=wave, status="skipped", detail=message, update=update,
+            )
+        return self._finish_complete_site_update(
+            run, status=MaintenanceRunStatus.failed.value, stage="bridge-unavailable",
+            message="Bridge nicht erreichbar. Der Ablauf wurde sofort gestoppt; weitere Updates wurden nicht ausgeführt.",
         )
 
     @staticmethod
@@ -1996,6 +2041,7 @@ class MaintenanceRunService:
             try:
                 SiteUpdateService(db=self.db, cipher=self.cipher).refresh_site_updates(run.site_id)
             except SiteMcpProxyError as exc:
+                self._record_bridge_connection_failure(run, exc)
                 self._fail_plugin_update_run(run, f"Direct update preflight failed: {exc.message}")
                 return "failed"
 
@@ -2041,6 +2087,7 @@ class MaintenanceRunService:
             try:
                 payload = self._execute_direct_update(run.site_id, details)
             except SiteMcpProxyError as exc:
+                self._record_bridge_connection_failure(run, exc)
                 reconciled_result, reconciliation_detail = self._reconcile_plugin_after_failed_update_request(
                     run,
                     details,
@@ -2062,6 +2109,26 @@ class MaintenanceRunService:
         if result_error:
             self._fail_plugin_update_run(run, result_error)
             return "failed"
+
+        if details["update_identifier"] == "kosmos-bridge/kosmos-bridge.php" and details["expected_active"]:
+            # A self-update is not confirmed until a fresh request can load the new Bridge.
+            try:
+                fresh = self.proxy.execute_readonly_ability(
+                    run.site_id, self.LIST_INSTALLED_PLUGINS_ABILITY, None, timeout_seconds=45,
+                )
+                installed = self._result_from_payload(fresh).get("plugins", [])
+                if not isinstance(installed, list) or not any(
+                    isinstance(plugin, dict)
+                    and plugin.get("plugin_file") == details["update_identifier"]
+                    and plugin.get("version") == details["target_version"]
+                    and plugin.get("active") is True for plugin in installed
+                ):
+                    raise SiteMcpProxyError("REMOTE_INVALID_RESPONSE", "Neue Bridge-Version ist nicht aktiv bestätigt.")
+                run.result_json = {**(run.result_json or {}), "bridge_fresh_request_verified": True}
+            except SiteMcpProxyError as exc:
+                self._record_bridge_connection_failure(run, exc, force=True)
+                self._fail_plugin_update_run(run, f"Bridge-Selbst-Update nicht bestätigt: {exc.message}")
+                return "failed"
 
         self._complete_plugin_update_step(
             run,
@@ -2561,6 +2628,7 @@ class MaintenanceRunService:
             try:
                 return "updated", self._execute_direct_update(run.site_id, details)
             except SiteMcpProxyError as exc:
+                self._record_bridge_connection_failure(run, exc)
                 resolution = self._bridge_update_preflight_resolution(details, exc)
                 if resolution is None:
                     reconciled_result, reconciliation_detail = self._reconcile_plugin_after_failed_update_request(
@@ -2653,6 +2721,7 @@ class MaintenanceRunService:
                 timeout_seconds=45,
             )
         except SiteMcpProxyError as recovery_error:
+            self._record_bridge_connection_failure(run, recovery_error, force=True)
             run.result_json = {
                 **(run.result_json or {}),
                 "post_update_reconciliation": {
@@ -2664,8 +2733,19 @@ class MaintenanceRunService:
             self.db.commit()
             return None, recovery_error.message
 
-        available_plugins = self._result_from_payload(payload).get("plugins", [])
-        plugins = available_plugins if isinstance(available_plugins, list) else []
+        available_plugins = self._result_from_payload(payload).get("plugins")
+        if not isinstance(available_plugins, list):
+            invalid = SiteMcpProxyError("REMOTE_INVALID_RESPONSE", "Bridge returned no valid plugin inventory.")
+            self._record_bridge_connection_failure(run, invalid)
+            run.result_json = {
+                **(run.result_json or {}),
+                "post_update_reconciliation": {**reconciliation, "confirmed": False, "error": invalid.message},
+            }
+            self.db.commit()
+            return None, invalid.message
+        # A successful independent read supersedes an ambiguous transport error.
+        run.result_json = {key: value for key, value in (run.result_json or {}).items() if key != "bridge_unavailable"}
+        plugins = available_plugins
         installed = next(
             (
                 plugin
@@ -2722,6 +2802,7 @@ class MaintenanceRunService:
                     timeout_seconds=60,
                 )
             except SiteMcpProxyError as activation_error:
+                self._record_bridge_connection_failure(run, activation_error)
                 run.result_json = {
                     **(run.result_json or {}),
                     "post_update_reconciliation": {
@@ -3478,6 +3559,19 @@ class MaintenanceRunService:
             step.result_json = dict(result or {})
         self.db.commit()
 
+    @staticmethod
+    def _record_bridge_connection_failure(run: MaintenanceRun, error: SiteMcpProxyError, *, force: bool = False) -> None:
+        code = error.code.upper()
+        if (
+            force or code.startswith("REMOTE_")
+            or code in {"REST_NO_ROUTE", "KOSMOS_BRIDGE_AUTH_FAILED"}
+            or error.status_code in {401, 403, 502, 503, 504}
+        ):
+            run.result_json = {
+                **(run.result_json or {}),
+                "bridge_unavailable": {"code": code, "status": error.status_code, "message": error.message},
+            }
+
     def _fail_plugin_update_run(
         self,
         run: MaintenanceRun,
@@ -3522,6 +3616,13 @@ class MaintenanceRunService:
         )
         self.db.commit()
 
+        batch_id = self._plugin_update_batch_id(run)
+        if batch_id and (run.result_json or {}).get("bridge_unavailable"):
+            self._skip_queued_maintenance_runs(
+                batch_id, kind=self.PLUGIN_UPDATE_KIND, site_id=run.site_id,
+                message="Nicht ausgeführt: Bridge nicht erreichbar.",
+            )
+
     def _direct_update_batch_runs(self, batch_id: str) -> list[MaintenanceRun]:
         statement = select(MaintenanceRun).where(MaintenanceRun.kind == self.PLUGIN_UPDATE_KIND)
         runs = [
@@ -3556,7 +3657,7 @@ class MaintenanceRunService:
             position = run.id
         return position, run.id
 
-    def _skip_queued_maintenance_runs(self, batch_id: str, *, kind: str, message: str) -> int:
+    def _skip_queued_maintenance_runs(self, batch_id: str, *, kind: str, message: str, site_id: int | None = None) -> int:
         statement = (
             select(MaintenanceRun)
             .options(selectinload(MaintenanceRun.steps), selectinload(MaintenanceRun.site))
@@ -3569,6 +3670,8 @@ class MaintenanceRunService:
         skipped = 0
         completed_at = datetime.now(UTC)
         for run in self.db.scalars(statement):
+            if site_id is not None and run.site_id != site_id:
+                continue
             if self._plugin_update_batch_id(run) != batch_id:
                 continue
             if (run.result_json or {}).get("stage") != "queued":

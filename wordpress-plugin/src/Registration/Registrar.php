@@ -26,6 +26,11 @@ class Registrar {
 	 * @return bool
 	 */
 	public function register( $heartbeat = false, $allow_domain_retry = true ) {
+		// Old activation callbacks can autoload this new file after replacing the plugin.
+		// Let the existing cron retry run in a fresh request, without touching identity.
+		if ( ! \KosmosBridge\Runtime::is_current() || ! method_exists( SecretStore::class, 'get_identity' ) ) {
+			return false;
+		}
 		if ( ! SecretStore::ensure_identity() ) {
 			return false;
 		}
