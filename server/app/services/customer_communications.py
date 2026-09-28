@@ -2209,6 +2209,7 @@ class CustomerCommunicationService:
             occurred_at=email.zoho_sent_at or email.created_at,
             preview_html=self._email_preview_document(
                 content,
+                content_type=self._text(payload.get("content_type")),
                 image_url_prefix=f"/customers/{email.customer_id}/communications/emails/{email.id}/images",
             ),
             attachments=self._email_attachments(payload),
@@ -2236,7 +2237,7 @@ class CustomerCommunicationService:
             source="scheduled",
             sync_status=email.status,
             occurred_at=email.scheduled_at,
-            preview_html=self._email_preview_document(content),
+            preview_html=self._email_preview_document(content, content_type=self._text(payload.get("content_type"))),
             attachments=(),
             can_load_content=False,
             last_error=email.last_error,
@@ -2247,19 +2248,26 @@ class CustomerCommunicationService:
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
     @classmethod
-    def _email_preview_document(cls, content: str | None, *, image_url_prefix: str | None = None) -> str | None:
+    def _email_preview_document(
+        cls, content: str | None, *, image_url_prefix: str | None = None, content_type: str | None = None,
+    ) -> str | None:
         if content is None:
             return None
-        if image_url_prefix:
+        media_type = (content_type or "").partition(";")[0].strip().casefold()
+        # Older imports lack MIME metadata. An address in angle brackets is not an HTML tag.
+        is_html = media_type == "text/html" or (
+            media_type != "text/plain"
+            and bool(re.search(r"</?[a-z][a-z0-9:-]*(?:\s[^<>]*|/?)>", content, flags=re.IGNORECASE))
+        )
+        if not is_html:
+            content = f"<pre>{escape(content)}</pre>"
+        elif image_url_prefix:
             content = cls._rewrite_external_image_sources(content, image_url_prefix=image_url_prefix)
         security_head = (
             '<meta charset="utf-8">'
             '<meta http-equiv="Content-Security-Policy" '
             "content=\"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'\">"
         )
-        if not re.search(r"</?[a-z][^>]*>", content, flags=re.IGNORECASE):
-            content = f"<pre>{escape(content)}</pre>"
-
         head_match = re.search(r"<head\\b[^>]*>", content, flags=re.IGNORECASE)
         if head_match:
             return f"{content[:head_match.end()]}{security_head}{content[head_match.end():]}"

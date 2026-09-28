@@ -468,6 +468,7 @@ class HubMailboxImapImportService:
             "to": people("To"),
             "cc": people("Cc"),
             "content": html_body if html_body is not None else text_body,
+            "content_type": "text/html" if html_body is not None else "text/plain",
             "attachments": [{"id": attachment.id, "name": attachment.filename} for attachment in attachments],
             "direction": direction,
             "received_time": occurred_at.isoformat(),

@@ -80,7 +80,9 @@ class HubLeadEmailService:
             recipients=CustomerCommunicationService._people_text(payload.get("to")),
             direction=email.direction,
             occurred_at=email.zoho_sent_at or email.created_at,
-            preview_html=CustomerCommunicationService._email_preview_document(content),
+            preview_html=CustomerCommunicationService._email_preview_document(
+                content, content_type=self._text(payload.get("content_type")),
+            ),
         )
 
     def _payload(self, encrypted_payload: str) -> dict[str, object]:

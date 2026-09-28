@@ -1228,7 +1228,9 @@ class HubMailboxService:
             lead=HubMailboxLeadLink(id=lead.lead.id, name=lead.name) if lead is not None else None,
             customer_email_id=email.id,
             # Deluge can send an unknown email body directly; render it only inside the sandboxed preview.
-            preview_html=CustomerCommunicationService._email_preview_document(content),
+            preview_html=CustomerCommunicationService._email_preview_document(
+                content, content_type=self._text(payload.get("content_type")),
+            ),
             attachments=self.communications._email_attachments(payload),
             can_load_content=False,
             last_error=email.last_error,
@@ -1253,7 +1255,9 @@ class HubMailboxService:
             customers=(HubMailboxCustomerLink(id=customer.id, name=customer.name),) if customer is not None else (),
             customer_id=scheduled.customer_id,
             customer_email_id=None,
-            preview_html=CustomerCommunicationService._email_preview_document(self._text(payload.get("content"))),
+            preview_html=CustomerCommunicationService._email_preview_document(
+                self._text(payload.get("content")), content_type=self._text(payload.get("content_type")),
+            ),
             attachments=tuple(
                 CustomerCommunicationAttachment(id=str(attachment.id), filename=attachment.filename)
                 for attachment in scheduled.attachments

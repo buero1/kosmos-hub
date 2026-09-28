@@ -444,6 +444,7 @@ class HubCaseService:
                 occurred_at=email.zoho_sent_at or email.created_at,
                 preview_html=CustomerCommunicationService._email_preview_document(
                     content,
+                    content_type=CustomerCommunicationService._text(payload.get("content_type")),
                     image_url_prefix=f"/customers/{email.customer_id}/communications/emails/{email.id}/images",
                 ),
                 attachments=attachments,
@@ -480,7 +481,9 @@ class HubCaseService:
                 direction=email.direction,
                 is_unread=email.is_unread,
                 occurred_at=email.received_at,
-                preview_html=CustomerCommunicationService._email_preview_document(content),
+                preview_html=CustomerCommunicationService._email_preview_document(
+                    content, content_type=CustomerCommunicationService._text(payload.get("content_type")),
+                ),
                 attachments=attachments,
                 can_load_content=False,
                 last_error=email.last_error,

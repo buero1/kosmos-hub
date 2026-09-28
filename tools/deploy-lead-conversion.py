@@ -34,6 +34,8 @@ if '--bridge-recovery' in sys.argv:
     release_prefix = 'bridge-recovery'
 if '--invoice-recipient' in sys.argv:
     release_prefix = 'invoice-recipient'
+if '--email-preview' in sys.argv:
+    release_prefix = 'email-preview'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -120,8 +122,14 @@ if '--invoice-recipient' in sys.argv:
         'app/services/customer_communications.py', 'app/services/hub_invoice_email_batches.py',
         'app/services/hub_operation_invoice_email.py',
     }
+if '--email-preview' in sys.argv:
+    expected = {
+        'app/services/customer_communications.py', 'app/services/hub_mailbox.py',
+        'app/services/hub_mailbox_imap_import.py', 'app/services/hub_cases.py',
+        'app/services/hub_lead_emails.py',
+    }
 assert changes == expected, changes
-if '--invoice-recipient' in sys.argv:
+if '--invoice-recipient' in sys.argv or '--email-preview' in sys.argv:
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
