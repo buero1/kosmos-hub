@@ -106,7 +106,9 @@ class HubInvoiceEmailBatchService:
             fields = {field.key: field.value for field in detail.fields}
             customer = detail.document.customer
             contact_id = detail.document.contact_id
-            recipients = self.communications.list_contact_recipients(customer_id=customer.id) if customer else ()
+            recipients = self.communications.list_contact_recipients(
+                customer_id=customer.id, allowed_contact_ids={contact_id},
+            ) if customer and contact_id else ()
             recipient = next((item for item in recipients if item.key.startswith(f"contact:{contact_id}:")), None)
             pdf = generated.get(invoice_id)
             original = imported.get(invoice_id)
@@ -271,7 +273,9 @@ def run_invoice_email_batch(batch_id: int) -> None:
                 communications = CustomerCommunicationService(
                     db=db, cipher=cipher, public_base_url=get_settings().public_base_url,
                 )
-                recipients = communications.list_contact_recipients(customer_id=invoice.customer_id)
+                recipients = communications.list_contact_recipients(
+                    customer_id=invoice.customer_id, allowed_contact_ids={invoice.contact_id},
+                )
                 if not any(recipient.key == payload["recipient_key"] and recipient.email == payload["recipient_email"] for recipient in recipients):
                     raise InvoiceEmailBatchError("Die Empfängeradresse hat sich geändert.")
                 if payload["pdf_kind"] == "generated":

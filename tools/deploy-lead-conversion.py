@@ -32,6 +32,8 @@ if '--order-compose-template' in sys.argv:
     release_prefix = 'order-compose-template'
 if '--bridge-recovery' in sys.argv:
     release_prefix = 'bridge-recovery'
+if '--invoice-recipient' in sys.argv:
+    release_prefix = 'invoice-recipient'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -113,7 +115,16 @@ if '--order-compose-template' in sys.argv:
     expected = {'app/services/hub_operation_order_email.py', 'app/templates/base.html'}
 if '--bridge-recovery' in sys.argv:
     expected = {'app/services/maintenance_runs.py'}
+if '--invoice-recipient' in sys.argv:
+    expected = {
+        'app/services/customer_communications.py', 'app/services/hub_invoice_email_batches.py',
+        'app/services/hub_operation_invoice_email.py',
+    }
 assert changes == expected, changes
+if '--invoice-recipient' in sys.argv:
+    runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
+                     if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
+    assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
 for name, data in old.items():
     assert (root / name).read_bytes().replace(b'\r\n', b'\n') == data.replace(b'\r\n', b'\n'), name + ': production changed'
 

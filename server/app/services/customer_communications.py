@@ -580,6 +580,22 @@ class CustomerCommunicationService:
         customer = self._require_customer(customer_id)
         return tuple(self._recipients_for_customer(customer, include_account_email=False, allowed_contact_ids=allowed_contact_ids))
 
+    def get_recipient(self, *, customer_id: int, recipient_key: str) -> CustomerCommunicationRecipient | None:
+        """Resolve an explicit contact before address deduplication across a customer."""
+        customer = self._require_customer(customer_id)
+        contact_ids: set[int] = set()
+        is_contact = recipient_key.startswith("contact:")
+        if is_contact:
+            match = re.fullmatch(r"contact:([1-9][0-9]{0,18}):(.+)", recipient_key)
+            if match is None or int(match.group(1)) > 9223372036854775807:
+                return None
+            contact_ids.add(int(match.group(1)))
+        elif not recipient_key.startswith("account:"):
+            return None
+        return next((item for item in self._recipients_for_customer(
+            customer, include_account_email=not is_contact, allowed_contact_ids=contact_ids,
+        ) if item.key == recipient_key), None)
+
     def search_recipients(self, *, query: str, limit: int = 12, allowed_customer_ids: set[int] | None = None,
                           allowed_contact_ids: set[int] | None = None) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
         """Find known recipient addresses without sending a new request to Zoho."""
@@ -670,10 +686,10 @@ class CustomerCommunicationService:
         template = self._stored_email_template(template_id)
         payload = self._payload(template.encrypted_payload_json)
         name = self._required_text(self._text(payload.get("name")) or "", "Vorlagenname", maximum=255)
-        recipient = next((item for item in self._recipients_for_customer(
-            customer, include_account_email=not recipient_key.startswith("contact:")
-        ) if item.key == recipient_key), None)
-        if recipient is None:
+        recipient = self.get_recipient(customer_id=customer.id, recipient_key=recipient_key)
+        if recipient_key and recipient is None:
+            raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
+        if not recipient_key:
             recipient = next(iter(self._recipients_for_customer(customer)), None)
         context = self._email_template_context(customer=customer, recipient=recipient)
         for key, value in (template_values or {}).items():
@@ -1258,9 +1274,7 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle eine aktuell von Zoho erlaubte Absenderadresse aus.")
-        recipient = recipient_override or next((item for item in self._recipients_for_customer(
-            customer, include_account_email=not recipient_key.startswith("contact:")
-        ) if item.key == recipient_key), None)
+        recipient = recipient_override or self.get_recipient(customer_id=customer.id, recipient_key=recipient_key)
         if recipient is None:
             raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
         if reply_to_email_id is not None and forward_from_email_id is not None:
@@ -1394,9 +1408,7 @@ class CustomerCommunicationService:
         )
         if sender is None:
             raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
-        recipient = recipient_override or next((item for item in self._recipients_for_customer(
-            customer, include_account_email=not recipient_key.startswith("contact:")
-        ) if item.key == recipient_key), None)
+        recipient = recipient_override or self.get_recipient(customer_id=customer.id, recipient_key=recipient_key)
         if recipient is None:
             raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
         if reply_to_email_id is not None and forward_from_email_id is not None:

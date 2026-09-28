@@ -20,11 +20,16 @@ from app.services.hub_invoice_email_batches import (
 )
 
 
-def _fixture(db, *, contact_email="kunde@example.de", pdf=True, template_subject="Rechnung ${Invoice.Number}"):
+def _fixture(db, *, contact_email="kunde@example.de", pdf=True, template_subject="Rechnung ${Invoice.Number}", shared_email=False):
     cipher = SecretCipher("a" * 32)
     customer = Customer(name="Muster GmbH", encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {}})))
     db.add(customer)
     db.flush()
+    if shared_email:
+        db.add(CustomerContact(customer_id=customer.id, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {
+            "Name": "Other contact", "E-Mail": contact_email,
+        }}))))
+        db.flush()
     contact = CustomerContact(customer_id=customer.id, encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {
         "Name": "Max Muster", "E-Mail": contact_email, "Vorname": "Max", "Nachname": "Muster",
     }})))
@@ -65,14 +70,19 @@ def _db():
     return engine
 
 
-def test_review_lists_contact_and_email_then_requires_fresh_confirmation():
+@pytest.mark.parametrize("shared_email", [False, True])
+def test_review_lists_contact_and_email_then_requires_fresh_confirmation(shared_email):
     engine = _db()
     with Session(engine) as db:
-        cipher, invoice_id, contact = _fixture(db)
+        cipher, invoice_id, contact = _fixture(db, shared_email=shared_email)
         service = HubInvoiceEmailBatchService(db=db, cipher=cipher)
         review = service.review([invoice_id], actor="admin")
         assert review["rows"][0]["email"] == "kunde@example.de"
         assert review["rows"][0]["contact"] == "Max Muster"
+        payload, _template = service.prepare_message(invoice_id, sender_email=review["sender"])
+        assert payload["recipient_key"] == f"contact:{contact.id}:kunde@example.de"
+        assert "Max Muster" in payload["content"]
+        assert "Other contact" not in payload["content"]
         assert review["sender"] == "info@kosmos-medien.de"
         assert review["review_token"]
         with pytest.raises(InvoiceEmailBatchError, match="ungültig"):
@@ -102,10 +112,12 @@ def test_review_blocks_missing_prerequisites(contact_email, pdf, template_subjec
         assert review["review_token"] == ""
 
 
-def test_worker_sends_once_only_after_confirmation(monkeypatch):
+@pytest.mark.parametrize("shared_email", [False, True])
+def test_worker_sends_once_only_after_confirmation(monkeypatch, shared_email):
     engine = _db()
     with Session(engine) as db:
-        cipher, invoice_id, _contact = _fixture(db)
+        cipher, invoice_id, _contact = _fixture(db, shared_email=shared_email)
+        expected_key = f"contact:{_contact.id}:kunde@example.de"
         service = HubInvoiceEmailBatchService(db=db, cipher=cipher)
         batch = service.confirm(token=service.review([invoice_id], actor="admin")["review_token"], actor="admin")
         batch_id = batch.id
@@ -125,7 +137,7 @@ def test_worker_sends_once_only_after_confirmation(monkeypatch):
     run_invoice_email_batch(batch_id)
     assert len(sent) == 1
     assert sent[0][0] == "info@kosmos-medien.de"
-    assert sent[0][1].startswith("contact:")
+    assert sent[0][1] == expected_key
     assert sent[0][2] == "Rechnung RE-000042"
     with Session(engine) as db:
         assert HubInvoiceEmailBatchService(db=db, cipher=cipher).status(batch_id=batch_id, actor="admin")["items"][0]["status"] == "sent"

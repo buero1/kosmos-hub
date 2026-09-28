@@ -147,8 +147,16 @@ def send_invoice_email(service, values):
     files = mailbox.prepare_draft_delivery_attachments(draft_id=draft_id)
     if not any(sha256(file.content).hexdigest() == metadata["pdf_sha256"] for file in files):
         raise HubOperationError("Die Rechnungs-PDF wurde aus dem Anhang entfernt. Bitte den Versand aus der Rechnung neu vorbereiten.")
-    recipient = next((r for r in mailbox.communications.list_recipients(customer_id=invoice.customer_id)
-                      if r.email.casefold() == context["recipient_email"].casefold()), None)
+    recipient_key = (context.get("recipient") or {}).get("key", "")
+    recipient = mailbox.communications.get_recipient(customer_id=invoice.customer_id, recipient_key=recipient_key)
+    if recipient_key and recipient is None:
+        raise HubOperationError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
+    if recipient is None or recipient.email.casefold() != context["recipient_email"].casefold():
+        # A manually changed address must not silently switch to another contact sharing it.
+        candidates = mailbox.communications.list_contact_recipients(
+            customer_id=invoice.customer_id, allowed_contact_ids={invoice.contact_id},
+        ) + mailbox.communications.list_recipients(customer_id=invoice.customer_id)
+        recipient = next((r for r in candidates if r.email.casefold() == context["recipient_email"].casefold()), None)
     batch = HubInvoiceEmailBatch(review_nonce=token_urlsafe(24), actor=service.actor[:64],
         sender_email=context["sender_email"], template_id=context["template_id"], status="running")
     service.db.add(batch)

@@ -14,6 +14,7 @@ from starlette.requests import Request
 from app.api.routes import web
 from app.main import create_app
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_documents import HubFinanceInvoice
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.hub_invoice_email_batch import HubInvoiceEmailBatchItem
@@ -68,6 +69,34 @@ def test_prepare_only_creates_editable_draft_with_pdf(prepared):
     assert p.env.db.query(HubInvoiceEmailBatchItem).count() == 0
     assert invoice_email_deliveries(p.env.db, [p.invoice.id])[p.invoice.id].status == "not_sent"
     assert "finance.invoices.email.send" not in {op.key for op in agent_operations()}
+
+
+@pytest.mark.parametrize("address_field", ["E-Mail", "Zweite E-Mail-Adresse"])
+@pytest.mark.parametrize("keep_key", [False, True])
+def test_shared_email_keeps_selected_contact_through_prepare_and_send(prepared, address_field, keep_key):
+    p = prepared
+    selected = CustomerContact(customer_id=p.invoice.customer_id, encrypted_profile_json=p.env.cipher.encrypt(json.dumps({
+        "fields": {"Name": "Selected contact", address_field: "test@example.test"},
+    })))
+    p.env.db.add(selected)
+    p.env.db.flush()
+    p.invoice.contact_id = selected.id
+    p.env.db.commit()
+    result = p.env.service.execute("finance.invoices.email.prepare", {"record_id": str(p.invoice.id)})
+    context = mailbox_for(p.env.service).get_draft_compose_context(draft_id=result.record_id)
+    assert context["recipient"]["key"] == f"contact:{selected.id}:test@example.test"
+    assert context["recipient"]["name"] == "Selected contact"
+    assert "Selected contact" in context["content"]
+    assert not p.sent
+    data = {field: str(context.get(field) or "") for field in SEND_FIELDS}
+    data.update(recipient_customer_id=str(p.invoice.customer_id),
+                recipient_key=context["recipient"]["key"] if keep_key else "",
+                retained_attachment_ids=json.dumps([file["id"] for file in context["attachments"]]))
+    p.env.service.execute("finance.invoices.email.send", data)
+    assert len(p.sent) == 1
+    assert p.sent[0]["recipient_name"] == "Selected contact"
+    assert p.sent[0]["recipient_email"] == "test@example.test"
+    assert invoice_email_deliveries(p.env.db, [p.invoice.id])[p.invoice.id].status == "sent"
 
 
 def test_send_exact_edited_values_one_pdf_and_update_status(prepared):
