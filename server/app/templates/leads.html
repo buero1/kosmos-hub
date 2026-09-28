@@ -23,7 +23,7 @@
             {% for entry in entries %}
               <tr><td><a href="/leads/{{ entry.lead.id }}">{{ entry.name }}</a></td><td>{{ entry.company }}</td><td>{{ entry.email }}</td><td>{{ entry.status }}</td><td>{{ entry.source }}</td><td>{{ entry.created_time }}</td></tr>
             {% else %}
-              <tr><td colspan="6">Noch keine Leads vorhanden. Der spätere Import füllt diese Liste aus Zoho.</td></tr>
+              <tr><td colspan="6">Noch keine Leads vorhanden.</td></tr>
             {% endfor %}
           </tbody>
         </table>

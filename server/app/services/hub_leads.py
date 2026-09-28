@@ -281,6 +281,9 @@ class HubLeadService:
             value = self._display_option(definition, form_value) or form_value
             if definition.display_type == "DatumZeit":
                 value = self._format_date_time(value)
+            if definition.display_type in {"Datum", "DatumZeit"}:
+                from app.services.hub_profile_values import date_control_value
+                form_value = date_control_value(form_value, definition.display_type)
         return HubLeadFieldValue(
             key=definition.key,
             label=definition.label,
@@ -363,6 +366,12 @@ class HubLeadService:
             raise HubLeadError(f"{definition.label} ist zu lang.")
         if definition.display_type == "Boolesch":
             return value.casefold() in {"true", "1", "on", "yes"}
+        if definition.display_type in {"Datum", "DatumZeit"}:
+            from app.services.hub_profile_values import normalize_date_value
+            try:
+                return normalize_date_value(value, definition.display_type, definition.label)
+            except ValueError as exc:
+                raise HubLeadError(str(exc)) from exc
         self._validate_options(definition, (value,) if value else (), existing)
         return value
 

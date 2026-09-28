@@ -36,6 +36,8 @@ if '--invoice-recipient' in sys.argv:
     release_prefix = 'invoice-recipient'
 if '--email-preview' in sys.argv:
     release_prefix = 'email-preview'
+if '--local-crm' in sys.argv:
+    release_prefix = 'local-crm'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -71,7 +73,8 @@ if '--offer-order' in sys.argv:
         'app/templates/partials/finance_customer_search_script.html',
         'app/templates/partials/finance_document_positions.html',
     }
-assert old.keys() <= new.keys()
+if '--local-crm' not in sys.argv:
+    assert old.keys() <= new.keys()
 if '--invoice-delivery' in sys.argv:
     expected = {
         'app/main.py', 'app/models/hub_invoice_email_batch.py',
@@ -86,7 +89,7 @@ if '--invoice-compose' in sys.argv:
         'app/templates/finance_document_detail.html', 'app/templates/base.html',
         'app/templates/emails.html',
     }
-changes = {name for name in new if old.get(name) != new[name]}
+changes = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
 if '--finance-relations' in sys.argv:
     expected = {
         'app/api/routes/web.py', 'app/services/hub_finance_operations_shared.py',
@@ -128,8 +131,34 @@ if '--email-preview' in sys.argv:
         'app/services/hub_mailbox_imap_import.py', 'app/services/hub_cases.py',
         'app/services/hub_lead_emails.py',
     }
+if '--local-crm' in sys.argv:
+    expected = {
+        'app/api/routes/accounts.py', 'app/api/routes/web.py', 'app/main.py',
+        'app/services/customer_communications.py', 'app/services/customer_directory.py',
+        'app/services/customer_profile.py', 'app/services/hub_customer_field_catalog.py',
+        'app/services/hub_cases.py',
+        'app/services/hub_lead_conversion.py', 'app/services/hub_lead_emails.py',
+        'app/services/hub_lead_notes.py', 'app/services/hub_leads.py',
+        'app/services/hub_operation_contacts.py', 'app/services/hub_operation_email_composition.py',
+        'app/services/hub_operation_notes.py', 'app/services/hub_operation_records.py',
+        'app/services/hub_profile_values.py', 'app/services/hub_record_catalog.py',
+        'app/services/maintenance_worker.py', 'app/services/retire_external_crm.py',
+        'app/services/zoho_books.py', 'app/services/zoho_books_invoice_import.py',
+        'app/services/zoho_books_order_import.py', 'app/services/zoho_books_order_pdf_import.py',
+        'app/services/zoho_books_recurring_invoice_import.py', 'app/services/zoho_case_import.py',
+        'app/services/zoho_crm.py', 'app/services/zoho_email_attachment_import.py',
+        'app/services/zoho_email_content_import.py', 'app/services/zoho_email_history_import.py',
+        'app/services/zoho_email_workflow_webhook.py', 'app/services/zoho_lead_import.py',
+        'app/services/zoho_note_history_import.py', 'app/templates/account.html',
+        'app/templates/cases.html', 'app/templates/customer_contact_detail.html',
+        'app/templates/case_detail.html', 'app/templates/emails_reading_pane.html',
+        'app/templates/customer_detail.html', 'app/templates/lead_detail.html',
+        'app/templates/leads.html', 'app/templates/partials/contact_field_control.html',
+        'app/templates/partials/lead_field_control.html',
+    }
+    assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if '--invoice-recipient' in sys.argv or '--email-preview' in sys.argv:
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))

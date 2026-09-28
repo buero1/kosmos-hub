@@ -113,18 +113,10 @@ from app.services.maintenance_worker import (
     process_pending_direct_updates,
     process_pending_user_deletions,
     schedule_pending_user_deletions,
-    schedule_pending_zoho_email_content_import,
-    schedule_pending_zoho_email_attachment_import,
     schedule_pending_hub_mailbox_imap_import,
     schedule_elapsed_customer_meetings,
     schedule_hub_mailbox_imap_inbox_idle,
     schedule_hub_mailbox_imap_sync_polling,
-    schedule_pending_zoho_email_history_import,
-    schedule_pending_zoho_note_history_import,
-    schedule_pending_zoho_books_invoice_import,
-    schedule_pending_zoho_books_order_import,
-    schedule_pending_zoho_books_recurring_invoice_import,
-    schedule_pending_zoho_email_workflow_deliveries,
 )
 from app.services.task_email_reminder_worker import TaskEmailReminderWorker
 from app.services.scheduled_email_worker import ScheduledEmailWorker
@@ -1171,6 +1163,8 @@ async def lifespan(_: FastAPI):
         from app.services.hub_activity_responsibility_schema import ensure_activity_responsibility_schema
         ensure_activity_responsibility_schema(engine)
         with SessionLocal() as db:
+            from app.services.retire_external_crm import retire_external_crm
+            retire_external_crm(db)
             HubAccessControlService(db=db).ensure_defaults()
             HubWorkflowService(db=db).ensure_default_workflows()
             EmailAiPromptPresetService(db=db).ensure_default_presets()
@@ -1180,17 +1174,9 @@ async def lifespan(_: FastAPI):
         invoice_mail_recovery_task = asyncio.create_task(asyncio.to_thread(resume_queued_invoice_email_batches))
         schedule_elapsed_customer_meetings()
         schedule_pending_user_deletions()
-        schedule_pending_zoho_email_content_import()
-        schedule_pending_zoho_email_attachment_import()
         schedule_pending_hub_mailbox_imap_import()
         schedule_hub_mailbox_imap_inbox_idle()
         schedule_hub_mailbox_imap_sync_polling()
-        schedule_pending_zoho_email_history_import()
-        schedule_pending_zoho_note_history_import()
-        schedule_pending_zoho_books_invoice_import()
-        schedule_pending_zoho_books_order_import()
-        schedule_pending_zoho_books_recurring_invoice_import()
-        schedule_pending_zoho_email_workflow_deliveries()
         recovered_runs = await asyncio.to_thread(FleetRefreshService.recover_interrupted_runs)
         if recovered_runs:
             logger.info("Re-queued %s interrupted fleet refresh run(s).", recovered_runs)
@@ -1434,7 +1420,7 @@ def _request_access_denial(request: Request, user):
 
 
 def _is_public_hub_path(path: str) -> bool:
-    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith(("/account/zoho/email-workflow-webhook/receive/", "/api/v1/plugin-packages/"))
+    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith("/api/v1/plugin-packages/")
 
 
 def _is_mcp_path(path: str) -> bool:

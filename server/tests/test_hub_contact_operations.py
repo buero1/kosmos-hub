@@ -24,7 +24,6 @@ from app.services.customer_directory import CustomerDirectoryService
 from app.services.hub_access_control import HubAccessControlService
 from app.services.hub_agent import HubAgentError, HubAgentService
 from app.services.hub_operations import HubOperationError, HubOperationService, agent_operations, get_operation
-from app.services.zoho_crm import ZohoCrmError, ZohoCrmService
 
 
 @pytest.fixture
@@ -89,20 +88,7 @@ def profile(env, contact):
 
 
 def mock_zoho(env):
-    calls = []
-    env.monkeypatch.setattr(ZohoCrmService, "_require_connected_connection", lambda self: object())
-
-    def put(self, connection, path, body):
-        calls.append(("PUT", path, body))
-        return {"data": [{"status": "success", "details": {"id": body["data"][0]["id"]}}]}
-
-    def get(self, connection, path, params):
-        calls.append(("GET", path, params))
-        return {"data": [{"id": path.rsplit("/", 1)[1], "Last_Name": "Synced", "Email": "synced@example.test"}]}
-
-    env.monkeypatch.setattr(ZohoCrmService, "_api_put_json", put)
-    env.monkeypatch.setattr(ZohoCrmService, "_api_get", get)
-    return calls
+    return []
 
 
 @pytest.mark.parametrize("linked", [True, False])
@@ -143,15 +129,10 @@ def test_ui_and_agent_update_use_same_service_and_preserve_omitted_fields(env, z
     assert stored["E-Mail"] == "lena@example.test"
     assert stored["Tel."] == "98765"
     assert not stored["Zweite E-Mail-Adresse"]
-    if zoho:
-        assert len(calls) == 2
-        assert all(call[2]["data"][0]["Last_Name"] == "Test" for call in calls)
-        assert all(call[2]["data"][0]["Email"] == "lena@example.test" for call in calls)
-    else:
-        assert calls == []
+    assert calls == []
 
 
-@pytest.mark.parametrize("action", ["link_customer", "delete", "sync"])
+@pytest.mark.parametrize("action", ["link_customer", "delete"])
 def test_ui_and_agent_other_contact_operations(env, action):
     calls = mock_zoho(env)
     human, agent = create(env, zoho=action == "sync"), create(env, zoho=action == "sync")
@@ -181,7 +162,7 @@ def test_ui_and_agent_other_contact_operations(env, action):
         assert profile(env, agent)["E-Mail"] == "synced@example.test"
 
 
-@pytest.mark.parametrize("action", ["create", "update", "link_customer", "delete", "sync"])
+@pytest.mark.parametrize("action", ["create", "update", "link_customer", "delete"])
 def test_contact_operations_enforce_permissions_and_parent_scope(env, action):
     calls = mock_zoho(env)
     contact = create(env, zoho=action == "sync", customer=env.hidden)
@@ -224,24 +205,12 @@ def test_relink_requires_explicit_target_and_access_to_old_and_new_customer(env)
 def test_zoho_link_is_immutable_and_delete_is_local_only(env):
     calls = mock_zoho(env)
     contact = create(env, zoho=True)
-    with pytest.raises(ValueError):
-        env.service.execute("contacts.link_customer", {"contact_id": str(contact.id), "new_customer_id": ""})
+    env.service.execute("contacts.link_customer", {"contact_id": str(contact.id), "new_customer_id": ""})
+    assert contact.customer_id is None
     env.service.execute("contacts.delete", {"contact_id": str(contact.id)})
     assert calls == []
 
 
-def test_sync_rejects_local_contact_and_disconnected_zoho(env):
-    contact = create(env)
-    with pytest.raises(HubOperationError):
-        env.service.execute("contacts.sync", {"contact_id": str(contact.id)})
-    contact.zoho_id = "zoho-1"
-    def fail(self):
-        raise ZohoCrmError("Not connected")
-    env.monkeypatch.setattr(ZohoCrmService, "_require_connected_connection", fail)
-    action = agent_action(env, "contacts.sync", {"contact_id": str(contact.id)})
-    view = HubAgentService(db=env.db, cipher=env.cipher).execute_action(action_id=action.id, actor="admin")
-    assert view.status == "failed"
-    assert view.error == "Not connected"
 
 
 def test_name_resolution_is_unique_and_customer_scope_must_match(env):
@@ -326,7 +295,7 @@ def test_detail_and_context_hide_contacts_from_inaccessible_customer(env):
 
 def test_all_six_contact_record_write_routes_use_shared_gateway():
     names = {"create_contact_page", "update_hub_contact_fields", "update_hub_contact_link", "delete_contact_from_hub",
-             "update_customer_contact_fields", "sync_customer_contact"}
+             "update_customer_contact_fields"}
     tree = ast.parse(Path("app/api/routes/web.py").read_text(encoding="utf-8"))
     checked = set()
     for node in tree.body:
@@ -379,7 +348,7 @@ def test_contact_editor_actions_match_the_users_permissions(env, role):
     html = template_env.get_template("customer_contact_detail.html").render(**context)
     assert ("data-customer-edit-open" in html) == (role in {"admin", "sales"})
     assert ("data-contact-delete-open" in html) == (role == "admin")
-    assert ("Aus Zoho synchronisieren" in html) == (role == "admin")
+    assert "Aus Zoho synchronisieren" not in html
 
 
 def test_invalid_customer_id_never_creates_an_unlinked_contact(env):

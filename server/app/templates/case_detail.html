@@ -123,8 +123,6 @@
                   <summary>E-Mail-Vorschau anzeigen</summary>
                   <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe>
                 </details>
-              {% elif email.can_load_content %}
-                <p class="subtle">Der Inhalt liegt noch nicht im Hub vor. Er kann in der E-Mail-Zentrale nachgeladen werden.</p>
               {% else %}
                 <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
               {% endif %}

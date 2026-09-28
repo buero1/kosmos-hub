@@ -26,7 +26,6 @@ from app.services.hub_cases import HubCaseService
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_note_catalog import note_fields
 from app.services.hub_operations import HubOperationError, HubOperationService, get_operation
-from app.services.zoho_crm import ZohoCrmError, ZohoCrmService
 
 
 @pytest.fixture
@@ -48,13 +47,6 @@ def env(monkeypatch):
         monkeypatch.setattr(HubCaseService, "_now_form_value", classmethod(lambda cls: "2026-09-19T12:00"))
         calls = []
 
-        def create_note(self, **values):
-            calls.append(("create", values))
-            return {"id": f"note-{len(calls)}"}
-
-        monkeypatch.setattr(ZohoCrmService, "create_account_note", create_note)
-        monkeypatch.setattr(ZohoCrmService, "update_note", lambda self, **values: calls.append(("update", values)))
-        monkeypatch.setattr(ZohoCrmService, "delete_note", lambda self, **values: calls.append(("delete", values)))
         yield SimpleNamespace(db=db, cipher=cipher, user=user, customer=customer, hidden=hidden, lead=lead,
             service=HubOperationService(db=db, cipher=cipher, actor="admin"),
             cases=HubCaseService(db=db, cipher=cipher), calls=calls, monkeypatch=monkeypatch)
@@ -216,7 +208,7 @@ def test_ui_and_agent_notes_crud_parity(env, module):
     getattr(web, f"delete_{prefix}_note")(parent.id, human.id, request_for(env, {}), env.db, csrf_token="")
     execute_agent(env, f"{module}.notes.delete", {parent_key: str(parent.id), "note_id": str(agent.id)})
     assert env.db.scalars(select(model)).all() == []
-    assert [action for action, _ in env.calls] == (["create", "create", "update", "update", "delete", "delete"] if customer else [])
+    assert [action for action, _ in env.calls] == []
 
 
 @pytest.mark.parametrize("module", ["customers", "leads"])
@@ -227,24 +219,6 @@ def test_notes_reject_wrong_parent_and_blank_patch(env, module):
     for values in ({key: "99999"}, {"title": ""}, {"content": ""}):
         with pytest.raises(ValueError):
             env.service.execute(f"{module}.notes.update", {key: str(parent), "note_id": str(result.record_id), **values})
-
-
-def test_zoho_failure_retains_note_and_agent_shows_warning(env):
-    def fail(*args, **kwargs):
-        raise ZohoCrmError("Not connected")
-    env.monkeypatch.setattr(ZohoCrmService, "create_account_note", fail)
-    action = agent_action(env, "customers.notes.create", {"customer_id": str(env.customer.id), "content": "Retain"})
-    service = HubAgentService(db=env.db, cipher=env.cipher)
-    view = service.execute_action(action_id=action.id, actor="admin")
-    assert view.status == "completed"
-    assert any("konnte aber noch nicht" in line for line in view.preview_lines)
-    note = env.db.scalars(select(CustomerZohoNote)).one()
-    assert note.sync_status == "failed"
-    outputs = json.loads(env.cipher.decrypt(action.encrypted_result_json))["outputs"]
-    assert outputs["sync_status"] == "failed" and outputs["note_id"] == str(note.id)
-    update = agent_action(env, "customers.notes.update", {"customer_id": str(env.customer.id), "note_id": str(note.id), "content": "Do not save"})
-    assert service.execute_action(action_id=update.id, actor="admin").status == "failed"
-    assert "Retain" in env.cipher.decrypt(note.encrypted_payload_json)
 
 
 @pytest.mark.parametrize("operation", ["cases.create", "cases.update", "cases.delete", "cases.link_email", "cases.unlink_email",

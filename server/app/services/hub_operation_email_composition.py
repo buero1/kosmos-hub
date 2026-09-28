@@ -13,13 +13,13 @@ from app.services.hub_operations import HubArtifact, HubOperation, HubOperationE
 from app.services.hub_record_access import identifier, require_actor
 from app.services.hub_email_readers import template_library
 from app.services.template_placeholders import EMAIL_TEMPLATE_CONTEXTS
-from app.services.zoho_crm import ZohoCrmError
+from app.services.hub_record_catalog import RecordDataError
 
 
 def safe_call(callback, *args, **kwargs):
     try:
         return callback(*args, **kwargs)
-    except (ValueError, ZohoCrmError) as exc:
+    except (ValueError, RecordDataError) as exc:
         raise HubOperationError(str(exc)) from exc
 
 

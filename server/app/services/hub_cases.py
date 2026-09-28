@@ -448,7 +448,7 @@ class HubCaseService:
                     image_url_prefix=f"/customers/{email.customer_id}/communications/emails/{email.id}/images",
                 ),
                 attachments=attachments,
-                can_load_content=content is None and bool(email.zoho_message_id and email.zoho_module and email.zoho_record_id),
+                can_load_content=False,
                 last_error=email.last_error,
                 mailbox_folder=self._mailbox_folder(mailbox_state=email.mailbox_state, direction=email.direction),
             )

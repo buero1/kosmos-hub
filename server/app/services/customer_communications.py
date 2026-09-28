@@ -1,4 +1,4 @@
-"""Encrypted per-customer communication history backed by Zoho CRM."""
+"""Locally stored, encrypted communication history and Hub mailbox delivery."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from datetime import UTC, datetime, timedelta
 from email.utils import getaddresses, parseaddr
 from html import escape, unescape
 from html.parser import HTMLParser
-from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -41,7 +40,6 @@ from app.services.hub_mailbox_transport import (
     HubMailboxTransportInlineImage,
     HubMailboxTransportService,
 )
-from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.template_placeholders import (
     EMAIL_CONTACT_PLACEHOLDERS,
     EMAIL_CUSTOMER_PLACEHOLDERS,
@@ -51,7 +49,7 @@ from app.services.template_placeholders import (
 )
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS
-from app.services.zoho_crm import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, ZohoCrmError, ZohoCrmService
+from app.services.hub_record_catalog import ZOHO_ACCOUNT_MODULE, ZOHO_CONTACT_MODULE, RecordDataError
 
 
 _EMAIL_IMAGE_CACHE_TTL = timedelta(days=30)
@@ -301,13 +299,6 @@ class CustomerCommunicationEmailTemplateDetail:
 
 
 @dataclass(frozen=True)
-class CustomerCommunicationEmailTemplateSyncResult:
-    created: int
-    updated: int
-    archived: int
-
-
-@dataclass(frozen=True)
 class CustomerCommunicationAttachment:
     id: str
     filename: str
@@ -396,18 +387,6 @@ class CustomerCommunicationView:
 
 
 @dataclass(frozen=True)
-class CustomerCommunicationSyncResult:
-    notes: int
-    emails: int
-
-
-@dataclass(frozen=True)
-class CustomerCommunicationEmailHeaderSyncResult:
-    emails: int
-    loaded_contents: int = 0
-
-
-@dataclass(frozen=True)
 class CustomerCommunicationActionResult:
     success: bool
     message: str
@@ -424,7 +403,6 @@ class CustomerCommunicationService:
         db: Session,
         cipher: SecretCipher,
         public_base_url: str,
-        zoho_service: ZohoCrmService | None = None,
         attachment_storage: EmailAttachmentStorage | None = None,
         actor: str | None = None,
     ):
@@ -438,11 +416,6 @@ class CustomerCommunicationService:
             root=settings.email_attachment_storage_dir,
             cipher=cipher,
             min_free_bytes=settings.email_attachment_import_min_free_bytes,
-        )
-        self.zoho_service = zoho_service or ZohoCrmService(
-            db=db,
-            cipher=cipher,
-            public_base_url=public_base_url,
         )
 
     def get_view(self, *, customer_id: int, actor: str | None = None) -> CustomerCommunicationView:
@@ -546,29 +519,10 @@ class CustomerCommunicationService:
         return tuple(emails)
 
     def list_senders(self) -> tuple[CustomerCommunicationSender, ...]:
-        """Use configured Mittwald addresses, retaining Zoho only for an unconfigured legacy install."""
-        mittwald_senders = HubMailboxTransportService(db=self.db, cipher=self.cipher, actor=self.actor).list_senders()
-        if mittwald_senders or self.actor:
-            return tuple(
-                CustomerCommunicationSender(name=sender.name, email=sender.email)
-                for sender in mittwald_senders
-            )
-        senders: list[CustomerCommunicationSender] = []
-        seen: set[str] = set()
-        for record in self.zoho_service.list_allowed_from_addresses():
-            email = self._text(record.get("email"))
-            if not email or "@" not in email or email.casefold() in seen:
-                continue
-            seen.add(email.casefold())
-            senders.append(
-                CustomerCommunicationSender(
-                    name=self._text(record.get("user_name")) or email,
-                    email=email.casefold(),
-                )
-            )
-        if not senders:
-            raise ZohoCrmError("Zoho CRM has no verified sender address for this connection.")
-        return tuple(senders)
+        return tuple(
+            CustomerCommunicationSender(name=sender.name, email=sender.email)
+            for sender in HubMailboxTransportService(db=self.db, cipher=self.cipher, actor=self.actor).list_senders()
+        )
 
     def list_recipients(self, *, customer_id: int) -> tuple[CustomerCommunicationRecipient, ...]:
         """List only the current customer's valid recipient addresses for the mailbox composer."""
@@ -919,215 +873,6 @@ class CustomerCommunicationService:
         self.db.flush()
         return len(templates)
 
-    def sync_email_templates(self) -> CustomerCommunicationEmailTemplateSyncResult:
-        """Synchronize all Zoho email-template modules once for local composition."""
-        synced_at = datetime.now(UTC)
-        existing = {
-            template.zoho_template_id: template
-            for template in self.db.scalars(select(ZohoEmailTemplate)).all()
-        }
-        synchronized_ids: set[str] = set()
-        created = 0
-        updated = 0
-        for summary in self.zoho_service.list_email_templates():
-            template_id = self._required_template_id(self._text(summary.get("id")) or "")
-            summary_module = self._template_module_from_record(summary)
-            record = self.zoho_service.get_email_template(template_id=template_id)
-            name = self._required_text(self._text(record.get("name")) or "", "Vorlagenname", maximum=255)
-            subject = self._text(record.get("subject")) or ""
-            content = self._sanitized_email_content(self._text(record.get("content")) or "")
-            folder = record.get("folder") if isinstance(record.get("folder"), dict) else {}
-            payload = {
-                "name": name,
-                "subject": subject,
-                "content": content,
-                "category": self._text(record.get("category")) or "",
-                "folder_id": self._text(folder.get("id")) or "",
-                "folder_name": self._text(folder.get("name")) or "",
-                # Imported documents are kept byte-for-byte compatible until adopted in the Hub.
-                "email_compiler_mode": "legacy",
-            }
-            template_module = self._template_module_from_record(record, fallback=summary_module)
-            modified_at = self._datetime(record.get("modified_time") or record.get("Modified_Time"))
-            synchronized_ids.add(template_id)
-            template = existing.get(template_id)
-            if template is None:
-                self.db.add(
-                    ZohoEmailTemplate(
-                        zoho_template_id=template_id,
-                        module=template_module,
-                        encrypted_payload_json=self._encrypt_payload(payload),
-                        zoho_modified_at=modified_at,
-                        zoho_synced_at=synced_at,
-                        is_active=True,
-                    )
-                )
-                created += 1
-                continue
-            previous_payload = self._payload(template.encrypted_payload_json)
-            if self._text(previous_payload.get("hub_deleted_at")):
-                # A Hub deletion must not be undone when the source still exists in Zoho.
-                template.is_active = False
-                continue
-            if self._text(previous_payload.get("hub_edited_at")):
-                # Hub edits are intentional local copies and must survive a later Zoho refresh.
-                template.is_active = True
-                continue
-            if (
-                previous_payload != payload
-                or template.module != template_module
-                or template.zoho_modified_at != modified_at
-                or not template.is_active
-            ):
-                updated += 1
-            template.module = template_module
-            template.encrypted_payload_json = self._encrypt_payload(payload)
-            template.zoho_modified_at = modified_at
-            template.zoho_synced_at = synced_at
-            template.is_active = True
-
-        archived = 0
-        for template_id, template in existing.items():
-            payload = self._payload(template.encrypted_payload_json)
-            if (
-                template.is_active
-                and template_id not in synchronized_ids
-                and not self._text(payload.get("hub_edited_at"))
-            ):
-                template.is_active = False
-                archived += 1
-        self.db.flush()
-        return CustomerCommunicationEmailTemplateSyncResult(created=created, updated=updated, archived=archived)
-
-    def sync_customer(
-        self,
-        *,
-        customer_id: int,
-        mark_new_emails_unread: bool = False,
-        load_new_inbound_content: bool = False,
-    ) -> CustomerCommunicationSyncResult:
-        customer = self._require_zoho_customer(customer_id)
-        synced_at = datetime.now(UTC)
-        note_count = self._sync_customer_notes(customer=customer, synced_at=synced_at)
-
-        email_result = self._sync_customer_email_headers(
-            customer=customer,
-            synced_at=synced_at,
-            mark_new_emails_unread=mark_new_emails_unread,
-            load_new_inbound_content=load_new_inbound_content,
-        )
-        return CustomerCommunicationSyncResult(notes=note_count, emails=email_result.emails)
-
-    def sync_customer_notes(self, *, customer_id: int) -> int:
-        """Synchronize only Account notes, without reloading email histories."""
-        customer = self._require_zoho_customer(customer_id)
-        return self._sync_customer_notes(customer=customer, synced_at=datetime.now(UTC))
-
-    def _sync_customer_notes(self, *, customer: Customer, synced_at: datetime) -> int:
-        """Upsert every Zoho Account note for one customer and return new-note count."""
-        note_count = 0
-        known_notes = {
-            note.zoho_note_id: note
-            for note in self.db.scalars(
-                select(CustomerZohoNote).where(CustomerZohoNote.zoho_note_id.is_not(None))
-            ).all()
-            if note.zoho_note_id
-        }
-        for record in self.zoho_service.list_account_notes(customer.zoho_id):
-            if self._upsert_zoho_note(
-                customer=customer,
-                record=record,
-                synced_at=synced_at,
-                known_notes=known_notes,
-            ):
-                note_count += 1
-        self.db.flush()
-        return note_count
-
-    def sync_customer_email_headers(
-        self,
-        *,
-        customer_id: int,
-        mark_new_emails_unread: bool = False,
-        load_new_inbound_content: bool = False,
-    ) -> CustomerCommunicationEmailHeaderSyncResult:
-        """Synchronize only the Zoho email headers, without reloading notes."""
-        customer = self._require_zoho_customer(customer_id)
-        return self._sync_customer_email_headers(
-            customer=customer,
-            synced_at=datetime.now(UTC),
-            mark_new_emails_unread=mark_new_emails_unread,
-            load_new_inbound_content=load_new_inbound_content,
-        )
-
-    def _sync_customer_email_headers(
-        self,
-        *,
-        customer: Customer,
-        synced_at: datetime,
-        mark_new_emails_unread: bool,
-        load_new_inbound_content: bool,
-    ) -> CustomerCommunicationEmailHeaderSyncResult:
-        email_count = 0
-        known_emails = {
-            (email.customer_id, email.zoho_message_id): email
-            for email in self.db.scalars(
-                select(CustomerZohoEmail).where(
-                    CustomerZohoEmail.customer_id == customer.id,
-                    CustomerZohoEmail.zoho_message_id.is_not(None),
-                )
-            ).all()
-            if email.zoho_message_id
-        }
-        targets = [(ZOHO_ACCOUNT_MODULE, customer.zoho_id)]
-        targets.extend(
-            (ZOHO_CONTACT_MODULE, contact.zoho_id)
-            for contact in self.db.scalars(
-                select(CustomerContact).where(CustomerContact.customer_id == customer.id)
-            ).all()
-            if contact.zoho_id
-        )
-        for module, record_id in targets:
-            for record in self.zoho_service.list_record_email_headers(module, record_id):
-                created_email = self._upsert_zoho_email(
-                    customer=customer,
-                    record=record,
-                    module=module,
-                    record_id=record_id,
-                    synced_at=synced_at,
-                    known_emails=known_emails,
-                    mark_new_emails_unread=mark_new_emails_unread,
-                )
-                if created_email is not None:
-                    email_count += 1
-
-        self.db.flush()
-        duplicate_count = self._deduplicate_customer_emails(customer_id=customer.id)
-        loaded_contents = 0
-        if load_new_inbound_content:
-            # Webhooks set only newly discovered inbound messages to unread. Looking them up again
-            # after deduplication also handles the Account/Contact copies Zoho may return together.
-            unread_emails = self.db.scalars(
-                select(CustomerZohoEmail).where(
-                    CustomerZohoEmail.customer_id == customer.id,
-                    CustomerZohoEmail.direction == "inbound",
-                    CustomerZohoEmail.is_unread.is_(True),
-                )
-            ).all()
-            for email in unread_emails:
-                if self.has_loaded_email_content(email):
-                    continue
-                try:
-                    self._load_email_content_for_email(email, mark_as_read=False)
-                    loaded_contents += 1
-                except (ValueError, ZohoCrmError) as exc:
-                    # Keep the unread header visible even when Zoho cannot supply the body yet.
-                    email.last_error = str(exc)[:1000]
-            self.db.flush()
-        return CustomerCommunicationEmailHeaderSyncResult(
-            emails=max(0, email_count - duplicate_count),
-            loaded_contents=loaded_contents,
-        )
 
     def create_note(
         self,
@@ -1137,41 +882,18 @@ class CustomerCommunicationService:
         title: str,
         content: str,
     ) -> CustomerCommunicationActionResult:
-        customer = self._require_zoho_customer(customer_id)
+        customer = self._require_customer(customer_id)
         from app.services.hub_note_catalog import normalize_note
         values = normalize_note(title=title, content=content, creating=True)
-        normalized_title, normalized_content = values["title"], values["content"]
         now = datetime.now(UTC)
         note = CustomerZohoNote(
-            customer=customer,
-            source="hub",
-            sync_status="pending",
-            encrypted_payload_json=self._encrypt_payload({"title": normalized_title, "content": normalized_content}),
-            created_by_username=actor[:64],
-            zoho_created_at=now,
+            customer=customer, source="hub", sync_status="local",
+            encrypted_payload_json=self._encrypt_payload(values),
+            created_by_username=actor[:64], zoho_created_at=now, zoho_modified_at=now,
         )
         self.db.add(note)
         self.db.flush()
-        try:
-            created = self.zoho_service.create_account_note(
-                account_id=customer.zoho_id,
-                title=normalized_title,
-                content=normalized_content,
-            )
-        except ZohoCrmError as exc:
-            note.sync_status = "failed"
-            note.last_error = str(exc)[:1000]
-            self.db.flush()
-            return CustomerCommunicationActionResult(False, "Notiz wurde im Hub gespeichert, konnte aber noch nicht an Zoho gesendet werden.", note_id=note.id)
-
-        note.zoho_note_id = self._text(created.get("id"))
-        note.zoho_created_at = self._datetime(created.get("Created_Time")) or now
-        note.zoho_modified_at = self._datetime(created.get("Modified_Time")) or note.zoho_created_at
-        note.zoho_synced_at = now
-        note.sync_status = "synced"
-        note.last_error = None
-        self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde an Zoho CRM übertragen.", note_id=note.id)
+        return CustomerCommunicationActionResult(True, "Notiz wurde im Hub gespeichert.", note_id=note.id)
 
     def update_note(
         self,
@@ -1181,49 +903,26 @@ class CustomerCommunicationService:
         title: str,
         content: str,
     ) -> CustomerCommunicationActionResult:
-        customer = self._require_zoho_customer(customer_id)
-        note = self._note_or_error(customer_id=customer.id, note_id=note_id)
+        self._require_customer(customer_id)
+        note = self._note_or_error(customer_id=customer_id, note_id=note_id)
         from app.services.hub_note_catalog import normalize_note
         values = normalize_note(title=title, content=content)
-        normalized_title, normalized_content = values["title"], values["content"]
-        now = datetime.now(UTC)
-        if note.zoho_note_id:
-            self.zoho_service.update_note(
-                note_id=note.zoho_note_id,
-                title=normalized_title,
-                content=normalized_content,
-            )
-        else:
-            created = self.zoho_service.create_account_note(
-                account_id=customer.zoho_id,
-                title=normalized_title,
-                content=normalized_content,
-            )
-            note.zoho_note_id = self._text(created.get("id"))
-
         payload = self._payload(note.encrypted_payload_json)
-        payload.update({
-            "Note_Title": normalized_title,
-            "Note_Content": normalized_content,
-            "title": normalized_title,
-            "content": normalized_content,
-        })
+        payload.update(values)
+        payload.update(Note_Title=values["title"], Note_Content=values["content"])
         note.encrypted_payload_json = self._encrypt_payload(payload)
-        note.zoho_modified_at = now
-        note.zoho_synced_at = now
-        note.sync_status = "synced"
+        note.zoho_modified_at = datetime.now(UTC)
+        note.sync_status = "local"
         note.last_error = None
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde in Zoho CRM aktualisiert.", note_id=note.id)
+        return CustomerCommunicationActionResult(True, "Notiz wurde im Hub aktualisiert.", note_id=note.id)
 
     def delete_note(self, *, customer_id: int, note_id: int) -> CustomerCommunicationActionResult:
-        customer = self._require_zoho_customer(customer_id)
-        note = self._note_or_error(customer_id=customer.id, note_id=note_id)
-        if note.zoho_note_id:
-            self.zoho_service.delete_note(note_id=note.zoho_note_id)
+        self._require_customer(customer_id)
+        note = self._note_or_error(customer_id=customer_id, note_id=note_id)
         self.db.delete(note)
         self.db.flush()
-        return CustomerCommunicationActionResult(True, "Notiz wurde aus Zoho CRM gelöscht.", note_id=note.id)
+        return CustomerCommunicationActionResult(True, "Notiz wurde im Hub gelöscht.", note_id=note_id)
 
     @with_mailbox_actor
     def send_email(
@@ -1267,119 +966,7 @@ class CustomerCommunicationService:
                 dunning_id=dunning_id,
                 recipient_override=recipient_override,
             )
-        customer = self._require_zoho_customer(customer_id)
-        sender = next(
-            (item for item in self.list_senders() if item.email.casefold() == sender_email.strip().casefold()),
-            None,
-        )
-        if sender is None:
-            raise ValueError("Wähle eine aktuell von Zoho erlaubte Absenderadresse aus.")
-        recipient = recipient_override or self.get_recipient(customer_id=customer.id, recipient_key=recipient_key)
-        if recipient is None:
-            raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
-        if reply_to_email_id is not None and forward_from_email_id is not None:
-            raise ValueError("Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein.")
-        cc_recipients = self._cc_recipients(
-            cc_emails,
-            excluded_emails={sender.email, recipient.email},
-        )
-        reply_to_message_id: str | None = None
-        reply_to_owner_id: str | None = None
-        if reply_to_email_id is not None:
-            reply = self.get_email_reply(customer_id=customer.id, email_id=reply_to_email_id)
-            if reply.recipient_key != recipient.key:
-                raise ValueError("Eine Antwort muss an den Absender der ursprünglichen E-Mail gesendet werden.")
-            parent = self._require_customer_email(customer_id=customer.id, email_id=reply_to_email_id)
-            reply_to_message_id = parent.zoho_message_id
-            reply_to_owner_id = self._email_owner_id(self._payload(parent.encrypted_payload_json))
-        normalized_subject = self._required_text(subject, "Betreff", maximum=500)
-        normalized_content = self._outbound_email_content(content)
-        source_stylesheet = EmailHtmlCompiler.extract_stylesheet(content)
-        if _LOCAL_COMPOSE_IMAGE_SRC_PATTERN.search(normalized_content):
-            raise ValueError("Lokale Bilder können erst über ein eingerichtetes Mittwald-Postfach versendet werden.")
-        normalized_template_id = self._required_template_id(template_id) if template_id.strip() else None
-        compiler_mode = self._email_compiler_mode_for_template(normalized_template_id)
-        delivery_content, compiler_version, compiler_warnings = self._compile_outbound_email(
-            normalized_content,
-            compiler_mode=compiler_mode,
-            source_stylesheet=source_stylesheet,
-        )
-        template_name = ""
-        if normalized_template_id:
-            template = self._stored_email_template(normalized_template_id)
-            template_name = self._text(self._payload(template.encrypted_payload_json).get("name")) or ""
-        attachment_ids = self._outbound_email_attachment_ids(
-            customer_id=customer.id,
-            forward_from_email_id=forward_from_email_id,
-            attachments=attachments,
-        )
-        now = datetime.now(UTC)
-        outbound_payload = {
-            "subject": normalized_subject,
-            "content": normalized_content,
-            "from": {"name": sender.name, "email": sender.email},
-            "to": {"name": recipient.name, "email": recipient.email},
-            "cc": [{"name": name, "email": email} for name, email in cc_recipients],
-            "sent_time": now.isoformat(),
-            "template": {"id": normalized_template_id, "name": template_name} if normalized_template_id else None,
-            "in_reply_to": {
-                "email_id": reply_to_email_id,
-                "message_id": reply_to_message_id,
-            } if reply_to_message_id else None,
-            "forwarded_from_email_id": forward_from_email_id,
-            "outbound_html": delivery_content,
-            "email_compiler": {
-                "mode": compiler_mode,
-                "version": compiler_version,
-                "warnings": list(compiler_warnings),
-            },
-        }
-        email = CustomerZohoEmail(
-            customer=customer,
-            dunning_id=dunning_id,
-            source="hub",
-            direction="outbound",
-            is_unread=False,
-            sync_status="pending",
-            encrypted_payload_json=self._encrypt_payload(outbound_payload),
-            encrypted_header_json=self._encrypt_email_list_header(outbound_payload),
-            created_by_username=actor[:64],
-            zoho_module=ZOHO_ACCOUNT_MODULE,
-            zoho_record_id=customer.zoho_id,
-            zoho_sent_at=now,
-        )
-        self.db.add(email)
-        self.db.flush()
-        try:
-            sent = self.zoho_service.send_account_email(
-                account_id=customer.zoho_id,
-                sender_name=sender.name,
-                sender_email=sender.email,
-                recipient_name=recipient.name,
-                recipient_email=recipient.email,
-                subject=normalized_subject,
-                content=delivery_content,
-                reply_to_message_id=reply_to_message_id,
-                reply_to_owner_id=reply_to_owner_id,
-                cc_recipients=cc_recipients,
-                attachment_ids=attachment_ids,
-            )
-        except ZohoCrmError as exc:
-            email.sync_status = "failed"
-            email.last_error = str(exc)[:1000]
-            self.db.flush()
-            return CustomerCommunicationActionResult(
-                False,
-                "E-Mail wurde nicht versendet. Der Entwurf bleibt verschlüsselt im Hub gespeichert.",
-                email.id,
-            )
-
-        email.zoho_message_id = self._text(sent.get("message_id")) or self._text(sent.get("id"))
-        email.sync_status = "sent"
-        email.zoho_synced_at = now
-        email.last_error = None
-        self.db.flush()
-        return CustomerCommunicationActionResult(True, "E-Mail wurde über Zoho CRM versendet.", email.id)
+        raise ValueError("Bitte ein E-Mail-Postfach im Hub für den Versand einrichten.")
 
     def _send_email_via_mittwald(
         self,
@@ -1638,51 +1225,9 @@ class CustomerCommunicationService:
             payload = self._payload(email.encrypted_payload_json)
             original_content = self._text(payload.get("content"))
         if original_content is None:
-            raise ZohoCrmError("Zoho hat die E-Mail ohne Nachrichtentext geliefert.")
+            raise RecordDataError("Zoho hat die E-Mail ohne Nachrichtentext geliefert.")
         return payload, original_content
 
-    def _outbound_email_attachment_ids(
-        self,
-        *,
-        customer_id: int,
-        forward_from_email_id: int | None,
-        attachments: tuple[CustomerCommunicationAttachmentUpload, ...],
-    ) -> tuple[str, ...]:
-        uploads = list(attachments)
-        if forward_from_email_id is not None:
-            email = self._require_customer_email(customer_id=customer_id, email_id=forward_from_email_id)
-            for attachment in self._email_attachments(self._payload(email.encrypted_payload_json)):
-                downloaded = self.download_email_attachment(
-                    customer_id=customer_id,
-                    email_id=email.id,
-                    attachment_id=attachment.id,
-                )
-                uploads.append(
-                    CustomerCommunicationAttachmentUpload(
-                        filename=downloaded.filename,
-                        content=downloaded.content,
-                        content_type=downloaded.content_type,
-                    )
-                )
-        if len(uploads) > _MAX_OUTBOUND_ATTACHMENT_COUNT:
-            raise ValueError("Zoho erlaubt höchstens zehn Anhänge pro E-Mail.")
-        total_bytes = 0
-        uploaded_ids: list[str] = []
-        for attachment in uploads:
-            filename = self._required_text(attachment.filename, "Dateiname", maximum=255)
-            if not attachment.content:
-                raise ValueError("Ein leerer Anhang kann nicht versendet werden.")
-            total_bytes += len(attachment.content)
-            if total_bytes > _MAX_OUTBOUND_ATTACHMENT_TOTAL_BYTES:
-                raise ValueError("Die Anhänge überschreiten zusammen das Zoho-Limit von 10 MB.")
-            uploaded_ids.append(
-                self.zoho_service.upload_file_to_zfs(
-                    filename=filename,
-                    content=attachment.content,
-                    content_type=attachment.content_type or "application/octet-stream",
-                )
-            )
-        return tuple(uploaded_ids)
 
     def _outbound_email_attachments(
         self,
@@ -1759,43 +1304,9 @@ class CustomerCommunicationService:
         """Return whether a full Zoho body was already stored for this header."""
         return "content" in self._payload(email.encrypted_payload_json)
 
-    def load_email_content(self, *, customer_id: int, email_id: int) -> CustomerCommunicationActionResult:
-        self._require_customer_email(customer_id=customer_id, email_id=email_id)
-        email = self.db.scalar(
-            select(CustomerZohoEmail).where(
-                CustomerZohoEmail.id == email_id,
-                CustomerZohoEmail.customer_id == customer_id,
-            )
-        )
-        if email is None:
-            raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
-        if self.actor:
-            from app.services.hub_mailbox_access import HubMailboxAccess
-            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=self.actor).require(f"linked-{customer_id}-{email_id}")
-        self._load_email_content_for_email(email, mark_as_read=True)
-        return CustomerCommunicationActionResult(True, "E-Mail-Inhalt wurde verschlüsselt aus Zoho geladen.")
-
     def _load_email_content_for_email(self, email: CustomerZohoEmail, *, mark_as_read: bool) -> None:
-        if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
-            raise ValueError("Für diese E-Mail ist kein Zoho-Inhalt verfügbar.")
-
-        payload = self._payload(email.encrypted_payload_json)
-        record = self.zoho_service.get_record_email(
-            module=email.zoho_module,
-            record_id=email.zoho_record_id,
-            message_id=email.zoho_message_id,
-            user_id=self._email_owner_id(payload),
-        )
-        if "content" not in record:
-            raise ZohoCrmError("Zoho hat die E-Mail ohne Inhalt geliefert.")
-        payload.update(record)
-        email.encrypted_payload_json = self._encrypt_payload(payload)
-        email.encrypted_header_json = self._encrypt_email_list_header(payload)
-        email.zoho_synced_at = datetime.now(UTC)
-        if mark_as_read:
-            email.is_unread = False
-        email.last_error = None
-        self.db.flush()
+        if not self.has_loaded_email_content(email):
+            raise ValueError("Der Inhalt dieser historischen E-Mail wurde nicht im Hub gespeichert.")
 
     def mark_email_read(self, *, customer_id: int, email_id: int) -> None:
         self._require_customer_email(customer_id=customer_id, email_id=email_id)
@@ -1861,9 +1372,7 @@ class CustomerCommunicationService:
                 content_type=stored_attachment.content_type,
                 filename=attachment.filename,
             )
-        if not allow_fetch or not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
-            raise ValueError("Für diese E-Mail liegt kein lokal gespeicherter Anhang vor.")
-        return self._download_zoho_email_attachment(email=email, payload=payload, attachment=attachment)
+        raise ValueError("Für diese E-Mail liegt kein lokal gespeicherter Anhang vor.")
 
     def ensure_email_attachment_storage(self) -> None:
         """Verify the encrypted attachment store before a background import starts."""
@@ -1928,30 +1437,6 @@ class CustomerCommunicationService:
             )
         )
 
-    def _download_zoho_email_attachment(
-        self,
-        *,
-        email: CustomerZohoEmail,
-        payload: dict[str, object],
-        attachment: CustomerCommunicationAttachment,
-    ) -> CustomerCommunicationAttachmentDownload:
-        owner_id = self._email_owner_id(payload)
-        if owner_id is None:
-            raise ValueError("Zoho hat für diesen Anhang keine abrufbare E-Mail-Owner-ID geliefert.")
-
-        downloaded = self.zoho_service.download_record_email_attachment(
-            module=email.zoho_module,
-            record_id=email.zoho_record_id,
-            message_id=email.zoho_message_id,
-            user_id=owner_id,
-            attachment_id=attachment.id,
-            filename=attachment.filename,
-        )
-        return CustomerCommunicationAttachmentDownload(
-            content=downloaded.content,
-            content_type=downloaded.content_type,
-            filename=attachment.filename,
-        )
 
     def get_email_preview_image(
         self,
@@ -1985,7 +1470,7 @@ class CustomerCommunicationService:
             )
         )
         if cached_image is not None:
-            if self._as_utc(cached_image.expires_at) > now:
+            if source.kind == "zoho-inline" or self._as_utc(cached_image.expires_at) > now:
                 try:
                     return CustomerCommunicationCachedImage(
                         content=self.cipher.decrypt_bytes(cached_image.encrypted_image_bytes),
@@ -2000,7 +1485,7 @@ class CustomerCommunicationService:
                 self.db.flush()
 
         if source.kind == "zoho-inline":
-            content, content_type = self._download_zoho_inline_image(email=email, payload=payload, image_id=source.value)
+            raise ValueError("Dieses Bild wurde nicht im Hub gespeichert.")
         else:
             content, content_type = self._download_external_image(source.value)
         self._expire_cached_email_images(now)
@@ -2017,92 +1502,6 @@ class CustomerCommunicationService:
         self.db.flush()
         return CustomerCommunicationCachedImage(content=content, content_type=content_type)
 
-    def _upsert_zoho_note(
-        self,
-        *,
-        customer: Customer,
-        record: dict[str, object],
-        synced_at: datetime,
-        known_notes: dict[str, CustomerZohoNote],
-    ) -> bool:
-        note_id = self._text(record.get("id"))
-        if not note_id:
-            return False
-        note = known_notes.get(note_id)
-        created = note is None
-        if note is None:
-            note = CustomerZohoNote(
-                customer=customer,
-                zoho_note_id=note_id,
-                source="zoho",
-                sync_status="synced",
-                encrypted_payload_json="",
-            )
-            self.db.add(note)
-            known_notes[note_id] = note
-        note.customer = customer
-        note.source = "zoho"
-        note.sync_status = "synced"
-        note.encrypted_payload_json = self._encrypt_payload(record)
-        note.created_by_username = self._name_from_value(record.get("Created_By"))
-        note.zoho_created_at = self._datetime(record.get("Created_Time"))
-        note.zoho_modified_at = self._datetime(record.get("Modified_Time"))
-        note.zoho_synced_at = synced_at
-        note.last_error = None
-        return created
-
-    def _upsert_zoho_email(
-        self,
-        *,
-        customer: Customer,
-        record: dict[str, object],
-        module: str,
-        record_id: str,
-        synced_at: datetime,
-        known_emails: dict[tuple[int, str], CustomerZohoEmail],
-        mark_new_emails_unread: bool,
-    ) -> bool:
-        message_id = self._text(record.get("message_id")) or self._text(record.get("id"))
-        if not message_id:
-            return None
-        key = (customer.id, message_id)
-        email = known_emails.get(key)
-        created = email is None
-        if email is None:
-            direction = self._email_direction(record)
-            email = CustomerZohoEmail(
-                customer=customer,
-                zoho_message_id=message_id,
-                source="zoho",
-                direction=direction,
-                mailbox_state="spam" if HubSpamSenderService(db=self.db).is_blocked(
-                    direction=direction, payload=record
-                ) else "active",
-                is_unread=mark_new_emails_unread and direction == "inbound",
-                sync_status="synced",
-                encrypted_payload_json="",
-                encrypted_header_json="",
-            )
-            self.db.add(email)
-            known_emails[key] = email
-        email.customer = customer
-        email.zoho_module = module
-        email.zoho_record_id = record_id
-        email.source = "zoho"
-        email.direction = self._email_direction(record)
-        email.sync_status = "synced"
-        existing_payload = self._payload(email.encrypted_payload_json)
-        merged_payload = dict(record)
-        # Header refreshes omit the full body and detailed attachments. Keep them once loaded.
-        for key in ("content", "attachments"):
-            if key in existing_payload and key not in merged_payload:
-                merged_payload[key] = existing_payload[key]
-        email.encrypted_payload_json = self._encrypt_payload(merged_payload)
-        email.encrypted_header_json = self._encrypt_email_list_header(merged_payload)
-        email.zoho_sent_at = self._email_datetime(record)
-        email.zoho_synced_at = synced_at
-        email.last_error = None
-        return email if created else None
 
     def _deduplicate_customer_emails(self, *, customer_id: int) -> int:
         """Merge the same Zoho email when it appears in both Account and Contact histories."""
@@ -2213,7 +1612,7 @@ class CustomerCommunicationService:
                 image_url_prefix=f"/customers/{email.customer_id}/communications/emails/{email.id}/images",
             ),
             attachments=self._email_attachments(payload),
-            can_load_content=content is None and bool(email.zoho_message_id and email.zoho_module and email.zoho_record_id),
+            can_load_content=False,
             last_error=email.last_error,
         )
 
@@ -2368,31 +1767,6 @@ class CustomerCommunicationService:
                 raise CustomerCommunicationImageError("Das externe Bild konnte nicht abgerufen werden.") from exc
         raise CustomerCommunicationImageError("Das externe Bild leitet zu oft weiter.")
 
-    def _download_zoho_inline_image(
-        self,
-        *,
-        email: CustomerZohoEmail,
-        payload: dict[str, object],
-        image_id: str,
-    ) -> tuple[bytes, str]:
-        if not email.zoho_message_id or not email.zoho_module or not email.zoho_record_id:
-            raise CustomerCommunicationImageError("Für dieses Zoho-Inline-Bild fehlen die Abrufdaten.")
-        owner_id = self._email_owner_id(payload)
-        if owner_id is None:
-            raise CustomerCommunicationImageError("Zoho hat für dieses Inline-Bild keine Owner-ID geliefert.")
-        downloaded = self.zoho_service.download_record_email_inline_image(
-            module=email.zoho_module,
-            record_id=email.zoho_record_id,
-            message_id=email.zoho_message_id,
-            user_id=owner_id,
-            image_id=image_id,
-        )
-        content_type = downloaded.content_type.casefold()
-        if content_type not in _ALLOWED_IMAGE_CONTENT_TYPES:
-            raise CustomerCommunicationImageError("Das Zoho-Inline-Bild hat kein erlaubtes Bildformat.")
-        if not downloaded.content or len(downloaded.content) > _MAX_EXTERNAL_IMAGE_BYTES:
-            raise CustomerCommunicationImageError("Das Zoho-Inline-Bild überschreitet das Größenlimit.")
-        return downloaded.content, content_type
 
     @staticmethod
     def _validate_external_image_url(source_url: str) -> None:
@@ -2537,11 +1911,6 @@ class CustomerCommunicationService:
             raise ValueError("Die E-Mail gehört nicht zu diesem Kunden.")
         return email
 
-    def _require_zoho_customer(self, customer_id: int) -> Customer:
-        customer = self._require_customer(customer_id)
-        if not customer.zoho_id:
-            raise ValueError("Dieser Kunde besitzt keine verknüpfte Zoho-Account-ID.")
-        return customer
 
     def _stored_email_template(self, template_id: str) -> ZohoEmailTemplate:
         normalized_template_id = self._required_template_id(template_id)
@@ -2552,7 +1921,7 @@ class CustomerCommunicationService:
             )
         )
         if template is None:
-            raise ValueError("Diese Zoho-E-Mail-Vorlage ist nicht im Hub synchronisiert.")
+            raise ValueError("Diese E-Mail-Vorlage ist nicht im Hub gespeichert.")
         return template
 
     @staticmethod

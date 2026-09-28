@@ -12,10 +12,7 @@
         <h2>Fälle</h2>
       </div>
       <div class="communication-heading-actions">
-        <form method="post" action="/cases/sync">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button button-secondary button-variant-1" type="submit">Alle Fälle aus Zoho importieren</button>
-        </form>
+
         <a class="button button-variant-1" href="/cases/new">Fall neu anlegen</a>
         {{ module_layout_menu("case-fields", "Fall") }}
       </div>

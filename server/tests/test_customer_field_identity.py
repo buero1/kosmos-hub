@@ -12,7 +12,6 @@ from app.services.customer_profile import resolve_customer_fields
 from app.services.module_layout_catalog import get_module_layout_definition
 from app.services.module_layouts import ModuleLayoutService
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
-from app.services.zoho_crm import ZohoCrmService
 from test_customer_edit_layout import Controls, render_grids
 from test_customer_empty_fields import customer_fields
 from test_hub_record_operations import env, request
@@ -103,37 +102,14 @@ def test_renamed_website_remains_writable_via_shared_operation(env, path):
     env.db.add(customer)
     env.db.flush()
     directory = CustomerDirectoryService(db=env.db, cipher=env.cipher)
-    writes = []
-
-    def update(self, *, customer_id, submitted_values):
-        stored = directory._profile_data(customer)
-        changes = self._root_field_changes(stored["field_metadata"], stored, submitted_values)
-        writes.append(changes)
-        refreshed = self._build_profile({"id": "test-account", "Website": changes["Website"]}, {"website": "Website"},
-            {"metadata": profile["field_metadata"]}, datetime.now(UTC))
-        customer.encrypted_profile_json = env.cipher.encrypt(json.dumps(refreshed))
-        env.db.flush()
-        return customer
-
-    env.monkeypatch.setattr(ZohoCrmService, "update_customer_fields", update)
     if path == "ui":
         response = asyncio.run(web.update_customer_fields(customer.id, request(env, {"customer_field__website": "https://after.test"}), env.db))
         assert response.status_code == 303
     else:
         env.service.execute("customers.update", {"customer_id": str(customer.id), "website": "https://after.test"})
-    assert writes == [{"Website": "https://after.test"}]
     for _ in range(2):
         detail = directory.get_detail(customer_id=customer.id)
         website = next(field for field in detail.display_profile_fields if field.key == "website")
         assert website.value == "https://after.test" and website.editable
         assert website.label == "Website"
     assert directory._profile_data(customer)["field_metadata"]["website"]["label"] == "Website"
-
-
-@pytest.mark.parametrize("label", ["Webseite", "Website", "website"])
-def test_unchanged_website_does_not_trigger_a_write_for_any_persisted_label(customer_fields, label):
-    db, directory, _, _ = customer_fields
-    service = ZohoCrmService(db=db, cipher=directory.cipher, public_base_url="https://hub.example")
-    metadata = {"website": {"label": "Webseite", "api_name": "Website", "editable": True}}
-    assert service._root_field_changes(metadata, {"fields": {label: "https://example.test"}},
-        {"customer_field__website": "https://example.test"}) == {}

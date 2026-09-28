@@ -3,7 +3,6 @@
 import json
 from collections.abc import Mapping
 
-from app.core.config import get_settings
 from app.services.customer_directory import CustomerDirectoryService
 from app.services.hub_customer_field_catalog import customer_create_defaults, customer_create_fields
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS
@@ -15,7 +14,6 @@ from app.services.hub_operations import (
 )
 from app.services.hub_record_access import identifier, require_actor
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
-from app.services.zoho_crm import ZohoCrmService
 
 
 def form_input(values: Mapping[str, object], *, kind: str) -> dict[str, str]:
@@ -90,7 +88,7 @@ def lead_entries(service):
 
 
 def customer_suggestions(service, *, query="", status="all", industry="all", email="all"):
-    from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
+    from app.services.hub_record_catalog import ZOHO_RELEVANT_ACCOUNT_STATUSES
     require_actor(service, "customers", "view")
     if status not in {*ZOHO_RELEVANT_ACCOUNT_STATUSES, "all"} or email not in {"all", "unread"}:
         raise HubOperationError("Ungueltiger Kundenfilter.")
@@ -141,19 +139,9 @@ def _customer_update(service, values):
     submitted = {f"customer_field__{key}": value for key, value in values.items() if key in editable}
     submitted.update(_subforms(values, prefix="customer_subform__", allowed=customer_subform_inputs(detail)))
     customer = detail.entry.customer
-    if customer.zoho_id:
-        # The HTML form omits unchecked boxes. Partial operations must not clear omitted boxes.
-        for key, field in editable.items():
-            if field.display_type == "Boolesch":
-                submitted.setdefault(f"customer_field__{key}", field.form_value)
-        customer = ZohoCrmService(db=service.db, cipher=service.cipher, public_base_url=get_settings().public_base_url).update_customer_fields(
-            customer_id=customer.id, submitted_values=submitted,
-        )
-    else:
-        defaults = {f"customer_field__{key}": field.form_value for key, field in editable.items()}
-        customer = CustomerDirectoryService(db=service.db, cipher=service.cipher).update_hub_customer(
-            customer_id=customer.id, submitted_values={**defaults, **submitted},
-        )
+    customer = CustomerDirectoryService(db=service.db, cipher=service.cipher).update_hub_customer(
+        customer_id=customer.id, submitted_values=submitted,
+    )
     return _customer_result(customer)
 
 
@@ -242,7 +230,7 @@ for module, label, create, update, inputs, defaults in (
         register_operation(HubOperation(
             key=f"{module}.{action}", module=module, label=f"{label} {verb}",
             description=f"{label} {verb} mit derselben Validierung und denselben Workflows wie die Maske. "
-                + ("Neue Datensaetze werden lokal im Hub angelegt." if action == "create" else "Nur angegebene Felder aendern; ausgelassene Felder bleiben erhalten. Vorher den Datensatz lesen; dessen edit_fields und Optionen sind verbindlich. Zoho-verknuepfte Kunden werden wie in der Maske in Zoho gespeichert."),
+                + ("Neue Datensaetze werden lokal im Hub angelegt." if action == "create" else "Nur angegebene Felder aendern; ausgelassene Felder bleiben erhalten. Vorher den Datensatz lesen; dessen edit_fields und Optionen sind verbindlich. Alle Kundendaten werden ausschliesslich lokal im Hub gespeichert."),
             input_guide="Datumswerte ISO YYYY-MM-DD, DatumZeit YYYY-MM-DDTHH:MM (Europe/Berlin), Boolesch true/false. Unterformular-Eingaben optional aus dem Leseergebnis.",
             preview_fields=(("customer_id", "Kunden-ID"), ("lead_id", "Lead-ID")),
             preview_builder=lambda values: tuple(f"{key}: {value}" for key, value in values.items()),

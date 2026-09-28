@@ -171,6 +171,10 @@
       </select>
     {% elif field.display_type == "Boolesch" %}
       <input type="checkbox" name="{{ name }}" value="true"{% if field.form_value | lower == "true" %} checked{% endif %}>
+    {% elif field.display_type == "Datum" %}
+      <input type="date" name="{{ name }}" value="{{ field.form_value }}">
+    {% elif field.display_type in ["DatumZeit", "Datum und Uhrzeit"] %}
+      <input type="datetime-local" step="1" name="{{ name }}" value="{{ field.form_value }}">
     {% elif "Multizeilen" in field.display_type %}
       <textarea name="{{ name }}" rows="3">{{ field.form_value }}</textarea>
     {% else %}
@@ -243,12 +247,7 @@
               <a class="button button-secondary button-variant-1 detail-actions-menu-item" href="{{ detail.google_search_url }}" target="_blank" rel="noopener noreferrer">Google Suche</a>
               {% if can_send_website_profile %}<button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-website-profile-open>Daten ans Firmenprofil senden</button>{% endif %}
               <button class="button button-secondary button-variant-1 detail-actions-menu-item agent-context-action" type="button" data-agent-context-add data-agent-context-type="customer" data-agent-context-key="{{ detail.entry.customer.id }}">In Agent-Kontext aufnehmen</button>
-              {% if can_manage_communications and detail.entry.customer.zoho_id %}
-                <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/sync">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <button class="button button-secondary button-variant-1" type="submit">Aus Zoho synchronisieren</button>
-                </form>
-              {% endif %}
+
             </div>
           </details>
         {% endif %}
@@ -323,7 +322,7 @@
                     {% endif %}
                   {% else %}
                     <dl class="customer-fields-grid">
-                      <div><dt>Kundendaten</dt><dd>Keine Zoho-Kundendaten verfügbar.</dd></div>
+                      <div><dt>Kundendaten</dt><dd>Keine Kundendaten verfügbar.</dd></div>
                     </dl>
                   {% endif %}
                 </div>
@@ -472,12 +471,6 @@
                       {% if email.direction == "inbound" and can_manage_communications and email.source != "scheduled" %}{{ communication_email_actions(email) }}{% endif %}
                         <iframe class="communication-email-preview" data-email-preview-frame title="E-Mail-Vorschau: {{ email.subject }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy" data-srcdoc="{{ email.preview_html }}"></iframe>
                       </details>
-                    {% elif email.can_load_content and can_manage_communications %}
-                      {% if email.direction == "inbound" and email.source != "scheduled" %}{{ communication_email_actions(email, true) }}{% endif %}
-                      <form method="post" action="/customers/{{ detail.entry.customer.id }}/communications/emails/{{ email.id }}/load">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <button class="button button-secondary" type="submit">Nachricht laden</button>
-                      </form>
                     {% else %}
                       <p class="subtle">Nur der E-Mail-Kopf ist gespeichert.</p>
                     {% endif %}
@@ -492,7 +485,7 @@
                   </article>
                   {% endif %}
                 {% else %}
-                  <p class="subtle">{% if detail.entry.customer.zoho_id %}Noch keine E-Mails gespeichert. Über „Aus Zoho synchronisieren“ wird der Verlauf geladen.{% else %}Noch keine E-Mails gespeichert.{% endif %}</p>
+                  <p class="subtle">Noch keine E-Mails gespeichert.</p>
                 {% endfor %}
               </div>
               <button class="button button-secondary button-variant-2 customer-expand-toggle" type="button" data-expandable-toggle hidden>Weiter lesen ...</button>
@@ -581,13 +574,13 @@
             {% endfor %}</dl>
           {% endif %}
         {% endcall %}
-        {% if can_view_emails and detail.entry.customer.zoho_id %}
+        {% if can_view_emails %}
         <article id="customer-notes" class="card customer-detail-panel customer-notes-panel">
           <div class="customer-detail-panel-heading">
             <div>
               <p class="eyebrow">Kosmos Hub</p>
               <h3>Notizen</h3>
-              <p class="subtle">Notizen aus Zoho und aus dem Hub.</p>
+              <p class="subtle">Notizen zu diesem Datensatz.</p>
             </div>
           </div>
           {% if can_manage_communications %}
@@ -646,7 +639,7 @@
               <form method="post" data-customer-note-delete-form>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <h3 id="customer-note-delete-heading">Notiz löschen?</h3>
-                <p>Die Notiz <strong data-customer-note-delete-name></strong> wird aus dem Kosmos Hub und Zoho CRM entfernt.</p>
+                <p>Die Notiz <strong data-customer-note-delete-name></strong> wird aus dem Kosmos Hub entfernt.</p>
                 <div class="dialog-actions">
                   <button class="button button-secondary" type="button" data-customer-note-delete-cancel>Abbrechen</button>
                   <button class="button button-danger" type="submit">Notiz löschen</button>

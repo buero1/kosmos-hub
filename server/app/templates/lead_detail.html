@@ -13,7 +13,7 @@
 {% endmacro %}
 {% macro lead_notes_panel() %}
   <article id="lead-notes" class="card customer-detail-panel lead-subform-panel">
-    <div class="customer-detail-panel-heading"><div><p class="eyebrow">Kosmos Hub</p><h3>Notizen</h3><p class="subtle">Notizen aus Zoho und aus dem Hub.</p></div></div>
+    <div class="customer-detail-panel-heading"><div><p class="eyebrow">Kosmos Hub</p><h3>Notizen</h3><p class="subtle">Notizen zu diesem Datensatz.</p></div></div>
     <div class="customer-note-composer" data-note-composer>
       <button class="customer-note-composer-placeholder" type="button" data-note-composer-open>Eine Notiz hinzufügen</button>
       <form method="post" action="/leads/{{ detail.lead.id }}/notes" class="communication-form" data-note-composer-form hidden>

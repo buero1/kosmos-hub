@@ -22,7 +22,7 @@ from app.services.hub_activity_responsibility import ACTIVITY_MODELS
 from app.services.hub_email_associations import addresses
 from app.services.hub_record_info import record_info
 from app.services.hub_workflows import LEAD_CUSTOMER_CONVERSION_WORKFLOW_KEY, ORDER_LEAD_RESULTS
-from app.services.zoho_crm import ZohoCrmService
+from app.services.hub_record_catalog import normalize_website_domain
 
 
 class LeadConversionService:
@@ -85,7 +85,7 @@ class LeadConversionService:
         return conversion
 
     def _check_duplicates(self, company, website, contact_values):
-        domain = ZohoCrmService.normalize_website_domain(website)
+        domain = normalize_website_domain(website)
         condition = func.lower(func.trim(Customer.name)) == company.lower()
         if domain:
             condition |= Customer.website_domain == domain

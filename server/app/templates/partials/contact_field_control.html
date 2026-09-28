@@ -15,7 +15,7 @@
     {% elif field.display_type == "Telefon" %}
       <input type="tel" name="contact_field__{{ field.key }}" value="{{ value }}" autocomplete="tel"{% if is_required %} required{% endif %}>
     {% else %}
-      <input type="text" name="contact_field__{{ field.key }}" value="{{ value }}"{% if is_required %} required{% endif %}>
+      <input type="{{ 'date' if field.display_type == 'Datum' else 'datetime-local' if field.display_type in ['DatumZeit', 'Datum und Uhrzeit'] else 'text' }}"{% if field.display_type in ['DatumZeit', 'Datum und Uhrzeit'] %} step="1"{% endif %} name="contact_field__{{ field.key }}" value="{{ value }}"{% if is_required %} required{% endif %}>
     {% endif %}
   </label>
 {% endmacro %}

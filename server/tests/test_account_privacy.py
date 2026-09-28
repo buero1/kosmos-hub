@@ -57,7 +57,7 @@ def test_personal_context_never_loads_system_data_and_only_lists_own_devices(mon
     def forbidden(*args, **kwargs):
         pytest.fail("Personal account must not load system data")
 
-    for name in ("_zoho_service", "_zoho_books_service", "_legal_terms_context", "_pdf_template_context",
+    for name in ("_legal_terms_context", "_pdf_template_context",
         "AiProviderConfigService", "ProviderCredentialService", "HubMailboxAccountService",
         "_administration", "list_activity_events"):
         monkeypatch.setattr(accounts, name, forbidden)

@@ -28,7 +28,6 @@ from app.services.hub_customer_field_catalog import customer_create_fields
 from app.services.hub_global_search import HubGlobalSearchService
 from app.services.hub_leads import HubLeadService
 from app.services.hub_operations import HubOperationError, HubOperationService, get_operation, hub_queries
-from app.services.zoho_crm import ZohoCrmService
 
 
 def tool_output(payload):
@@ -144,17 +143,12 @@ def test_customer_zoho_partial_update_keeps_omitted_checkbox_but_ui_can_clear_it
     customer = Customer(name="Remote", zoho_id="remote-id", encrypted_profile_json=env.cipher.encrypt(json.dumps(profile)))
     env.db.add(customer)
     env.db.flush()
-    changes = []
-
-    def update(self, *, customer_id, submitted_values):
-        changes.append(self._root_field_changes(profile["field_metadata"], profile, submitted_values))
-        return customer
-
-    env.monkeypatch.setattr(ZohoCrmService, "update_customer_fields", update)
     env.service.execute("customers.update", {"customer_id": str(customer.id), "customer_name": "Changed"})
-    assert changes[-1] == {"Account_Name": "Changed"}
+    stored = json.loads(env.cipher.decrypt(customer.encrypted_profile_json))["fields"]
+    assert stored["Kunde-Name"] == "Changed" and stored["Bankverbindung zeigen"] is True
     asyncio.run(web.update_customer_fields(customer.id, request(env, {"customer_field__customer_name": "Changed"}), env.db))
-    assert changes[-1] == {"Account_Name": "Changed", "Bankverbindung_zeigen": False}
+    assert json.loads(env.cipher.decrypt(customer.encrypted_profile_json))["fields"]["Bankverbindung zeigen"] is False
+
 
 
 @pytest.mark.parametrize("module", ["customers", "leads"])

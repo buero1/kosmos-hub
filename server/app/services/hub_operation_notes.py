@@ -11,7 +11,7 @@ from app.services.hub_lead_notes import HubLeadNoteService
 from app.services.hub_note_catalog import note_fields
 from app.services.hub_operations import HubOperation, HubOperationError, HubOperationInputField, HubOperationResult, register_operation
 from app.services.hub_record_access import customer_id, identifier, require_actor
-from app.services.zoho_crm import ZohoCrmError
+from app.services.hub_record_catalog import RecordDataError
 
 
 def _execute(service, values, *, module, action):
@@ -44,11 +44,11 @@ def _execute(service, values, *, module, action):
             args.update(submitted)
     try:
         result = getattr(notes, f"{action}_note")(**args)
-    except ZohoCrmError as exc:
+    except RecordDataError as exc:
         raise HubOperationError(str(exc)) from exc
     if module == "customers":
         selected_id = result.note_id
-        message, sync_status = result.message, "synced" if result.success else "failed"
+        message, sync_status = result.message, "local" if result.success else "failed"
     else:
         selected_id = result.id if result is not None else selected_id
         message, sync_status = "Notiz wurde im Hub gespeichert." if action != "delete" else "Notiz wurde gelöscht.", "local"
@@ -71,7 +71,7 @@ def _fields(module, action):
 for _module in ("customers", "leads"):
     for _action, _verb in (("create", "anlegen"), ("update", "bearbeiten"), ("delete", "löschen")):
         _label = ("Kundennotiz" if _module == "customers" else "Lead-Notiz") + " " + _verb
-        _storage = "Kundennotizen werden auch in Zoho CRM geändert bzw. gelöscht. Bei fehlgeschlagener Neuanlage in Zoho bleibt die Notiz im Hub gespeichert (sync_status=failed)." if _module == "customers" else "Lead-Notizen werden ausschließlich im Hub geändert oder gelöscht."
+        _storage = "Kundennotizen werden ausschließlich im Hub geändert oder gelöscht." if _module == "customers" else "Lead-Notizen werden ausschließlich im Hub geändert oder gelöscht."
         register_operation(HubOperation(key=f"{_module}.notes.{_action}", module=_module, label=_label,
             description=f"{_label}. {_storage}",
             input_guide=("Zugehörigen Datensatz per ID wählen; bei Kunden ist alternativ customer_name möglich. "

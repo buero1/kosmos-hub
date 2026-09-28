@@ -83,7 +83,7 @@ from app.services.styling_settings import FONT_FAMILY_OPTIONS, StylingSettingsEr
 from app.services.module_layouts import ModuleLayoutError, ModuleLayoutService
 from app.services.module_layout_catalog import ModuleLayoutDefinition, get_module_layout_definition
 from app.services.plugin_installation_packages import PluginInstallationPackageService, PluginPackageError
-from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmError, ZohoCrmService
+from app.services.hub_record_catalog import ZOHO_RELEVANT_ACCOUNT_STATUSES, RecordDataError
 from app.services.zoho_contact_field_catalog import contact_fields
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY, HubCaseEmailSource, HubCaseError, HubCaseService
@@ -147,7 +147,6 @@ from app.services.hub_invoice_email_batches import (
 from app.services.hub_pdf_templates import HubPdfTemplateService
 from app.services.template_placeholders import EMAIL_TEMPLATE_CONTEXTS, email_placeholders
 from app.services.hub_workflows import CASE_COMPLETION_EMAIL_TEMPLATE_ID
-from app.services.zoho_case_import import ZohoCaseImportService
 
 templates = create_templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 router = APIRouter(include_in_schema=False)
@@ -1126,52 +1125,6 @@ def cases_page(
     )
 
 
-@router.post("/cases/sync")
-def synchronize_all_cases(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_hub_admin(request)
-    try:
-        result = ZohoCaseImportService(
-            db=db,
-            cipher=get_secret_cipher(),
-            zoho_service=ZohoCrmService(
-                db=db,
-                cipher=get_secret_cipher(),
-                public_base_url=get_settings().public_base_url,
-            ),
-        ).synchronize_all_cases()
-    except ZohoCrmError as exc:
-        db.rollback()
-        query = urlencode({"sync": "error", "sync_message": str(exc)})
-        return RedirectResponse(url=f"/cases?{query}", status_code=303)
-    write_audit_log(
-        db,
-        site=None,
-        actor=user.username,
-        source="hub-web",
-        action="sync-all-zoho-cases",
-        result="ok",
-        detail=(
-            f"Synchronized {result.synchronized_cases} Zoho Cases: "
-            f"created {result.created_cases}, updated {result.updated_cases}, "
-            f"unlinked {result.unlinked_cases}."
-        ),
-    )
-    db.commit()
-    message = (
-        f"{result.synchronized_cases} Fälle aus Zoho aktualisiert: "
-        f"{result.created_cases} neu, {result.updated_cases} aktualisiert"
-    )
-    if result.unlinked_cases:
-        message += f", {result.unlinked_cases} ohne Kundenverknüpfung"
-    if result.number_collisions:
-        message += f", {result.number_collisions} mit Hub-Fallnummer"
-    query = urlencode({"sync": "success", "sync_message": f"{message}."})
-    return RedirectResponse(url=f"/cases?{query}", status_code=303)
 
 
 @router.get("/cases/new", response_class=HTMLResponse)
@@ -2743,49 +2696,6 @@ def update_calendar_activity(
     return _calendar_redirect(week_start, "success", message)
 
 
-@router.post("/contacts/sync")
-def synchronize_all_contacts(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_hub_admin(request)
-    try:
-        result = ZohoCrmService(
-            db=db,
-            cipher=get_secret_cipher(),
-            public_base_url=get_settings().public_base_url,
-        ).synchronize_all_contacts()
-    except ZohoCrmError as exc:
-        db.rollback()
-        query = urlencode({"sync": "error", "sync_message": str(exc)})
-        return RedirectResponse(url=f"/contacts?{query}", status_code=303)
-
-    write_audit_log(
-        db,
-        site=None,
-        actor=user.username,
-        source="hub-web",
-        action="sync-all-zoho-contacts",
-        result="ok",
-        detail=(
-            f"Synchronized {result.synchronized_contacts} Zoho Contacts: "
-            f"created {result.created_contacts}, updated {result.updated_contacts}, "
-            f"removed {result.removed_contacts}."
-        ),
-    )
-    db.commit()
-    query = urlencode(
-        {
-            "sync": "success",
-            "sync_message": (
-                f"{result.synchronized_contacts} Kontakte aus Zoho aktualisiert: "
-                f"{result.created_contacts} neu, {result.updated_contacts} aktualisiert."
-            ),
-        }
-    )
-    return RedirectResponse(url=f"/contacts?{query}", status_code=303)
 
 
 @router.get("/contacts/new", response_class=HTMLResponse)
@@ -2918,7 +2828,7 @@ async def update_hub_contact_fields(
         detail=f"Updated Contact {contact.record_id}; contact data is not retained in the audit log.",
     )
     db.commit()
-    message = "Kontaktdaten wurden in Zoho CRM gespeichert." if contact.outputs.get("zoho_id") else "Kontaktdaten wurden im Hub gespeichert."
+    message = "Kontaktdaten wurden im Hub gespeichert."
     query = urlencode({"fields": "success", "fields_message": message})
     return RedirectResponse(url=f"/contacts/{contact_id}?{query}#contact-fields", status_code=303)
 
@@ -4082,7 +3992,7 @@ def mailbox_linked_email_compose_context(
     except ValueError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ZohoCrmError as exc:
+    except RecordDataError as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -4514,31 +4424,6 @@ def download_unassigned_mailbox_attachment(
     )
 
 
-@router.post("/emails/linked/{customer_id}/{email_id}/load")
-def load_linked_mailbox_email_content(
-    customer_id: int,
-    email_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    folder: Annotated[str, Form()] = "inbox",
-    unread: Annotated[bool, Form()] = False,
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    _require_hub_admin(request)
-    if folder not in MAILBOX_FOLDERS:
-        raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
-    try:
-        HubMailboxAccess(db=db, cipher=get_secret_cipher(), actor=_require_hub_admin(request).username).require(f"linked-{customer_id}-{email_id}")
-        _customer_communication_service(db).load_email_content(customer_id=customer_id, email_id=email_id)
-    except (ValueError, ZohoCrmError):
-        db.rollback()
-    else:
-        db.commit()
-    return RedirectResponse(
-        url=_mailbox_url(folder=folder, unread=unread, selected=f"linked-{customer_id}-{email_id}"),
-        status_code=303,
-    )
 
 
 @router.get("/customers/{customer_id}/website-profile/preview", response_class=JSONResponse)
@@ -4719,6 +4604,11 @@ async def update_customer_fields(
         for field in detail.editable_profile_fields:
             if field.display_type == "Boolesch":
                 submitted.setdefault(f"customer_field__{field.key}", "false")
+        for subform in detail.subforms:
+            for index in (*range(len(subform.records)), "new"):
+                for field in subform.fields:
+                    if field.editable and field.display_type == "Boolesch":
+                        submitted.setdefault(f"customer_subform__{subform.key}__{index}__{field.key}", "false")
         result = service.execute("customers.update", {
             **record_form_input(submitted, kind="customer"), "customer_id": str(customer_id),
         })
@@ -4727,14 +4617,13 @@ async def update_customer_fields(
         query = urlencode({"fields": "error", "fields_message": str(exc)})
         return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
     customer = db.get(Customer, result.record_id)
-    is_zoho = bool(customer.zoho_id)
     write_audit_log(
         db, site=None, actor=user.username, source="hub-web",
-        action="update-zoho-customer-fields" if is_zoho else "update-hub-customer-fields",
+        action="update-hub-customer-fields",
         result="ok", detail=f"Updated Customer {customer.id}; customer data is not retained in the audit log.",
     )
     db.commit()
-    query = urlencode({"fields": "success", "fields_message": "Kundendaten wurden in Zoho CRM gespeichert." if is_zoho else "Kundendaten wurden im Hub gespeichert."})
+    query = urlencode({"fields": "success", "fields_message": "Kundendaten wurden im Hub gespeichert."})
     return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
 
 @router.post("/customers/{customer_id}/layout")
@@ -4775,36 +4664,6 @@ async def update_customer_field_layout(
     return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-fields", status_code=303)
 
 
-@router.post("/customers/{customer_id}/communications/sync")
-def sync_customer_communications(
-    customer_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_hub_admin(request)
-    try:
-        result = _customer_communication_service(db).sync_customer(customer_id=customer_id)
-    except (ValueError, ZohoCrmError) as exc:
-        db.rollback()
-        return _customer_communication_redirect(customer_id, "error", str(exc))
-
-    write_audit_log(
-        db,
-        site=None,
-        actor=user.username,
-        source="hub-web",
-        action="sync-zoho-customer-communications",
-        result="ok",
-        detail=f"Synchronized Zoho communication headers for customer {customer_id}: {result.notes} new notes, {result.emails} new emails.",
-    )
-    db.commit()
-    return _customer_communication_redirect(
-        customer_id,
-        "success",
-        f"Zoho-Kommunikation aktualisiert: {result.notes} neue Notizen, {result.emails} neue E-Mail-Köpfe.",
-    )
 
 
 @router.post("/customers/{customer_id}/communications/notes")
@@ -4824,7 +4683,7 @@ def create_customer_communication_note(
             title=title,
             content=content,
         )
-    except (ValueError, ZohoCrmError) as exc:
+    except (ValueError, RecordDataError) as exc:
         db.rollback()
         return _customer_communication_redirect(customer_id, "error", str(exc))
 
@@ -4833,7 +4692,7 @@ def create_customer_communication_note(
         site=None,
         actor=user.username,
         source="hub-web",
-        action="create-zoho-customer-note",
+        action="create-customer-note",
         result="ok" if (result.outputs["sync_status"] != "failed") else "failed",
         detail=f"Created customer note for customer {customer_id}; note content is not retained in the audit log.",
     )
@@ -4860,7 +4719,7 @@ def update_customer_communication_note(
             title=title,
             content=content,
         )
-    except (ValueError, ZohoCrmError) as exc:
+    except (ValueError, RecordDataError) as exc:
         db.rollback()
         return _customer_communication_redirect(customer_id, "error", str(exc))
 
@@ -4869,7 +4728,7 @@ def update_customer_communication_note(
         site=None,
         actor=user.username,
         source="hub-web",
-        action="update-zoho-customer-note",
+        action="update-customer-note",
         result="ok" if (result.outputs["sync_status"] != "failed") else "failed",
         detail=f"Updated customer note {note_id} for customer {customer_id}; note content is not retained in the audit log.",
     )
@@ -4889,7 +4748,7 @@ def delete_customer_communication_note(
     user = _require_hub_admin(request)
     try:
         result = _execute_note_operation(db, user.username, "customers", "delete", customer_id=customer_id, note_id=note_id)
-    except (ValueError, ZohoCrmError) as exc:
+    except (ValueError, RecordDataError) as exc:
         db.rollback()
         return _customer_communication_redirect(customer_id, "error", str(exc))
 
@@ -4898,7 +4757,7 @@ def delete_customer_communication_note(
         site=None,
         actor=user.username,
         source="hub-web",
-        action="delete-zoho-customer-note",
+        action="delete-customer-note",
         result="ok" if (result.outputs["sync_status"] != "failed") else "failed",
         detail=f"Deleted customer note {note_id} for customer {customer_id}.",
     )
@@ -5457,7 +5316,7 @@ async def send_customer_communication_email(
                 cipher=get_secret_cipher(),
                 public_base_url=get_settings().public_base_url,
             ).discard_draft(draft_id=int(draft_id))
-    except (ValueError, ZohoCrmError) as exc:
+    except (ValueError, RecordDataError) as exc:
         db.rollback()
         if mailbox_origin == "1":
             return _email_compose_response(request, RedirectResponse(
@@ -5531,7 +5390,7 @@ def load_customer_communication_email_template(
         })
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ZohoCrmError as exc:
+    except RecordDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "id": template.id,
@@ -5542,36 +5401,6 @@ def load_customer_communication_email_template(
     }
 
 
-@router.post("/customers/{customer_id}/communications/emails/{email_id}/load")
-def load_customer_communication_email(
-    customer_id: int,
-    email_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_hub_admin(request)
-    try:
-        result = _customer_communication_service(db).load_email_content(
-            customer_id=customer_id,
-            email_id=email_id,
-        )
-    except (ValueError, ZohoCrmError) as exc:
-        db.rollback()
-        return _customer_communication_redirect(customer_id, "error", str(exc))
-
-    write_audit_log(
-        db,
-        site=None,
-        actor=user.username,
-        source="hub-web",
-        action="load-zoho-customer-email-content",
-        result="ok",
-        detail=f"Loaded encrypted Zoho email content for customer {customer_id}.",
-    )
-    db.commit()
-    return _customer_communication_redirect(customer_id, "success", result.message)
 
 
 @router.post("/customers/{customer_id}/communications/emails/{email_id}/read")
@@ -5606,7 +5435,7 @@ def download_customer_communication_attachment(
         download = download_shared_email_attachment(_email_gateway(request, db), f"linked-{customer_id}-{email_id}", attachment_id, allow_fetch=True)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ZohoCrmError as exc:
+    except RecordDataError as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -5718,11 +5547,11 @@ async def update_customer_contact_fields(
         query = urlencode({"fields": "error", "fields_message": str(exc)})
         return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
     write_audit_log(
-        db, site=None, actor=user.username, source="hub-web", action="update-zoho-contact-fields", result="ok",
+        db, site=None, actor=user.username, source="hub-web", action="update-hub-contact-fields", result="ok",
         detail=f"Updated Contact {contact.record_id} for customer {customer_id}.",
     )
     db.commit()
-    message = "Kontaktdaten wurden in Zoho CRM gespeichert." if contact.outputs.get("zoho_id") else "Kontaktdaten wurden im Hub gespeichert."
+    message = "Kontaktdaten wurden im Hub gespeichert."
     query = urlencode({"fields": "success", "fields_message": message})
     return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
 
@@ -5755,31 +5584,6 @@ async def update_customer_contact_field_layout(
     return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
 
 
-@router.post("/customers/{customer_id}/contacts/{contact_id}/sync")
-def sync_customer_contact(
-    customer_id: int,
-    contact_id: int,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    csrf_token: Annotated[str, Form()] = "",
-):
-    require_csrf(request, csrf_token)
-    user = _require_hub_admin(request)
-    try:
-        contact = _execute_contact_operation(
-            db, user.username, "sync", customer_id=customer_id, contact_id=contact_id,
-        )
-    except ValueError as exc:
-        db.rollback()
-        query = urlencode({"fields": "error", "fields_message": str(exc)})
-        return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
-    write_audit_log(
-        db, site=None, actor=user.username, source="hub-web", action="sync-zoho-contact", result="ok",
-        detail=f"Synchronized Contact {contact.record_id} for customer {customer_id}.",
-    )
-    db.commit()
-    query = urlencode({"fields": "success", "fields_message": "Kontaktdaten wurden aus Zoho CRM aktualisiert."})
-    return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
 
 
 @router.post("/customers/{customer_id}/link-site")

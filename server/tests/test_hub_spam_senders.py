@@ -14,7 +14,6 @@ from app.services.customer_communications import CustomerCommunicationService
 from app.services.hub_mailbox import HubMailboxService
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportService, _ParsedMessage
 from app.services.hub_spam_senders import HubSpamSenderService
-from app.services.zoho_email_workflow_webhook import ZohoEmailWorkflowWebhookService
 
 
 def _message(identity: str, sender: str) -> _ParsedMessage:
@@ -79,24 +78,6 @@ def test_sender_rules_only_match_exact_inbound_address_across_sources(monkeypatc
         importer._store_message(parsed=_message("linked", "blocked@example.de"))
         linked = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.source == "mittwald-imap"))
         assert linked.mailbox_state == "spam"
-
-        communications = CustomerCommunicationService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
-        communications._upsert_zoho_email(
-            customer=customer,
-            record={"id": "zoho-mail-1", "from": [{"email": "blocked@example.de"}], "direction": "inbound"},
-            module="Accounts", record_id="zoho-1", synced_at=datetime(2026, 9, 14, tzinfo=UTC),
-            known_emails={}, mark_new_emails_unread=True,
-        )
-        zoho_email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-mail-1"))
-        assert zoho_email.mailbox_state == "spam"
-
-        webhook = ZohoEmailWorkflowWebhookService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
-        webhook._store_unassigned_email(
-            payload={"from": [{"email": "blocked@example.de"}], "direction": "inbound"},
-            received_at=datetime(2026, 9, 14, tzinfo=UTC),
-        )
-        unassigned = db.scalar(select(HubMailboxEmail).where(HubMailboxEmail.source == "zoho-workflow"))
-        assert unassigned.mailbox_state == "spam"
 
         assert rules.unblock_id(db.scalar(select(HubSpamSender.id))) == "blocked@example.de"
         assert rules.list_senders() == ()

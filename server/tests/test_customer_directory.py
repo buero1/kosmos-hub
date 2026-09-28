@@ -88,7 +88,7 @@ def test_hub_customer_validation_does_not_modify_imported_customers():
         imported = Customer(name="Zoho-Kunde", zoho_id="zoho-123")
         db.add(imported)
         db.flush()
-        with pytest.raises(ValueError, match="nicht im Hub verwaltet"):
+        with pytest.raises(ValueError, match="Kundendaten"):
             service.update_hub_customer(customer_id=imported.id, submitted_values={
                 "customer_field__customer_name": "Unerwünscht",
                 "customer_field__account_status": "Neu",

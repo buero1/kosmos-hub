@@ -61,7 +61,10 @@ def resolve_customer_fields(profile: dict[str, object]) -> tuple[ResolvedCustome
             continue
         definition = dict(metadata.get(key, {}))
         if catalog:
-            definition.setdefault("display_type", catalog.display_type)
+            if catalog.display_type in {"Datum", "DatumZeit"}:
+                definition["display_type"] = catalog.display_type
+            else:
+                definition.setdefault("display_type", catalog.display_type)
             definition["sensitive"] = catalog.sensitive or bool(definition.get("sensitive"))
         resolved[key] = ResolvedCustomerField(key, label, value, definition)
         priorities[key] = priority
@@ -75,7 +78,10 @@ def resolve_customer_fields(profile: dict[str, object]) -> tuple[ResolvedCustome
         catalog = _CATALOG.get(key)
         definition = dict(definition)
         if catalog:
-            definition.setdefault("display_type", catalog.display_type)
+            if catalog.display_type in {"Datum", "DatumZeit"}:
+                definition["display_type"] = catalog.display_type
+            else:
+                definition.setdefault("display_type", catalog.display_type)
             definition["sensitive"] = catalog.sensitive or bool(definition.get("sensitive"))
         label = catalog.label if catalog else str(definition.get("label") or key)
         resolved[key] = ResolvedCustomerField(key, label, None, definition)

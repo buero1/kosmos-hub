@@ -21,7 +21,7 @@ from app.services.customer_profile import resolve_customer_fields
 from app.services.google_search import business_google_search_url
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
 from app.services.zoho_contact_field_catalog import ZOHO_CONTACT_FIELDS, contact_fields
-from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES, ZohoCrmService
+from app.services.hub_record_catalog import ZOHO_RELEVANT_ACCOUNT_STATUSES, normalize_website_domain
 from app.services.hub_customer_field_catalog import HUB_CUSTOMER_FIELD_KEYS, customer_create_fields
 
 
@@ -377,7 +377,7 @@ class CustomerDirectoryService:
             name=values["customer_name"],
             zoho_status=values["account_status"],
             is_visible=True,
-            website_domain=ZohoCrmService.normalize_website_domain(values["website"]),
+            website_domain=normalize_website_domain(values["website"]),
             encrypted_profile_json=self.cipher.encrypt(json.dumps(self._hub_customer_profile(values), ensure_ascii=False)),
         )
         self.db.add(customer)
@@ -390,16 +390,17 @@ class CustomerDirectoryService:
         customer = self.db.get(Customer, customer_id)
         if customer is None:
             raise ValueError("Der Kunde wurde nicht gefunden.")
-        if customer.zoho_id or self._profile_data(customer).get("source") != "hub-customers":
-            raise ValueError("Dieser Kunde wird nicht im Hub verwaltet.")
-        previous = self._profile_data(customer)
-        for key, label in (("customer_type", "Kunde Typ"), ("order_date", "Auftragsdatum"), ("source", "Quelle")):
-            submitted_values = {f"customer_field__{key}": str(previous.get("fields", {}).get(label) or ""), **submitted_values}
-        values = self._hub_customer_values(submitted_values)
-        customer.name = values["customer_name"]
-        customer.zoho_status = values["account_status"]
-        customer.website_domain = ZohoCrmService.normalize_website_domain(values["website"])
-        customer.encrypted_profile_json = self.cipher.encrypt(json.dumps(self._hub_customer_profile(values), ensure_ascii=False))
+        from app.services.hub_profile_values import patch_customer_profile
+        profile = patch_customer_profile(self._profile_data(customer), submitted_values)
+        values = {field.key: field.value for field in resolve_customer_fields(profile)}
+        name = str(values.get("customer_name") or customer.name).strip()
+        if not name or len(name) > 255 or ("customer_field__customer_name" in submitted_values and not submitted_values["customer_field__customer_name"].strip()):
+            raise ValueError("Bitte einen Kundennamen mit höchstens 255 Zeichen eingeben.")
+        customer.name = name
+        customer.zoho_status = values.get("account_status", customer.zoho_status)
+        if "website" in values:
+            customer.website_domain = normalize_website_domain(values["website"])
+        customer.encrypted_profile_json = self.cipher.encrypt(json.dumps(profile, ensure_ascii=False))
         self.db.flush()
         from app.services.site_customer_matching import SiteCustomerMatchingService
         SiteCustomerMatchingService(db=self.db, cipher=self.cipher).customer_saved(customer)
@@ -422,7 +423,7 @@ class CustomerDirectoryService:
         website = values["website"]
         if website and (
             "://" in website and not website.startswith(("http://", "https://"))
-            or not (domain := ZohoCrmService.normalize_website_domain(website))
+            or not (domain := normalize_website_domain(website))
             or "." not in domain
             or " " in domain
         ):
@@ -495,10 +496,14 @@ class CustomerDirectoryService:
         contact = self.db.get(CustomerContact, contact_id)
         if contact is None:
             raise ValueError("Der Kontakt wurde nicht gefunden.")
-        if contact.zoho_id:
-            raise ValueError("Dieser Zoho-Kontakt wird über die Zoho-Bearbeitung aktualisiert.")
+        previous = self._profile_data(contact)
+        current = self.get_contact_detail_by_id(contact_id=contact.id)
+        submitted_values = {**{f"contact_field__{field.key}": field.form_value for field in current.editable_profile_fields}, **submitted_values}
+        updated = self._hub_contact_profile(self._hub_contact_values(submitted_values, require_salutation=False))
+        previous.setdefault("fields", {}).update(updated["fields"])
+        previous.setdefault("field_metadata", {}).update(updated.get("field_metadata", {}))
         contact.encrypted_profile_json = self.cipher.encrypt(
-            json.dumps(self._hub_contact_profile(self._hub_contact_values(submitted_values, require_salutation=False)), ensure_ascii=False)
+            json.dumps(previous, ensure_ascii=False)
         )
         self.db.flush()
         return contact
@@ -507,8 +512,6 @@ class CustomerDirectoryService:
         contact = self.db.get(CustomerContact, contact_id)
         if contact is None:
             raise ValueError("Der Kontakt wurde nicht gefunden.")
-        if contact.zoho_id:
-            raise ValueError("Die Verknüpfung eines Zoho-Kontakts wird durch Zoho CRM verwaltet.")
         if customer_id is None:
             contact.customer = None
         else:
@@ -613,14 +616,14 @@ class CustomerDirectoryService:
             raise ValueError("This site is already linked to a customer and was not changed.")
 
         expected_domain = customer.website_domain
-        actual_domain = ZohoCrmService.normalize_website_domain(site.domain)
+        actual_domain = normalize_website_domain(site.domain)
         if not expected_domain or actual_domain != expected_domain:
             raise ValueError("Only an exact Zoho website-domain match can be linked from this review screen.")
 
         matching_unlinked_sites = [
             current_site
             for current_site in self.db.scalars(select(Site).where(Site.customer_id.is_(None))).all()
-            if ZohoCrmService.normalize_website_domain(current_site.domain) == expected_domain
+            if normalize_website_domain(current_site.domain) == expected_domain
         ]
         if len(matching_unlinked_sites) != 1 or matching_unlinked_sites[0].id != site.id:
             raise ValueError("This website-domain match is ambiguous and requires a later manual review workflow.")
@@ -637,7 +640,7 @@ class CustomerDirectoryService:
             if site.customer_id is not None:
                 linked_by_customer.setdefault(site.customer_id, []).append(site)
                 continue
-            normalized_domain = ZohoCrmService.normalize_website_domain(site.domain)
+            normalized_domain = normalize_website_domain(site.domain)
             if normalized_domain:
                 unlinked_by_domain.setdefault(normalized_domain, []).append(site)
         return linked_by_customer, unlinked_by_domain
@@ -673,13 +676,13 @@ class CustomerDirectoryService:
             (field.value for field in profile_fields if field.key == "work_domain_login"),
             None,
         )
-        login_domain = ZohoCrmService.normalize_website_domain(work_domain_login)
+        login_domain = normalize_website_domain(work_domain_login)
         if not login_domain:
             return None
         matching_sites = tuple(
             site
             for site in entry.linked_sites
-            if ZohoCrmService.normalize_website_domain(site.domain) == login_domain
+            if normalize_website_domain(site.domain) == login_domain
         )
         return matching_sites[0] if len(matching_sites) == 1 else None
 
@@ -865,6 +868,8 @@ class CustomerDirectoryService:
         text_value = self._format_profile_value(raw_value)
         displayed_value = next((label for value, label in option_values if value == text_value), text_value)
         form_value = next((value for value, label in option_values if label == text_value), text_value)
+        from app.services.hub_profile_values import date_control_value
+        form_value = date_control_value(form_value, str(source.get("display_type") or ""))
         return CustomerProfileField(
             label=label,
             value="Geschützt" if sensitive and raw_value is not None else displayed_value,
@@ -936,7 +941,7 @@ class CustomerDirectoryService:
                         for field in formatted_fields
                         if field.value and self._is_phone_field(field.label)
                     ),
-                    is_hub_contact=contact.zoho_id is None,
+                    is_hub_contact=True,
                 )
             )
         return tuple(sorted(contacts, key=lambda contact: contact.name.casefold()))

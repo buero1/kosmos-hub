@@ -19,7 +19,6 @@ from app.services.hub_email_readers import download_attachment
 from app.services.hub_calendar import calendar_activities, busy_times
 from app.services.scheduled_email_worker import ScheduledEmailWorker
 from app.services import scheduled_emails
-from app.services.zoho_crm import ZohoCrmService
 from app.services.customer_communications import CustomerCommunicationService
 
 
@@ -118,7 +117,6 @@ def test_options_do_not_use_zoho_and_match_ui(env):
     for account in env.db.scalars(select(HubMailboxAccount)):
         account.enabled = False
     env.db.flush()
-    env.monkeypatch.setattr(ZohoCrmService, "list_allowed_from_addresses", lambda self: pytest.fail("No external sender lookup"))
     empty = env.service.query("emails.compose.options", {})
     assert empty["senders"] == [] and empty["sender_error"]
     account = env.db.scalar(select(HubMailboxAccount).where(HubMailboxAccount.email_address == "info@kosmos-medien.de"))
@@ -167,8 +165,7 @@ def test_attachment_text_artifact_and_download_share_bytes_and_access(env):
 
 def test_local_attachment_read_never_downloads_from_zoho(env):
     row = inbound(env, customer=env.own, attachments=[{"id": "remote", "file_name": "remote.pdf"}])
-    env.monkeypatch.setattr(CustomerCommunicationService,
-        "_download_zoho_email_attachment", lambda *args, **kw: pytest.fail("No external attachment fetch"))
+    assert not hasattr(CustomerCommunicationService, "_download_zoho_email_attachment")
     with pytest.raises(ValueError):
         download_attachment(env.service, key(row), "remote")
 

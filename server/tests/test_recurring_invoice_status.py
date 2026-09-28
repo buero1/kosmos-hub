@@ -12,9 +12,7 @@ from app.main import create_app
 from app.models.hub_finance_documents import HubFinanceInvoice, HubFinanceRecurringInvoice
 from app.services.hub_finance_documents import HubFinanceDocumentError, HubFinanceDocumentService, RECURRING_INVOICE_MODULE
 from app.services.hub_recurring_invoice_generation import HubRecurringInvoiceGenerationService
-from app.services.zoho_books_recurring_invoice_import import ZohoBooksRecurringInvoiceImportService
 from test_hub_finance_operations import env, values
-from test_zoho_books_recurring_invoice_import import FakeBooksRecurringInvoiceReader
 
 
 def create(env, **fields):
@@ -131,24 +129,6 @@ def test_automatic_end_also_clears_both_dates(env, end_date, expected_count):
     assert len(env.db.scalars(select(HubFinanceInvoice)).all()) == expected_count
 
 
-@pytest.mark.parametrize('status', ['stopped', 'expired'])
-def test_import_of_stopped_series_clears_cursor_including_existing_record(env, status):
-    reader = FakeBooksRecurringInvoiceReader()
-    env.customer.zoho_id = 'crm-customer-1'
-    env.contact.zoho_id = 'crm-contact-1'
-    env.db.commit()
-    service = ZohoBooksRecurringInvoiceImportService(db=env.db, cipher=env.cipher, books_service=reader)
-    for imported_status in ['active', status, status]:
-        reader.invoice['status'] = imported_status
-        service.start_all(requested_by='admin')
-        env.db.commit()
-        assert service.process_next_invoice() == 'succeeded'
-        assert service.process_next_invoice() == 'completed'
-        record = env.db.scalar(select(HubFinanceRecurringInvoice).where(HubFinanceRecurringInvoice.zoho_books_id == '7001'))
-        if imported_status == 'active':
-            assert record.hub_next_run_on is not None
-        else:
-            assert_stopped(env, record)
 
 
 def test_render_recurring_status_forms(env):

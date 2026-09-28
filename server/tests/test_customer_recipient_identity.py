@@ -80,6 +80,12 @@ def test_both_transports_send_to_the_explicit_shared_contact(shared_contacts, mo
         return SimpleNamespace(message_id="test@example.de", sent_at=datetime.now(UTC))
 
     monkeypatch.setattr("app.services.customer_communications.HubMailboxTransportService.send", send)
+    if not mittwald:
+        with pytest.raises(ValueError, match="Postfach"):
+            p.service.send_email(customer_id=p.customer.id, actor="operator", sender_email="team@example.de",
+                recipient_key=f"contact:{p.second.id}:anna@example.de", subject="Test", content="<p>Test</p>")
+        assert delivered == p.fake.sent_emails == []
+        return
     result = p.service.send_email(customer_id=p.customer.id, actor="operator", sender_email="team@example.de",
         recipient_key=f"contact:{p.second.id}:anna@example.de", subject="Test", content="<p>Test</p>")
     assert result.success

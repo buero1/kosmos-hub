@@ -5,7 +5,6 @@ from typing import Mapping
 
 from sqlalchemy import or_, select
 
-from app.core.config import get_settings
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_user import HubUser
@@ -16,7 +15,6 @@ from app.services.hub_operations import (
     HubOperationService, register_operation,
 )
 from app.services.zoho_contact_field_catalog import contact_fields
-from app.services.zoho_crm import ZohoCrmError, ZohoCrmService
 
 
 def _identifier(value: str) -> int | None:
@@ -76,7 +74,7 @@ def _contact(service, directory, access, user, values):
 def _execute(service: HubOperationService, values: Mapping[str, str], *, action: str) -> HubOperationResult:
     user = service.db.scalar(select(HubUser).where(HubUser.username == service.actor, HubUser.is_active.is_(True)))
     access = HubAccessControlService(db=service.db)
-    permission = {"create": "create", "update": "edit", "link_customer": "edit", "delete": "delete", "sync": "manage"}[action]
+    permission = {"create": "create", "update": "edit", "link_customer": "edit", "delete": "delete"}[action]
     if user is None or not access.can(user, "contacts", "view") or not access.can(user, "contacts", permission):
         raise HubOperationError("Für diese Kontaktaktion fehlt die Berechtigung.")
     directory = CustomerDirectoryService(db=service.db, cipher=service.cipher)
@@ -100,26 +98,9 @@ def _execute(service: HubOperationService, values: Mapping[str, str], *, action:
             directory.delete_contact_from_hub(contact_id=identifier)
             return HubOperationResult(label="Kontakte öffnen", href="/contacts", record_id=identifier,
                 outputs={"contact_id": str(identifier), "customer_id": str(customer_id or "")})
-        elif action in {"update", "sync"}:
-            if action == "update":
-                # Both callers submit patches; omitted fields retain the current form values.
-                detail = directory.get_contact_detail_by_id(contact_id=contact.id)
-                submitted = {**{f"contact_field__{field.key}": field.form_value for field in detail.editable_profile_fields}, **submitted}
-            if contact.zoho_id:
-                if contact.customer_id is None:
-                    raise HubOperationError("Der Zoho-Kontakt hat keine Kundenverknüpfung und kann hier nicht aktualisiert werden.")
-                zoho = ZohoCrmService(db=service.db, cipher=service.cipher, public_base_url=get_settings().public_base_url)
-                try:
-                    if action == "sync":
-                        contact = zoho.synchronize_contact(customer_id=contact.customer_id, contact_id=contact.id)
-                    else:
-                        contact = zoho.update_contact(customer_id=contact.customer_id, contact_id=contact.id, submitted_values=submitted)
-                except ZohoCrmError as exc:
-                    raise HubOperationError(str(exc)) from exc
-            elif action == "sync":
-                raise HubOperationError("Dieser Kontakt ist nicht mit Zoho CRM verknüpft.")
-            else:
-                contact = directory.update_hub_contact(contact_id=contact.id, submitted_values=submitted)
+        elif action == "update":
+            contact = directory.update_hub_contact(contact_id=contact.id, submitted_values=submitted)
+
     detail = directory.get_contact_detail_by_id(contact_id=contact.id)
     fields = {field.key: field.form_value for field in detail.editable_profile_fields}
     return HubOperationResult(label="Kontakt öffnen", href=f"/contacts/{contact.id}", record_id=contact.id, outputs={
@@ -146,10 +127,9 @@ def _input_fields(action: str) -> tuple[HubOperationInputField, ...]:
 
 _DESCRIPTIONS = {
     "create": ("Kontakt anlegen", "Neuen Kontakt ausschließlich im Hub anlegen, optional mit einem Kunden verknüpft."),
-    "update": ("Kontakt bearbeiten", "Kontaktfelder ändern. Hub-Kontakte werden lokal gespeichert; bestehende Zoho-Kontakte werden auch in Zoho CRM geändert."),
-    "link_customer": ("Kontakt verknüpfen", "Die Kundenverknüpfung eines Hub-Kontakts setzen oder entfernen. Zoho verwaltet die Verknüpfung seiner Kontakte selbst."),
-    "delete": ("Kontakt löschen", "Kontakt nur aus dem Hub löschen. Ein vorhandener Zoho-Datensatz wird nicht gelöscht."),
-    "sync": ("Kontakt synchronisieren", "Kontakt aus Zoho CRM neu laden. Dabei werden die Kontaktfelder im Hub durch den aktuellen Zoho-Stand ersetzt."),
+    "update": ("Kontakt bearbeiten", "Kontaktfelder ändern. Alle Kontakte werden ausschließlich im Hub gespeichert."),
+    "link_customer": ("Kontakt verknüpfen", "Die Kundenverknüpfung eines Hub-Kontakts setzen oder entfernen."),
+    "delete": ("Kontakt löschen", "Kontakt nur aus dem Hub löschen."),
 }
 
 

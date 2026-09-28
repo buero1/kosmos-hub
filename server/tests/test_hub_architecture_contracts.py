@@ -98,16 +98,14 @@ def test_scope_exclusions_need_a_decision_and_still_guard_route_changes():
     assert any("Changed route/helper" in error for error in validate(changed, files, manifest))
 
 
-def test_zoho_is_excluded_without_disguising_local_crm_as_retired():
+def test_zoho_is_removed_without_retiring_local_crm():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     for identity, entry in manifest["routes"].items():
-        if "zoho" in identity.split(":")[1]:
-            assert entry["state"] == "out_of_scope"
-            assert entry["scope_exclusion"] == "zoho-retirement"
+        assert "zoho" not in identity.split(":")[1]
         if identity.split(":")[1] in {"create_customer_page", "create_lead_page", "update_customer_fields", "update_lead_fields"}:
             assert entry["state"] == "shared"
     report = coverage_report(manifest)
-    assert "out_of_scope: 41" in report
+    assert not any(entry.get("scope_exclusion") == "zoho-retirement" for entry in manifest["routes"].values())
     retry = next(entry for identity, entry in manifest["routes"].items() if ":retry_failed_mailbox_message:" in identity)
     assert retry["scope_exclusion"] == "imports-and-sync"
     assert "Scope exclusions are not completed migrations" in report

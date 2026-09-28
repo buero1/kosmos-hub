@@ -15,8 +15,6 @@ SETTINGS_SECTIONS = (
     ("account-legal-terms", "AGBs"),
     ("account-pdf-templates", "PDF-Vorlagen"),
     ("account-mailbox", "E-Mail-Postfächer"),
-    ("account-zoho", "Zoho CRM"),
-    ("account-zoho-books", "Zoho Books"),
     ("account-refresh-settings", "Refresh settings"),
     ("account-styling", "Styling"),
 )
@@ -95,7 +93,8 @@ def test_account_and_settings_modes_render_only_their_own_sections():
     assert 'id="account-zoho"' not in rendered["account"]
 
     assert 'id="account-workflows"' in rendered["settings"]
-    assert 'id="account-zoho"' in rendered["settings"]
+    assert 'id="account-zoho"' not in rendered["settings"]
+    assert 'id="account-zoho-books"' not in rendered["settings"]
     assert 'id="account-styling"' in rendered["settings"]
     assert 'id="account-users"' not in rendered["settings"]
     assert 'id="account-openai"' not in rendered["settings"]

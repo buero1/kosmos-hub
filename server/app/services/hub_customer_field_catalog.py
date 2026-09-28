@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from app.services.zoho_account_field_catalog import ZOHO_ACCOUNT_FIELDS
-from app.services.zoho_crm import ZOHO_RELEVANT_ACCOUNT_STATUSES
+from app.services.hub_record_catalog import ZOHO_RELEVANT_ACCOUNT_STATUSES
 
 
 @dataclass(frozen=True)

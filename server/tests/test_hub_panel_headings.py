@@ -36,5 +36,5 @@ def test_connector_settings_remain_separate_from_neutral_record_panels():
     settings = (TEMPLATES / "account.html").read_text(encoding="utf-8")
     assert 'hub_data_panel(detail.entry.customer)' in customer
     assert '<dt>Quelle</dt>' not in customer
-    assert '<h3>Zoho CRM</h3>' in settings
-    assert 'href="/account/zoho/connect"' in settings
+    assert '<h3>Zoho CRM</h3>' not in settings
+    assert 'href="/account/zoho/connect"' not in settings

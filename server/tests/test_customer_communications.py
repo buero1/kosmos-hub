@@ -17,7 +17,7 @@ from app.services.customer_communications import CustomerCommunicationAttachment
 from app.services.email_attachment_storage import EmailAttachmentStorage
 from app.services.email_composer_settings import EmailComposerSettingsService
 from app.services.hub_mailbox_transport import HubMailboxTransportDelivery
-from app.services.zoho_crm import ZohoCrmError
+from app.services.hub_record_catalog import RecordDataError as ZohoCrmError
 
 
 class FakeZohoCommunications:
@@ -188,9 +188,23 @@ def _service(
         db=db,
         cipher=SecretCipher("a" * 32),
         public_base_url="https://hub.example",
-        zoho_service=fake_zoho,  # type: ignore[arg-type]
         attachment_storage=attachment_storage,
     )
+
+
+def _seed_templates(service):
+    fixture = FakeZohoCommunications()
+    for summary in fixture.list_email_templates():
+        if service.db.scalar(select(ZohoEmailTemplate).where(ZohoEmailTemplate.zoho_template_id == summary['id'])):
+            continue
+        payload = fixture.get_email_template(template_id=summary['id'])
+        payload['folder_name'] = payload['folder']['name']
+        service.db.add(ZohoEmailTemplate(
+            zoho_template_id=summary['id'], module=payload['module']['api_name'],
+            encrypted_payload_json=service.cipher.encrypt(json.dumps(payload)),
+            is_active=True, zoho_synced_at=datetime.now(UTC),
+        ))
+    service.db.flush()
 
 
 def _customer(cipher: SecretCipher) -> tuple[Customer, CustomerContact]:
@@ -231,66 +245,6 @@ def _customer(cipher: SecretCipher) -> tuple[Customer, CustomerContact]:
         ),
     )
     return customer, contact
-
-
-def test_customer_communications_syncs_headers_and_keeps_payloads_encrypted():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        service = _service(db, FakeZohoCommunications())
-        result = service.sync_customer(customer_id=customer.id)
-        db.commit()
-
-        assert (result.notes, result.emails) == (1, 1)
-        stored_note = db.scalar(select(CustomerZohoNote))
-        stored_email = db.scalar(select(CustomerZohoEmail))
-        assert stored_note is not None
-        assert stored_email is not None
-        assert stored_email.is_unread is False
-        assert "Imported note content" not in stored_note.encrypted_payload_json
-        assert "client@example.de" not in stored_email.encrypted_payload_json
-
-        view = service.get_view(customer_id=customer.id)
-        assert view.notes[0].content == "Imported note content"
-        assert view.emails[0].subject == "Anfrage"
-        assert view.emails[0].preview_html is None
-        assert [(item.id, item.filename) for item in view.emails[0].attachments] == [("zoho-attachment-1", "Angebot.pdf")]
-        assert view.emails[0].can_load_content is True
-        assert [recipient.email for recipient in view.recipients] == [
-            "accounts@example.de",
-            "anna@example.de",
-            "anna.private@example.de",
-        ]
-
-        second = service.sync_customer(customer_id=customer.id)
-        assert (second.notes, second.emails) == (0, 0)
-
-
-def test_customer_communications_marks_webhook_emails_unread_until_opened():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        service = _service(db, FakeZohoCommunications())
-        service.sync_customer(customer_id=customer.id, mark_new_emails_unread=True)
-        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
-        assert email is not None
-        assert email.is_unread is True
-
-        service.mark_email_read(customer_id=customer.id, email_id=email.id)
-
-        assert email.is_unread is False
 
 
 def test_customer_communications_lists_recipients_without_loading_the_full_view():
@@ -431,7 +385,7 @@ def test_customer_communications_marks_all_shared_email_copies_read():
         assert second_email.is_unread is False
 
 
-def test_customer_communications_auto_loads_new_webhook_email_content_without_marking_it_read():
+def test_customer_communications_retains_historical_headers_without_remote_loading():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -443,99 +397,20 @@ def test_customer_communications_auto_loads_new_webhook_email_content_without_ma
 
         fake_zoho = FakeZohoCommunications()
         service = _service(db, fake_zoho)
-        result = service.sync_customer_email_headers(
-            customer_id=customer.id,
-            mark_new_emails_unread=True,
-            load_new_inbound_content=True,
-        )
-        imported = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.customer_id == customer.id))
-
-        assert result.emails == 1
-        assert result.loaded_contents == 1
-        assert imported is not None
+        imported = CustomerZohoEmail(customer_id=customer.id, source="zoho", direction="inbound",
+            is_unread=True, sync_status="synced", zoho_message_id="legacy-id",
+            encrypted_payload_json=cipher.encrypt('{"subject":"Retained header"}'))
+        db.add(imported); db.flush()
+        before = imported.encrypted_payload_json
+        with pytest.raises(ValueError, match="historischen E-Mail"):
+            service._load_email_content_for_email(imported, mark_as_read=False)
         assert imported.is_unread is True
-        assert service._payload(imported.encrypted_payload_json)["content"] == "Full imported email body"
-        assert len(fake_zoho.email_content_requests) == 1
+        assert imported.encrypted_payload_json == before
+        assert fake_zoho.email_content_requests == []
 
 
 def test_customer_communications_treats_zoho_unsent_headers_as_inbound():
     assert CustomerCommunicationService._email_direction({"sent": False}) == "inbound"
-
-
-def test_customer_communications_downloads_only_the_selected_email_attachment():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        service.sync_customer(customer_id=customer.id)
-        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
-        assert email is not None
-
-        download = service.download_email_attachment(
-            customer_id=customer.id,
-            email_id=email.id,
-            attachment_id="zoho-attachment-1",
-        )
-
-        assert download.content == b"%PDF-test"
-        assert download.content_type == "application/pdf"
-        assert download.filename == "Angebot.pdf"
-        assert fake_zoho.downloaded_attachments == [
-            ("Accounts", "zoho-account-1", "zoho-email-account-1", "zoho-owner-1", "zoho-attachment-1", "Angebot.pdf")
-        ]
-        with pytest.raises(ValueError, match="gehört nicht"):
-            service.download_email_attachment(
-                customer_id=customer.id,
-                email_id=email.id,
-                attachment_id="other-attachment",
-            )
-
-
-def test_customer_communications_stores_an_email_attachment_encrypted_and_reuses_it(tmp_path):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        storage = EmailAttachmentStorage(root=tmp_path / "attachments", cipher=cipher, min_free_bytes=0)
-        service = _service(db, fake_zoho, attachment_storage=storage)
-        service.sync_customer(customer_id=customer.id)
-        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
-        assert email is not None
-
-        stored = service.store_email_attachment(
-            customer_id=customer.id,
-            email_id=email.id,
-            attachment_id="zoho-attachment-1",
-        )
-        db.commit()
-
-        assert stored.byte_size == len(b"%PDF-test")
-        assert db.scalar(select(CustomerEmailAttachment).where(CustomerEmailAttachment.id == stored.id)) is not None
-        encrypted_blob = next((tmp_path / "attachments").rglob("*.bin"))
-        assert b"%PDF-test" not in encrypted_blob.read_bytes()
-
-        download = service.download_email_attachment(
-            customer_id=customer.id,
-            email_id=email.id,
-            attachment_id="zoho-attachment-1",
-        )
-        assert download.content == b"%PDF-test"
-        assert fake_zoho.downloaded_attachments == [
-            ("Accounts", "zoho-account-1", "zoho-email-account-1", "zoho-owner-1", "zoho-attachment-1", "Angebot.pdf")
-        ]
 
 
 def _authorize_operator(db, monkeypatch, *, mittwald=False):
@@ -547,347 +422,6 @@ def _authorize_operator(db, monkeypatch, *, mittwald=False):
     db.flush()
     if not mittwald:
         monkeypatch.setattr(HubMailboxTransportService, "is_configured", lambda self: False)
-
-
-def test_customer_communications_create_notes_send_mail_and_load_bodies(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        service.sync_customer(customer_id=customer.id)
-        view = service.get_view(customer_id=customer.id)
-
-        note_result = service.create_note(
-            customer_id=customer.id,
-            actor="operator",
-            title="Hub note",
-            content="Created from the Hub",
-        )
-        assert note_result.success is True
-        assert fake_zoho.created_notes == [("zoho-account-1", "Hub note", "Created from the Hub")]
-
-
-        email_result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=view.recipients[1].key,
-            subject="Status",
-            content="Created from the Hub",
-        )
-        assert email_result.success is True
-        sent_email = fake_zoho.sent_emails[0]
-        assert sent_email[:6] == (
-            "zoho-account-1",
-            "Hub Team",
-            "team@example.de",
-            "Anna Example",
-            "anna@example.de",
-            "Status",
-        )
-        assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in sent_email[6]
-        assert "Created from the Hub" in sent_email[6]
-        assert sent_email[7] is None
-
-        imported_email = db.scalar(
-            select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1")
-        )
-        assert imported_email is not None
-        load_result = service.load_email_content(customer_id=customer.id, email_id=imported_email.id)
-        assert load_result.success is True
-        assert fake_zoho.email_content_requests == ["zoho-owner-1"]
-        updated_view = service.get_view(customer_id=customer.id)
-        assert "Created from the Hub" in (updated_view.emails[0].preview_html or "")
-        assert any("Full imported email body" in (email.preview_html or "") for email in updated_view.emails)
-
-
-def test_customer_communications_update_and_delete_notes_in_zoho():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        service.sync_customer(customer_id=customer.id)
-        note = db.scalar(select(CustomerZohoNote).where(CustomerZohoNote.zoho_note_id == "zoho-note-1"))
-        assert note is not None
-
-        result = service.update_note(
-            customer_id=customer.id,
-            note_id=note.id,
-            title="Aktualisierte Notiz",
-            content="Aktualisierter Inhalt",
-        )
-        assert result.success is True
-        assert fake_zoho.updated_notes == [("zoho-note-1", "Aktualisierte Notiz", "Aktualisierter Inhalt")]
-        view = service.get_view(customer_id=customer.id)
-        assert view.notes[0].title == "Aktualisierte Notiz"
-        assert view.notes[0].content == "Aktualisierter Inhalt"
-
-        delete_result = service.delete_note(customer_id=customer.id, note_id=note.id)
-        assert delete_result.success is True
-        assert fake_zoho.deleted_notes == ["zoho-note-1"]
-        assert db.get(CustomerZohoNote, note.id) is None
-
-
-def test_customer_communications_keeps_loaded_email_content_during_header_sync():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        service = _service(db, FakeZohoCommunications())
-        service.sync_customer(customer_id=customer.id)
-        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
-        assert email is not None
-        service.load_email_content(customer_id=customer.id, email_id=email.id)
-        db.commit()
-
-        service.sync_customer(customer_id=customer.id)
-        payload = service._payload(email.encrypted_payload_json)
-
-        assert payload["content"] == "Full imported email body"
-        assert payload["attachments"] == [{"id": "zoho-attachment-1", "name": "Angebot.pdf"}]
-
-
-def test_customer_communications_rejects_an_email_response_without_content():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        service.sync_customer(customer_id=customer.id)
-        email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-account-1"))
-        assert email is not None
-        fake_zoho.get_record_email = lambda **_kwargs: {"id": "zoho-email-account-1"}  # type: ignore[method-assign]
-
-        with pytest.raises(ZohoCrmError, match="ohne Inhalt"):
-            service.load_email_content(customer_id=customer.id, email_id=email.id)
-
-
-def test_customer_communications_replies_to_the_original_zoho_message(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-        original = CustomerZohoEmail(
-            customer=customer,
-            zoho_message_id="zoho-parent-message-1",
-            zoho_module="Accounts",
-            zoho_record_id="zoho-account-1",
-            source="zoho",
-            direction="inbound",
-            sync_status="synced",
-            encrypted_payload_json=cipher.encrypt(
-                json.dumps(
-                    {
-                        "subject": "Frage zur Rechnung",
-                        "owner": {"id": "zoho-owner-1"},
-                        "from": {"name": "Anna Example", "email": "anna@example.de"},
-                        "to": [{"name": "Hub Team", "email": "team@example.de"}],
-                        "cc": [{"name": "Office", "email": "office@example.de"}],
-                        "content": "<p>Originale Nachricht</p>",
-                    }
-                )
-            ),
-        )
-        db.add(original)
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        signature = "<p>Viele Grüße<br>Hub Team</p>"
-        EmailComposerSettingsService(db=db).configure_signature(signature_html=signature)
-        reply = service.get_email_reply(customer_id=customer.id, email_id=original.id)
-
-        assert reply.recipient_key.startswith(f"contact:{contact.id}:")
-        assert reply.recipient_email == "anna@example.de"
-        assert reply.subject == "Re: Frage zur Rechnung"
-        assert "Am " in reply.content
-        assert "Anna Example" in reply.content
-        assert "Originale Nachricht" in reply.content
-        assert "<strong>Am " in reply.content
-        assert reply.content.startswith(f"<br><br>{signature}<p><br><br></p><p><strong>Am ")
-        assert "<blockquote" in reply.content
-        assert reply.reply_all_cc_emails == ("office@example.de", "team@example.de")
-
-        result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=reply.recipient_key,
-            subject=reply.subject,
-            content="Danke, wir melden uns.",
-            reply_to_email_id=original.id,
-            cc_emails=", ".join(reply.reply_all_cc_emails),
-        )
-
-        assert result.success is True
-        assert fake_zoho.reply_to_calls == [("zoho-parent-message-1", "zoho-owner-1")]
-        assert fake_zoho.sent_cc_recipients == [(("office@example.de", "office@example.de"),)]
-        sent_email = db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-email-hub-1"))
-        assert sent_email is not None
-        assert service._payload(sent_email.encrypted_payload_json)["in_reply_to"] == {
-            "email_id": original.id,
-            "message_id": "zoho-parent-message-1",
-        }
-
-
-def test_customer_communications_forwards_loaded_content_and_attachments(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-        original = CustomerZohoEmail(
-            customer=customer,
-            zoho_message_id="zoho-forward-message-1",
-            zoho_module="Accounts",
-            zoho_record_id="zoho-account-1",
-            source="zoho",
-            direction="inbound",
-            sync_status="synced",
-            encrypted_payload_json=cipher.encrypt(
-                json.dumps(
-                    {
-                        "subject": "Angebot",
-                        "owner": {"id": "zoho-owner-1"},
-                        "from": {"name": "Anna Example", "email": "anna@example.de"},
-                        "to": [{"name": "Hub Team", "email": "team@example.de"}],
-                        "attachments": [{"id": "zoho-attachment-1", "name": "Angebot.pdf"}],
-                    }
-                )
-            ),
-        )
-        db.add(original)
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        fake_zoho.get_record_email = lambda **_kwargs: {
-            "id": "zoho-forward-message-1",
-            "content": "<p>Bitte das Angebot weiterleiten.</p>",
-        }  # type: ignore[method-assign]
-        service = _service(db, fake_zoho)
-        forward = service.get_email_forward(customer_id=customer.id, email_id=original.id)
-        recipient = service.get_view(customer_id=customer.id).recipients[1]
-
-        assert forward.subject == "Fwd: Angebot"
-        assert "Weitergeleitete Nachricht" in forward.content
-        assert service._payload(original.encrypted_payload_json)["content"] == "<p>Bitte das Angebot weiterleiten.</p>"
-        result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=recipient.key,
-            subject=forward.subject,
-            content=forward.content,
-            forward_from_email_id=original.id,
-        )
-
-        assert result.success is True
-        assert fake_zoho.uploaded_files == [("Angebot.pdf", b"%PDF-test", "application/pdf")]
-        assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
-
-
-def test_customer_communications_sends_new_email_attachments(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        recipient = service.get_view(customer_id=customer.id).recipients[1]
-        result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=recipient.key,
-            subject="Unterlagen",
-            content="Anbei die Unterlagen.",
-            attachments=(
-                CustomerCommunicationAttachmentUpload(
-                    filename="Unterlagen.txt",
-                    content=b"Anbei",
-                    content_type="text/plain",
-                ),
-            ),
-        )
-
-        assert result.success is True
-        assert fake_zoho.uploaded_files == [("Unterlagen.txt", b"Anbei", "text/plain")]
-        assert fake_zoho.sent_attachment_ids == [("zfs-1",)]
-
-
-def test_customer_communications_sends_sanitized_rich_email_html(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        view = service.get_view(customer_id=customer.id)
-        result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=view.recipients[1].key,
-            subject="Formatierte Nachricht",
-            content=(
-                '<div style="text-align: center; color: red"><font color="#0e7c66" size="5">'
-                "<strong>Wichtig</strong></font><script>ignored()</script>"
-                '<a href="javascript:alert(1)">Unsicher</a><a href="https://example.de">Sicher</a></div>'
-            ),
-        )
-
-        assert result.success is True
-        sent_html = fake_zoho.sent_emails[0][-2]
-        assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in sent_html
-        assert '<div style="text-align: center; color: red"><font color="#0e7c66" size="5"><strong>Wichtig</strong></font>' in sent_html
-        assert 'javascript:alert' not in sent_html
 
 
 def test_customer_communications_compiles_hub_email_before_mittwald_delivery(monkeypatch):
@@ -948,67 +482,6 @@ def test_customer_communications_compiles_hub_email_before_mittwald_delivery(mon
         assert compiler["version"]
 
 
-def test_customer_communications_loads_and_sends_an_editable_zoho_email_template(monkeypatch):
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        _authorize_operator(db, monkeypatch)
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        sync_result = service.sync_email_templates()
-        assert (sync_result.created, sync_result.updated, sync_result.archived) == (2, 0, 0)
-        assert fake_zoho.template_detail_requests == ["zoho-template-1", "zoho-template-2"]
-        assert [(item.id, item.name, item.module) for item in service.list_email_templates()] == [
-            ("zoho-template-1", "Statusvorlage", "Accounts"),
-            ("zoho-template-2", "Kontaktvorlage", "Contacts"),
-        ]
-        assert [item.category for item in service.list_email_templates()] == ["Kunden", "Kunden"]
-        preview = service.get_email_template_preview(template_id="zoho-template-1")
-        assert preview.subject == "Aktueller Stand für ${Accounts.Account_Name}"
-        assert "${!Accounts.id}" in preview.content
-        assert preview.unresolved_placeholders == (
-            "!Accounts.Dialfire_WV_Datum",
-            "!Accounts.Dialfire_WV_Notiz",
-            "!Accounts.id",
-            "Accounts.Account_Name",
-        )
-        template = service.get_email_template(customer_id=customer.id, template_id="zoho-template-1")
-        assert template.subject == "Aktueller Stand für Example Customer"
-        assert template.content == '<table style="width: 100%"><tr><td><strong>Hallo Example Customer zoho-account-1 2026-09-02 Bitte nachfassen</strong></td></tr></table>'
-        assert template.unresolved_placeholders == ()
-        assert fake_zoho.template_detail_requests == ["zoho-template-1", "zoho-template-2"]
-
-        recipient = service.get_view(customer_id=customer.id).recipients[0]
-        result = service.send_email(
-            customer_id=customer.id,
-            actor="operator",
-            sender_email="team@example.de",
-            recipient_key=recipient.key,
-            subject="Ergänzter Stand",
-            content=template.content + "<p>Mit Zusatz.</p>",
-            template_id=template.id,
-        )
-        assert result.success is True
-        assert fake_zoho.sent_emails[0][-1] is None
-        assert '<meta name="viewport"' not in fake_zoho.sent_emails[0][-2]
-        outgoing = db.scalar(
-            select(CustomerZohoEmail).where(CustomerZohoEmail.direction == "outbound")
-        )
-        assert outgoing is not None
-        assert service._payload(outgoing.encrypted_payload_json)["email_compiler"] == {
-            "mode": "legacy",
-            "version": None,
-            "warnings": [],
-        }
-        assert fake_zoho.template_detail_requests == ["zoho-template-1", "zoho-template-2"]
-
-
 def test_customer_communications_resolves_visible_customer_field_placeholders_in_links():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -1020,7 +493,7 @@ def test_customer_communications_resolves_visible_customer_field_placeholders_in
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         service.update_email_template(
             template_id="zoho-template-1",
             name="Website-Link",
@@ -1053,7 +526,7 @@ def test_customer_communications_resolves_visible_contact_field_placeholders():
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         service.update_email_template(
             template_id="zoho-template-1",
             name="Kontakt-Anrede",
@@ -1090,7 +563,7 @@ def test_customer_communications_resolves_canonical_linked_and_global_placeholde
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         signature = "<p>Mit freundlichen Grüßen</p>"
         EmailComposerSettingsService(db=db).configure_signature(signature_html=signature)
         service.update_email_template(
@@ -1129,7 +602,7 @@ def test_customer_communications_resolves_supplied_dunning_placeholders():
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         service.update_email_template(
             template_id="zoho-template-1",
             name="Erneute Abbuchung",
@@ -1157,34 +630,6 @@ def test_customer_communications_resolves_supplied_dunning_placeholders():
         assert rendered.unresolved_placeholders == ()
 
 
-def test_customer_communications_keeps_hub_template_edits_when_zoho_templates_are_synced():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
-        edited = service.update_email_template(
-            template_id="zoho-template-1",
-            name="Eigene Statusvorlage",
-            subject="Eigener Betreff für ${Accounts.Account_Name}",
-            content="<p>Hallo ${Accounts.Account_Name}</p>",
-        )
-        assert edited.name == "Eigene Statusvorlage"
-        assert edited.subject == "Eigener Betreff für ${Accounts.Account_Name}"
-
-        sync_result = service.sync_email_templates()
-        assert (sync_result.created, sync_result.updated, sync_result.archived) == (0, 0, 0)
-        preview = service.get_email_template_preview(template_id="zoho-template-1")
-        assert preview.name == "Eigene Statusvorlage"
-        assert preview.content == "<p>Hallo ${Accounts.Account_Name}</p>"
-
-
 def test_customer_communications_moves_email_template_to_an_existing_folder():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -1196,7 +641,7 @@ def test_customer_communications_moves_email_template_to_an_existing_folder():
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         service.update_email_template(
             template_id="zoho-template-1",
             name="Statusvorlage",
@@ -1221,7 +666,7 @@ def test_customer_communications_inserts_the_shared_signature_as_safe_html_in_te
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         signature = '<p>Viele Grüße<br><img src="/emails/compose/images/' + "a" * 32 + '" alt="Kosmos"></p>'
         EmailComposerSettingsService(db=db).configure_signature(signature_html=signature)
         service.update_email_template(
@@ -1252,7 +697,7 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         cloned = service.clone_email_template(
             template_id="zoho-template-1",
             name="Statusvorlage_geklont",
@@ -1275,7 +720,7 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
         reviewed_summary = next(item for item in service.list_email_templates() if item.id == cloned.id)
         assert reviewed_summary.content_reviewed
 
-        service.sync_email_templates()
+        _seed_templates(service)
         assert {item.id for item in service.list_email_templates()} == {
             "zoho-template-1",
             "zoho-template-2",
@@ -1284,7 +729,7 @@ def test_customer_communications_clones_and_deletes_local_email_templates():
 
         service.delete_email_template(template_id=cloned.id)
         service.delete_email_template(template_id="zoho-template-1")
-        service.sync_email_templates()
+        _seed_templates(service)
         assert [item.id for item in service.list_email_templates()] == ["zoho-template-2"]
 
 
@@ -1299,7 +744,7 @@ def test_customer_communications_moves_and_deletes_email_templates_in_batches():
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         cloned = service.clone_email_template(
             template_id="zoho-template-1",
             name="Statusvorlage Kopie",
@@ -1333,7 +778,7 @@ def test_customer_communications_persists_and_infers_email_template_context_modu
         db.commit()
 
         service = _service(db, FakeZohoCommunications())
-        service.sync_email_templates()
+        _seed_templates(service)
         assert service.get_email_template_source(template_id="zoho-template-1").context_module == "customers"
 
         edited = service.update_email_template(
@@ -1355,68 +800,6 @@ def test_customer_communications_persists_and_infers_email_template_context_modu
                 content="<p>Test</p>",
                 context_module="unknown-module",
             )
-
-
-def test_customer_communication_sync_deduplicates_one_message_linked_to_account_and_contact():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        duplicate_header = {
-            "message_id": "zoho-shared-email-1",
-            "subject": "Shared history item",
-            "sent": True,
-            "time": "2026-09-02T08:20:00+00:00",
-        }
-        fake_zoho.list_record_email_headers = lambda _module, _record_id: [duplicate_header]
-        result = _service(db, fake_zoho).sync_customer(customer_id=customer.id)
-
-        assert result.emails == 1
-        assert db.scalar(select(CustomerZohoEmail).where(CustomerZohoEmail.zoho_message_id == "zoho-shared-email-1")) is not None
-
-
-def test_customer_communication_sync_deduplicates_account_and_contact_copies_with_distinct_zoho_ids():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, contact = _customer(cipher)
-        db.add_all([customer, contact])
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        account_header = {
-            "message_id": "zoho-account-copy-1",
-            "subject": "Website fertiggestellt",
-            "from": {"name": "Team Kosmos", "email": "info@kosmos-medien.de"},
-            "to": [{"name": "Customer", "email": "customer@example.de"}],
-            "sent_time": "2026-09-02T09:30:00+00:00",
-        }
-        contact_header = {
-            "message_id": "zoho-contact-copy-1",
-            "subject": "Website fertiggestellt",
-            "from": {"name": "info@kosmos-medien.de", "email": "info@kosmos-medien.de"},
-            "to": [{"name": "Customer", "email": "customer@example.de"}],
-            "sent_time": "2026-09-02T09:30:01+00:00",
-        }
-        fake_zoho.list_record_email_headers = lambda module, _record_id: [
-            account_header if module == "Accounts" else contact_header
-        ]
-
-        result = _service(db, fake_zoho).sync_customer(customer_id=customer.id)
-
-        emails = db.scalars(select(CustomerZohoEmail)).all()
-        assert result.emails == 1
-        assert len(emails) == 1
-        assert emails[0].zoho_message_id == "zoho-contact-copy-1"
-        assert emails[0].zoho_module == "Contacts"
 
 
 def test_customer_communication_view_prepares_a_sandboxed_html_email_preview():
@@ -1520,54 +903,3 @@ def test_customer_communication_preview_accepts_public_http_image_sources():
     assert CustomerCommunicationService._is_external_image_source("http://images.example.test/logo.png") is True
     assert CustomerCommunicationService._is_external_image_source("http://127.0.0.1/logo.png") is False
     assert CustomerCommunicationService._is_external_image_source("http://images.example.test:8080/logo.png") is False
-
-
-def test_customer_communication_preview_downloads_zoho_inline_images():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-
-    with Session(engine) as db:
-        cipher = SecretCipher("a" * 32)
-        customer, _contact = _customer(cipher)
-        db.add(customer)
-        db.commit()
-        image_id = "zoho-inline-image-1"
-        email = CustomerZohoEmail(
-            customer=customer,
-            zoho_message_id="zoho-email-inline-1",
-            zoho_module="Accounts",
-            zoho_record_id="zoho-account-1",
-            source="zoho",
-            direction="inbound",
-            sync_status="synced",
-            encrypted_payload_json=cipher.encrypt(
-                json.dumps(
-                    {
-                        "subject": "Inline image mail",
-                        "owner": {"id": "zoho-owner-1"},
-                        "content": f'<p><img src="crm\\img_id:{image_id}" alt="Logo"></p>',
-                    }
-                )
-            ),
-        )
-        db.add(email)
-        db.commit()
-
-        fake_zoho = FakeZohoCommunications()
-        service = _service(db, fake_zoho)
-        source_url_hash = hashlib.sha256(f"zoho-inline:{image_id}".encode("utf-8")).hexdigest()
-        preview = service.get_view(customer_id=customer.id).emails[0].preview_html
-        assert preview is not None
-        assert f"/customers/{customer.id}/communications/emails/{email.id}/images/{source_url_hash}" in preview
-
-        image = service.get_email_preview_image(
-            customer_id=customer.id,
-            email_id=email.id,
-            source_url_hash=source_url_hash,
-        )
-
-        assert image.content == b"inline-image-bytes"
-        assert image.content_type == "image/png"
-        assert fake_zoho.downloaded_inline_images == [
-            ("Accounts", "zoho-account-1", "zoho-email-inline-1", "zoho-owner-1", image_id)
-        ]
