@@ -915,7 +915,6 @@ class CustomerCommunicationService:
         from app.services.hub_note_catalog import normalize_note
         values = normalize_note(title=title, content=content)
         payload = self._payload(note.encrypted_payload_json)
-        payload.update(values)
         payload.update(Note_Title=values["title"], Note_Content=values["content"], **values)
         note.encrypted_payload_json = self._encrypt_payload(payload)
         note.zoho_modified_at = datetime.now(UTC)
