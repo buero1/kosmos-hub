@@ -35,9 +35,10 @@ FIELD_IDS = {
 
 
 class SepaError(ValueError):
-    def __init__(self, message, status_code=400):
+    def __init__(self, message, status_code=400, *, code="invalid_request"):
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
 
 
 def utc(value):
@@ -63,20 +64,26 @@ def extract_fields(pairs):
 
 def normalize_bank_fields(fields):
     iban = re.sub(r"\s+", "", fields.get("iban", "")).upper()
+    if not iban:
+        raise SepaError("Bitte eine gueltige IBAN eingeben.", 422, code="iban_missing")
     if not re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}", iban):
-        raise SepaError("Bitte eine gueltige IBAN eingeben.", 422)
+        raise SepaError("Bitte eine gueltige IBAN eingeben.", 422, code="iban_format")
     numeric = "".join(str(ord(c) - 55) if c.isalpha() else c for c in iban[4:] + iban[:4])
-    if int(numeric) % 97 != 1 or (iban.startswith("DE") and len(iban) != 22):
-        raise SepaError("Die IBAN-Pruefsumme oder Laenge ist ungueltig.", 422)
+    if iban.startswith("DE") and len(iban) != 22:
+        raise SepaError("Die IBAN-Pruefsumme oder Laenge ist ungueltig.", 422, code="iban_length")
+    if int(numeric) % 97 != 1:
+        raise SepaError("Die IBAN-Pruefsumme oder Laenge ist ungueltig.", 422, code="iban_checksum")
     bic = re.sub(r"\s+", "", fields.get("bic", "")).upper()
     if bic and not re.fullmatch(r"[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", bic):
-        raise SepaError("Bitte eine gueltige BIC eingeben oder das optionale Feld leer lassen.", 422)
+        raise SepaError("Bitte eine gueltige BIC eingeben oder das optionale Feld leer lassen.", 422, code="bic_format")
     holder = " ".join(fields.get("account_holder", "").split())
     bank = " ".join(fields.get("bank", "").split())
-    if not holder or len(holder) > 255 or len(bank) > 255:
-        raise SepaError("Bitte den Kontoinhaber angeben (maximal 255 Zeichen).", 422)
+    if not holder:
+        raise SepaError("Bitte den Kontoinhaber angeben (maximal 255 Zeichen).", 422, code="account_holder_missing")
+    if len(holder) > 255 or len(bank) > 255:
+        raise SepaError("Bitte den Kontoinhaber angeben (maximal 255 Zeichen).", 422, code="bank_text_length")
     if any(ord(c) < 32 or c in "<>" for c in holder + bank):
-        raise SepaError("Kontoinhaber und Bank duerfen nur normalen Text enthalten.", 422)
+        raise SepaError("Kontoinhaber und Bank duerfen nur normalen Text enthalten.", 422, code="bank_text_format")
     return {key: value for key, value in {
         "iban": iban, "bic": bic, "account_holder": holder, "bank": bank,
     }.items() if value}

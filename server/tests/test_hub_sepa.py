@@ -282,6 +282,46 @@ def test_rate_limit(env):
     assert response.status_code == 429 and response.headers["retry-after"] == "60"
 
 
+@pytest.mark.parametrize(("override", "code"), [
+    ({"ks_iban": ""}, "iban_missing"),
+    ({"ks_iban": "not-an-iban"}, "iban_format"),
+    ({"ks_iban": IBAN[:-1]}, "iban_length"),
+    ({"ks_iban": "DE00370400440532013000"}, "iban_checksum"),
+    ({"ks_bic": "invalid!"}, "bic_format"),
+    ({"field_a13f37a": ""}, "account_holder_missing"),
+    ({"field_a13f37a": "a" * 256}, "bank_text_length"),
+    ({"field_a13f37a": "Private <Holder>"}, "bank_text_format"),
+])
+def test_rejection_diagnostics_exclude_bank_values_and_token(env, caplog, override, code):
+    token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
+    client = TestClient(main.create_app())
+    data = body(token, **override)
+    response = client.post(sepa.WEBHOOK_PATH, json={"fields": {
+        key: {"value": value} for key, value in data.items()
+    }})
+    assert response.status_code == 422
+    logs = [record.getMessage() for record in caplog.records if record.name == sepa.__name__]
+    assert logs == [f"SEPA webhook rejected: status=422 code={code} fields=token,iban,bic,account_holder"]
+    assert token not in caplog.text
+    assert not any(value in caplog.text for value in data.values() if value)
+    assert payload(env) == env.profile
+    assert env.db.scalar(select(HubSepaSubmission)) is None
+
+
+def test_missing_field_mapping_is_distinguishable_without_logging_unknown_names(env, caplog):
+    token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
+    client = TestClient(main.create_app())
+    response = client.post(sepa.WEBHOOK_PATH, json={
+        TOKEN_FIELD: token, "IBAN": IBAN, "Kontoinhaber": "Private Holder", "private-field-name": "private-value",
+    })
+    assert response.status_code == 422
+    logs = [record.getMessage() for record in caplog.records if record.name == sepa.__name__]
+    assert logs == ["SEPA webhook rejected: status=422 code=iban_missing fields=token"]
+    for private in (token, IBAN, "Private Holder", "private-field-name", "private-value"):
+        assert private not in caplog.text
+    assert payload(env) == env.profile
+
+
 def test_commit_failure_is_not_acknowledged_and_whole_transaction_rolls_back(env, monkeypatch):
     token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
     real_factory = sepa.SessionLocal

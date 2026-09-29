@@ -23,7 +23,7 @@
   },
   "routes": {
     "app/api/routes/sepa.py:submit_sepa:POST:/api/v1/integrations/sepa/submissions": {
-      "fingerprint": "fd6c0e73e9f1b942628d29108c72302b3e67d3ad29281303054a6c6cb0748de0",
+      "fingerprint": "31de98f4b21176cbb5286632767dae90e2b7144463dede3566886132a833fa71",
       "state": "infrastructure",
       "reason": "Reviewed Elementor SEPA webhook protocol, not an unscoped user/agent write command. Exact public POST endpoint authenticates a purpose-bound encrypted single-use customer token (14 days) and rechecks issuer record edit permission. Bounded input, encrypted profile allowlist, atomic receipt/audit/commit, idempotent retries, Berlin receipt date, no Zoho or outbound side effects. Covered by test_hub_sepa.py. Template issue uses existing authorized rendering; no session exemption for adjacent routes."
     },

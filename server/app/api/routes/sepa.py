@@ -81,6 +81,7 @@ def _receive(fields):
 @router.post("/api/v1/integrations/sepa/submissions")
 async def submit_sepa(request: Request):
     headers = {"Cache-Control": "no-store"}
+    fields = {}
     if not _allow_request(request.client.host if request.client else "unknown"):
         return JSONResponse({"success": False, "message": "Zu viele Anfragen. Bitte spaeter erneut versuchen."},
                             status_code=429, headers={**headers, "Retry-After": "60"})
@@ -95,6 +96,9 @@ async def submit_sepa(request: Request):
         result = await run_in_threadpool(_receive, fields)
         return JSONResponse(result, headers=headers)
     except SepaError as exc:
+        # Only fixed diagnostic codes and recognized field names, never submitted values.
+        recognized = ",".join(key for key in ("token", "iban", "bic", "account_holder", "bank") if key in fields)
+        logger.warning("SEPA webhook rejected: status=%s code=%s fields=%s", exc.status_code, exc.code, recognized or "none")
         return JSONResponse({"success": False, "message": str(exc)}, status_code=exc.status_code, headers=headers)
     except SQLAlchemyError:
         # Do not emit exception parameters: submissions contain bank data.
