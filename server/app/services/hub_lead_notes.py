@@ -79,12 +79,8 @@ class HubLeadNoteService:
         self._lead_or_error(lead_id)
         normalized_source = self._required_text(source_system, "Externe Quelle", maximum=96)
         normalized_external_id = self._required_text(source_external_id, "Externe Notiz-ID", maximum=255)
-        normalized_content = self._required_text(content, "Notiz", maximum=30_000)
-        normalized_title = (
-            self._required_text(title, "Titel", maximum=255)
-            if title.strip()
-            else self._title_from_content(normalized_content)
-        )
+        values = self._validated_note(title=title, content=content, creating=True)
+        normalized_title, normalized_content = values["title"], values["content"]
         note = self.db.scalar(
             select(HubLeadNote).where(
                 HubLeadNote.lead_id == lead_id,
@@ -164,7 +160,7 @@ class HubLeadNoteService:
 
     def _view(self, note: HubLeadNote) -> HubLeadNoteView:
         payload = self._payload(note.encrypted_payload_json)
-        title = self._text(payload.get("Note_Title")) or "Ohne Titel"
+        title = self._text(payload.get("Note_Title")) or ""
         content = self._text(payload.get("Note_Content")) or ""
         return HubLeadNoteView(
             id=note.id,
@@ -192,10 +188,6 @@ class HubLeadNoteService:
         if len(normalized) > maximum:
             raise HubLeadNoteError(f"{label} darf höchstens {maximum:,} Zeichen enthalten.")
         return normalized
-
-    @staticmethod
-    def _title_from_content(content: str) -> str:
-        return next(line.strip() for line in content.splitlines() if line.strip())[:255]
 
     @staticmethod
     def _text(value: object) -> str | None:

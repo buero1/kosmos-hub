@@ -202,7 +202,7 @@ def test_ui_and_agent_notes_crud_parity(env, module):
     agent = env.db.get(model, int(outputs["note_id"]))
     assert human.encrypted_payload_json != agent.encrypted_payload_json
     assert json.loads(env.cipher.decrypt(human.encrypted_payload_json)) == json.loads(env.cipher.decrypt(agent.encrypted_payload_json))
-    getattr(web, f"update_{prefix}_note")(parent.id, human.id, request_for(env, {}), env.db, title="First line", content="Edited", csrf_token="")
+    getattr(web, f"update_{prefix}_note")(parent.id, human.id, request_for(env, {}), env.db, title="", content="Edited", csrf_token="")
     execute_agent(env, f"{module}.notes.update", {parent_key: str(parent.id), "note_id": str(agent.id), "content": "Edited"})
     assert json.loads(env.cipher.decrypt(human.encrypted_payload_json)) == json.loads(env.cipher.decrypt(agent.encrypted_payload_json))
     getattr(web, f"delete_{prefix}_note")(parent.id, human.id, request_for(env, {}), env.db, csrf_token="")
@@ -216,9 +216,32 @@ def test_notes_reject_wrong_parent_and_blank_patch(env, module):
     key = "customer_id" if module == "customers" else "lead_id"
     parent = env.customer.id if module == "customers" else env.lead.id
     result = env.service.execute(f"{module}.notes.create", {key: str(parent), "content": "Retain"})
-    for values in ({key: "99999"}, {"title": ""}, {"content": ""}):
+    for values in ({key: "99999"}, {"content": ""}):
         with pytest.raises(ValueError):
             env.service.execute(f"{module}.notes.update", {key: str(parent), "note_id": str(result.record_id), **values})
+
+
+@pytest.mark.parametrize("module", ["customers", "leads"])
+def test_note_title_can_be_omitted_preserved_and_explicitly_removed(env, module):
+    key = "customer_id" if module == "customers" else "lead_id"
+    parent = env.customer.id if module == "customers" else env.lead.id
+    model = CustomerZohoNote if module == "customers" else HubLeadNote
+    result = env.service.execute(f"{module}.notes.create", {key: str(parent), "content": "Only the body"})
+    record = env.db.get(model, result.record_id)
+
+    def payload():
+        return json.loads(env.cipher.decrypt(record.encrypted_payload_json))
+
+    assert payload().get("Note_Title", payload().get("title")) == ""
+    values = {key: str(parent), "note_id": str(record.id)}
+    env.service.execute(f"{module}.notes.update", {**values, "title": "Explicit title"})
+    env.service.execute(f"{module}.notes.update", {**values, "content": "Edited body"})
+    assert payload()["Note_Title"] == "Explicit title"
+    env.service.execute(f"{module}.notes.update", {**values, "title": ""})
+    env.service.execute(f"{module}.notes.update", {**values, "content": "Edited again"})
+    assert payload()["Note_Title"] == ""
+    assert payload()["Note_Content"] == "Edited again"
+    assert not payload().get("title")
 
 
 @pytest.mark.parametrize("operation", ["cases.create", "cases.update", "cases.delete", "cases.link_email", "cases.unlink_email",

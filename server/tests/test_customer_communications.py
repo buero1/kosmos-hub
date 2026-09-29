@@ -173,10 +173,12 @@ class FakeZohoCommunications:
         return f"zfs-{len(self.uploaded_files)}"
 
 
-def test_note_title_uses_the_first_nonempty_content_line_when_omitted():
-    title = CustomerCommunicationService._note_title_from_content("\n  Anfrage zur Rechnung\nWeitere Details")
+def test_note_title_stays_empty_when_omitted():
+    from app.services.hub_note_catalog import normalize_note
 
-    assert title == "Anfrage zur Rechnung"
+    values = normalize_note(title="", content="\n  Anfrage zur Rechnung\nWeitere Details", creating=True)
+    assert values["title"] == ""
+    assert values["content"] == "Anfrage zur Rechnung\nWeitere Details"
 
 
 def _service(

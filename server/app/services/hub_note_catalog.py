@@ -13,7 +13,7 @@ class HubNoteField:
 
 def note_fields(*, creating: bool = False) -> tuple[HubNoteField, ...]:
     return (
-        HubNoteField("title", "Titel", 255, not creating),
+        HubNoteField("title", "Titel", 255, False),
         HubNoteField("content", "Notiz", 30_000, True),
     )
 
@@ -26,7 +26,4 @@ def normalize_note(*, title: str, content: str, creating: bool = False) -> dict[
             raise ValueError(f"{field.label} darf nicht leer sein.")
         if len(values[field.name]) > field.maximum:
             raise ValueError(f"{field.label} darf höchstens {field.maximum:,} Zeichen enthalten.")
-    if creating and not values["title"]:
-        maximum = next(field.maximum for field in fields if field.name == "title")
-        values["title"] = next(line.strip() for line in values["content"].splitlines() if line.strip())[:maximum]
     return values

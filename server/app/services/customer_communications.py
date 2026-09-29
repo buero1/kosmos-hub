@@ -916,7 +916,7 @@ class CustomerCommunicationService:
         values = normalize_note(title=title, content=content)
         payload = self._payload(note.encrypted_payload_json)
         payload.update(values)
-        payload.update(Note_Title=values["title"], Note_Content=values["content"])
+        payload.update(Note_Title=values["title"], Note_Content=values["content"], **values)
         note.encrypted_payload_json = self._encrypt_payload(payload)
         note.zoho_modified_at = datetime.now(UTC)
         note.sync_status = "local"
@@ -1585,7 +1585,7 @@ class CustomerCommunicationService:
         payload = self._payload(note.encrypted_payload_json)
         return CustomerCommunicationNoteView(
             id=note.id,
-            title=self._text(payload.get("Note_Title")) or self._text(payload.get("title")) or "Ohne Titel",
+            title=self._text(payload.get("Note_Title") if "Note_Title" in payload else payload.get("title")) or "",
             content=self._text(payload.get("Note_Content")) or self._text(payload.get("content")) or "",
             source=note.source,
             sync_status=note.sync_status,
@@ -2117,11 +2117,6 @@ class CustomerCommunicationService:
         if len(normalized) > maximum:
             raise ValueError(f"{label} darf höchstens {maximum:,} Zeichen enthalten.")
         return normalized
-
-    @staticmethod
-    def _note_title_from_content(content: str) -> str:
-        """Zoho requires a title; use the first written line when the form omits it."""
-        return next(line.strip() for line in content.splitlines() if line.strip())[:255]
 
     @staticmethod
     def _required_template_id(value: str) -> str:

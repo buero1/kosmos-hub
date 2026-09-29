@@ -75,8 +75,8 @@ for _module in ("customers", "leads"):
         register_operation(HubOperation(key=f"{_module}.notes.{_action}", module=_module, label=_label,
             description=f"{_label}. {_storage}",
             input_guide=("Zugehörigen Datensatz per ID wählen; bei Kunden ist alternativ customer_name möglich. "
-                "Neue Notizen benötigen Inhalt; ohne Titel wird dieser aus dem Inhalt abgeleitet. "
-                "Bei update nur geänderte Felder übergeben; fehlende Felder bleiben erhalten. Ein explizit leerer Titel oder Inhalt ist beim Bearbeiten ungültig."),
+                "Notizen benötigen Inhalt. Der Titel ist optional und wird nicht aus dem Inhalt abgeleitet. "
+                "Bei update nur geänderte Felder übergeben; fehlende Felder bleiben erhalten. Ein leerer Titel entfernt die Überschrift; leerer Inhalt ist ungültig."),
             preview_fields=(), preview_builder=lambda values, module=_module, action=_action, storage=_storage: (storage,) + tuple(
                 f"{field.label}: {values[field.name] or '(leer)'}" for field in _fields(module, action) if field.name in values),
             execute=partial(_execute, module=_module, action=_action), input_fields=partial(_fields, _module, _action),

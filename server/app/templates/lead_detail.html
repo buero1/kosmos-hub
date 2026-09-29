@@ -30,7 +30,7 @@
         {% for note in lead_notes %}
           <article class="communication-entry">
             <div class="communication-entry-heading">
-              <strong>{{ note.title }}</strong>
+              {% if note.title %}<strong>{{ note.title }}</strong>{% endif %}
               <div class="customer-activity-entry-actions" role="group" aria-label="Notizaktionen">
                 {{ lead_note_entry_action(note, "edit") }}
                 {{ lead_note_entry_action(note, "delete") }}
@@ -49,7 +49,7 @@
       <form method="post" data-customer-note-edit-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <h3 id="lead-note-edit-heading">Notiz bearbeiten</h3>
-        <label>Titel<input name="title" maxlength="{{ note_field_catalog(false).title.maximum }}" {% if note_field_catalog(false).title.required %}required{% endif %} data-customer-note-edit-title></label>
+        <label>Titel (optional)<input name="title" maxlength="{{ note_field_catalog(false).title.maximum }}" {% if note_field_catalog(false).title.required %}required{% endif %} data-customer-note-edit-title></label>
         <label>Notiz<textarea name="content" rows="7" maxlength="{{ note_field_catalog(false).content.maximum }}" {% if note_field_catalog(false).content.required %}required{% endif %} data-customer-note-edit-content></textarea></label>
         <div class="dialog-actions">
           <button class="button button-secondary" type="button" data-customer-note-edit-cancel>Abbrechen</button>
