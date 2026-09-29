@@ -309,7 +309,7 @@ def test_customer_communications_searches_known_recipients_across_customers():
         ] == [(customer.id, "Example Customer", "Anna Example", "anna@example.de")]
 
 
-def test_customer_communications_searches_hidden_test_customers_by_customer_type():
+def test_customer_communications_search_does_not_filter_by_import_visibility_or_customer_type():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
 
@@ -346,6 +346,7 @@ def test_customer_communications_searches_hidden_test_customers_by_customer_type
         assert {(match.customer_name, match.recipient.name, match.recipient.email) for match in matches} == {
             ("Test Customer", "Test Customer", "test@example.de"),
             ("Test Customer", "Test Contact", "test.contact@example.de"),
+            ("Hidden Customer", "Hidden Customer", "hidden@example.de"),
         }
 
 

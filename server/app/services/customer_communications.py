@@ -90,8 +90,6 @@ _CUSTOMER_FIELD_LABEL_ALIASES = {
     "Webseite": "Website",
     "Website": "Webseite",
 }
-_EMAIL_RECIPIENT_CUSTOMER_TYPE_FIELD = "Kunde Typ"
-_EMAIL_RECIPIENT_ADDITIONAL_CUSTOMER_TYPE = "analyst"
 _CONTACT_FIELD_LEGACY_ALIASES = {
     "Name": ("Full Name", "Full_Name"),
     "Vorname": ("First Name", "First_Name"),
@@ -559,7 +557,7 @@ class CustomerCommunicationService:
 
     def search_recipients(self, *, query: str, limit: int = 12, allowed_customer_ids: set[int] | None = None,
                           allowed_contact_ids: set[int] | None = None) -> tuple[CustomerCommunicationRecipientSearchMatch, ...]:
-        """Find known recipient addresses without sending a new request to Zoho."""
+        """Search permitted records regardless of historical import visibility or customer type."""
         normalized_query = " ".join(query.casefold().split())
         if len(normalized_query) < 2:
             return ()
@@ -570,8 +568,6 @@ class CustomerCommunicationService:
             .where(Customer.id.in_(allowed_customer_ids) if allowed_customer_ids is not None else True)
             .order_by(Customer.name.asc(), Customer.id.asc())
         ).all():
-            if not self._is_available_for_recipient_search(customer):
-                continue
             for recipient in self._recipients_for_customer(customer, allowed_contact_ids=allowed_contact_ids):
                 searchable = " ".join((recipient.name, recipient.email, customer.name)).casefold()
                 if not all(token in searchable for token in tokens):
@@ -595,16 +591,6 @@ class CustomerCommunicationService:
             )
 
         return tuple(sorted(matches, key=sort_key)[:max(1, min(limit, 30))])
-
-    def _is_available_for_recipient_search(self, customer: Customer) -> bool:
-        """Keep standard visibility, with explicit access for email-only customer types."""
-        if customer.is_visible:
-            return True
-        profile = self._payload(customer.encrypted_profile_json)
-        fields = profile.get("fields") if isinstance(profile.get("fields"), dict) else {}
-        customer_type = self._text(fields.get(_EMAIL_RECIPIENT_CUSTOMER_TYPE_FIELD))
-        normalized_type = " ".join((customer_type or "").casefold().split())
-        return normalized_type == _EMAIL_RECIPIENT_ADDITIONAL_CUSTOMER_TYPE
 
     def list_email_templates(self) -> tuple[CustomerCommunicationEmailTemplate, ...]:
         """List the local, encrypted Zoho templates without querying Zoho."""

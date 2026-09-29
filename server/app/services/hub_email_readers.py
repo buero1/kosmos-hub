@@ -60,7 +60,7 @@ def recipients(service, *, query="", customer_id=None):
     communications = mailbox_for(service).communications
     if customer_id is not None:
         customer = service.db.get(Customer, customer_id)
-        if customer is None or not customer.is_visible or (allowed is not None and customer_id not in allowed):
+        if customer is None or (allowed is not None and customer_id not in allowed):
             raise HubOperationError("Der Kunde ist nicht verfuegbar.")
         return [{"customer_id": customer.id, "customer_name": customer.name, "key": row.key, "name": row.name, "email": row.email}
             for row in communications.list_contact_recipients(customer_id=customer.id, allowed_contact_ids=contacts)]
