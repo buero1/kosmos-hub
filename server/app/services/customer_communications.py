@@ -644,6 +644,7 @@ class CustomerCommunicationService:
             if text:
                 context[self._normalized_template_key(key)] = text
         context.update(self._template_user_context())
+        self._add_sepa_template_values(context, customer=customer, payload=payload)
         subject, subject_placeholders = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "",
             context=context,
@@ -724,6 +725,7 @@ class CustomerCommunicationService:
         for key, value in invoice_values.items():
             context[self._normalized_template_key(key)] = value
         context.update(self._template_user_context())
+        self._add_sepa_template_values(context, customer=customer, payload=payload)
         subject, subject_unresolved = self._resolve_template_placeholders(
             self._text(payload.get("subject")) or "", context=context, html=False,
         )
@@ -2011,6 +2013,20 @@ class CustomerCommunicationService:
                         *(f"Contacts.{alias}" for alias in aliases),
                     )
         return context
+
+    def _add_sepa_template_values(self, context, *, customer, payload):
+        keys = {
+            self._normalized_template_key(match[1] or match[2])
+            for match in re.finditer(r"\$\{([^}]+)\}|\{\{(.+?)\}\}",
+                                     str(payload.get("subject", "")) + str(payload.get("content", "")))
+        }
+        if not keys.intersection({"customersepamandateurl", "customersepatoken"}):
+            return
+        from app.services.hub_sepa import HubSepaService
+        url, token = HubSepaService(db=self.db, cipher=self.cipher).issue_link(
+            customer=customer, actor=self.actor, context=context,
+        )
+        context.update(customersepamandateurl=url, customersepatoken=token)
 
     def _contact_for_recipient(
         self,

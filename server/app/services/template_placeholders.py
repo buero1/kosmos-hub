@@ -233,7 +233,17 @@ _CONTACT_FIELD_TOKENS = {
     "mailing_city": "MailingCity",
 }
 
-EMAIL_CUSTOMER_PLACEHOLDERS = _prefer_placeholder_definitions(
+SEPA_PLACEHOLDERS = (
+    TemplatePlaceholder("${Customer.SepaMandateUrl}", "SEPA-Formularlink (14 Tage)",
+                        "https://kunden.kosmos-medien.de/sepa-mandat/?ks_hub_sepa_token=BEISPIEL",
+                        "Kunde", hint="Persoenlicher Einmal-Link; Kunden-Bearbeitungsrecht erforderlich",
+                        contexts=_CUSTOMER_EMAIL_CONTEXTS),
+    TemplatePlaceholder("${Customer.SepaToken}", "SEPA-Formularschluessel (14 Tage)", "BEISPIEL",
+                        "Kunde", hint="Nur fuer eigene Formularlinks; vorzugsweise SEPA-Formularlink verwenden",
+                        contexts=_CUSTOMER_EMAIL_CONTEXTS),
+)
+
+EMAIL_CUSTOMER_PLACEHOLDERS = SEPA_PLACEHOLDERS + _prefer_placeholder_definitions(
     tuple(replace(item, contexts=_CUSTOMER_EMAIL_CONTEXTS) for item in CUSTOMER_PLACEHOLDERS),
     _catalog_placeholders(
         "Customer",

@@ -14,6 +14,8 @@ from starlette.background import BackgroundTask, BackgroundTasks
 
 from app.api.routes import accounts, agent, assistant, desktop_notifications, health, integrations, registrations, site_abilities, site_backups, site_inventory, site_updates, sites, web
 from app.core.config import get_settings
+from app.api.routes import sepa
+from app.models.hub_sepa_submission import HubSepaSubmission
 from app.core.form_responses import FormResponseMiddleware
 from app.core.mcp_context import reset_mcp_actor, set_mcp_actor
 from app.core.security import get_secret_cipher
@@ -163,6 +165,8 @@ def _ensure_phase_one_schema() -> None:
 
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+
+    HubSepaSubmission.__table__.create(bind=engine, checkfirst=True)
 
     if "hub_wordpress_jobs" not in table_names:
         HubWordPressJob.__table__.create(bind=engine, checkfirst=True)
@@ -1374,6 +1378,7 @@ def create_app() -> FastAPI:
     app.include_router(accounts.router)
     app.include_router(desktop_notifications.router)
     app.include_router(integrations.router)
+    app.include_router(sepa.router)
     app.include_router(accounts.bootstrap_router)
     app.include_router(assistant.router)
     app.include_router(agent.router)
@@ -1420,7 +1425,7 @@ def _request_access_denial(request: Request, user):
 
 
 def _is_public_hub_path(path: str) -> bool:
-    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token"} or path.startswith("/api/v1/plugin-packages/")
+    return path in {"/healthz", "/api/v1/registrations", "/account/login", "/account/setup", "/internal/bootstrap-token", sepa.WEBHOOK_PATH} or path.startswith("/api/v1/plugin-packages/")
 
 
 def _is_mcp_path(path: str) -> bool:

@@ -11,16 +11,22 @@
     "app/api/routes/health.py": "40d6b4accef603e1f8aaaab48931008cce0df2fbf68507c3e3de81e659ac0c21",
     "app/api/routes/integrations.py": "e06feb327f82991c4c849cb98631219481bc2cae463d81e6ff77ae69cd9783cb",
     "app/api/routes/registrations.py": "e2d39b7bb3707df93e162d8df686fd79c98a8b08b7c3e7d68a620afdc480ab51",
+    "app/api/routes/sepa.py": "1823501cf4b2c2ec065b5116537d0d91e5d03ef3409281ec0d8ab10018cf0625",
     "app/api/routes/site_abilities.py": "15eb6e81e824473579b0fb495d89fda877a0d40beb5fb43c96d650c3a80907fc",
     "app/api/routes/site_backups.py": "79bae37d4ed4c14c713cf750d09963d7f613d0d6883663c25267b02252e7b922",
     "app/api/routes/site_inventory.py": "e17ba749ad7654eada8133a3f1426f470614a3e9d58233ed0fa4ebbe83fedd47",
     "app/api/routes/site_updates.py": "f91cc76b4d88acb3c18646bfed201de7bd3235e1a148402494ff339d2213c6f3",
     "app/api/routes/sites.py": "3625fd99454a3357f7b2c41c6f00f4c387e72aa6a509a43e4045f8c489b11276",
     "app/api/routes/web.py": "92fa138453cdfe53b79e41902b2c981e27b4b80b1fdf937e519533f60e387853",
-    "app/main.py": "9c9135b6cbaff06c974daaa8383eb4fba4b07efd4d88daafa1f33b9e64e10ca2",
-    "app/main.py:route-wiring": "96ebac08e0923d6470e9c39da23a0553783ca0ffffa9b9c82e5ce7c1e75107c0"
+    "app/main.py": "a1dcd0191d643151a961e7a8b5cbba3fb1e338c3dcf4cdcf4e894f7f44f957e9",
+    "app/main.py:route-wiring": "1b68f07b0a806d14fba2f800726d545df62355718d7e13cf997d7873519a81f4"
   },
   "routes": {
+    "app/api/routes/sepa.py:submit_sepa:POST:/api/v1/integrations/sepa/submissions": {
+      "fingerprint": "fd6c0e73e9f1b942628d29108c72302b3e67d3ad29281303054a6c6cb0748de0",
+      "state": "infrastructure",
+      "reason": "Reviewed Elementor SEPA webhook protocol, not an unscoped user/agent write command. Exact public POST endpoint authenticates a purpose-bound encrypted single-use customer token (14 days) and rechecks issuer record edit permission. Bounded input, encrypted profile allowlist, atomic receipt/audit/commit, idempotent retries, Berlin receipt date, no Zoho or outbound side effects. Covered by test_hub_sepa.py. Template issue uses existing authorized rendering; no session exemption for adjacent routes."
+    },
     "app/api/routes/accounts.py:save_mailbox_access:POST:/access/mailboxes/{subject_type}/{subject_id}": {
       "state": "shared",
       "contracts": [

@@ -16,6 +16,7 @@ from app.models.hub_access_token import HubAccessToken
 from app.models.hub_integration_token import HubIntegrationToken
 from app.models.hub_desktop_device import HubDesktopDevice
 from app.models.hub_setup_token import HubSetupToken
+from app.models.hub_sepa_submission import HubSepaSubmission
 from app.models.hub_user import HubUser
 from app.models.hub_wordpress_job import HubWordPressJob
 from app.models.hub_access_control import HubAccessRole, HubRecordAccessGrant, HubRecordAssignment, HubRolePermission, HubTeam
