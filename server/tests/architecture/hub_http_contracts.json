@@ -22,6 +22,11 @@
     "app/main.py:route-wiring": "1b68f07b0a806d14fba2f800726d545df62355718d7e13cf997d7873519a81f4"
   },
   "routes": {
+    "app/api/routes/web.py:reveal_customer_iban_value:POST:/customers/{customer_id}/iban/reveal": {
+      "fingerprint": "90bb1bac8136636683523778f1437714a3cb1b8964d462c007eddd5f1d77f685",
+      "state": "human_only",
+      "reason": "Explicit user-requested human-only IBAN disclosure, never exposed to the agent catalog. CSRF/session required; domain reloads active user, immutable Superadmin role key admin and current session version before decrypting. Record access checked, only canonical IBAN returned, no-store response, no plaintext persistence, successful audit commit required before disclosure. All other roles denied even with module grants. Read/edit HTML stays masked; UI clears after 30 seconds, hiding, navigation or cancellation and never fills edit inputs. Covered by test_customer_iban_reveal.py and desktop/mobile browser tests."
+    },
     "app/api/routes/sepa.py:submit_sepa:POST:/api/v1/integrations/sepa/submissions": {
       "fingerprint": "31de98f4b21176cbb5286632767dae90e2b7144463dede3566886132a833fa71",
       "state": "infrastructure",

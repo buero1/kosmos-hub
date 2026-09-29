@@ -17,11 +17,13 @@ TEMPLATE = Path(__file__).resolve().parents[1] / "app/templates/customer_detail.
 
 def render_grids(detail):
     source = TEMPLATE.read_text(encoding="utf-8")
-    names = ("customer_profile_field_value", "customer_field_control", "customer_readonly_field_control", "customer_profile_edit_grid")
+    names = ("customer_iban_reveal", "customer_profile_field_value", "customer_field_control", "customer_readonly_field_control", "customer_profile_edit_grid")
     macros = "\n".join(re.search(r"{% macro " + name + r"\(.*?{% endmacro %}", source, re.S).group() for name in names)
     env = Environment(autoescape=True, undefined=StrictUndefined)
     return env.from_string(macros + "{{ customer_profile_edit_grid(detail.summary_profile_fields) }}"
-                           "{{ customer_profile_edit_grid(detail.following_profile_fields, following=true) }}").render(detail=detail)
+                           "{{ customer_profile_edit_grid(detail.following_profile_fields, following=true) }}").render(
+                               detail=detail, csrf_token="test-csrf",
+                               request=SimpleNamespace(state=SimpleNamespace(hub_user=SimpleNamespace(role="admin", is_active=True))))
 
 
 class Controls(HTMLParser):

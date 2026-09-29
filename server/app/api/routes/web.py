@@ -4588,6 +4588,35 @@ def customer_detail_page(
     )
 
 
+@router.post("/customers/{customer_id}/iban/reveal")
+def reveal_customer_iban_value(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    from sqlalchemy.exc import SQLAlchemyError
+    from app.services.hub_customer_iban import IbanRevealError, reveal_customer_iban
+
+    headers = {"Cache-Control": "no-store, private", "Pragma": "no-cache"}
+    try:
+        require_csrf(request, csrf_token)
+        user = getattr(request.state, "hub_user", None)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Anmeldung erforderlich.")
+        value = reveal_customer_iban(db=db, cipher=get_secret_cipher(), user_id=user.id,
+                                     session_version=request.session.get("session_version"), customer_id=customer_id)
+        db.commit()  # Do not disclose the value unless the audit entry is persisted.
+    except (HTTPException, IbanRevealError) as exc:
+        db.rollback()
+        return JSONResponse({"detail": exc.detail if isinstance(exc, HTTPException) else str(exc)},
+                            status_code=exc.status_code, headers=headers)
+    except SQLAlchemyError:
+        db.rollback()
+        return JSONResponse({"detail": "Die IBAN kann momentan nicht angezeigt werden."}, status_code=503, headers=headers)
+    return JSONResponse({"iban": value}, headers=headers)
+
+
 @router.post("/customers/{customer_id}/fields")
 async def update_customer_fields(
     customer_id: int,

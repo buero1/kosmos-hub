@@ -5,6 +5,19 @@
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/site_domain.html" import wordpress_admin_quick_action with context %}
 {% block title %}{{ detail.entry.customer.name }} · Customers · kosmos-hub{% endblock %}
+{% macro customer_iban_reveal() %}
+  {% if request.state.hub_user and request.state.hub_user.is_active and request.state.hub_user.role == 'admin' %}
+    <span class="customer-iban-reveal" data-iban-reveal data-iban-url="/customers/{{ detail.entry.customer.id }}/iban/reveal" data-iban-csrf="{{ csrf_token }}" role="group" aria-label="Geschützte IBAN">
+      <button type="button" class="button button-secondary" data-iban-show aria-label="IBAN anzeigen" aria-expanded="false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span data-iban-show-label>Anzeigen</span>
+      </button>
+      <span data-iban-value hidden></span>
+      <button type="button" class="button button-secondary" data-iban-copy hidden>IBAN kopieren</button>
+      <small data-iban-status role="status" aria-live="polite"></small>
+    </span>
+  {% endif %}
+{% endmacro %}
 {% macro customer_profile_field_value(field) %}
   {% set href = field.url_href %}
   {% if field.key == "work_domain_login" and field.value %}
@@ -14,6 +27,7 @@
     <a class="customer-field-url" href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>
   {% else %}
     {{ field.value or "–" }}
+    {% if field.key == 'iban' and field.sensitive %}{{ customer_iban_reveal() }}{% endif %}
   {% endif %}
 {% endmacro %}
 {% macro communication_email_address(address, prefix="") %}
@@ -179,6 +193,7 @@
       <textarea name="{{ name }}" rows="3">{{ field.form_value }}</textarea>
     {% else %}
       <input name="{{ name }}" value="{{ field.form_value }}"{% if field.sensitive %} type="password" autocomplete="new-password" placeholder="Unverändert lassen"{% elif field.display_type == "Telefon" %} type="tel"{% elif field.display_type == "URL" %} type="url"{% else %} type="text"{% endif %}>
+      {% if field.key == 'iban' and field.sensitive %}{{ customer_iban_reveal() }}{% endif %}
     {% endif %}
   </label>
 {% endmacro %}
@@ -218,6 +233,8 @@
   </div>
 {% endmacro %}
 {% block content %}
+  <link rel="stylesheet" href="/static/customer-iban.css?v=1">
+  <script src="/static/customer-iban.js?v=1" defer></script>
   <section>
     {% call module_detail_header(
       "/customers",
