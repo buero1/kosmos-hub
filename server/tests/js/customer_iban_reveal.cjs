@@ -15,11 +15,11 @@ names=('customer_iban_reveal','customer_profile_field_value','customer_field_con
 macros='\\n'.join(re.search(r'{% macro '+n+r'\\(.*?{% endmacro %}', source, re.S)[0] for n in names)
 field=S(key='iban',label='IBAN',value='Geschuetzt',sensitive=True,url_href=None,form_value='',options=(),display_type='Einzelzeile')
 body=Environment(autoescape=True).from_string(macros+'''<h1>Bankverbindung</h1><form><section>{{ customer_profile_field_value(field) }}</section><section>{{ customer_field_control(field, 'customer_field__iban') }}</section><input name="other" value="unchanged"></form>''').render(field=field,detail=S(entry=S(customer=S(id=411))),csrf_token='test-csrf',request=S(state=S(hub_user=S(role='admin',is_active=True))))
-print('<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/customer-iban.css"><style>body{max-width:600px;margin:24px;font:16px sans-serif}section{padding:16px;border:1px solid #ddd;margin:16px 0}button{cursor:pointer}label{display:grid;gap:8px}input{max-width:100%;box-sizing:border-box}</style>'+body+'<script src="/customer-iban.js"></script>')
+print('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/customer-iban.css"><style>body{max-width:600px;margin:24px;font:16px sans-serif}section{padding:16px;border:1px solid #ddd;margin:16px 0}button{cursor:pointer}label{display:grid;gap:8px}input{max-width:100%;box-sizing:border-box}</style>'+body+'<script src="/customer-iban.js"></script>')
 `;
 
 (async () => {
-  const html = execFileSync('.venv/Scripts/python.exe', ['-c', render], {encoding: 'utf8'});
+  const html = execFileSync('.venv/Scripts/python.exe', ['-c', render], {encoding: 'utf8', env: {...process.env, PYTHONIOENCODING: 'utf-8'}});
   const server = http.createServer((request, response) => {
     assert.equal(request.method, 'GET', 'Every POST must be intercepted in the test');
     const name = request.url === '/customer-iban.js' ? 'customer-iban.js' : request.url === '/customer-iban.css' ? 'customer-iban.css' : null;
