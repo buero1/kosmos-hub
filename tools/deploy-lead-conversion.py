@@ -46,6 +46,8 @@ if '--recipient-access' in sys.argv:
     release_prefix = 'recipient-access'
 if '--sepa-webhook' in sys.argv:
     release_prefix = 'sepa-webhook'
+if '--email-send-navigation' in sys.argv:
+    release_prefix = 'email-send-navigation'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -98,6 +100,8 @@ if '--invoice-compose' in sys.argv:
         'app/templates/emails.html',
     }
 changes = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+if '--email-send-navigation' in sys.argv:
+    expected = {'app/static/email-delivery.js', 'app/templates/base.html', 'app/templates/emails.html'}
 if '--sepa-webhook' in sys.argv:
     expected = {
         'app/api/routes/sepa.py', 'app/db/base.py', 'app/main.py',
@@ -182,7 +186,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))

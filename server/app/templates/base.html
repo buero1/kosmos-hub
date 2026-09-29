@@ -5354,7 +5354,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <link rel="stylesheet" href="/static/jodit-editor.css?v=1">
     <script src="/static/jodit-editor.js?v=12"></script>
-    <script src="/static/email-delivery.js?v=1"></script>
+    <script src="/static/email-delivery.js?v=2"></script>
     <script src="/static/form-submit.js?v=2"></script>
     <script src="/static/deletion-preview.js?v=1"></script>
     <script src="/static/email-draft-attachments.js?v=2"></script>
@@ -6894,7 +6894,7 @@
               if (!saved) throw new Error("Der Entwurf konnte nicht gespeichert werden. Es wurde keine E-Mail versendet.");
               return window.KosmosEmailDelivery.submit(globalMailboxForm);
             }).then(function (url) {
-              window.location.assign(url);
+              window.KosmosEmailDelivery.navigate(url);
             }).catch(function (error) {
               globalMailboxSubmitting = false;
               globalMailboxSaveDraft.disabled = false;

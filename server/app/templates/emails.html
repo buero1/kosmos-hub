@@ -1158,7 +1158,7 @@
           mailboxComposerForm.action = scopedMailboxUrl(mailboxComposerForm.action).toString();
           return window.KosmosEmailDelivery.submit(mailboxComposerForm);
         }).then(function (url) {
-          window.location.assign(url);
+          window.KosmosEmailDelivery.navigate(url);
         }).catch(function (error) {
           mailboxComposerSubmitting = false;
           if (mailboxComposerSaveDraft) mailboxComposerSaveDraft.disabled = false;
