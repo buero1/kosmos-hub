@@ -161,7 +161,11 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
         values = {name.casefold(): (value or "").strip() for name, value in attrs}
         if tag == "a":
             href = values.get("href", "")
-            scheme = urlsplit(href).scheme.casefold()
+            try:
+                scheme = urlsplit(href).scheme.casefold()
+            except ValueError:
+                # Keep the link text, but never reactivate malformed/defanged URLs.
+                return ""
             is_template_href = self._allow_template_href_placeholders and bool(
                 _TEMPLATE_HREF_PLACEHOLDER_PATTERN.fullmatch(href)
             )
@@ -177,7 +181,10 @@ class _EmailComposerHtmlSanitizer(HTMLParser):
             return ""
         if tag == "img":
             source = values.get("src", "")
-            scheme = urlsplit(source).scheme.casefold()
+            try:
+                scheme = urlsplit(source).scheme.casefold()
+            except ValueError:
+                return ""
             if scheme not in {"http", "https", "data"} and not _LOCAL_COMPOSE_IMAGE_PATH_PATTERN.fullmatch(source):
                 return ""
             attributes = [f' src="{escape(source, quote=True)}"']

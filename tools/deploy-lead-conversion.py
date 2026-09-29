@@ -38,6 +38,8 @@ if '--email-preview' in sys.argv:
     release_prefix = 'email-preview'
 if '--local-crm' in sys.argv:
     release_prefix = 'local-crm'
+if '--email-reply-urls' in sys.argv:
+    release_prefix = 'email-reply-urls'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -90,6 +92,8 @@ if '--invoice-compose' in sys.argv:
         'app/templates/emails.html',
     }
 changes = {name for name in old.keys() | new.keys() if old.get(name) != new.get(name)}
+if '--email-reply-urls' in sys.argv:
+    expected = {'app/services/customer_communications.py'}
 if '--finance-relations' in sys.argv:
     expected = {
         'app/api/routes/web.py', 'app/services/hub_finance_operations_shared.py',
@@ -158,7 +162,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
