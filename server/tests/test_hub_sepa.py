@@ -103,9 +103,12 @@ def test_local_only_update_berlin_date_encryption_attribution_and_preservation(e
     assert result == {"success": True, "duplicate": False, "sepa_grant_date": "2026-09-30"}
     assert saved["fields"] == {**env.profile["fields"], "IBAN": IBAN, "BIC": "COBADEFFXXX",
                                "Kontoinhaber": "Erika Muster", "Bank": "Beispielbank",
-                               "Datum SEPA-Erteilung": "2026-09-30"}
+                               "Datum SEPA-Erteilung": "2026-09-30", "Art SEPA-Erteilung": "per Online-Formular"}
     assert saved["custom"] == "keep" and saved["subforms"] == env.profile["subforms"]
     assert saved["field_metadata"]["sepa_grant_date"]["display_type"] == "Datum"
+    assert saved["field_metadata"]["sepa_grant_type"] == {
+        "label": "Art SEPA-Erteilung", "display_type": "Auswahlliste", "editable": True, "sensitive": False,
+    }
     assert IBAN not in env.customer.encrypted_profile_json
     assert json.loads(env.cipher.decrypt(env.other.encrypted_profile_json)) == env.profile
     receipt = env.db.scalar(select(HubSepaSubmission))
@@ -115,6 +118,24 @@ def test_local_only_update_berlin_date_encryption_attribution_and_preservation(e
     info = env.db.scalar(select(HubRecordInfo).where(HubRecordInfo.record_table == "customers",
                                                   HubRecordInfo.record_id == env.customer.id))
     assert info.changed_name == "SEPA-Formular"
+
+
+@pytest.mark.parametrize("previous", [None, "", "schriftlich"])
+def test_grant_type_is_server_defined_and_preserves_existing_field_metadata(env, previous):
+    profile = payload(env)
+    if previous is not None:
+        profile["fields"]["Art SEPA-Erteilung"] = previous
+    metadata = {"label": "Art SEPA-Erteilung", "display_type": "Auswahlliste", "editable": True,
+                "pick_list_values": [{"value": value, "label": value} for value in ("schriftlich", "per Online-Formular")]}
+    profile["field_metadata"]["sepa_grant_type"] = metadata
+    env.customer.encrypted_profile_json = env.cipher.encrypt(json.dumps(profile))
+    env.db.commit()
+    token = issue(env)[1]
+    env.service.receive(fields(token, sepa_grant_type="forged"), now=NOW + timedelta(seconds=1))
+    env.db.commit()
+    saved = payload(env)
+    assert saved["fields"]["Art SEPA-Erteilung"] == "per Online-Formular"
+    assert saved["field_metadata"]["sepa_grant_type"] == metadata
 
 
 @pytest.mark.parametrize("offset,allowed", [(timedelta(days=14, microseconds=-1), True),
@@ -144,6 +165,7 @@ def test_retries_are_idempotent_and_do_not_overwrite_later_manual_edits(env):
     env.db.commit()
     edited = payload(env)
     edited["fields"]["Kontoinhaber"] = "Manual edit"
+    edited["fields"]["Art SEPA-Erteilung"] = "schriftlich"
     env.customer.encrypted_profile_json = env.cipher.encrypt(json.dumps(edited))
     env.db.commit()
     assert env.service.receive(fields(token), now=NOW + timedelta(days=1))["duplicate"] is True
@@ -249,6 +271,7 @@ def test_real_http_webhook_without_session_maps_current_elementor_ids(env, encod
     assert response.status_code == 200, response.text
     assert response.json()["success"] and response.headers["cache-control"] == "no-store"
     assert payload(env)["fields"]["IBAN"] == IBAN
+    assert payload(env)["fields"]["Art SEPA-Erteilung"] == "per Online-Formular"
     env.db.refresh(env.other)
     assert json.loads(env.cipher.decrypt(env.other.encrypted_profile_json)) == env.profile
     assert client.post(sepa.WEBHOOK_PATH, **kwargs).json()["duplicate"] is True
@@ -330,6 +353,7 @@ def test_elementor_exact_form_labels_update_only_authorized_customer(env, encodi
         TOKEN_FIELD: token, "IBAN": IBAN, "BIC": "COBADEFFXXX", "Kontoinhaber:in": "Erika Muster",
         "Bank": "Beispielbank", "ks_account_id": str(env.other.id), "ks_mandatsreferenz": "WRONG",
         "Kunde-ID": str(env.other.id), "Datum SEPA-Erteilung": "1999-01-01", "Firma": "Ignore changed company",
+        "Art SEPA-Erteilung": "forged", "sepa_grant_type": "forged", "Art_SEPA_Erteilung": "forged",
     }
     if encoding.endswith("form"):
         values = {f"fields[{key}][value]": value for key, value in data.items()} if encoding.startswith("advanced") else data
@@ -345,6 +369,7 @@ def test_elementor_exact_form_labels_update_only_authorized_customer(env, encodi
     assert profile["Bank"] == "Beispielbank"
     assert profile["Kunde-Name"] == env.profile["fields"]["Kunde-Name"]
     assert profile["Datum SEPA-Erteilung"] != "1999-01-01"
+    assert profile["Art SEPA-Erteilung"] == "per Online-Formular"
     env.db.refresh(env.other)
     assert json.loads(env.cipher.decrypt(env.other.encrypted_profile_json)) == env.profile
     assert client.post(sepa.WEBHOOK_PATH, **kwargs).json()["duplicate"] is True

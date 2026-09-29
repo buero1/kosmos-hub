@@ -175,6 +175,7 @@ class HubSepaService:
         except (InvalidToken, ValueError, TypeError, AttributeError):
             raise SepaError("Die Kundendaten konnten nicht aktualisiert werden. Bitte das Kosmos-Team kontaktieren.", 409) from None
         values["sepa_grant_date"] = now.astimezone(BERLIN_TIMEZONE).date().isoformat()
+        values["sepa_grant_type"] = "per Online-Formular"
         catalog = {field.key: field for field in ZOHO_ACCOUNT_FIELDS}
         metadata = profile.setdefault("field_metadata", {})
         if not isinstance(metadata, dict):
@@ -191,7 +192,7 @@ class HubSepaService:
                                         expires_at=expires, received_at=now, payload_digest=payload_digest))
             write_audit_log(self.db, site=None, actor="SEPA-Formular", source="sepa-webhook",
                             action="customer-sepa-received", result="ok",
-                            detail=f"Kunde {customer.id}: Bankdaten und Datum SEPA-Erteilung aus dem Formular gespeichert.")
+                            detail=f"Kunde {customer.id}: Bankdaten, Datum und Art SEPA-Erteilung aus dem Formular gespeichert.")
             self.db.flush()
         return self._success(now, duplicate=False)
 
