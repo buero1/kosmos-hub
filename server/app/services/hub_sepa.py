@@ -32,6 +32,13 @@ FIELD_IDS = {
     "ks_kontoinhaber": "account_holder",
     "ks_bank": "bank",
 }
+FIELD_LABELS = {
+    "IBAN": "iban",
+    "BIC": "bic",
+    "Kontoinhaber:in": "account_holder",
+    "Kontoinhaber": "account_holder",
+    "Bank": "bank",
+}
 
 
 class SepaError(ValueError):
@@ -46,12 +53,12 @@ def utc(value):
 
 
 def extract_fields(pairs):
-    """Read Elementor Advanced Data's stable field IDs, never display labels."""
+    """Accept stable IDs and exact approved Elementor labels, rejecting aliases twice."""
     result = {}
     for name, value in pairs:
         match = re.fullmatch(r"fields\[([^\[\]]+)\]\[value\]", name)
         field_id = match[1] if match else name
-        key = FIELD_IDS.get(field_id)
+        key = FIELD_IDS.get(field_id) or FIELD_LABELS.get(field_id)
         if key is None:
             continue
         if key in result or not isinstance(value, str) or len(value) > 2048:

@@ -312,7 +312,7 @@ def test_missing_field_mapping_is_distinguishable_without_logging_unknown_names(
     token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
     client = TestClient(main.create_app())
     response = client.post(sepa.WEBHOOK_PATH, json={
-        TOKEN_FIELD: token, "IBAN": IBAN, "Kontoinhaber": "Private Holder", "private-field-name": "private-value",
+        TOKEN_FIELD: token, "Unknown IBAN Field": IBAN, "Unknown Holder Field": "Private Holder", "private-field-name": "private-value",
     })
     assert response.status_code == 422
     logs = [record.getMessage() for record in caplog.records if record.name == sepa.__name__]
@@ -320,6 +320,61 @@ def test_missing_field_mapping_is_distinguishable_without_logging_unknown_names(
     for private in (token, IBAN, "Private Holder", "private-field-name", "private-value"):
         assert private not in caplog.text
     assert payload(env) == env.profile
+
+
+@pytest.mark.parametrize("encoding", ["flat-form", "flat-json", "advanced-form", "advanced-json"])
+def test_elementor_exact_form_labels_update_only_authorized_customer(env, encoding):
+    token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
+    client = TestClient(main.create_app())
+    data = {
+        TOKEN_FIELD: token, "IBAN": IBAN, "BIC": "COBADEFFXXX", "Kontoinhaber:in": "Erika Muster",
+        "Bank": "Beispielbank", "ks_account_id": str(env.other.id), "ks_mandatsreferenz": "WRONG",
+        "Kunde-ID": str(env.other.id), "Datum SEPA-Erteilung": "1999-01-01", "Firma": "Ignore changed company",
+    }
+    if encoding.endswith("form"):
+        values = {f"fields[{key}][value]": value for key, value in data.items()} if encoding.startswith("advanced") else data
+        kwargs = {"content": urlencode(values), "headers": {"Content-Type": "application/x-www-form-urlencoded"}}
+    else:
+        kwargs = {"json": {"fields": {key: {"value": value} for key, value in data.items()}} if encoding.startswith("advanced") else data}
+    response = client.post(sepa.WEBHOOK_PATH, **kwargs)
+    assert response.status_code == 200, response.text
+    profile = payload(env)["fields"]
+    assert profile["IBAN"] == IBAN
+    assert profile["BIC"] == "COBADEFFXXX"
+    assert profile["Kontoinhaber"] == "Erika Muster"
+    assert profile["Bank"] == "Beispielbank"
+    assert profile["Kunde-Name"] == env.profile["fields"]["Kunde-Name"]
+    assert profile["Datum SEPA-Erteilung"] != "1999-01-01"
+    env.db.refresh(env.other)
+    assert json.loads(env.cipher.decrypt(env.other.encrypted_profile_json)) == env.profile
+    assert client.post(sepa.WEBHOOK_PATH, **kwargs).json()["duplicate"] is True
+
+
+@pytest.mark.parametrize("names", [
+    ("ks_iban", "IBAN"), ("ks_bic", "BIC"), ("field_a13f37a", "Kontoinhaber:in"),
+    ("ks_kontoinhaber", "Kontoinhaber"), ("Kontoinhaber:in", "Kontoinhaber"), ("ks_bank", "Bank"),
+])
+def test_elementor_id_and_label_ambiguity_is_rejected_without_writes(env, names):
+    token = issue(env, now=datetime.now(UTC) - timedelta(seconds=2))[1]
+    client = TestClient(main.create_app())
+    pairs = [(TOKEN_FIELD, token), (names[0], "first"), (names[1], "second")]
+    response = client.post(sepa.WEBHOOK_PATH, content=urlencode(pairs),
+                           headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert response.status_code == 400
+    assert payload(env) == env.profile
+    assert env.db.scalar(select(HubSepaSubmission)) is None
+
+
+@pytest.mark.parametrize("token", [None, "invalid-token"])
+def test_elementor_labels_do_not_replace_customer_token_authentication(env, token):
+    client = TestClient(main.create_app())
+    data = {"IBAN": IBAN, "BIC": "COBADEFFXXX", "Kontoinhaber:in": "Erika Muster", "Kunde-ID": str(env.customer.id)}
+    if token is not None:
+        data[TOKEN_FIELD] = token
+    response = client.post(sepa.WEBHOOK_PATH, json=data)
+    assert response.status_code == (400 if token is None else 403)
+    assert payload(env) == env.profile
+    assert env.db.scalar(select(HubSepaSubmission)) is None
 
 
 def test_commit_failure_is_not_acknowledged_and_whole_transaction_rolls_back(env, monkeypatch):

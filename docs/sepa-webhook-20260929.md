@@ -11,8 +11,12 @@ Under Actions After Submit, replace the old Zoho webhook destination with:
 https://kosmos-hub.31-70-92-95.sslip.io/api/v1/integrations/sepa/submissions
 ```
 
-Enable **Advanced Data / Erweiterte Daten**. The receiver uses stable field IDs,
-not labels, and accepts Elementor's nested URL-encoded or JSON payload.
+**Advanced Data / Erweiterte Daten** is recommended. The receiver accepts stable
+field IDs in nested URL-encoded or JSON payloads and the exact approved labels
+`IBAN`, `BIC`, `Kontoinhaber:in`, `Kontoinhaber`, `Bank` in either format. This also
+supports Elementor's simple label-based webhook. Unknown labels are ignored;
+duplicate IDs/labels for the same bank field are rejected, not merged. The token
+must always use `ks_hub_sepa_token`; customer IDs never authorize an update.
 
 Add one form field:
 
