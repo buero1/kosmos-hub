@@ -2810,6 +2810,8 @@ async def update_hub_contact_fields(
         for key, value in form.items()
         if isinstance(value, str) and str(key).startswith("contact_field__")
     }
+    if "new_customer_id" in form:
+        submitted_values["new_customer_id"] = str(form.get("new_customer_id") or "").strip()
     try:
         contact = _execute_contact_operation(
             db, user.username, "update", contact_id=contact_id, **submitted_values,
@@ -5567,6 +5569,8 @@ async def update_customer_contact_fields(
         for key, value in form.items()
         if isinstance(value, str) and str(key).startswith("contact_field__")
     }
+    if "new_customer_id" in form:
+        submitted_values["new_customer_id"] = str(form.get("new_customer_id") or "").strip()
     try:
         contact = _execute_contact_operation(
             db, user.username, "update", customer_id=customer_id, contact_id=contact_id, **submitted_values,
@@ -5582,7 +5586,10 @@ async def update_customer_contact_fields(
     db.commit()
     message = "Kontaktdaten wurden im Hub gespeichert."
     query = urlencode({"fields": "success", "fields_message": message})
-    return RedirectResponse(url=f"/customers/{customer_id}/contacts/{contact_id}?{query}#contact-fields", status_code=303)
+    return RedirectResponse(
+        url=f"/customers/{contact.outputs['customer_id']}/contacts/{contact.record_id}?{query}#contact-fields",
+        status_code=303,
+    )
 
 
 @router.post("/customers/{customer_id}/contacts/{contact_id}/layout")

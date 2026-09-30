@@ -132,6 +132,65 @@ def test_ui_and_agent_update_use_same_service_and_preserve_omitted_fields(env, z
     assert calls == []
 
 
+def test_contact_edit_saves_customer_link_and_fields_together(env):
+    contact = create(env, zoho=True)
+    changes = {"contact_field__phone": "98765", "new_customer_id": str(env.hidden.id)}
+
+    response = asyncio.run(
+        web.update_customer_contact_fields(
+            env.customer.id,
+            contact.id,
+            request_for(env, changes),
+            env.db,
+        )
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/customers/{env.hidden.id}/contacts/{contact.id}?")
+    assert contact.customer_id == env.hidden.id
+    assert profile(env, contact)["Tel."] == "98765"
+
+    response = asyncio.run(
+        web.update_hub_contact_fields(
+            contact.id,
+            request_for(env, {"contact_field__phone": "111", "new_customer_id": ""}),
+            env.db,
+        )
+    )
+
+    assert "fields=error" in response.headers["location"]
+    assert contact.customer_id == env.hidden.id
+    assert profile(env, contact)["Tel."] == "98765"
+
+
+def test_contact_detail_uses_one_customer_field_and_read_only_hub_link(env):
+    from jinja2 import ChoiceLoader, DictLoader
+
+    contact = create(env)
+    request = request_for(env, {})
+    context = web._contact_detail_context(
+        request,
+        env.db,
+        detail=env.directory.get_contact_detail_by_id(contact_id=contact.id),
+        fields="",
+        fields_message="",
+        layout="",
+        layout_message="",
+    )
+    template_env = web.templates.env.overlay(loader=ChoiceLoader([
+        DictLoader({"base.html": "{% block content %}{% endblock %}"}),
+        web.templates.env.loader,
+    ]))
+
+    html = template_env.get_template("customer_contact_detail.html").render(**context)
+
+    assert 'name="new_customer_id"' in html
+    assert 'data-finance-customer-search' in html
+    assert 'Kunde <small>erforderlich</small>' in html
+    assert 'class="communication-form contact-link-form"' not in html
+    assert f'href="/customers/{env.customer.id}"' in html
+
+
 @pytest.mark.parametrize("action", ["link_customer", "delete"])
 def test_ui_and_agent_other_contact_operations(env, action):
     calls = mock_zoho(env)

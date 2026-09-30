@@ -848,6 +848,13 @@ def test_hub_contacts_can_be_created_without_zoho_or_customer_and_linked_later()
         assert profile["source"] == "hub"
         assert profile["fields"]["Name"] == "Anna Hub"
 
+        detail = service.get_contact_detail_by_id(contact_id=contact.id)
+        displayed_customer = next(field for field in detail.display_profile_fields if field.key == "customer_name")
+        editable_customer = next(field for field in detail.editable_profile_fields if field.key == "customer_name")
+        assert displayed_customer.value is None
+        assert editable_customer.label == "Kunde"
+        assert editable_customer.required is True
+
         entry = service.list_contact_entries()[0]
         assert entry.customer is None
         assert entry.contact.is_hub_contact is True

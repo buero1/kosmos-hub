@@ -99,6 +99,11 @@ def _execute(service: HubOperationService, values: Mapping[str, str], *, action:
             return HubOperationResult(label="Kontakte öffnen", href="/contacts", record_id=identifier,
                 outputs={"contact_id": str(identifier), "customer_id": str(customer_id or "")})
         elif action == "update":
+            if "new_customer_id" in values:
+                customer_id = _customer(service, access, user, {"customer_id": values["new_customer_id"]})
+                if customer_id is None:
+                    raise HubOperationError("Bitte einen Kunden auswählen.")
+                contact = directory.set_hub_contact_customer(contact_id=contact.id, customer_id=customer_id)
             contact = directory.update_hub_contact(contact_id=contact.id, submitted_values=submitted)
 
     detail = directory.get_contact_detail_by_id(contact_id=contact.id)
@@ -120,6 +125,8 @@ def _input_fields(action: str) -> tuple[HubOperationInputField, ...]:
             f"contact_field__{field.key}", field.label, required=field.required if action == "create" else False,
             options=field.options,
         ) for field in contact_fields(creating=action == "create"))
+    if action == "update":
+        fields += (HubOperationInputField("new_customer_id", "Neue Kundenverknüpfung"),)
     if action == "link_customer":
         fields += (HubOperationInputField("new_customer_id", "Neue Kundenverknüpfung"),)
     return fields
@@ -146,7 +153,10 @@ for _action, (_label, _description) in _DESCRIPTIONS.items():
         "Bestehenden Kontakt über contact_id oder eindeutigen target_name wählen. Optional customer_id oder eindeutiger customer_name grenzt die Auswahl ein."
     )
     if _action == "update":
-        _guide += " Weggelassene Felder bleiben unverändert, ein expliziter Leerwert leert ein optionales Feld."
+        _guide += (
+            " Weggelassene Felder bleiben unverändert, ein expliziter Leerwert leert ein optionales Feld."
+            " new_customer_id ändert die Kundenverknüpfung und darf dabei nicht leer sein."
+        )
     elif _action == "link_customer":
         _guide += " new_customer_id muss übergeben werden: eine Kunden-ID setzt den Bezug, ein Leerwert entfernt ihn."
     register_operation(HubOperation(

@@ -974,7 +974,7 @@ class CustomerDirectoryService:
             values_by_key["last_name"] = name_parts[-1]
         if not values_by_key.get("first_name") and len(name_parts) == 2:
             values_by_key["first_name"] = name_parts[0]
-        return tuple(
+        contact_fields = tuple(
             CustomerProfileField(
                 label=definition.label,
                 value=values_by_key.get(definition.key) or None,
@@ -987,6 +987,18 @@ class CustomerDirectoryService:
             )
             for definition in ZOHO_CONTACT_FIELDS
         )
+        return (
+            CustomerProfileField(
+                label="Kunde",
+                value=contact.customer.name if contact.customer is not None else None,
+                key="customer_name",
+                display_type="Link",
+                form_value=str(contact.customer_id or ""),
+                editable=True,
+                required=True,
+            ),
+            *contact_fields,
+        )
 
     def _contact_profile_field_display_layout(
         self,
@@ -996,7 +1008,7 @@ class CustomerDirectoryService:
         """Show the complete reviewed contact schema for older partial imports too."""
         display_fields = list(profile_fields)
         fields_by_key = {field.key: field for field in display_fields if field.key}
-        if contact.customer is not None and "customer_name" not in fields_by_key:
+        if "customer_name" not in fields_by_key:
             customer_field = CustomerProfileField(
                 label="Kunde-Name",
                 value=contact.customer.name if contact.customer is not None else None,

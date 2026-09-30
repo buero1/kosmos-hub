@@ -4,7 +4,9 @@
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/contact_field_control.html" import contact_field_control %}
 {% macro contact_field_value(field) %}
-  {% if field.display_type == "E-Mail" and field.value and field.value != "-" and can_manage_contacts %}
+  {% if field.key == "customer_name" and detail.customer %}
+    <a href="/customers/{{ detail.customer.id }}">{{ detail.customer.name }}</a>
+  {% elif field.display_type == "E-Mail" and field.value and field.value != "-" and can_manage_contacts %}
     <button class="email-address-link" type="button" data-email-compose-open data-recipient-email="{{ field.value | lower }}" aria-label="E-Mail an {{ field.value }} verfassen">{{ field.value }}</button>
   {% else %}
     {{ field.value or "-" }}
@@ -133,7 +135,23 @@
               <form id="contact-fields-form" method="post" action="{% if detail.contact.zoho_id and detail.customer %}/customers/{{ detail.customer.id }}/contacts/{{ detail.contact.id }}/fields{% else %}/contacts/{{ detail.contact.id }}/fields{% endif %}" class="communication-form customer-field-editor" data-customer-field-editor hidden>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="customer-field-editor-grid">
-                  {% for field in detail.editable_profile_fields %}{{ contact_field_control(field, field.form_value) }}{% endfor %}
+                  {% for field in detail.editable_profile_fields %}
+                    {% if field.key == "customer_name" %}
+                      <div class="customer-field-control finance-customer-search" data-finance-customer-search>
+                        <span id="contact-customer-label">Kunde <small>erforderlich</small></span>
+                        <div class="finance-customer-combobox">
+                          <input type="search" value="{{ detail.customer.name if detail.customer else '' }}" placeholder="Kunden suchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="contact-customer-options" aria-labelledby="contact-customer-label" data-finance-customer-input required>
+                          <input type="hidden" name="new_customer_id" value="{{ detail.customer.id if detail.customer else '' }}" data-finance-customer>
+                          <div id="contact-customer-options" class="finance-customer-options" role="listbox" aria-label="Kunden auswählen" hidden>
+                            {% for customer in linkable_customers %}<button type="button" class="finance-customer-option" role="option" data-finance-customer-option data-customer-id="{{ customer.id }}" aria-selected="{{ 'true' if detail.customer and customer.id == detail.customer.id else 'false' }}">{{ customer.name }}</button>{% endfor %}
+                            <p class="finance-customer-empty" data-finance-customer-empty hidden>Keine Kunden gefunden.</p>
+                          </div>
+                        </div>
+                      </div>
+                    {% else %}
+                      {{ contact_field_control(field, field.form_value) }}
+                    {% endif %}
+                  {% endfor %}
                 </div>
               </form>
             {% endif %}
@@ -143,23 +161,9 @@
 
       <aside class="customer-detail-side-column">
         {% call hub_data_panel(detail.contact) %}
-          {% if can_manage_contacts %}
-            <form method="post" action="/contacts/{{ detail.contact.id }}/link" class="communication-form contact-link-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <label class="customer-field-control">
-                <span>Kunde <small>optional</small></span>
-                <select name="customer_id">
-                  <option value="">Keinen Kunden verknüpfen</option>
-                  {% for customer in linkable_customers %}
-                    <option value="{{ customer.id }}"{% if detail.customer and customer.id == detail.customer.id %} selected{% endif %}>{{ customer.name }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <button class="button button-secondary button-variant-1" type="submit">Verknüpfung speichern</button>
-            </form>
-          {% elif detail.customer %}
-            <dl class="customer-fields-grid">{{ hub_data_link(detail.contact, 'customers', detail.customer.id, 'Kunde', detail.customer.name, '/customers/' ~ detail.customer.id) }}</dl>
-          {% endif %}
+          <dl class="customer-fields-grid">
+            {% if detail.customer %}{{ hub_data_link(detail.contact, 'customers', detail.customer.id, 'Kunde', detail.customer.name, '/customers/' ~ detail.customer.id) }}{% else %}<div><dt>Kunde</dt><dd>-</dd></div>{% endif %}
+          </dl>
         {% endcall %}
       </aside>
     </div>
@@ -177,5 +181,6 @@
         </form>
       </dialog>
     {% endif %}
+    {% include "partials/finance_customer_search_script.html" %}
   </section>
 {% endblock %}

@@ -2726,9 +2726,9 @@
       ]
     },
     "app/api/routes/web.py:update_customer_contact_fields:POST:/customers/{customer_id}/contacts/{contact_id}/fields": {
-      "fingerprint": "b03973c1a28e1a39c593e946dd391896c05d4f8335d7f8816350d9f90dc303c6",
+      "fingerprint": "ef6ced25a074d38920f85153181444bd4e4633d8a3403276d0c191463dda0433",
       "state": "shared",
-      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "reason": "Authenticated, CSRF-protected contact editing sends profile changes and an optional replacement customer id through the shared contacts.update operation. The operation rechecks access to the existing contact and replacement customer, rejects an explicitly empty replacement, and commits the relation and fields atomically.",
       "contracts": [
         "contacts.update"
       ],
@@ -2884,9 +2884,9 @@
       ]
     },
     "app/api/routes/web.py:update_hub_contact_fields:POST:/contacts/{contact_id}/fields": {
-      "fingerprint": "e21e4ea16a0f0d8bb10dc0ea7232001114e294f851a84f91c55486310c8d8ba9",
+      "fingerprint": "dcb9dea3085ab13329f97efe7436fb48e77b3c2dd96e67f78be2f92115156adc",
       "state": "shared",
-      "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
+      "reason": "Authenticated, CSRF-protected contact editing sends profile changes and an optional replacement customer id through the shared contacts.update operation. The operation rechecks access to the contact and replacement customer, rejects an explicitly empty replacement, and commits the relation and fields atomically.",
       "contracts": [
         "contacts.update"
       ],
