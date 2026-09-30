@@ -40,7 +40,8 @@ _LEAD_RESULT_FIELD_UPDATE_DESCRIPTION = (
 )
 _LEAD_APPOINTMENT_REMINDER_DESCRIPTION = (
     "Setzt die Termin-Erinnerung bei Beratungsterminen mit mehr als 60 Stunden Vorlauf und "
-    "entfernt sie bei kürzerem Vorlauf oder Stornierung."
+    "entfernt sie bei kürzerem Vorlauf oder Stornierung. Bei aktiver Erinnerung wird am Vortag "
+    "um 11:00 Uhr automatisch die Vorlage „Terminerinnerung“ aus „Leads Hub“ versendet."
 )
 _LEAD_RESULT_FIELD_UPDATES: dict[str, dict[str, str]] = {
     "Stattgefunden + Auftrag": {

@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,12 +20,22 @@ class HubScheduledEmail(TimestampMixin, Base):
 
     __tablename__ = "hub_scheduled_emails"
     __table_args__ = (
-        Index("ix_hub_scheduled_emails_status_next_attempt", "status", "next_attempt_at"),
-        Index("ix_hub_scheduled_emails_customer_status", "customer_id", "status", "scheduled_at"),
+        Index(
+            "ix_hub_scheduled_emails_status_next_attempt", "status", "next_attempt_at"
+        ),
+        Index(
+            "ix_hub_scheduled_emails_customer_status",
+            "customer_id",
+            "status",
+            "scheduled_at",
+        ),
+        Index("uq_hub_scheduled_emails_automation_key", "automation_key", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    lead_id: Mapped[int | None] = mapped_column(ForeignKey("hub_leads.id", ondelete="SET NULL"), nullable=True, index=True)
+    lead_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hub_leads.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     customer_id: Mapped[int | None] = mapped_column(
         ForeignKey("customers.id", ondelete="SET NULL"),
         nullable=True,
@@ -49,6 +67,7 @@ class HubScheduledEmail(TimestampMixin, Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    automation_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     attachments = relationship(
         "HubScheduledEmailAttachment",
@@ -62,7 +81,9 @@ class HubScheduledEmailAttachment(TimestampMixin, Base):
 
     __tablename__ = "hub_scheduled_email_attachments"
     __table_args__ = (
-        UniqueConstraint("storage_key", name="uq_hub_scheduled_email_attachments_storage_key"),
+        UniqueConstraint(
+            "storage_key", name="uq_hub_scheduled_email_attachments_storage_key"
+        ),
         Index("ix_hub_scheduled_email_attachments_email_id", "scheduled_email_id"),
     )
 
@@ -73,7 +94,9 @@ class HubScheduledEmailAttachment(TimestampMixin, Base):
     )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(96), nullable=False)
-    content_type: Mapped[str] = mapped_column(String(128), nullable=False, default="application/octet-stream")
+    content_type: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="application/octet-stream"
+    )
     byte_size: Mapped[int] = mapped_column(Integer(), nullable=False)
     stored_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)
 

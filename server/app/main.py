@@ -944,6 +944,16 @@ def _ensure_phase_one_schema() -> None:
                     )
                 )
             logger.info("Added dunning links to hub_scheduled_emails.")
+        if "automation_key" not in scheduled_email_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE hub_scheduled_emails "
+                        "ADD COLUMN automation_key VARCHAR(255) NULL AFTER message_id, "
+                        "ADD UNIQUE INDEX uq_hub_scheduled_emails_automation_key (automation_key)"
+                    )
+                )
+            logger.info("Added automation keys to hub_scheduled_emails.")
 
     if "hub_scheduled_email_attachments" not in table_names:
         HubScheduledEmailAttachment.__table__.create(bind=engine, checkfirst=True)

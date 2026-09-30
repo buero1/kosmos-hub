@@ -16,17 +16,23 @@ from app.core.config import get_settings
 from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
-from app.models.hub_scheduled_email import HubScheduledEmail, HubScheduledEmailAttachment
+from app.models.hub_scheduled_email import (
+    HubScheduledEmail,
+    HubScheduledEmailAttachment,
+)
 from app.services.customer_communications import (
     CustomerCommunicationAttachment,
     CustomerCommunicationAttachmentDownload,
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationService,
 )
-from app.services.email_attachment_storage import EmailAttachmentStorage, EmailAttachmentStorageError, track_attachment_file
+from app.services.email_attachment_storage import (
+    EmailAttachmentStorage,
+    EmailAttachmentStorageError,
+    track_attachment_file,
+)
 from app.services.hub_mailbox import HubMailboxService
 from app.services.hub_mailbox_transport import HubMailboxTransportService
-
 
 _PENDING_STATUSES = ("scheduled", "retrying")
 _VISIBLE_STATUSES = (*_PENDING_STATUSES, "sending", "failed")
@@ -72,7 +78,9 @@ class ScheduledEmailService:
         try:
             local_value = datetime.fromisoformat(normalized)
         except ValueError as exc:
-            raise ValueError("Datum oder Uhrzeit für den geplanten Versand ist ungültig.") from exc
+            raise ValueError(
+                "Datum oder Uhrzeit für den geplanten Versand ist ungültig."
+            ) from exc
         if local_value.tzinfo is None:
             local_value = local_value.replace(tzinfo=_BERLIN)
         return local_value.astimezone(UTC).replace(tzinfo=None)
@@ -97,14 +105,40 @@ class ScheduledEmailService:
         forward_from_email_id: int | None = None,
         attachments: tuple[CustomerCommunicationAttachmentUpload, ...] = (),
         scheduled_email_id: int | None = None,
+        automation_key: str = "",
     ) -> HubScheduledEmail:
-        from app.services.hub_mailbox_permissions import MailboxPermissions
         from app.services.hub_mailbox_access import HubMailboxAccess
+        from app.services.hub_mailbox_permissions import MailboxPermissions
+
         MailboxPermissions(db=self.db, actor=actor).require_sender(sender_email, "send")
         if scheduled_email_id is not None:
-            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(f"scheduled-{scheduled_email_id}", "edit")
+            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(
+                f"scheduled-{scheduled_email_id}", "edit"
+            )
         now = self._utc_now()
+        normalized_automation_key = automation_key.strip()
+        if len(normalized_automation_key) > 255:
+            raise ValueError("Der Automationsschlüssel ist zu lang.")
+        if normalized_automation_key:
+            automated = self.db.scalar(
+                select(HubScheduledEmail)
+                .where(HubScheduledEmail.automation_key == normalized_automation_key)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if automated is not None:
+                if (
+                    scheduled_email_id is not None
+                    and scheduled_email_id != automated.id
+                ):
+                    raise ValueError(
+                        "Die geplante E-Mail gehört zu einer anderen Automation."
+                    )
+                if automated.status in {"sent", "sending"}:
+                    return automated
+                scheduled_email_id = automated.id
         from app.services.hub_deletion import lock_parent
+
         if customer_id is not None and lead_id is not None:
             raise ValueError("Bitte nur einen Kunden oder Lead verknuepfen.")
         if lead_id is not None:
@@ -112,10 +146,15 @@ class ScheduledEmailService:
         if customer_id is not None:
             lock_parent(self.db, kind="customers", record_id=customer_id)
         normalized_scheduled_at = self._naive_utc(scheduled_at)
-        if normalized_scheduled_at <= now:
-            raise ValueError("Der geplante Versandzeitpunkt muss in der Zukunft liegen.")
+        if normalized_scheduled_at <= now and not normalized_automation_key:
+            raise ValueError(
+                "Der geplante Versandzeitpunkt muss in der Zukunft liegen."
+            )
+        normalized_scheduled_at = max(now, normalized_scheduled_at)
         if reply_to_email_id is not None and forward_from_email_id is not None:
-            raise ValueError("Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein.")
+            raise ValueError(
+                "Eine E-Mail kann nicht gleichzeitig Antwort und Weiterleitung sein."
+            )
 
         communications = CustomerCommunicationService(
             db=self.db,
@@ -123,7 +162,9 @@ class ScheduledEmailService:
             public_base_url=self.public_base_url,
             attachment_storage=self.attachment_storage,
         )
-        normalized_subject = communications._required_text(subject, "Betreff", maximum=500)
+        normalized_subject = communications._required_text(
+            subject, "Betreff", maximum=500
+        )
         normalized_content = communications._sanitized_email_content(content)
         normalized_sender = sender_email.strip().casefold()
         normalized_recipient_name = recipient_name.strip()[:255]
@@ -134,41 +175,66 @@ class ScheduledEmailService:
             if customer is None:
                 raise ValueError("Der verknüpfte Kunde wurde nicht gefunden.")
             sender = next(
-                (item for item in communications.list_senders() if item.email.casefold() == normalized_sender),
+                (
+                    item
+                    for item in communications.list_senders()
+                    if item.email.casefold() == normalized_sender
+                ),
                 None,
             )
             if sender is None:
-                raise ValueError("Wähle eine aktuell eingerichtete Absenderadresse aus.")
+                raise ValueError(
+                    "Wähle eine aktuell eingerichtete Absenderadresse aus."
+                )
             recipient = next(
                 (
                     item
                     for item in communications._recipients_for_customer(
                         customer,
-                        include_account_email=not normalized_recipient_key.startswith("contact:"),
+                        include_account_email=not normalized_recipient_key.startswith(
+                            "contact:"
+                        ),
                     )
                     if item.key == normalized_recipient_key
                 ),
                 None,
             )
-            if recipient is None or recipient.email.casefold() != recipient_email.strip().casefold():
-                raise ValueError("Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus.")
+            if (
+                recipient is None
+                or recipient.email.casefold() != recipient_email.strip().casefold()
+            ):
+                raise ValueError(
+                    "Wähle eine aktuelle E-Mail-Adresse dieses Kunden oder Kontakts aus."
+                )
             normalized_recipient_email = recipient.email
             normalized_recipient_name = recipient.name
         else:
             transport = HubMailboxTransportService(db=self.db, cipher=self.cipher)
             sender = next(
-                (item for item in transport.list_senders() if item.email.casefold() == normalized_sender),
+                (
+                    item
+                    for item in transport.list_senders()
+                    if item.email.casefold() == normalized_sender
+                ),
                 None,
             )
             if sender is None:
-                raise ValueError("Wähle ein eingerichtetes Mittwald-Postfach als Absender aus.")
+                raise ValueError(
+                    "Wähle ein eingerichtetes Mittwald-Postfach als Absender aus."
+                )
             parsed_name, parsed_email = parseaddr(recipient_email.strip())
             normalized_recipient_email = parsed_email.strip().casefold()
             if not normalized_recipient_email or "@" not in normalized_recipient_email:
                 raise ValueError("Gib eine gültige Empfängeradresse ein.")
-            normalized_recipient_name = normalized_recipient_name or parsed_name.strip() or normalized_recipient_email
+            normalized_recipient_name = (
+                normalized_recipient_name
+                or parsed_name.strip()
+                or normalized_recipient_email
+            )
 
-        normalized_attachments = HubMailboxService._validated_direct_attachments(attachments)
+        normalized_attachments = HubMailboxService._validated_direct_attachments(
+            attachments
+        )
         payload = {
             "recipient_lead_id": lead_id,
             "sender_email": sender.email,
@@ -193,14 +259,31 @@ class ScheduledEmailService:
                 next_attempt_at=normalized_scheduled_at,
                 status="scheduled",
                 message_id=f"<hub-scheduled-{token_hex(20)}@kosmos-medien.de>",
+                automation_key=normalized_automation_key or None,
             )
             self.db.add(scheduled)
         else:
-            scheduled = self._editable(scheduled_email_id=scheduled_email_id)
+            if normalized_automation_key:
+                from app.services.hub_mailbox_access import HubMailboxAccess
+
+                scheduled = self.db.get(HubScheduledEmail, scheduled_email_id)
+                if scheduled is None:
+                    raise ValueError("Die geplante E-Mail wurde nicht gefunden.")
+                HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(
+                    f"scheduled-{scheduled.id}", "edit"
+                )
+            else:
+                scheduled = self._editable(scheduled_email_id=scheduled_email_id)
             if len(scheduled.attachments) + len(normalized_attachments) > 20:
-                raise ValueError("Es können höchstens 20 Anhänge pro E-Mail versendet werden.")
-            existing_attachment_bytes = sum(attachment.byte_size for attachment in scheduled.attachments)
-            new_attachment_bytes = sum(len(attachment.content) for attachment in normalized_attachments)
+                raise ValueError(
+                    "Es können höchstens 20 Anhänge pro E-Mail versendet werden."
+                )
+            existing_attachment_bytes = sum(
+                attachment.byte_size for attachment in scheduled.attachments
+            )
+            new_attachment_bytes = sum(
+                len(attachment.content) for attachment in normalized_attachments
+            )
             if existing_attachment_bytes + new_attachment_bytes > 50 * 1024 * 1024:
                 raise ValueError("Die Anhänge sind zusammen größer als 50 MB.")
             scheduled.customer_id = customer_id
@@ -214,12 +297,17 @@ class ScheduledEmailService:
             scheduled.last_error = None
             scheduled.locked_at = None
             scheduled.sent_at = None
-        scheduled.encrypted_payload_json = self.cipher.encrypt(json.dumps(payload, ensure_ascii=False))
+            if normalized_automation_key:
+                scheduled.automation_key = normalized_automation_key
+        scheduled.encrypted_payload_json = self.cipher.encrypt(
+            json.dumps(payload, ensure_ascii=False)
+        )
         scheduled.scheduled_at = normalized_scheduled_at
         scheduled.next_attempt_at = normalized_scheduled_at
         scheduled.status = "scheduled"
         self.db.flush()
         from app.services.hub_mailbox_permissions import bind_message
+
         bind_message(self.db, self.cipher, scheduled, replace=True)
 
         stored_keys: list[str] = []
@@ -232,7 +320,9 @@ class ScheduledEmailService:
                         scheduled_email_id=scheduled.id,
                         filename=attachment.filename.strip()[:255],
                         storage_key=storage_key,
-                        content_type=(attachment.content_type or "application/octet-stream")[:128],
+                        content_type=(
+                            attachment.content_type or "application/octet-stream"
+                        )[:128],
                         byte_size=len(attachment.content),
                         stored_at=now,
                     )
@@ -249,11 +339,17 @@ class ScheduledEmailService:
     def get_compose_context(self, *, scheduled_email_id: int) -> dict[str, object]:
         scheduled = self._editable(scheduled_email_id=scheduled_email_id)
         payload = self.payload(scheduled)
-        customer = self.db.get(Customer, scheduled.customer_id) if scheduled.customer_id is not None else None
+        customer = (
+            self.db.get(Customer, scheduled.customer_id)
+            if scheduled.customer_id is not None
+            else None
+        )
         recipient_email = self._text(payload.get("recipient_email"))
         recipient_name = self._text(payload.get("recipient_name")) or recipient_email
         recipient_key = self._text(payload.get("recipient_key"))
-        local_scheduled_at = scheduled.scheduled_at.replace(tzinfo=UTC).astimezone(_BERLIN)
+        local_scheduled_at = scheduled.scheduled_at.replace(tzinfo=UTC).astimezone(
+            _BERLIN
+        )
         return {
             "action": "scheduled",
             "scheduled_email_id": scheduled.id,
@@ -272,7 +368,9 @@ class ScheduledEmailService:
             "cc_emails": self._text(payload.get("cc_emails")),
             "template_id": self._text(payload.get("template_id")),
             "reply_to_email_id": self._optional_int(payload.get("reply_to_email_id")),
-            "forward_from_email_id": self._optional_int(payload.get("forward_from_email_id")),
+            "forward_from_email_id": self._optional_int(
+                payload.get("forward_from_email_id")
+            ),
             "scheduled_at": local_scheduled_at.strftime("%Y-%m-%dT%H:%M"),
             "attachments": [
                 {"id": attachment.id, "filename": attachment.filename}
@@ -287,9 +385,13 @@ class ScheduledEmailService:
         attachment_id: int,
     ) -> CustomerCommunicationAttachmentDownload:
         scheduled = self._editable(scheduled_email_id=scheduled_email_id)
-        attachment = next((item for item in scheduled.attachments if item.id == attachment_id), None)
+        attachment = next(
+            (item for item in scheduled.attachments if item.id == attachment_id), None
+        )
         if attachment is None:
-            raise ValueError("Der angeforderte Anhang gehört nicht zu dieser geplanten E-Mail.")
+            raise ValueError(
+                "Der angeforderte Anhang gehört nicht zu dieser geplanten E-Mail."
+            )
         try:
             content = self.attachment_storage.load(attachment.storage_key)
         except EmailAttachmentStorageError as exc:
@@ -311,16 +413,28 @@ class ScheduledEmailService:
         return self._deliver(scheduled_id=scheduled.id)
 
     def cancel(self, *, scheduled_email_id: int) -> HubScheduledEmail:
-        self.db.scalar(select(HubScheduledEmail).where(HubScheduledEmail.id == scheduled_email_id)
-                       .with_for_update().execution_options(populate_existing=True))
+        self.db.scalar(
+            select(HubScheduledEmail)
+            .where(HubScheduledEmail.id == scheduled_email_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         scheduled = self._editable(scheduled_email_id=scheduled_email_id, action="edit")
         storage_keys = [attachment.storage_key for attachment in scheduled.attachments]
         scheduled.attachments.clear()
         scheduled.status = "cancelled"
         scheduled.locked_at = None
+        if scheduled.automation_key:
+            payload = self.payload(scheduled)
+            payload["automation_manual_cancelled"] = True
+            scheduled.encrypted_payload_json = self.cipher.encrypt(
+                json.dumps(payload, ensure_ascii=False)
+            )
         self.db.flush()
         for storage_key in storage_keys:
-            track_attachment_file(self.db, self.attachment_storage, storage_key, removed=True)
+            track_attachment_file(
+                self.db, self.attachment_storage, storage_key, removed=True
+            )
         return scheduled
 
     def next_due_at(self) -> datetime | None:
@@ -330,13 +444,17 @@ class ScheduledEmailService:
             )
         )
 
-    def visible_for_customer(self, *, customer_id: int) -> tuple[HubScheduledEmail, ...]:
+    def visible_for_customer(
+        self, *, customer_id: int
+    ) -> tuple[HubScheduledEmail, ...]:
         return tuple(
             self.db.scalars(
                 select(HubScheduledEmail)
                 .where(HubScheduledEmail.customer_id == customer_id)
                 .where(HubScheduledEmail.status.in_(_VISIBLE_STATUSES))
-                .order_by(HubScheduledEmail.scheduled_at.desc(), HubScheduledEmail.id.desc())
+                .order_by(
+                    HubScheduledEmail.scheduled_at.desc(), HubScheduledEmail.id.desc()
+                )
             ).all()
         )
 
@@ -347,9 +465,13 @@ class ScheduledEmailService:
             return {}
         return decoded if isinstance(decoded, dict) else {}
 
-    def attachment_views(self, scheduled: HubScheduledEmail) -> tuple[CustomerCommunicationAttachment, ...]:
+    def attachment_views(
+        self, scheduled: HubScheduledEmail
+    ) -> tuple[CustomerCommunicationAttachment, ...]:
         return tuple(
-            CustomerCommunicationAttachment(id=str(attachment.id), filename=attachment.filename)
+            CustomerCommunicationAttachment(
+                id=str(attachment.id), filename=attachment.filename
+            )
             for attachment in scheduled.attachments
         )
 
@@ -361,7 +483,9 @@ class ScheduledEmailService:
                 select(HubScheduledEmail.id)
                 .where(HubScheduledEmail.status.in_(_PENDING_STATUSES))
                 .where(HubScheduledEmail.next_attempt_at <= now)
-                .order_by(HubScheduledEmail.next_attempt_at.asc(), HubScheduledEmail.id.asc())
+                .order_by(
+                    HubScheduledEmail.next_attempt_at.asc(), HubScheduledEmail.id.asc()
+                )
                 .limit(limit)
             )
         )
@@ -378,7 +502,11 @@ class ScheduledEmailService:
     def _deliver(self, *, scheduled_id: int) -> ScheduledEmailProcessResult:
         now = self._utc_now()
         scheduled = self.db.get(HubScheduledEmail, scheduled_id)
-        if scheduled is None or scheduled.status not in _PENDING_STATUSES or scheduled.next_attempt_at > now:
+        if (
+            scheduled is None
+            or scheduled.status not in _PENDING_STATUSES
+            or scheduled.next_attempt_at > now
+        ):
             return ScheduledEmailProcessResult()
         scheduled.status = "sending"
         scheduled.locked_at = now
@@ -387,9 +515,14 @@ class ScheduledEmailService:
         try:
             payload = self.payload(scheduled)
             from app.services.hub_mailbox_access import HubMailboxAccess
-            scope = HubMailboxAccess(db=self.db, cipher=self.cipher, actor=scheduled.creator_username)
+
+            scope = HubMailboxAccess(
+                db=self.db, cipher=self.cipher, actor=scheduled.creator_username
+            )
             scope.require(f"scheduled-{scheduled.id}", "send")
-            scope.mailboxes.require_sender(self._text(payload.get("sender_email")), "send")
+            scope.mailboxes.require_sender(
+                self._text(payload.get("sender_email")), "send"
+            )
             attachments = tuple(
                 CustomerCommunicationAttachmentUpload(
                     filename=attachment.filename,
@@ -399,7 +532,9 @@ class ScheduledEmailService:
                 for attachment in scheduled.attachments
             )
             reply_to_email_id = self._optional_int(payload.get("reply_to_email_id"))
-            forward_from_email_id = self._optional_int(payload.get("forward_from_email_id"))
+            forward_from_email_id = self._optional_int(
+                payload.get("forward_from_email_id")
+            )
             if scheduled.customer_id is not None:
                 result = CustomerCommunicationService(
                     db=self.db,
@@ -446,9 +581,13 @@ class ScheduledEmailService:
                 )
                 scheduled.mailbox_email_id = sent_email.id
                 if scheduled.lead_id is not None:
-                    sent_payload = json.loads(self.cipher.decrypt(sent_email.encrypted_payload_json))
+                    sent_payload = json.loads(
+                        self.cipher.decrypt(sent_email.encrypted_payload_json)
+                    )
                     sent_payload["recipient_lead_id"] = scheduled.lead_id
-                    sent_email.encrypted_payload_json = self.cipher.encrypt(json.dumps(sent_payload, ensure_ascii=False))
+                    sent_email.encrypted_payload_json = self.cipher.encrypt(
+                        json.dumps(sent_payload, ensure_ascii=False)
+                    )
         except Exception as exc:
             self.db.rollback()
             return self._record_failure(scheduled_id=scheduled_id, error=str(exc))
@@ -457,7 +596,9 @@ class ScheduledEmailService:
         if scheduled is None:
             self.db.commit()
             return ScheduledEmailProcessResult()
-        queued_storage_keys = [attachment.storage_key for attachment in scheduled.attachments]
+        queued_storage_keys = [
+            attachment.storage_key for attachment in scheduled.attachments
+        ]
         scheduled.attachments.clear()
         scheduled.status = "sent"
         scheduled.sent_at = self._utc_now()
@@ -474,25 +615,33 @@ class ScheduledEmailService:
         email = self.db.get(CustomerZohoEmail, email_id)
         if email is None:
             return
-        storage_keys = [attachment.storage_key for attachment in email.stored_attachments]
+        storage_keys = [
+            attachment.storage_key for attachment in email.stored_attachments
+        ]
         self.db.delete(email)
         self.db.flush()
         for storage_key in storage_keys:
             self.attachment_storage.remove(storage_key)
 
-    def _record_failure(self, *, scheduled_id: int, error: str) -> ScheduledEmailProcessResult:
+    def _record_failure(
+        self, *, scheduled_id: int, error: str
+    ) -> ScheduledEmailProcessResult:
         scheduled = self.db.get(HubScheduledEmail, scheduled_id)
         if scheduled is None:
             return ScheduledEmailProcessResult()
         scheduled.attempt_count += 1
         scheduled.locked_at = None
-        scheduled.last_error = (error.strip() or "Der Versand konnte nicht abgeschlossen werden.")[:2_000]
+        scheduled.last_error = (
+            error.strip() or "Der Versand konnte nicht abgeschlossen werden."
+        )[:2_000]
         if scheduled.attempt_count > len(_RETRY_DELAYS):
             scheduled.status = "failed"
             self.db.commit()
             return ScheduledEmailProcessResult(failed=1)
         scheduled.status = "retrying"
-        scheduled.next_attempt_at = self._utc_now() + _RETRY_DELAYS[scheduled.attempt_count - 1]
+        scheduled.next_attempt_at = (
+            self._utc_now() + _RETRY_DELAYS[scheduled.attempt_count - 1]
+        )
         self.db.commit()
         return ScheduledEmailProcessResult(retried=1)
 
@@ -509,7 +658,9 @@ class ScheduledEmailService:
         for scheduled in stale:
             scheduled.attempt_count += 1
             scheduled.locked_at = None
-            scheduled.last_error = "Der Hub-Dienst wurde während des Versands neu gestartet."
+            scheduled.last_error = (
+                "Der Hub-Dienst wurde während des Versands neu gestartet."
+            )
             if scheduled.attempt_count > len(_RETRY_DELAYS):
                 scheduled.status = "failed"
                 failed += 1
@@ -521,17 +672,24 @@ class ScheduledEmailService:
             self.db.commit()
         return retried, failed
 
-    def _editable(self, *, scheduled_email_id: int, action: str = "view") -> HubScheduledEmail:
+    def _editable(
+        self, *, scheduled_email_id: int, action: str = "view"
+    ) -> HubScheduledEmail:
         from app.core.mailbox_actor import resolve_mailbox_actor
         from app.services.hub_mailbox_access import HubMailboxAccess
+
         actor = resolve_mailbox_actor()
         if actor:
-            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(f"scheduled-{scheduled_email_id}", action=action)
+            HubMailboxAccess(db=self.db, cipher=self.cipher, actor=actor).require(
+                f"scheduled-{scheduled_email_id}", action=action
+            )
         scheduled = self.db.get(HubScheduledEmail, scheduled_email_id)
         if scheduled is None or scheduled.status not in _VISIBLE_STATUSES:
             raise ValueError("Die geplante E-Mail wurde nicht gefunden.")
         if scheduled.status == "sending":
-            raise ValueError("Die E-Mail wird gerade versendet und kann nicht mehr geändert werden.")
+            raise ValueError(
+                "Die E-Mail wird gerade versendet und kann nicht mehr geändert werden."
+            )
         return scheduled
 
     @staticmethod
@@ -547,7 +705,11 @@ class ScheduledEmailService:
 
     @staticmethod
     def _naive_utc(value: datetime) -> datetime:
-        return value.astimezone(UTC).replace(tzinfo=None) if value.tzinfo is not None else value
+        return (
+            value.astimezone(UTC).replace(tzinfo=None)
+            if value.tzinfo is not None
+            else value
+        )
 
     @staticmethod
     def _utc_now() -> datetime:

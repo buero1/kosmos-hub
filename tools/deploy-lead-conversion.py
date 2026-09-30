@@ -58,6 +58,8 @@ if '--sepa-grant-method' in sys.argv:
     release_prefix = 'sepa-grant-method'
 if '--lead-url-fields' in sys.argv:
     release_prefix = 'lead-url-fields'
+if '--lead-appointment-email' in sys.argv:
+    release_prefix = 'lead-appointment-email'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -121,6 +123,14 @@ if '--sepa-grant-method' in sys.argv:
 if '--lead-url-fields' in sys.argv:
     expected = {'app/core/web_urls.py', 'app/services/customer_directory.py',
                 'app/services/hub_leads.py', 'app/templates/lead_detail.html'}
+if '--lead-appointment-email' in sys.argv:
+    expected = {
+        'app/main.py', 'app/models/hub_scheduled_email.py',
+        'app/services/hub_workflows.py',
+        'app/services/lead_appointment_email_reminders.py',
+        'app/services/scheduled_email_worker.py',
+        'app/services/scheduled_emails.py',
+    }
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -208,7 +218,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
@@ -220,8 +230,7 @@ sys.path.insert(0, str(root))
 from dotenv import load_dotenv
 load_dotenv('/etc/kosmos-hub/kosmos-hub.env')
 from sqlalchemy import select, func, text
-from app.db.base import Base
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.models.maintenance_run import MaintenanceRun
 from app.models.fleet_refresh_run import FleetRefreshRun
 from app.models.hub_wordpress_job import HubWordPressJob
@@ -287,4 +296,11 @@ except Exception:
     healthy()
     raise
 subprocess.run(['systemctl', 'is-active', 'kosmos-hub-api'], check=True)
+if '--lead-appointment-email' in sys.argv:
+    from sqlalchemy import inspect
+    schema = inspect(engine)
+    columns = {column['name'] for column in schema.get_columns('hub_scheduled_emails')}
+    indexes = {index['name'] for index in schema.get_indexes('hub_scheduled_emails')}
+    assert 'automation_key' in columns
+    assert 'uq_hub_scheduled_emails_automation_key' in indexes
 print(json.dumps({'deployed': True, 'health': 200, 'backup': str(backup)}), flush=True)

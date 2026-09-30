@@ -355,7 +355,8 @@ def test_lead_appointment_reminder_workflow_is_listed_and_can_be_disabled():
         assert workflow.module_label == "Leads · Termindatum, Lead-Ergebnis"
         assert workflow.description == (
             "Setzt die Termin-Erinnerung bei Beratungsterminen mit mehr als 60 Stunden Vorlauf und "
-            "entfernt sie bei kürzerem Vorlauf oder Stornierung."
+            "entfernt sie bei kürzerem Vorlauf oder Stornierung. Bei aktiver Erinnerung wird am Vortag "
+            "um 11:00 Uhr automatisch die Vorlage „Terminerinnerung“ aus „Leads Hub“ versendet."
         )
         workflow.is_enabled = False
         db.flush()
