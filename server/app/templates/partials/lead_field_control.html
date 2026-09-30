@@ -22,7 +22,7 @@
       {% elif field.display_type == "Datum" %}
         <input type="date" name="{{ name }}" value="{{ value }}">
       {% elif field.display_type == "DatumZeit" %}
-        <input type="datetime-local" step="1" name="{{ name }}" value="{{ value }}">
+        <input type="datetime-local" step="1800" name="{{ name }}" value="{{ value[:16] }}">
       {% elif field.display_type == "Mehrzeilen" %}
         <textarea name="{{ name }}" rows="5">{{ value }}</textarea>
       {% elif field.display_type == "Ganzzahl" %}
