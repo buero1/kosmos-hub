@@ -124,6 +124,7 @@ def test_customer_checklist_ui_contract():
     detail = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
     partial = Path("app/templates/partials/customer_checklists.html").read_text(encoding="utf-8")
     script = Path("app/static/customer-checklists.js").read_text(encoding="utf-8")
+    styles = Path("app/templates/base.html").read_text(encoding="utf-8")
     main = Path("app/main.py").read_text(encoding="utf-8")
 
     assert detail.index("customer-fields-tab-{{ tab.key }}") < detail.index("customer-fields-tab-checklists")
@@ -137,6 +138,7 @@ def test_customer_checklist_ui_contract():
     assert 'submit("item.delete"' in script
     assert 'item.classList.toggle("is-completed", completed)' in script
     assert "7/9" not in partial and "Fortschritt" not in partial
+    assert ".customer-checklist-panel[hidden] { display: none; }" in styles
     customer_schema = main[main.index('if "customers" in table_names:'):]
     assert '"checklists_initialized": "TINYINT(1) NOT NULL DEFAULT 0"' in customer_schema
     case_schema = main[main.index('if "hub_cases" not in table_names:'):main.index('if "hub_email_template_folders" not in table_names:')]
@@ -162,6 +164,8 @@ def test_customer_checklist_partial_renders_editable_items():
     assert 'data-checklist-id="7"' in html
     assert 'data-checklist-item-id="9"' in html
     assert "Browsertests" in html and "is-completed" in html
+    assert 'aria-expanded="false"' in html
+    assert 'data-checklist-panel hidden' in html
 
 
 def test_checklist_action_endpoint_requires_csrf_and_updates_exact_customer():

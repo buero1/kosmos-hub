@@ -17,7 +17,7 @@
 
   <div class="customer-checklist-list" data-customer-checklist-list>
     {% for checklist in customer_checklists %}
-      {% set checklist_open = checklist.id == active_checklist_id or (active_checklist_id is not defined and loop.first) %}
+      {% set checklist_open = active_checklist_id is defined and checklist.id == active_checklist_id %}
       <article class="customer-checklist-card{% if checklist.is_completed %} is-complete{% endif %}" data-checklist-id="{{ checklist.id }}">
         <header class="customer-checklist-heading">
           {% if can_manage_checklists %}
