@@ -84,12 +84,12 @@
             {% for value, label in call_fields.status.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
           </select>
         </label>
-        {{ delete_button("call", "Anruf") }}
-        <label>Dauer
+        <label class="activity-compose-duration-field">Dauer
           <select name="duration_minutes" data-customer-call-duration>
             {% for minutes in call_duration_options %}<option value="{{ minutes }}"{% if minutes == call_defaults.duration_minutes %} selected{% endif %}>{{ minutes }} Min.</option>{% endfor %}
           </select>
         </label>
+        {{ delete_button("call", "Anruf") }}
       </div>
       <fieldset class="activity-compose-datetime">
         <legend>Startdatum *</legend>
@@ -195,12 +195,12 @@
             {% for value, label in meeting_fields.status.options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
           </select>
         </label>
-        {{ delete_button("meeting", "Meeting") }}
-        <label>Dauer
+        <label class="activity-compose-duration-field">Dauer
           <select name="duration_minutes" data-customer-meeting-duration>
             {% for minutes in call_duration_options %}<option value="{{ minutes }}"{% if minutes == meeting_defaults.duration_minutes %} selected{% endif %}>{{ minutes }} Min.</option>{% endfor %}
           </select>
         </label>
+        {{ delete_button("meeting", "Meeting") }}
       </div>
       <fieldset class="activity-compose-datetime">
         <legend>Startdatum *</legend>

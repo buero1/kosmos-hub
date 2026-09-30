@@ -3997,7 +3997,7 @@
       .activity-compose-status-row > label { min-width: 0; }
       .activity-compose-status-row > button { margin: 0; white-space: nowrap; }
       .activity-compose-status-with-duration { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .activity-compose-status-with-duration:has([data-activity-delete-open]:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+      .activity-compose-status-with-duration:has([data-activity-delete-open]:not([hidden])) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
       .calendar-page-header { flex-wrap: wrap; gap: 0.75rem; }
       .calendar-page-header .activity-view-filter { margin: 0; }
       .activity-compose-two-columns,
@@ -4430,7 +4430,7 @@
         .activity-compose-datetime { grid-template-columns: 1fr; }
         .activity-compose-status-with-duration,
         .activity-compose-status-with-duration:has([data-activity-delete-open]:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
-        .activity-compose-status-with-duration > label:last-child { grid-column: 1 / -1; }
+        .activity-compose-status-with-duration > .activity-compose-duration-field { grid-column: 1 / -1; grid-row: 2; }
         .email-template-library-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
         .email-template-library-categories { display: flex; gap: 0.25rem; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); }
         .email-template-library-category { flex: 0 0 auto; width: auto; }

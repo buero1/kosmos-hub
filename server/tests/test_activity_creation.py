@@ -102,6 +102,15 @@ def test_creation_values_are_display_only_and_used_by_all_openers():
     assert "creation_fields(" in standalone
 
 
+def test_call_and_meeting_delete_buttons_follow_duration_field():
+    composer = Path("app/templates/partials/customer_activity_composer.html").read_text(encoding="utf-8")
+    for kind in ("call", "meeting"):
+        form = composer.split(f'data-customer-{kind}-form', 1)[1].split("</form>", 1)[0]
+        duration_position = form.index(f"data-customer-{kind}-duration")
+        delete_position = form.index(f'delete_button("{kind}"')
+        assert duration_position < delete_position
+
+
 def test_creation_markup_escapes_employee_name():
     macros = create_templates(directory="app/templates").env.get_template("partials/activity_creation.html").module
     assert "&lt;script&gt;" in macros.fields("<script>", None)
