@@ -4,6 +4,10 @@
 {% from "partials/detail_header.html" import module_detail_header with context %}
 {% from "partials/lead_field_control.html" import lead_field_control %}
 {% block title %}{{ detail.name }} · Leads · kosmos-hub{% endblock %}
+{% macro lead_field_value(field) %}
+  {% set href = field.url_href %}
+  {% if href %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% else %}{{ field.value or "-" }}{% endif %}
+{% endmacro %}
 {% macro lead_note_entry_action(note, action) %}
   {% if action == "edit" %}
     <button class="customer-activity-entry-action" type="button" data-customer-note-edit data-customer-note-update-url="/leads/{{ detail.lead.id }}/notes/{{ note.id }}" data-customer-note-title="{{ note.title }}" data-customer-note-content="{{ note.content }}" aria-label="Notiz bearbeiten" title="Notiz bearbeiten"><svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 18.8 6.1 14.6 15.4 5.3a1.85 1.85 0 0 1 2.62 0l.72.72a1.85 1.85 0 0 1 0 2.62l-9.33 9.33-4.55 1.1Z"/><path d="M14.2 6.5 17.6 9.9"/><path d="M6.1 14.6 9.45 17.95"/></g></svg></button>
@@ -121,12 +125,12 @@
                 <div class="customer-section-expandable" data-expandable-section>
                   <div data-customer-fields-readonly>
                     <dl class="customer-fields-grid customer-fields-grid-summary">
-                      {% for field in detail.fields[:detail.show_more_index] %}<div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+                      {% for field in detail.fields[:detail.show_more_index] %}<div><dt>{{ field.label }}</dt><dd>{{ lead_field_value(field) }}</dd></div>{% endfor %}
                     </dl>
                     <div data-expandable-content{% if detail.show_more_index < detail.fields|length %} data-expandable-start-collapsed data-expandable-more-label="Mehr anzeigen ..." hidden{% else %} class="is-expanded"{% endif %}>
                       {% if detail.show_more_index < detail.fields|length %}
                         <dl class="customer-fields-grid customer-fields-grid-following">
-                          {% for field in detail.fields[detail.show_more_index:] %}<div><dt>{{ field.label }}</dt><dd>{{ field.value or "-" }}</dd></div>{% endfor %}
+                          {% for field in detail.fields[detail.show_more_index:] %}<div><dt>{{ field.label }}</dt><dd>{{ lead_field_value(field) }}</dd></div>{% endfor %}
                         </dl>
                       {% endif %}
                     </div>
@@ -136,7 +140,7 @@
                     <dl class="customer-fields-grid" data-layout-sortable>
                       {% for field in detail.fields %}
                         {% if loop.index0 == detail.show_more_index %}{{ show_more_layout_item() }}{% endif %}
-                        <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ field.value or "-" }}</dd></div>
+                        <div class="customer-field-layout-item" data-layout-item data-layout-item-key="{{ field.key }}"><dt>{{ field.label }} <small class="customer-field-type">{{ field.display_type }}</small></dt><dd>{{ lead_field_value(field) }}</dd></div>
                       {% endfor %}
                       {% if detail.show_more_index >= detail.fields|length %}{{ show_more_layout_item() }}{% endif %}
                     </dl>

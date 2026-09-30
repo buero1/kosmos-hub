@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.core.web_urls import web_url_href
 from app.models.hub_lead import HubLead
 from app.services.google_search import business_google_search_url
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS, HUB_LEAD_SUBFORMS, HubLeadField, HubLeadSubform
@@ -51,6 +52,10 @@ class HubLeadFieldValue:
     required: bool = False
     read_only: bool = False
     options: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def url_href(self) -> str | None:
+        return web_url_href(self.value) if self.display_type == "URL" else None
 
 
 @dataclass(frozen=True)

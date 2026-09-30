@@ -56,6 +56,8 @@ if '--customer-iban-reveal' in sys.argv:
     release_prefix = 'customer-iban-reveal'
 if '--sepa-grant-method' in sys.argv:
     release_prefix = 'sepa-grant-method'
+if '--lead-url-fields' in sys.argv:
+    release_prefix = 'lead-url-fields'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -116,6 +118,9 @@ if '--sepa-field-labels' in sys.argv:
     expected = {'app/services/hub_sepa.py'}
 if '--sepa-grant-method' in sys.argv:
     expected = {'app/services/hub_sepa.py'}
+if '--lead-url-fields' in sys.argv:
+    expected = {'app/core/web_urls.py', 'app/services/customer_directory.py',
+                'app/services/hub_leads.py', 'app/templates/lead_detail.html'}
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -203,7 +208,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))

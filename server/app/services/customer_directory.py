@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import re
-from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import SecretCipher
+from app.core.web_urls import web_url_href
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerZohoEmail
@@ -57,21 +57,7 @@ class CustomerProfileField:
     def url_href(self) -> str | None:
         if self.display_type != "URL" or self.sensitive or not self.value:
             return None
-        value = self.value.strip()
-        if not value or "\\" in value or any(char.isspace() or ord(char) < 32 for char in value):
-            return None
-        has_scheme = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", value))
-        href = "https:" + value if value.startswith("//") else value if has_scheme else "https://" + value
-        try:
-            parsed = urlsplit(href)
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-                return None
-            if not has_scheme and "." not in parsed.hostname:
-                return None
-            _ = parsed.port
-        except ValueError:
-            return None
-        return href
+        return web_url_href(self.value)
 
 
 @dataclass(frozen=True)
