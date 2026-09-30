@@ -683,11 +683,27 @@ def test_customer_directory_lists_and_filters_zoho_industries():
             name="Second Craft Customer",
             encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Branche": "handwerk"}})),
         )
-        db.add_all([craft_customer, consulting_customer, duplicate_industry_customer])
+        legacy_options_customer = Customer(
+            name="Legacy Options",
+            encrypted_profile_json=cipher.encrypt(json.dumps({
+                "fields": {"Branche": "Beratung"},
+                "field_metadata": {
+                    "industry": {
+                        "label": "Branche",
+                        "editable": True,
+                        "pick_list_values": [
+                            {"value": "Gastronomie", "label": "Gastronomie"},
+                            {"value": "craft", "label": "Handwerk"},
+                        ],
+                    }
+                },
+            })),
+        )
+        db.add_all([craft_customer, consulting_customer, duplicate_industry_customer, legacy_options_customer])
         db.commit()
 
         service = _service(db)
-        assert service.list_industries() == ["Beratung", "Handwerk"]
+        assert service.list_industries() == ["Beratung", "Gastronomie", "Handwerk"]
         assert [entry.customer.id for entry in service.list_entries(industry="Handwerk")] == [
             craft_customer.id,
             duplicate_industry_customer.id,

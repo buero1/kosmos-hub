@@ -176,7 +176,12 @@
 {% macro customer_field_control(field, name, label=none) %}
   <label class="customer-field-control">
     <span>{{ label if label is not none else field.label }}{% if field.sensitive %} <small>geschützt</small>{% endif %}</span>
-    {% if field.options %}
+    {% if field.key == "industry" %}
+      <input type="text" name="{{ name }}" value="{{ field.value or '' }}" list="customer-industry-options" autocomplete="off" maxlength="255">
+      <datalist id="customer-industry-options">
+        {% for option in customer_industry_options %}<option value="{{ option }}"></option>{% endfor %}
+      </datalist>
+    {% elif field.options %}
       <select name="{{ name }}">
         <option value=""></option>
         {% for value, label in field.options %}

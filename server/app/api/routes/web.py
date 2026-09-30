@@ -553,11 +553,15 @@ def _hub_customer_create_context(
     values: dict[str, str] | None = None,
     error: str = "",
 ) -> dict[str, object]:
+    industry_options = CustomerDirectoryService(
+        db=db, cipher=get_secret_cipher()
+    ).list_industries()
     return {
         "csrf_token": get_csrf_token(request),
         "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
         "field_order": _hub_customer_create_field_order(db),
         "create_fields": {field.key: field for field in customer_create_fields()},
+        "customer_industry_options": industry_options,
         "values": {**customer_create_defaults(), **(values or {})},
         "error": error,
     }
@@ -4531,6 +4535,9 @@ def customer_detail_page(
         record_id=customer_id,
         action="edit",
     )
+    allowed_customer_ids = access.accessible_record_ids(
+        user=current_user, module_key="customers"
+    )
     try:
         detail = read_customer_detail(HubOperationService(db=db, cipher=cipher, actor=current_user.username), {"customer_id": str(customer_id)})
     except HubOperationError:
@@ -4566,6 +4573,9 @@ def customer_detail_page(
             "communication_message": message[:500] if communication_state else "",
             "can_manage_communications": can_manage_communications,
             "can_manage_customer_fields": can_manage_customer_fields,
+            "customer_industry_options": CustomerDirectoryService(
+                db=db, cipher=cipher
+            ).list_industries(allowed_customer_ids=allowed_customer_ids),
             "can_manage_checklists": can_manage_customer_fields,
             "customer_checklists": checklist_service.list_for_customer(customer_id=customer_id),
             "can_send_website_profile": can_manage_customer_fields and access.can(current_user, "websites", "edit"),

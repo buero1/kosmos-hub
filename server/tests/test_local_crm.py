@@ -145,6 +145,30 @@ def test_subform_patch_and_explicit_date_clear_preserve_others():
     assert original == profile()
 
 
+def test_customer_industry_accepts_a_free_value_despite_legacy_choices():
+    original = profile()
+    original["fields"]["Branche"] = "Handwerk"
+    original["field_metadata"]["industry"] = {
+        "label": "Branche",
+        "display_type": "Auswahlliste",
+        "editable": True,
+        "pick_list_values": [{"value": "Handwerk", "label": "Handwerk"}],
+    }
+
+    result = patch_customer_profile(
+        original,
+        {"customer_field__industry": "Restaurierung historischer Gebäude"},
+    )
+
+    assert result["fields"]["Branche"] == "Restaurierung historischer Gebäude"
+
+    with pytest.raises(ValueError, match="Branche ist zu lang"):
+        patch_customer_profile(
+            original,
+            {"customer_field__industry": "x" * 256},
+        )
+
+
 @pytest.mark.parametrize(
     "value,kind,expected",
     [

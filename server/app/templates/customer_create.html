@@ -27,7 +27,12 @@
                 {% set name = "customer_field__" ~ field.key %}
                 <label class="customer-field-control">
                   <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
-                  {% if field.options %}
+                  {% if field.key == "industry" %}
+                    <input name="{{ name }}" type="text" value="{{ values.get(name, '') }}" list="customer-create-industry-options" autocomplete="off" maxlength="{{ field.max_length }}">
+                    <datalist id="customer-create-industry-options">
+                      {% for option in customer_industry_options %}<option value="{{ option }}"></option>{% endfor %}
+                    </datalist>
+                  {% elif field.options %}
                     <select name="{{ name }}"{% if field.required %} required{% endif %}>
                       {% for value, label in field.options %}<option value="{{ value }}"{% if values.get(name, '') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>

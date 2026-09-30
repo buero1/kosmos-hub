@@ -23,6 +23,7 @@ def render_grids(detail):
     return env.from_string(macros + "{{ customer_profile_edit_grid(detail.summary_profile_fields) }}"
                            "{{ customer_profile_edit_grid(detail.following_profile_fields, following=true) }}").render(
                                detail=detail, csrf_token="test-csrf",
+                               customer_industry_options=("Beratung", "Handwerk"),
                                request=SimpleNamespace(state=SimpleNamespace(hub_user=SimpleNamespace(role="admin", is_active=True))))
 
 
@@ -111,3 +112,26 @@ def test_customer_edit_template_uses_the_same_sections_as_reading():
     assert "customer_profile_edit_grid(detail.summary_profile_fields)" in form
     assert "customer_profile_edit_grid(detail.following_profile_fields, following=true)" in form
     assert "for field in detail.editable_profile_fields" not in form
+
+
+def test_industry_uses_searchable_free_text_control():
+    field = CustomerProfileField(
+        key="industry",
+        label="Branche",
+        value="Handwerk",
+        form_value="Handwerk",
+        options=(("Automobile", "Automobile"),),
+        editable=True,
+    )
+    detail = SimpleNamespace(
+        profile_fields=(field,),
+        summary_profile_fields=(field,),
+        following_profile_fields=(),
+        wordpress_admin_site=None,
+    )
+    rendered = render_grids(detail)
+    assert 'name="customer_field__industry"' in rendered
+    assert 'list="customer-industry-options"' in rendered
+    assert '<datalist id="customer-industry-options">' in rendered
+    assert 'value="Beratung"' in rendered
+    assert '<select name="customer_field__industry">' not in rendered

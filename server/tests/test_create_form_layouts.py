@@ -158,6 +158,10 @@ def test_customer_create_form_uses_the_saved_relative_layout_order():
         assert context["field_order"] == reversed_keys
         template = web.templates.env.get_template("customer_create.html")
         assert template is not None
+        source = template.environment.loader.get_source(template.environment, template.name)[0]
+        assert 'field.key == "industry"' in source
+        assert 'list="customer-create-industry-options"' in source
+        assert '<datalist id="customer-create-industry-options">' in source
 
 
 def test_customer_create_form_expands_the_saved_postal_city_field_in_place():

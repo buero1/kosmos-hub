@@ -295,15 +295,26 @@ class CustomerDirectoryService:
         return entries
 
     def list_industries(self, *, allowed_customer_ids: set[int] | None = None) -> list[str]:
-        """Return the available Zoho account industries for the customer filter."""
+        """Return legacy choices and all industry values currently used in the Hub."""
         industries_by_key: dict[str, str] = {}
         customer_query = select(Customer).order_by(Customer.name.asc(), Customer.id.asc())
         if allowed_customer_ids is not None:
             customer_query = customer_query.where(Customer.id.in_(allowed_customer_ids))
         for customer in self.db.scalars(customer_query).all():
-            industry = self._profile_field_value(self._profile_fields(customer), "Branche")
-            if industry:
-                industries_by_key.setdefault(industry.casefold(), industry)
+            industry_field = next(
+                (field for field in self._profile_fields(customer) if field.key == "industry"),
+                None,
+            )
+            if industry_field is None:
+                continue
+            if industry_field.value:
+                industries_by_key.setdefault(
+                    industry_field.value.casefold(), industry_field.value
+                )
+            for value, label in industry_field.options:
+                option = (label or value).strip()
+                if option:
+                    industries_by_key.setdefault(option.casefold(), option)
         return sorted(industries_by_key.values(), key=str.casefold)
 
     def get_detail(self, *, customer_id: int, include_sensitive: bool = False) -> CustomerDirectoryDetail | None:

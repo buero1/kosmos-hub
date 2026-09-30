@@ -66,7 +66,12 @@ def date_control_value(value: object, display_type: str) -> str:
 
 
 def profile_value(
-    value: object, definition: dict, label: str, *, previous: object = None
+    value: object,
+    definition: dict,
+    label: str,
+    *,
+    previous: object = None,
+    allow_unlisted_option: bool = False,
 ) -> object:
     text = str(value or "").strip()
     if definition.get("sensitive") and not text:
@@ -94,7 +99,7 @@ def profile_value(
         if not valid:
             raise ValueError(f"{label}: Bitte eine gültige Website-Adresse angeben.")
     options = definition.get("pick_list_values") or []
-    if options and text and text != str(previous or ""):
+    if options and text and text != str(previous or "") and not allow_unlisted_option:
         allowed = {str(item.get("value")) for item in options if isinstance(item, dict)}
         if text not in allowed:
             raise ValueError(f"{label}: Bitte einen gültigen Wert auswählen.")
@@ -112,8 +117,14 @@ def patch_customer_profile(profile: dict, submitted: dict[str, str]) -> dict:
     for field in resolved:
         key = f"customer_field__{field.key}"
         if key in submitted and field.definition.get("editable"):
+            if field.key == "industry" and len(submitted[key].strip()) > 255:
+                raise ValueError("Branche ist zu lang.")
             fields[field.label] = profile_value(
-                submitted[key], field.definition, field.label, previous=field.value
+                submitted[key],
+                field.definition,
+                field.label,
+                previous=field.value,
+                allow_unlisted_option=field.key == "industry",
             )
     result["fields"] = fields
     result["field_metadata"] = canonical_customer_metadata(result.get("field_metadata"))
