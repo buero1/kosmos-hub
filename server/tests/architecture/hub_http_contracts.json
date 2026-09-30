@@ -17,7 +17,7 @@
     "app/api/routes/site_inventory.py": "e17ba749ad7654eada8133a3f1426f470614a3e9d58233ed0fa4ebbe83fedd47",
     "app/api/routes/site_updates.py": "f91cc76b4d88acb3c18646bfed201de7bd3235e1a148402494ff339d2213c6f3",
     "app/api/routes/sites.py": "3625fd99454a3357f7b2c41c6f00f4c387e72aa6a509a43e4045f8c489b11276",
-    "app/api/routes/web.py": "5d64cdb5312f8b82a08770645e0eec62459a1c87d8d56c999a638c8a6b48dac9",
+    "app/api/routes/web.py": "47d0baf1a60433ec5f58b85e4f1951e0b7d55cc10c68eeae394a942747fe9685",
     "app/main.py": "a1dcd0191d643151a961e7a8b5cbba3fb1e338c3dcf4cdcf4e894f7f44f957e9",
     "app/main.py:route-wiring": "1b68f07b0a806d14fba2f800726d545df62355718d7e13cf997d7873519a81f4"
   },
@@ -1344,7 +1344,7 @@
       "reader_method": "contact_detail"
     },
     "app/api/routes/web.py:customer_detail_page:GET:/customers/{customer_id}": {
-      "fingerprint": "50aae93ed8e4cd40ebca2216b03e075568d054d326af0ad9c9aef8a0c6532ebf",
+      "fingerprint": "3c52624eb2d9a104a0aa7bdeba256339fafae95189d6a06152bbb362b68e2e7a",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -1354,6 +1354,11 @@
         "read_customer_detail"
       ],
       "reader_method": "customer_detail"
+    },
+    "app/api/routes/web.py:update_customer_checklists:POST:/customers/{customer_id}/checklists/actions": {
+      "fingerprint": "34f10bd4aa5ba98e0cb5bf1d50541097ac30ed2200b2d908d98bd3e67625aff9",
+      "state": "human_only",
+      "reason": "Interactive customer checklist mutations require an authenticated browser session, CSRF protection and edit access to the exact customer record. Titles, item text, identifiers and complete reorder sets are bounded and validated server-side; every mutation is customer-scoped and audited. The endpoint has no email, calendar, remote-site or agent side effects."
     },
     "app/api/routes/web.py:customer_website_profile_preview:GET:/customers/{customer_id}/website-profile/preview": {
       "fingerprint": "4ae085ebd6ff0202cf4d55e2a6f10a5cc7d593d29089fb6f9e990243c9de3dfb",

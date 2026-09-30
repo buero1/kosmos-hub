@@ -1,0 +1,98 @@
+{% macro checklist_icon(name) %}
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    {% if name == "edit" %}<path d="M4.5 19.5l4.2-1 9.9-9.9a2.1 2.1 0 0 0-3-3l-9.9 9.9-1.2 4Z"/><path d="m14.2 7 2.8 2.8"/>
+    {% elif name == "delete" %}<path d="M5 7h14M9 7V4.8h6V7M7.2 7l.7 12h8.2l.7-12M10 10.5v5M14 10.5v5"/>
+    {% elif name == "drag" %}<circle cx="9" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="9" cy="17" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="17" r="1" fill="currentColor" stroke="none"/>
+    {% else %}<path d="M12 5v14M5 12h14"/>{% endif %}
+  </svg>
+{% endmacro %}
+
+<section
+  class="customer-checklists"
+  data-customer-checklists
+  data-customer-checklists-url="/customers/{{ customer_id }}/checklists/actions"
+  data-customer-checklists-csrf="{{ csrf_token }}"
+>
+  <p class="customer-checklist-error notice-error" role="alert" data-customer-checklist-error hidden></p>
+
+  <div class="customer-checklist-list" data-customer-checklist-list>
+    {% for checklist in customer_checklists %}
+      {% set checklist_open = checklist.id == active_checklist_id or (active_checklist_id is not defined and loop.first) %}
+      <article class="customer-checklist-card{% if checklist.is_completed %} is-complete{% endif %}" data-checklist-id="{{ checklist.id }}">
+        <header class="customer-checklist-heading">
+          {% if can_manage_checklists %}
+            <button class="customer-checklist-icon customer-checklist-drag" type="button" aria-label="Checkliste verschieben" title="Checkliste verschieben">{{ checklist_icon("drag") }}</button>
+          {% endif %}
+          <button class="customer-checklist-toggle" type="button" aria-expanded="{{ 'true' if checklist_open else 'false' }}" aria-controls="customer-checklist-panel-{{ checklist.id }}" data-checklist-toggle>
+            <span class="customer-checklist-chevron" aria-hidden="true"></span>
+            <span class="customer-checklist-title">{{ checklist.title }}</span>
+            {% if checklist.is_completed %}<span class="customer-checklist-complete-label">Abgeschlossen</span>{% endif %}
+          </button>
+          {% if can_manage_checklists %}
+            <div class="customer-checklist-heading-actions">
+              <button class="customer-checklist-icon" type="button" data-checklist-edit-open aria-label="Checkliste umbenennen" title="Checkliste umbenennen">{{ checklist_icon("edit") }}</button>
+              <button class="customer-checklist-icon" type="button" data-checklist-delete aria-label="Checkliste löschen" title="Checkliste löschen">{{ checklist_icon("delete") }}</button>
+            </div>
+          {% endif %}
+        </header>
+
+        <div id="customer-checklist-panel-{{ checklist.id }}" class="customer-checklist-panel" data-checklist-panel{% if not checklist_open %} hidden{% endif %}>
+          {% if can_manage_checklists %}
+            <form class="customer-checklist-inline-form" data-checklist-form data-checklist-form-action="checklist.update" hidden>
+              <input type="text" name="title" value="{{ checklist.title }}" maxlength="120" required aria-label="Name der Checkliste">
+              <button class="button button-secondary" type="button" data-checklist-form-cancel>Abbrechen</button>
+              <button class="button" type="submit">Speichern</button>
+            </form>
+          {% endif %}
+
+          <ul class="customer-checklist-items" data-checklist-items>
+            {% for item in checklist.items %}
+              <li class="customer-checklist-item{% if item.is_completed %} is-completed{% endif %}" data-checklist-item-id="{{ item.id }}">
+                {% if can_manage_checklists %}
+                  <button class="customer-checklist-icon customer-checklist-item-drag" type="button" aria-label="Punkt verschieben" title="Punkt verschieben">{{ checklist_icon("drag") }}</button>
+                {% endif %}
+                <label class="customer-checklist-item-toggle">
+                  <input type="checkbox" data-checklist-item-toggle{% if item.is_completed %} checked{% endif %}{% if not can_manage_checklists %} disabled{% endif %}>
+                  <span>{{ item.text }}</span>
+                </label>
+                {% if can_manage_checklists %}
+                  <div class="customer-checklist-item-actions">
+                    <button class="customer-checklist-icon" type="button" data-checklist-item-edit-open aria-label="Punkt bearbeiten" title="Punkt bearbeiten">{{ checklist_icon("edit") }}</button>
+                    <button class="customer-checklist-icon" type="button" data-checklist-item-delete aria-label="Punkt löschen" title="Punkt löschen">{{ checklist_icon("delete") }}</button>
+                  </div>
+                  <form class="customer-checklist-inline-form customer-checklist-item-form" data-checklist-form data-checklist-form-action="item.update" hidden>
+                    <input type="text" name="text" value="{{ item.text }}" maxlength="500" required aria-label="Text des Checklistenpunkts">
+                    <button class="button button-secondary" type="button" data-checklist-form-cancel>Abbrechen</button>
+                    <button class="button" type="submit">Speichern</button>
+                  </form>
+                {% endif %}
+              </li>
+            {% else %}
+              <li class="customer-checklist-empty">Noch keine Punkte vorhanden.</li>
+            {% endfor %}
+          </ul>
+
+          {% if can_manage_checklists %}
+            <button class="customer-checklist-add" type="button" data-checklist-item-add-open>{{ checklist_icon("add") }}<span>Punkt hinzufügen</span></button>
+            <form class="customer-checklist-inline-form" data-checklist-form data-checklist-form-action="item.create" hidden>
+              <input type="text" name="text" maxlength="500" required placeholder="Neuer Checklistenpunkt" aria-label="Neuer Checklistenpunkt">
+              <button class="button button-secondary" type="button" data-checklist-form-cancel>Abbrechen</button>
+              <button class="button" type="submit">Hinzufügen</button>
+            </form>
+          {% endif %}
+        </div>
+      </article>
+    {% else %}
+      <p class="subtle customer-checklist-empty-state">Noch keine Checkliste vorhanden.</p>
+    {% endfor %}
+  </div>
+
+  {% if can_manage_checklists %}
+    <button class="customer-checklist-add customer-checklist-add-list" type="button" data-checklist-add-open>{{ checklist_icon("add") }}<span>Neue Checkliste</span></button>
+    <form class="customer-checklist-inline-form customer-checklist-create-form" data-checklist-form data-checklist-form-action="checklist.create" hidden>
+      <input type="text" name="title" maxlength="120" required placeholder="Name der Checkliste" aria-label="Name der neuen Checkliste">
+      <button class="button button-secondary" type="button" data-checklist-form-cancel>Abbrechen</button>
+      <button class="button" type="submit">Anlegen</button>
+    </form>
+  {% endif %}
+</section>

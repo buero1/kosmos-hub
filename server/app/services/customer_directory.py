@@ -368,6 +368,8 @@ class CustomerDirectoryService:
         )
         self.db.add(customer)
         self.db.flush()
+        from app.services.customer_checklists import CustomerChecklistService
+        CustomerChecklistService(db=self.db).initialize_customer(customer)
         from app.services.site_customer_matching import SiteCustomerMatchingService
         SiteCustomerMatchingService(db=self.db, cipher=self.cipher).customer_saved(customer)
         return customer

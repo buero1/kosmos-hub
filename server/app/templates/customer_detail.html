@@ -311,6 +311,7 @@
                   {% for tab in detail.profile_field_tabs %}
                     <button id="customer-fields-tab-{{ tab.key }}" class="field-tab" type="button" role="tab" aria-controls="customer-fields-panel-{{ tab.key }}" aria-selected="false" tabindex="-1" data-field-tab="{{ tab.key }}">{{ tab.label }}</button>
                   {% endfor %}
+                  <button id="customer-fields-tab-checklists" class="field-tab" type="button" role="tab" aria-controls="customer-fields-panel-checklists" aria-selected="false" tabindex="-1" data-field-tab="checklists">Checklisten</button>
                 </div>
               </div>
 
@@ -364,6 +365,9 @@
                   {% endif %}
                 </div>
               {% endfor %}
+              <div id="customer-fields-panel-checklists" role="tabpanel" aria-labelledby="customer-fields-tab-checklists" data-field-tab-panel="checklists" hidden>
+                {% include "partials/customer_checklists.html" %}
+              </div>
             </div>
             {% if can_manage_customer_fields and detail.display_profile_fields %}
               <div class="customer-fields-layout-editor" data-layout-fields-editor hidden>
@@ -854,6 +858,7 @@
     </div>
   </dialog>
 
+  <script src="/static/customer-checklists.js?v=1" defer></script>
   <script>
     (function () {
       var customerId = {{ detail.entry.customer.id | tojson }};

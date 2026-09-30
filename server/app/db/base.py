@@ -3,6 +3,7 @@ from app.models.hub_activity_event import HubActivityEvent
 from app.models.ai_provider_config import AiProviderConfig
 from app.models.ai_usage import AiUsageRequest
 from app.models.customer import Customer
+from app.models.customer_checklist import CustomerChecklist, CustomerChecklistItem
 from app.models.customer_contact import CustomerContact
 from app.models.customer_communication import CustomerEmailAttachment, CustomerZohoEmail, CustomerZohoEmailImage, CustomerZohoNote
 from app.models.email_compose_image import EmailComposeImage
@@ -84,6 +85,8 @@ __all__ = [
     "AiUsageRequest",
     "Base",
     "Customer",
+    "CustomerChecklist",
+    "CustomerChecklistItem",
     "CustomerEmailAttachment",
     "CustomerActivityReminderNotification",
     "CustomerTaskEmailReminder",

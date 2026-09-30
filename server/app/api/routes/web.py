@@ -61,6 +61,7 @@ from app.services.customer_activities import (
     CustomerActivityService,
     suggested_call_start,
 )
+from app.services.customer_checklists import CustomerChecklistError, CustomerChecklistService
 from app.services.bavarian_holidays import bavarian_public_holidays
 from app.services.hub_email_composition import compose_context, render_template
 from app.services.hub_email_readers import (mailbox_status_data, mailbox_accounts, template_library, compose_options as email_compose_options,
@@ -4550,6 +4551,7 @@ def customer_detail_page(
     berlin_now = datetime.now(ZoneInfo("Europe/Berlin"))
     call_start = suggested_call_start(berlin_now).replace(tzinfo=None)
     activity_service = CustomerActivityService(db=db)
+    checklist_service = CustomerChecklistService(db=db)
     finance_service = HubFinanceService(db=db, cipher=cipher)
     finance_document_service = HubFinanceDocumentService(db=db, cipher=cipher)
     return templates.TemplateResponse(
@@ -4563,6 +4565,8 @@ def customer_detail_page(
             "communication_message": message[:500] if communication_state else "",
             "can_manage_communications": can_manage_communications,
             "can_manage_customer_fields": can_manage_customer_fields,
+            "can_manage_checklists": can_manage_customer_fields,
+            "customer_checklists": checklist_service.list_for_customer(customer_id=customer_id),
             "can_send_website_profile": can_manage_customer_fields and access.can(current_user, "websites", "edit"),
             "can_view_emails": can_view_emails,
             "can_view_contacts": can_view_contacts,
@@ -4618,6 +4622,119 @@ def customer_detail_page(
             "completion_email_customer_id": customer_id if completion_email else None,
             "csrf_token": get_csrf_token(request),
         },
+    )
+
+
+@router.post("/customers/{customer_id}/checklists/actions", response_class=JSONResponse)
+async def update_customer_checklists(
+    customer_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if not HubAccessControlService(db=db).can_access_record(
+        user=user, module_key="customers", record_id=customer_id, action="edit"
+    ):
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    action = str(form.get("action") or "").strip()
+    service = CustomerChecklistService(db=db)
+
+    def integer(name: str, *, required: bool = True) -> int | None:
+        raw = str(form.get(name) or "").strip()
+        if not raw and not required:
+            return None
+        if not raw.isascii() or not raw.isdecimal() or int(raw) < 1:
+            raise CustomerChecklistError("Die Checkliste hat sich geändert. Bitte lade die Seite neu.")
+        return int(raw)
+
+    def ordered_ids() -> tuple[int, ...]:
+        try:
+            values = json.loads(str(form.get("order_json") or "[]"))
+        except json.JSONDecodeError as exc:
+            raise CustomerChecklistError("Die neue Reihenfolge ist ungültig.") from exc
+        if not isinstance(values, list) or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1 for value in values
+        ):
+            raise CustomerChecklistError("Die neue Reihenfolge ist ungültig.")
+        return tuple(values)
+
+    try:
+        active_id = integer("active_id", required=False)
+        checklist_id = integer("checklist_id", required=False)
+        item_id = integer("item_id", required=False)
+        if action == "checklist.create":
+            checklist = service.create_checklist(customer_id=customer_id, title=str(form.get("title") or ""))
+            active_id = checklist.id
+        elif action == "checklist.update" and checklist_id:
+            service.update_checklist(
+                customer_id=customer_id, checklist_id=checklist_id, title=str(form.get("title") or "")
+            )
+            active_id = checklist_id
+        elif action == "checklist.delete" and checklist_id:
+            service.delete_checklist(customer_id=customer_id, checklist_id=checklist_id)
+            active_id = None
+        elif action == "checklist.reorder":
+            service.reorder_checklists(customer_id=customer_id, ordered_ids=ordered_ids())
+        elif action == "item.create" and checklist_id:
+            service.create_item(
+                customer_id=customer_id, checklist_id=checklist_id, text=str(form.get("text") or "")
+            )
+            active_id = checklist_id
+        elif action == "item.update" and checklist_id and item_id:
+            service.update_item(
+                customer_id=customer_id,
+                checklist_id=checklist_id,
+                item_id=item_id,
+                text=str(form.get("text") or ""),
+            )
+            active_id = checklist_id
+        elif action == "item.toggle" and checklist_id and item_id:
+            service.toggle_item(
+                customer_id=customer_id, checklist_id=checklist_id, item_id=item_id, actor=user.username
+            )
+            active_id = checklist_id
+        elif action == "item.delete" and checklist_id and item_id:
+            service.delete_item(customer_id=customer_id, checklist_id=checklist_id, item_id=item_id)
+            active_id = checklist_id
+        elif action == "item.reorder" and checklist_id:
+            service.reorder_items(
+                customer_id=customer_id, checklist_id=checklist_id, ordered_ids=ordered_ids()
+            )
+            active_id = checklist_id
+        else:
+            raise CustomerChecklistError("Die Checklisten-Aktion ist ungültig.")
+        write_audit_log(
+            db,
+            site=None,
+            actor=user.username,
+            source="hub-web",
+            action="update-customer-checklists",
+            result="ok",
+            detail=f"Customer {customer_id}; action {action}.",
+        )
+        db.commit()
+    except CustomerChecklistError as exc:
+        db.rollback()
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    checklists = service.list_for_customer(customer_id=customer_id)
+    if active_id is None and checklists:
+        active_id = checklists[0].id
+    html = templates.env.get_template("partials/customer_checklists.html").render(
+        customer_id=customer_id,
+        customer_checklists=checklists,
+        can_manage_checklists=True,
+        csrf_token=get_csrf_token(request),
+        active_checklist_id=active_id,
+    )
+    return JSONResponse(
+        {"html": html, "active_id": active_id},
+        headers={"Cache-Control": "private, no-store"},
     )
 
 

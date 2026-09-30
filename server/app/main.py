@@ -1018,6 +1018,7 @@ def _ensure_phase_one_schema() -> None:
             "encrypted_profile_json": "TEXT NULL",
             "zoho_modified_at": "DATETIME NULL",
             "zoho_synced_at": "DATETIME NULL",
+            "checklists_initialized": "TINYINT(1) NOT NULL DEFAULT 0",
         }
         missing = [(name, definition) for name, definition in additions.items() if name not in columns]
         if missing:
@@ -1176,6 +1177,9 @@ async def lifespan(_: FastAPI):
         ensure_record_info_schema(engine)
         from app.services.hub_activity_responsibility_schema import ensure_activity_responsibility_schema
         ensure_activity_responsibility_schema(engine)
+        from app.models.customer_checklist import CustomerChecklist, CustomerChecklistItem
+        CustomerChecklist.__table__.create(bind=engine, checkfirst=True)
+        CustomerChecklistItem.__table__.create(bind=engine, checkfirst=True)
         with SessionLocal() as db:
             from app.services.retire_external_crm import retire_external_crm
             retire_external_crm(db)
@@ -1183,6 +1187,8 @@ async def lifespan(_: FastAPI):
             HubWorkflowService(db=db).ensure_default_workflows()
             EmailAiPromptPresetService(db=db).ensure_default_presets()
             HubPdfTemplateService(db=db).ensure_default_templates()
+            from app.services.customer_checklists import CustomerChecklistService
+            CustomerChecklistService(db=db).initialize_pending_customers()
             db.commit()
         _backfill_customer_zoho_email_headers()
         invoice_mail_recovery_task = asyncio.create_task(asyncio.to_thread(resume_queued_invoice_email_batches))

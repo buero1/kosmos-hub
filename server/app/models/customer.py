@@ -19,6 +19,7 @@ class Customer(TimestampMixin, Base):
     encrypted_profile_json: Mapped[str | None] = mapped_column(Text(), nullable=True)
     zoho_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checklists_initialized: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
 
     sites = relationship("Site", back_populates="customer")
     contacts = relationship("CustomerContact", back_populates="customer", cascade="all", passive_deletes=True)
@@ -27,3 +28,4 @@ class Customer(TimestampMixin, Base):
     call_activities = relationship("CustomerCallActivity", back_populates="customer", cascade="all, delete-orphan")
     task_activities = relationship("CustomerTaskActivity", back_populates="customer", cascade="all, delete-orphan")
     meeting_activities = relationship("CustomerMeetingActivity", back_populates="customer", cascade="all, delete-orphan")
+    checklists = relationship("CustomerChecklist", back_populates="customer", cascade="all, delete-orphan")

@@ -68,6 +68,8 @@ if '--record-email-return' in sys.argv:
     release_prefix = 'record-email-return'
 if '--activity-delete-position' in sys.argv:
     release_prefix = 'activity-delete-position'
+if '--customer-checklists' in sys.argv:
+    release_prefix = 'customer-checklists'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -159,6 +161,15 @@ if '--activity-delete-position' in sys.argv:
         'app/templates/base.html',
         'app/templates/partials/customer_activity_composer.html',
     }
+if '--customer-checklists' in sys.argv:
+    expected = {
+        'app/api/routes/web.py', 'app/db/base.py', 'app/main.py',
+        'app/models/__init__.py', 'app/models/customer.py',
+        'app/models/customer_checklist.py', 'app/services/customer_checklists.py',
+        'app/services/customer_directory.py', 'app/static/customer-checklists.js',
+        'app/templates/base.html', 'app/templates/customer_detail.html',
+        'app/templates/partials/customer_checklists.html',
+    }
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -246,7 +257,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
@@ -332,4 +343,15 @@ if '--lead-appointment-email' in sys.argv:
     indexes = {index['name'] for index in schema.get_indexes('hub_scheduled_emails')}
     assert 'automation_key' in columns
     assert 'uq_hub_scheduled_emails_automation_key' in indexes
+if '--customer-checklists' in sys.argv:
+    from sqlalchemy import inspect
+    schema = inspect(engine)
+    customer_columns = {column['name'] for column in schema.get_columns('customers')}
+    assert 'checklists_initialized' in customer_columns
+    assert {'customer_checklists', 'customer_checklist_items'} <= set(schema.get_table_names())
+    with engine.connect() as connection:
+        pending = connection.scalar(text('SELECT COUNT(*) FROM customers WHERE checklists_initialized = 0'))
+        checklist_count = connection.scalar(text('SELECT COUNT(*) FROM customer_checklists'))
+    assert pending == 0
+    assert checklist_count > 0
 print(json.dumps({'deployed': True, 'health': 200, 'backup': str(backup)}), flush=True)

@@ -3323,6 +3323,78 @@
         flex: 0 1 auto;
         white-space: normal;
       }
+      .customer-checklists { display: grid; gap: 0.85rem; padding-top: 0.35rem; }
+      .customer-checklists.is-saving { opacity: 0.72; pointer-events: none; }
+      .customer-checklist-error { margin: 0; }
+      .customer-checklist-list { display: grid; gap: 0; border-top: 1px solid var(--border); }
+      .customer-checklist-card { min-width: 0; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel) 76%, transparent); }
+      .customer-checklist-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.3rem; min-height: 3.4rem; }
+      .customer-checklist-toggle {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.8rem 0.25rem;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        cursor: pointer;
+        font: 700 0.92rem var(--font-body);
+        text-align: left;
+      }
+      .customer-checklist-chevron { width: 0.48rem; height: 0.48rem; flex: 0 0 auto; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 140ms ease; }
+      .customer-checklist-toggle[aria-expanded="true"] .customer-checklist-chevron { transform: rotate(45deg); }
+      .customer-checklist-title { min-width: 0; overflow-wrap: anywhere; }
+      .customer-checklist-complete-label { margin-left: auto; color: #26704b; font-size: 0.72rem; font-weight: 700; }
+      .customer-checklist-heading-actions,
+      .customer-checklist-item-actions { display: flex; align-items: center; gap: 0.15rem; }
+      .customer-checklist-icon {
+        display: inline-grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        flex: 0 0 auto;
+        padding: 0;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .customer-checklist-icon:hover { background: var(--accent-soft); color: var(--accent); }
+      .customer-checklist-icon svg,
+      .customer-checklist-add svg { width: 1rem; height: 1rem; }
+      .customer-checklist-drag,
+      .customer-checklist-item-drag { cursor: grab; touch-action: none; }
+      .customer-checklist-drag:active,
+      .customer-checklist-item-drag:active { cursor: grabbing; }
+      .customer-checklist-panel { display: grid; gap: 0.75rem; padding: 0.25rem 0.35rem 1rem 2.35rem; }
+      .customer-checklist-items { display: grid; gap: 0.2rem; margin: 0; padding: 0; list-style: none; }
+      .customer-checklist-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.35rem; min-width: 0; padding: 0.35rem 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent); }
+      .customer-checklist-item:last-child { border-bottom: 0; }
+      .customer-checklist-item-toggle { display: flex; min-width: 0; align-items: flex-start; gap: 0.65rem; padding: 0.4rem 0; cursor: pointer; color: var(--ink); font-weight: 400; line-height: 1.45; }
+      .customer-checklist-item-toggle input { width: 1rem; height: 1rem; flex: 0 0 auto; margin: 0.14rem 0 0; accent-color: var(--accent); }
+      .customer-checklist-item-toggle span { min-width: 0; overflow-wrap: anywhere; }
+      .customer-checklist-item.is-completed .customer-checklist-item-toggle span { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+      .customer-checklist-inline-form { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.5rem; }
+      .customer-checklist-inline-form[hidden] { display: none; }
+      .customer-checklist-inline-form input { margin: 0; }
+      .customer-checklist-inline-form .button { margin: 0; }
+      .customer-checklist-item-form { grid-column: 2 / -1; width: 100%; }
+      .customer-checklist-add { display: inline-flex; width: fit-content; align-items: center; gap: 0.45rem; padding: 0.35rem 0.45rem; border: 0; border-radius: 7px; background: transparent; color: var(--accent); cursor: pointer; font: 700 0.82rem var(--font-body); }
+      .customer-checklist-add:hover { background: var(--accent-soft); }
+      .customer-checklist-add-list { margin-top: 0.15rem; }
+      .customer-checklist-empty,
+      .customer-checklist-empty-state { padding: 0.75rem 0; color: var(--muted); }
+      .customer-checklist-sortable-ghost { opacity: 0.38; }
+      .customer-checklist-sortable-chosen { background: color-mix(in srgb, var(--accent-soft) 58%, var(--panel)); }
+      @media (max-width: 620px) {
+        .customer-checklist-heading { grid-template-columns: auto minmax(0, 1fr) auto; }
+        .customer-checklist-panel { padding-left: 0; }
+        .customer-checklist-item { grid-template-columns: auto minmax(0, 1fr) auto; }
+        .customer-checklist-inline-form { grid-template-columns: 1fr 1fr; }
+        .customer-checklist-inline-form input { grid-column: 1 / -1; }
+      }
       .field-tab:hover { color: var(--ink); }
       .field-tab[aria-selected="true"] {
         border-bottom-color: var(--accent);
