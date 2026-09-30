@@ -120,12 +120,14 @@ def test_deleted_last_checklist_is_not_recreated(db):
 
 
 def test_customer_checklist_ui_contract():
+    route = Path("app/api/routes/web.py").read_text(encoding="utf-8")
     detail = Path("app/templates/customer_detail.html").read_text(encoding="utf-8")
     partial = Path("app/templates/partials/customer_checklists.html").read_text(encoding="utf-8")
     script = Path("app/static/customer-checklists.js").read_text(encoding="utf-8")
     main = Path("app/main.py").read_text(encoding="utf-8")
 
     assert detail.index("customer-fields-tab-{{ tab.key }}") < detail.index("customer-fields-tab-checklists")
+    assert '"customer_id": customer_id' in route
     assert 'data-field-tab-panel="checklists"' in detail
     assert 'data-checklist-form-action="checklist.create"' in partial
     assert 'data-checklist-form-action="item.create"' in partial
@@ -133,6 +135,7 @@ def test_customer_checklist_ui_contract():
     assert "customer-checklist-item-drag" in partial and "customer-checklist-drag" in partial
     assert script.count("window.confirm") == 1
     assert 'submit("item.delete"' in script
+    assert 'item.classList.toggle("is-completed", completed)' in script
     assert "7/9" not in partial and "Fortschritt" not in partial
     customer_schema = main[main.index('if "customers" in table_names:'):]
     assert '"checklists_initialized": "TINYINT(1) NOT NULL DEFAULT 0"' in customer_schema

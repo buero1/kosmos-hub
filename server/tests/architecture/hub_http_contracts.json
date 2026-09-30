@@ -1344,7 +1344,7 @@
       "reader_method": "contact_detail"
     },
     "app/api/routes/web.py:customer_detail_page:GET:/customers/{customer_id}": {
-      "fingerprint": "3c52624eb2d9a104a0aa7bdeba256339fafae95189d6a06152bbb362b68e2e7a",
+      "fingerprint": "c43efa5282d8c78f4352f9889576ff8b37c261a0dda71fa727dca0ef39ea8f89",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [

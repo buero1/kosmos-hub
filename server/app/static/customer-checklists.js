@@ -33,7 +33,7 @@
     }
 
     function submit(action, values) {
-      if (root.classList.contains("is-saving")) return Promise.resolve();
+      if (root.classList.contains("is-saving")) return Promise.resolve(false);
       root.classList.add("is-saving");
       var error = root.querySelector("[data-customer-checklist-error]");
       if (error) error.hidden = true;
@@ -52,9 +52,11 @@
         });
       }).then(function (payload) {
         replace(payload.html);
+        return true;
       }).catch(function (errorValue) {
         root.classList.remove("is-saving");
         showError(errorValue.message);
+        return false;
       });
     }
 
@@ -188,10 +190,16 @@
       if (!checkbox) return;
       var item = checkbox.closest("[data-checklist-item-id]");
       var card = item.closest("[data-checklist-id]");
+      var completed = checkbox.checked;
+      item.classList.toggle("is-completed", completed);
       submit("item.toggle", {
         checklist_id: activeId(card),
         active_id: activeId(card),
         item_id: item.getAttribute("data-checklist-item-id")
+      }).then(function (saved) {
+        if (saved) return;
+        checkbox.checked = !completed;
+        item.classList.toggle("is-completed", !completed);
       });
     });
 

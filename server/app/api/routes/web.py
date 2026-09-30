@@ -4558,6 +4558,7 @@ def customer_detail_page(
         request,
         "customer_detail.html",
         {
+            "customer_id": customer_id,
             "detail": detail,
             "communication": communication_view,
             "linked_cases_by_email_id": linked_cases_by_email_id,
