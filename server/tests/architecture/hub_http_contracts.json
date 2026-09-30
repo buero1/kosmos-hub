@@ -17,7 +17,7 @@
     "app/api/routes/site_inventory.py": "e17ba749ad7654eada8133a3f1426f470614a3e9d58233ed0fa4ebbe83fedd47",
     "app/api/routes/site_updates.py": "f91cc76b4d88acb3c18646bfed201de7bd3235e1a148402494ff339d2213c6f3",
     "app/api/routes/sites.py": "3625fd99454a3357f7b2c41c6f00f4c387e72aa6a509a43e4045f8c489b11276",
-    "app/api/routes/web.py": "92fa138453cdfe53b79e41902b2c981e27b4b80b1fdf937e519533f60e387853",
+    "app/api/routes/web.py": "5d64cdb5312f8b82a08770645e0eec62459a1c87d8d56c999a638c8a6b48dac9",
     "app/main.py": "a1dcd0191d643151a961e7a8b5cbba3fb1e338c3dcf4cdcf4e894f7f44f957e9",
     "app/main.py:route-wiring": "1b68f07b0a806d14fba2f800726d545df62355718d7e13cf997d7873519a81f4"
   },
@@ -1920,7 +1920,7 @@
       "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
     },
     "app/api/routes/web.py:lead_detail_page:GET:/leads/{lead_id}": {
-      "fingerprint": "a56dbb597d371cdde5de902da715ab23c9d60d2367bacd3dc309e695be4c0e08",
+      "fingerprint": "2e6d23220725e200b0f95bc31b6edcdbe705d323ab87ac5cf8c2ea1a0ef0d052",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2452,14 +2452,14 @@
       ]
     },
     "app/api/routes/web.py:send_customer_communication_email:POST:/customers/{customer_id}/communications/emails": {
-      "fingerprint": "b6f858e7e63374b40b2aa9334b5ffa1b2433fa92c34b857e8f131452e9d2cfe7",
+      "fingerprint": "0052db7c30fcad962ef4735ed9dde92f6aebaabe1f107e482b645e17c1686e6d",
       "state": "human_only",
-      "reason": "Human-only send. Invoice and order drafts delegate to non-agent send operations with record/mailbox permissions, protected PDF metadata and durable send claims. Order messages retain their explicit customer link even with edited recipient addresses; regular customer mail remains unchanged."
+      "reason": "Human-only send. Invoice and order drafts delegate to non-agent send operations with record/mailbox permissions, protected PDF metadata and durable send claims. Customer-origin messages retain their explicit customer link, including manually entered recipient addresses."
     },
     "app/api/routes/web.py:send_direct_mailbox_email:POST:/emails/send": {
-      "fingerprint": "563b63f5d1aebde9e357f2861c319eb606ab52ad6dd4fee73fc3272d0dd18c4e",
+      "fingerprint": "c2f3acd539a58c718266b6abe22306c5e64385c818ef6ecd9b3ecca3ad218c68",
       "state": "human_only",
-      "reason": "Sending/scheduling stays human-only. Invoice/order drafts delegate to protected non-agent send operations even after reopening or entering free recipient addresses. Order mail retains its explicit customer link; regular lead, scheduling and deletion semantics are preserved."
+      "reason": "Sending/scheduling stays human-only. Invoice/order drafts delegate to protected non-agent send operations. Lead-origin messages retain their Lead link and return to the Lead email panel after success."
     },
     "app/api/routes/web.py:deletion_preview:GET:/deletion-preview": {
       "fingerprint": "9662653ac69a1141292986254073b67a1d467fff3de2bf67ae6490ee521ecd30",

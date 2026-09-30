@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, time, timedelta
+from email.utils import parseaddr
 import json
 from pathlib import Path
 from typing import Annotated, Literal
@@ -43,6 +44,7 @@ from app.services.customer_communications import (
     CustomerCommunicationAttachmentUpload,
     CustomerCommunicationEmailTemplate,
     CustomerCommunicationImageError,
+    CustomerCommunicationRecipient,
     CustomerCommunicationService,
 )
 from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
@@ -732,6 +734,8 @@ def lead_detail_page(
     activity_message: str = "",
     note: str = "",
     note_message: str = "",
+    email: str = "",
+    email_message: str = "",
 ):
     user = _require_hub_admin(request)
     access = HubAccessControlService(db=db)
@@ -779,6 +783,8 @@ def lead_detail_page(
             "can_delete_lead_activities": can_view_lead_activities and access.can(user, "activities", "delete"),
             "note_state": note if note in {"success", "error"} else "",
             "note_message": note_message[:500],
+            "email_state": email if email in {"success", "warning", "error"} else "",
+            "email_message": email_message[:500],
             "activity_calls": ActivityResponsibility(db, user).filter_views("call", activity_service.list_calls(lead_id=lead_id, include_completed=True)) if can_view_lead_activities else (),
             "activity_tasks": ActivityResponsibility(db, user).filter_views("task", activity_service.list_tasks(lead_id=lead_id)) if can_view_lead_activities else (),
             "activity_meetings": ActivityResponsibility(db, user).filter_views("meeting", activity_service.list_meetings(lead_id=lead_id)) if can_view_lead_activities else (),
@@ -4156,6 +4162,7 @@ async def send_direct_mailbox_email(
         cipher=get_secret_cipher(),
         public_base_url=get_settings().public_base_url,
     )
+    parsed_lead_id: int | None = None
     try:
         parsed_lead_id = _optional_form_id(lead_id)
         if parsed_lead_id is not None:
@@ -4227,6 +4234,12 @@ async def send_direct_mailbox_email(
             mailbox.discard_draft(draft_id=int(draft_id))
     except ValueError as exc:
         db.rollback()
+        if parsed_lead_id is not None:
+            return _email_compose_response(
+                request,
+                _lead_email_redirect(parsed_lead_id, "error", str(exc)),
+                error=str(exc),
+            )
         return _email_compose_response(request, RedirectResponse(
             url=f"/emails?{urlencode({'folder': 'planned' if scheduled_email_id.strip() else 'sent', 'email_state': 'error', 'email_message': str(exc)})}",
             status_code=303,
@@ -4251,11 +4264,29 @@ async def send_direct_mailbox_email(
     db.commit()
     if scheduled is not None:
         ScheduledEmailWorker.notify_schedule_changed()
+        if parsed_lead_id is not None:
+            return _email_compose_response(
+                request,
+                _lead_email_redirect(
+                    parsed_lead_id,
+                    "success",
+                    "E-Mail wurde für den geplanten Versand gespeichert.",
+                ),
+            )
         return _email_compose_response(request, RedirectResponse(
             url=f"/emails?{urlencode({'folder': 'planned', 'selected': f'scheduled-{scheduled.id}', 'email_state': 'success', 'email_message': 'E-Mail wurde für den geplanten Versand gespeichert.'})}",
             status_code=303,
         ))
     assert sent is not None
+    if parsed_lead_id is not None:
+        return _email_compose_response(
+            request,
+            _lead_email_redirect(
+                parsed_lead_id,
+                "success",
+                "E-Mail wurde über Mittwald versendet.",
+            ),
+        )
     return _email_compose_response(request, RedirectResponse(
         url=f"/emails?{urlencode({'folder': 'sent', 'selected': f'unassigned-{sent.id}', 'email_state': 'success', 'email_message': 'E-Mail wurde über Mittwald versendet.'})}",
         status_code=303,
@@ -5326,6 +5357,17 @@ async def send_customer_communication_email(
             result = None
         else:
             scheduled = None
+            recipient_override = None
+            if not recipient_key.strip() and recipient_email.strip():
+                parsed_name, parsed_email = parseaddr(recipient_email.strip())
+                normalized_email = parsed_email.strip().casefold()
+                if not normalized_email or "@" not in normalized_email:
+                    raise ValueError("Gib eine gültige Empfängeradresse ein.")
+                recipient_override = CustomerCommunicationRecipient(
+                    key=f"manual:{normalized_email}",
+                    name=(recipient_name.strip() or parsed_name.strip() or normalized_email)[:255],
+                    email=normalized_email,
+                )
             result = _customer_communication_service(db).send_email(
                 customer_id=customer_id,
                 actor=user.username,
@@ -5339,6 +5381,7 @@ async def send_customer_communication_email(
                 forward_from_email_id=forward_from_id,
                 attachments=tuple(uploaded_attachments),
                 dunning_id=parsed_dunning_id,
+                recipient_override=recipient_override,
             )
         if (scheduled is not None or (result is not None and result.success)) and draft_id.strip().isdigit():
             HubMailboxService(
@@ -8034,6 +8077,11 @@ def _email_compose_response(request: Request, redirect: RedirectResponse, *, err
 def _customer_communication_redirect(customer_id: int, state: str, message: str) -> RedirectResponse:
     query = urlencode({"communication": state, "message": message[:500]})
     return RedirectResponse(url=f"/customers/{customer_id}?{query}#customer-communications", status_code=303)
+
+
+def _lead_email_redirect(lead_id: int, state: str, message: str) -> RedirectResponse:
+    query = urlencode({"email": state, "email_message": message[:500]})
+    return RedirectResponse(url=f"/leads/{lead_id}?{query}#lead-emails", status_code=303)
 
 
 def _dunning_email_redirect(dunning_id: int, state: str, message: str) -> RedirectResponse:

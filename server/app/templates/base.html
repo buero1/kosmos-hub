@@ -6020,6 +6020,7 @@
           var globalMailboxContextModule = globalMailboxComposer.querySelector("[data-email-compose-context-module]");
           var globalMailboxContextRecordId = globalMailboxComposer.querySelector("[data-email-compose-context-record-id]");
           var globalMailboxContextPath = "";
+          var globalMailboxOriginCustomerId = "";
           var globalMailboxDraftId = globalMailboxComposer.querySelector("[data-email-compose-draft-id]");
           var globalMailboxReplyTo = globalMailboxComposer.querySelector("[data-email-compose-reply-to]");
           var globalMailboxForwardFrom = globalMailboxComposer.querySelector("[data-email-compose-forward-from]");
@@ -6173,10 +6174,16 @@
 
           function globalMailboxClearRecipient() {
             if (globalMailboxRecipientKey) globalMailboxRecipientKey.value = "";
-            if (globalMailboxRecipientCustomerId) globalMailboxRecipientCustomerId.value = "";
             if (globalMailboxRecipientName) globalMailboxRecipientName.value = "";
-            if (globalMailboxForm) globalMailboxForm.action = "/emails/send";
-            globalMailboxComposer.dataset.emailTemplateUrl = "";
+            if (globalMailboxOriginCustomerId) {
+              if (globalMailboxRecipientCustomerId) globalMailboxRecipientCustomerId.value = globalMailboxOriginCustomerId;
+              globalMailboxForm.action = "/customers/" + encodeURIComponent(globalMailboxOriginCustomerId) + "/communications/emails";
+              globalMailboxComposer.dataset.emailTemplateUrl = "/customers/" + encodeURIComponent(globalMailboxOriginCustomerId) + "/communications/email-templates";
+            } else {
+              if (globalMailboxRecipientCustomerId) globalMailboxRecipientCustomerId.value = "";
+              if (globalMailboxForm) globalMailboxForm.action = "/emails/send";
+              globalMailboxComposer.dataset.emailTemplateUrl = "";
+            }
           }
 
           function globalMailboxSetAttachments(attachments) {
@@ -6330,6 +6337,7 @@
             globalMailboxSuggestedRequest += 1;
             globalMailboxSuggestedRecipients = [];
             globalMailboxSuggestedCustomerId = "";
+            globalMailboxOriginCustomerId = "";
             if (globalMailboxDraftId) globalMailboxDraftId.value = "";
             if (globalMailboxReplyTo) globalMailboxReplyTo.value = "";
             if (globalMailboxForwardFrom) globalMailboxForwardFrom.value = "";
@@ -6429,11 +6437,19 @@
           function globalMailboxSelectRecipient(recipient) {
             if (!recipient || !recipient.key || !recipient.customer_id) return;
             globalMailboxRecipient.value = recipient.email;
-            globalMailboxRecipientKey.value = recipient.key;
-            globalMailboxRecipientCustomerId.value = String(recipient.customer_id);
             globalMailboxRecipientName.value = recipient.name || "";
-            globalMailboxForm.action = "/customers/" + encodeURIComponent(recipient.customer_id) + "/communications/emails";
-            globalMailboxComposer.dataset.emailTemplateUrl = "/customers/" + encodeURIComponent(recipient.customer_id) + "/communications/email-templates";
+            if (globalMailboxLeadId.value) {
+              globalMailboxRecipientKey.value = "";
+              globalMailboxRecipientCustomerId.value = "";
+              globalMailboxForm.action = "/emails/send";
+              globalMailboxComposer.dataset.emailTemplateUrl = "";
+            } else {
+              var customerId = globalMailboxOriginCustomerId || String(recipient.customer_id);
+              globalMailboxRecipientKey.value = String(recipient.customer_id) === customerId ? recipient.key : "";
+              globalMailboxRecipientCustomerId.value = customerId;
+              globalMailboxForm.action = "/customers/" + encodeURIComponent(customerId) + "/communications/emails";
+              globalMailboxComposer.dataset.emailTemplateUrl = "/customers/" + encodeURIComponent(customerId) + "/communications/email-templates";
+            }
             globalMailboxClearRecipientResults();
             globalMailboxStatusMessage(recipient.name + " · " + recipient.customer_name + " ausgewählt.");
             if (globalMailboxTemplate && globalMailboxTemplate.value) {
@@ -6690,10 +6706,12 @@
             document.body.classList.add("email-compose-open");
             var customerId = trigger.dataset.emailComposeCustomerId || "";
             var leadId = trigger.dataset.emailComposeLeadId || "";
+            globalMailboxOriginCustomerId = customerId;
             globalMailboxContextPath = window.location.pathname;
             globalMailboxContextModule.value = trigger.dataset.emailComposeContextModule || "";
             globalMailboxContextRecordId.value = trigger.dataset.emailComposeContextRecordId || "";
             if (globalMailboxLeadId) globalMailboxLeadId.value = leadId;
+            globalMailboxClearRecipient();
             if (globalMailboxDunningId) globalMailboxDunningId.value = trigger.dataset.emailComposeDunningId || "";
             globalMailboxLoadOptions().then(function () {
               globalMailboxApplyDefaultSender();

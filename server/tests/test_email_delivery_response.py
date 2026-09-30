@@ -1,6 +1,7 @@
-from types import SimpleNamespace
+import json
 import shutil
 import subprocess
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
+from app.models.hub_lead import HubLead
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.hub_user import HubUser
 from app.services.customer_communications import CustomerCommunicationActionResult
@@ -29,7 +31,8 @@ def delivery_client(monkeypatch):
     with Session(engine) as db:
         user = HubUser(username="email-author", password_hash="x", role="admin")
         customer = Customer(name="Example")
-        db.add_all([user, customer])
+        lead = HubLead(encrypted_profile_json=cipher.encrypt('{"fields":{"company":"Lead"}}'))
+        db.add_all([user, customer, lead])
         db.flush()
         draft = HubMailboxService(db=db, cipher=cipher, public_base_url="https://hub.example.test").save_draft(
             draft_id=None, sender_email="team@example.test", recipient_email="recipient@example.test",
@@ -49,7 +52,14 @@ def delivery_client(monkeypatch):
             return await call_next(request)
 
         with TestClient(app) as client:
-            yield SimpleNamespace(client=client, db=db, draft_id=draft.id, customer_id=customer.id, cipher=cipher)
+            yield SimpleNamespace(
+                client=client,
+                db=db,
+                draft_id=draft.id,
+                customer_id=customer.id,
+                lead_id=lead.id,
+                cipher=cipher,
+            )
 
 
 @pytest.mark.parametrize("kind", ["direct", "customer-exception", "customer-result", "scheduled"])
@@ -103,6 +113,58 @@ def test_successful_delivery_returns_navigation_target_after_deleting_draft(deli
     assert fixture.db.get(HubMailboxEmail, fixture.draft_id) is None
 
 
+def test_successful_lead_delivery_returns_to_lead_email_panel(delivery_client, monkeypatch):
+    fixture = delivery_client
+    sent = SimpleNamespace(
+        id=53,
+        encrypted_payload_json=fixture.cipher.encrypt("{}"),
+    )
+    monkeypatch.setattr(HubMailboxService, "send_direct_email", lambda *_args, **_kwargs: sent)
+
+    response = fixture.client.post(
+        "/emails/send",
+        headers={"Accept": "application/json"},
+        data={"csrf_token": "test-csrf", "lead_id": str(fixture.lead_id)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["redirect_url"].startswith(f"/leads/{fixture.lead_id}?")
+    assert response.json()["redirect_url"].endswith("#lead-emails")
+    assert json.loads(fixture.cipher.decrypt(sent.encrypted_payload_json))["recipient_lead_id"] == fixture.lead_id
+
+
+def test_manual_customer_recipient_stays_linked_to_customer(delivery_client, monkeypatch):
+    from app.api.routes import web
+
+    fixture = delivery_client
+    calls = []
+
+    def send_email(**kwargs):
+        calls.append(kwargs)
+        return CustomerCommunicationActionResult(True, "E-Mail wurde über Mittwald versendet.", email_id=54)
+
+    monkeypatch.setattr(web, "_customer_communication_service", lambda _db: SimpleNamespace(send_email=send_email))
+    response = fixture.client.post(
+        f"/customers/{fixture.customer_id}/communications/emails",
+        headers={"Accept": "application/json"},
+        data={
+            "csrf_token": "test-csrf",
+            "sender_email": "team@example.test",
+            "recipient_email": "manual@example.test",
+            "recipient_name": "Manueller Empfänger",
+            "subject": "Test",
+            "content": "<p>Test</p>",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["redirect_url"].startswith(f"/customers/{fixture.customer_id}?")
+    assert response.json()["redirect_url"].endswith("#customer-communications")
+    override = calls[0]["recipient_override"]
+    assert override.email == "manual@example.test"
+    assert override.name == "Manueller Empfänger"
+
+
 def test_failed_delivery_keeps_legacy_html_response_for_non_ajax_clients(delivery_client, monkeypatch):
     def fail_send(*_args, **_kwargs):
         raise ValueError("Delivery failed")
@@ -126,4 +188,16 @@ def test_manual_draft_save_closes_only_after_confirmed_success():
     if node is None:
         pytest.skip("Node.js is needed to exercise the composer JavaScript")
     result = subprocess.run([node, "tests/js/email_draft_save_close.cjs"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_global_composer_preserves_customer_and_lead_origin():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to exercise the composer JavaScript")
+    result = subprocess.run(
+        [node, "tests/js/email_record_origin.cjs"],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
