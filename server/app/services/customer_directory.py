@@ -32,6 +32,52 @@ _HUB_CUSTOMER_FIELDS = tuple(
     for key in HUB_CUSTOMER_FIELD_KEYS
 )
 
+# Obsolete imported suggestions with no assigned leads as of the 2026-09-30 cleanup.
+# Existing customer values are preserved; a value becomes selectable again if a lead uses it.
+_RETIRED_CUSTOMER_INDUSTRIES = frozenset(value.casefold() for value in (
+    "-None-",
+    "ASA (Applikationsserviceanbieter)",
+    "Automotive",
+    "Beschriftungen",
+    "Bildungswesen",
+    "Building Materials & Equipment",
+    "Communications",
+    "Computer",
+    "Construction",
+    "Creative",
+    "Daten/Telekom-OEM",
+    "Finanzen",
+    "Fliesenleger",
+    "Gartengestaltung",
+    "Gaststätten: Asiatisch",
+    "Gesundheitswesen",
+    "Government/Military",
+    "Grabdenkmäler",
+    "Grocery",
+    "Hausmeisterservice",
+    "Healthcare",
+    "Hospitality",
+    "Klein/Mittelständige Unternehmen",
+    "Management ISV",
+    "Manufacturing",
+    "Marketing",
+    "Mobilfunkbranche",
+    "Motelsss2",
+    "MSP (Management-Dienstleistungsanbieter)",
+    "Netzwerkausrüstungsunternehmen",
+    "Nicht-Management-ISV",
+    "Optiker",
+    "Schlüsseldienst",
+    "Schreinereien",
+    "Service",
+    "Speicherausrüstung",
+    "Speicherungs-Dienstleistungsanbieter",
+    "Sport",
+    "Support",
+    "Systemintegrator",
+    "Technology",
+))
+
 
 @dataclass(frozen=True)
 class CustomerDirectoryEntry:
@@ -295,7 +341,7 @@ class CustomerDirectoryService:
         return entries
 
     def list_industries(self, *, allowed_customer_ids: set[int] | None = None) -> list[str]:
-        """Return legacy choices and all industry values currently used in the Hub."""
+        """Return industry values currently used by accessible customers."""
         industries_by_key: dict[str, str] = {}
         customer_query = select(Customer).order_by(Customer.name.asc(), Customer.id.asc())
         if allowed_customer_ids is not None:
@@ -307,15 +353,45 @@ class CustomerDirectoryService:
             )
             if industry_field is None:
                 continue
+            if industry_field and industry_field.value:
+                industries_by_key.setdefault(industry_field.value.casefold(), industry_field.value)
+        return sorted(industries_by_key.values(), key=str.casefold)
+
+    def list_industry_suggestions(self) -> list[str]:
+        """Return cleaned legacy choices plus free values saved after the cleanup."""
+        suggestions_by_key: dict[str, str] = {}
+        for customer in self.db.scalars(
+            select(Customer).order_by(Customer.name.asc(), Customer.id.asc())
+        ).all():
+            industry_field = next(
+                (field for field in self._profile_fields(customer) if field.key == "industry"),
+                None,
+            )
+            if industry_field is None:
+                continue
             if industry_field.value:
-                industries_by_key.setdefault(
+                suggestions_by_key.setdefault(
                     industry_field.value.casefold(), industry_field.value
                 )
             for value, label in industry_field.options:
                 option = (label or value).strip()
                 if option:
-                    industries_by_key.setdefault(option.casefold(), option)
-        return sorted(industries_by_key.values(), key=str.casefold)
+                    suggestions_by_key.setdefault(option.casefold(), option)
+
+        from app.services.hub_leads import HubLeadService
+
+        lead_industries = {
+            value.casefold()
+            for value in HubLeadService(db=self.db, cipher=self.cipher).list_industries()
+        }
+        return sorted(
+            (
+                value
+                for key, value in suggestions_by_key.items()
+                if key not in _RETIRED_CUSTOMER_INDUSTRIES or key in lead_industries
+            ),
+            key=str.casefold,
+        )
 
     def get_detail(self, *, customer_id: int, include_sensitive: bool = False) -> CustomerDirectoryDetail | None:
         customer = self.db.get(Customer, customer_id)

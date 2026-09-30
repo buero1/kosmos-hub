@@ -119,6 +119,19 @@ class HubLeadService:
         entries.sort(key=lambda item: self._sort_key(item[0], item[1]), reverse=True)
         return tuple(self._list_entry(lead, profile) for lead, profile in entries)
 
+    def list_industries(self) -> list[str]:
+        """Return the distinct, human-readable industries assigned to leads."""
+        definition = next(field for field in HUB_LEAD_FIELDS if field.key == "industry")
+        labels = dict(definition.options)
+        industries_by_key: dict[str, str] = {}
+        for lead in self.db.scalars(select(HubLead)).all():
+            raw_value = self._text(self._fields(self._profile(lead)).get("industry")).strip()
+            if not raw_value or raw_value == "-None-":
+                continue
+            value = labels.get(raw_value, raw_value)
+            industries_by_key.setdefault(value.casefold(), value)
+        return sorted(industries_by_key.values(), key=str.casefold)
+
     def get_detail(self, *, lead_id: int) -> HubLeadDetail | None:
         lead = self.db.get(HubLead, lead_id)
         if lead is None:

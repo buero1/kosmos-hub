@@ -555,7 +555,7 @@ def _hub_customer_create_context(
 ) -> dict[str, object]:
     industry_options = CustomerDirectoryService(
         db=db, cipher=get_secret_cipher()
-    ).list_industries()
+    ).list_industry_suggestions()
     return {
         "csrf_token": get_csrf_token(request),
         "status_options": ZOHO_RELEVANT_ACCOUNT_STATUSES,
@@ -4535,9 +4535,6 @@ def customer_detail_page(
         record_id=customer_id,
         action="edit",
     )
-    allowed_customer_ids = access.accessible_record_ids(
-        user=current_user, module_key="customers"
-    )
     try:
         detail = read_customer_detail(HubOperationService(db=db, cipher=cipher, actor=current_user.username), {"customer_id": str(customer_id)})
     except HubOperationError:
@@ -4575,7 +4572,7 @@ def customer_detail_page(
             "can_manage_customer_fields": can_manage_customer_fields,
             "customer_industry_options": CustomerDirectoryService(
                 db=db, cipher=cipher
-            ).list_industries(allowed_customer_ids=allowed_customer_ids),
+            ).list_industry_suggestions(),
             "can_manage_checklists": can_manage_customer_fields,
             "customer_checklists": checklist_service.list_for_customer(customer_id=customer_id),
             "can_send_website_profile": can_manage_customer_fields and access.can(current_user, "websites", "edit"),

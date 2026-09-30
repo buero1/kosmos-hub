@@ -703,12 +703,51 @@ def test_customer_directory_lists_and_filters_zoho_industries():
         db.commit()
 
         service = _service(db)
-        assert service.list_industries() == ["Beratung", "Gastronomie", "Handwerk"]
+        assert service.list_industries() == ["Beratung", "Handwerk"]
+        assert service.list_industry_suggestions() == ["Beratung", "Gastronomie", "Handwerk"]
         assert [entry.customer.id for entry in service.list_entries(industry="Handwerk")] == [
             craft_customer.id,
             duplicate_industry_customer.id,
         ]
         assert service.list_entries(industry="Nicht vorhanden") == []
+
+
+def test_customer_industry_suggestions_hide_retired_values_until_a_lead_uses_them():
+    from app.models.hub_lead import HubLead
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        cipher = SecretCipher("a" * 32)
+        customer = Customer(
+            name="Legacy Customer",
+            encrypted_profile_json=cipher.encrypt(json.dumps({
+                "fields": {"Branche": "Computer"},
+                "field_metadata": {
+                    "industry": {
+                        "label": "Branche",
+                        "editable": True,
+                        "pick_list_values": [
+                            {"value": "Computer", "label": "Computer"},
+                            {"value": "Handwerk", "label": "Handwerk"},
+                        ],
+                    }
+                },
+            })),
+        )
+        db.add(customer)
+        db.flush()
+        service = CustomerDirectoryService(db=db, cipher=cipher)
+
+        assert service.list_industry_suggestions() == ["Handwerk"]
+
+        db.add(HubLead(encrypted_profile_json=cipher.encrypt(json.dumps({
+            "fields": {"industry": "Computer"},
+        }))))
+        db.flush()
+
+        assert service.list_industry_suggestions() == ["Computer", "Handwerk"]
 
 
 def test_customer_directory_masks_sensitive_zoho_profile_values_for_admins_and_hides_them_for_others():
