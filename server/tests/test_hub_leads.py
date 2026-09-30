@@ -91,6 +91,34 @@ def test_hub_lead_stores_encrypted_fields_and_a_new_repeater_row():
         assert next(field.value for field in detail.subforms[0].rows[0].fields if field.key == "lead_type") == "Termin vor Ort"
 
 
+def test_manual_lead_industry_accepts_free_text_and_adds_it_to_suggestions():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        service = _service(db)
+        custom_industry = "Restaurierung historischer Fahrzeuge"
+        lead = service.create_lead(
+            submitted_values=_submitted_values(
+                **{"lead_field__industry": custom_industry}
+            )
+        )
+        db.flush()
+
+        detail = service.get_detail(lead_id=lead.id)
+        industry = next(field for field in detail.fields if field.key == "industry")
+        assert industry.form_value == custom_industry
+        assert custom_industry in service.list_industries()
+
+        with pytest.raises(HubLeadError, match="Branche ist zu lang"):
+            service.update_lead(
+                lead_id=lead.id,
+                submitted_values=_submitted_values(
+                    **{"lead_field__industry": "x" * 256}
+                ),
+            )
+
+
 def test_lead_result_rows_are_sorted_by_modified_time_and_display_german_date_times():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

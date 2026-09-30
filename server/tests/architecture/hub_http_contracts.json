@@ -1243,7 +1243,7 @@
       ]
     },
     "app/api/routes/web.py:create_lead_page:POST:/leads": {
-      "fingerprint": "d92719474013cead4ebbb45752e3c7c0e49a03b3040e8d6924f7cb5b63a9f41f",
+      "fingerprint": "256ea0add7738f8f6e20fa10040debdeeb92b0f3deaea230b6491f755a2781b0",
       "state": "shared",
       "reason": "Reviewed adapter to registered Hub operations; route/helper changes require renewed review.",
       "contracts": [
@@ -1925,7 +1925,7 @@
       "reason": "Explicit human interaction: authentication, credentials, access-token provisioning, browser admin login or sending/scheduling email. No agent invocation."
     },
     "app/api/routes/web.py:lead_detail_page:GET:/leads/{lead_id}": {
-      "fingerprint": "2e6d23220725e200b0f95bc31b6edcdbe705d323ab87ac5cf8c2ea1a0ef0d052",
+      "fingerprint": "37cb5afc5b0092c58ea5a09e389cba94931c82dc4dae8e9b277d20f227eae1dd",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2262,7 +2262,7 @@
       "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
     },
     "app/api/routes/web.py:new_lead_page:GET:/leads/new": {
-      "fingerprint": "0050219fe1751748e0b337c1c0cd906ae3f1425471cce48fcadd55aeaad53ce7",
+      "fingerprint": "b2e83c92932e4aa467e046dc19adff6786653588d54b9a875d38645282f52619",
       "state": "infrastructure",
       "reason": "UI rendering, chat orchestration, image transport or health endpoint; business actions are governed separately. No independent agent capability."
     },

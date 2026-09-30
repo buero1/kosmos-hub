@@ -1,8 +1,13 @@
-{% macro lead_field_control(field, name, value="") %}
+{% macro lead_field_control(field, name, value="", industry_options=()) %}
   {% if not field.read_only %}
     <label class="customer-field-control">
       <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
-      {% if field.display_type == "Auswahlliste" %}
+      {% if field.key == "industry" %}
+        <input type="text" name="{{ name }}" value="{{ field.value if field.value is defined and field.value else value }}" list="lead-industry-options" autocomplete="off" maxlength="255">
+        <datalist id="lead-industry-options">
+          {% for option in industry_options %}<option value="{{ option }}"></option>{% endfor %}
+        </datalist>
+      {% elif field.display_type == "Auswahlliste" %}
         <select name="{{ name }}"{% if field.required %} required{% endif %}>
           <option value="">Auswählen</option>
           {% for option_value, option_label in field.options %}

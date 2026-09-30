@@ -14,7 +14,7 @@
       <form id="lead-create-form" method="post" action="/leads" class="communication-form customer-field-editor">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="customer-field-editor-grid">
-          {% for field in fields %}{{ lead_field_control(field, "lead_field__" ~ field.key, submitted_values.get("lead_field__" ~ field.key, "")) }}{% endfor %}
+          {% for field in fields %}{{ lead_field_control(field, "lead_field__" ~ field.key, submitted_values.get("lead_field__" ~ field.key, ""), lead_industry_options) }}{% endfor %}
         </div>
         {% for subform in subforms %}
           <article class="card customer-detail-panel" style="margin-top: 1rem;">
@@ -22,7 +22,7 @@
             <fieldset class="customer-subform-row">
               <legend>Neuer Eintrag</legend>
               <div class="customer-field-editor-grid">
-                {% for field in subform.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__new__" ~ field.key, submitted_values.get("lead_subform__" ~ subform.key ~ "__new__" ~ field.key, "")) }}{% endfor %}
+                {% for field in subform.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__new__" ~ field.key, submitted_values.get("lead_subform__" ~ subform.key ~ "__new__" ~ field.key, ""), lead_industry_options) }}{% endfor %}
               </div>
             </fieldset>
           </article>

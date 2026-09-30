@@ -344,7 +344,12 @@ class HubLeadService:
                 values[definition.key] = existing[definition.key]
                 continue
             raw_value = submitted_values.get(f"lead_field__{definition.key}")
-            values[definition.key] = self._normalize_value(definition, raw_value, existing.get(definition.key))
+            values[definition.key] = self._normalize_value(
+                definition,
+                raw_value,
+                existing.get(definition.key),
+                allow_unlisted_options=definition.key == "industry",
+            )
         return values
 
     def _submitted_subforms(self, submitted_values: dict[str, object], *, existing: dict[str, list[dict[str, object]]]) -> dict[str, list[dict[str, object]]]:
@@ -374,13 +379,21 @@ class HubLeadService:
             result[definition.key] = rows
         return result
 
-    def _normalize_value(self, definition: HubLeadField, raw_value: object, existing: object) -> object:
+    def _normalize_value(
+        self,
+        definition: HubLeadField,
+        raw_value: object,
+        existing: object,
+        *,
+        allow_unlisted_options: bool = False,
+    ) -> object:
         if definition.display_type == "Mehrfachauswahl":
             values = tuple(value.strip() for value in self._as_values(raw_value) if value.strip())
             self._validate_options(definition, values, existing)
             return list(values)
         value = self._text(raw_value).strip()
-        if len(value) > self._MAX_FIELD_LENGTH:
+        maximum_length = 255 if definition.key == "industry" else self._MAX_FIELD_LENGTH
+        if len(value) > maximum_length:
             raise HubLeadError(f"{definition.label} ist zu lang.")
         if definition.display_type == "Boolesch":
             return value.casefold() in {"true", "1", "on", "yes"}
@@ -390,7 +403,8 @@ class HubLeadService:
                 return normalize_date_value(value, definition.display_type, definition.label)
             except ValueError as exc:
                 raise HubLeadError(str(exc)) from exc
-        self._validate_options(definition, (value,) if value else (), existing)
+        if not allow_unlisted_options:
+            self._validate_options(definition, (value,) if value else (), existing)
         return value
 
     @staticmethod

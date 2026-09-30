@@ -210,7 +210,7 @@
             <article class="card customer-detail-panel">
               <div class="customer-detail-panel-heading"><div><p class="eyebrow">Leads</p><h3>Alle Felder</h3><p class="subtle">Änderungen werden ausschließlich im Hub gespeichert.</p></div></div>
               <div class="customer-field-editor-grid">
-                {% for field in detail.fields %}{{ lead_field_control(field, "lead_field__" ~ field.key, field.form_value) }}{% endfor %}
+                {% for field in detail.fields %}{{ lead_field_control(field, "lead_field__" ~ field.key, field.form_value, lead_industry_options) }}{% endfor %}
               </div>
             </article>
             {% for subform in detail.subforms %}
@@ -221,7 +221,7 @@
                   <fieldset class="customer-subform-row">
                     <legend>Eintrag {{ loop.index }}</legend>
                     <div class="customer-field-editor-grid">
-                      {% for field in row.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key, field.form_value) }}{% endfor %}
+                      {% for field in row.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__" ~ row_index ~ "__" ~ field.key, field.form_value, lead_industry_options) }}{% endfor %}
                     </div>
                     <label class="customer-subform-delete"><input type="checkbox" name="lead_subform__{{ subform.key }}__{{ loop.index0 }}__delete" value="true"> Eintrag entfernen</label>
                   </fieldset>
@@ -229,7 +229,7 @@
                 <fieldset class="customer-subform-row">
                   <legend>Neuer Eintrag</legend>
                   <div class="customer-field-editor-grid">
-                    {% for field in subform.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__new__" ~ field.key, field.form_value) }}{% endfor %}
+                    {% for field in subform.fields %}{{ lead_field_control(field, "lead_subform__" ~ subform.key ~ "__new__" ~ field.key, field.form_value, lead_industry_options) }}{% endfor %}
                   </div>
                 </fieldset>
               </article>

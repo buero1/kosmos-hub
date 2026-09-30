@@ -761,6 +761,9 @@ def lead_detail_page(
         "lead_detail.html",
         {
             "detail": detail,
+            "lead_industry_options": HubLeadService(
+                db=db, cipher=get_secret_cipher()
+            ).list_industries(),
             "can_edit_lead": access.can_access_record(
                 user=user, module_key="leads", record_id=lead_id, action="edit"
             ),
@@ -8032,7 +8035,8 @@ def _lead_create_context(
     submitted_values: dict[str, object] | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
-    values = HubLeadService(db=db, cipher=get_secret_cipher()).new_form_values()
+    lead_service = HubLeadService(db=db, cipher=get_secret_cipher())
+    values = lead_service.new_form_values()
     values.update(submitted_values or {})
     return {
         "fields": _ordered_layout_fields(
@@ -8041,6 +8045,7 @@ def _lead_create_context(
             fields=HUB_LEAD_FIELDS,
         ),
         "subforms": HUB_LEAD_SUBFORMS,
+        "lead_industry_options": lead_service.list_industries(),
         "submitted_values": values,
         "error": error,
         "csrf_token": get_csrf_token(request),
