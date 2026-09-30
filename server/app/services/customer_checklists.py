@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.base import utcnow
@@ -18,6 +18,43 @@ DEFAULT_DESIGN_CHECKLIST = (
     "E-Mail- und Telefonlinks testen",
     "Korrekturlesung",
     "Browsertests",
+)
+
+DEFAULT_POST_REVIEW_CHECKLIST = (
+    "Korrekturen nach Kundensicht",
+    "Elementor Bibliothek ausmisten",
+    "Bilder kaufen und Copyright eintragen",
+    "Bilderbeschriftung",
+    "Medienbibliothek ausmisten, für Suchmaschinen vorbereiten",
+    "Papierkörbe Seiten und Bibliothek leeren",
+)
+
+DEFAULT_FINAL_SETUP_CHECKLIST = (
+    "Domaintransfer + Domain auf WP-Verzeichnis weisen",
+    "SSL beantragen (optional)",
+    "Emails anlegen (optional)",
+    '"Replace" DB durchführen',
+    "Elementor URL's ändern",
+    "Kontaktformulare auf Kunden-Email umstellen",
+    "Benutzerdefinierte Schriften installieren, zuweisen und in Elementor G-Fonts deaktivieren.",
+    "SEO-Beschriftung der Seiten",
+    "Borlabs einrichten",
+    "Elementor pro Lizenz eintragen",
+    "Crocoblock Lizenzen eintragen",
+    "Prüfen, ob Yoast die richtigen Beiträge für suchmaschinen frei gibt bzw. versteckt",
+    "Letzte Kontrolle",
+    "Automatische Aktualisierung von Plugins deaktivieren",
+    "Manuelle Sicherung Updraftplus, welche nicht gelöscht wird",
+    "Kopien der Seiten als Elementor-Vorlagen und als screenshot",
+    "Für Suchmaschinen freigeben",
+    "Google search eintragen",
+)
+
+CUSTOMER_CHECKLIST_TEMPLATE_VERSION = 2
+DEFAULT_CUSTOMER_CHECKLISTS = (
+    ("Design Seiten", DEFAULT_DESIGN_CHECKLIST),
+    ("Nach Kundensicht", DEFAULT_POST_REVIEW_CHECKLIST),
+    ("Letzte Einrichtungen", DEFAULT_FINAL_SETUP_CHECKLIST),
 )
 
 
@@ -46,22 +83,45 @@ class CustomerChecklistService:
 
     def initialize_pending_customers(self) -> int:
         customers = tuple(
-            self.db.scalars(select(Customer).where(Customer.checklists_initialized.is_(False)).order_by(Customer.id))
+            self.db.scalars(
+                select(Customer)
+                .where(
+                    or_(
+                        Customer.checklists_initialized.is_(False),
+                        Customer.checklists_template_version < CUSTOMER_CHECKLIST_TEMPLATE_VERSION,
+                    )
+                )
+                .order_by(Customer.id)
+            )
         )
         for customer in customers:
             self.initialize_customer(customer)
         return len(customers)
 
     def initialize_customer(self, customer: Customer) -> None:
-        if customer.checklists_initialized:
+        template_version = int(customer.checklists_template_version or 0)
+        if customer.checklists_initialized and template_version >= CUSTOMER_CHECKLIST_TEMPLATE_VERSION:
             return
-        checklist = CustomerChecklist(customer=customer, title="Design Seiten", sort_order=1)
-        checklist.items = [
-            CustomerChecklistItem(text=text, sort_order=index)
-            for index, text in enumerate(DEFAULT_DESIGN_CHECKLIST, start=1)
-        ]
+        existing_titles = set(
+            self.db.scalars(
+                select(CustomerChecklist.title).where(CustomerChecklist.customer_id == customer.id)
+            )
+        )
+        next_order = self._next_checklist_order(customer.id)
+        templates = DEFAULT_CUSTOMER_CHECKLISTS if not customer.checklists_initialized else DEFAULT_CUSTOMER_CHECKLISTS[1:]
+        for title, item_texts in templates:
+            if title in existing_titles:
+                continue
+            checklist = CustomerChecklist(customer_id=customer.id, title=title, sort_order=next_order)
+            checklist.items = [
+                CustomerChecklistItem(text=text, sort_order=index)
+                for index, text in enumerate(item_texts, start=1)
+            ]
+            self.db.add(checklist)
+            existing_titles.add(title)
+            next_order += 1
         customer.checklists_initialized = True
-        self.db.add(checklist)
+        customer.checklists_template_version = CUSTOMER_CHECKLIST_TEMPLATE_VERSION
         self.db.flush()
 
     def list_for_customer(self, *, customer_id: int) -> tuple[CustomerChecklistView, ...]:

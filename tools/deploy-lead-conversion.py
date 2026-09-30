@@ -74,6 +74,8 @@ if '--customer-checklists-fix' in sys.argv:
     release_prefix = 'customer-checklists-fix'
 if '--customer-checklists-collapse' in sys.argv:
     release_prefix = 'customer-checklists-collapse'
+if '--customer-checklist-defaults' in sys.argv:
+    release_prefix = 'customer-checklist-defaults'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -178,6 +180,8 @@ if '--customer-checklists-fix' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/static/customer-checklists.js'}
 if '--customer-checklists-collapse' in sys.argv:
     expected = {'app/templates/base.html', 'app/templates/partials/customer_checklists.html'}
+if '--customer-checklist-defaults' in sys.argv:
+    expected = {'app/main.py', 'app/models/customer.py', 'app/services/customer_checklists.py'}
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -265,7 +269,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse', '--customer-checklist-defaults')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
@@ -362,4 +366,17 @@ if '--customer-checklists' in sys.argv:
         checklist_count = connection.scalar(text('SELECT COUNT(*) FROM customer_checklists'))
     assert pending == 0
     assert checklist_count > 0
+if '--customer-checklist-defaults' in sys.argv:
+    from sqlalchemy import inspect
+    schema = inspect(engine)
+    customer_columns = {column['name'] for column in schema.get_columns('customers')}
+    assert 'checklists_template_version' in customer_columns
+    with engine.connect() as connection:
+        customers = connection.scalar(text('SELECT COUNT(*) FROM customers'))
+        pending = connection.scalar(text('SELECT COUNT(*) FROM customers WHERE checklists_template_version < 2'))
+        post_review = connection.scalar(text("SELECT COUNT(*) FROM customer_checklists WHERE title = 'Nach Kundensicht'"))
+        final_setup = connection.scalar(text("SELECT COUNT(*) FROM customer_checklists WHERE title = 'Letzte Einrichtungen'"))
+    assert pending == 0
+    assert post_review >= customers
+    assert final_setup >= customers
 print(json.dumps({'deployed': True, 'health': 200, 'backup': str(backup)}), flush=True)

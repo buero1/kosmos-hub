@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -20,6 +20,7 @@ class Customer(TimestampMixin, Base):
     zoho_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     zoho_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     checklists_initialized: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=False)
+    checklists_template_version: Mapped[int] = mapped_column(Integer(), nullable=False, default=0)
 
     sites = relationship("Site", back_populates="customer")
     contacts = relationship("CustomerContact", back_populates="customer", cascade="all", passive_deletes=True)

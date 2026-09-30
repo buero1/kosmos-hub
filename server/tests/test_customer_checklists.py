@@ -9,9 +9,13 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.core.templates import create_templates
 from app.models.customer import Customer
+from app.models.customer_checklist import CustomerChecklist
 from app.models.hub_user import HubUser
 from app.services.customer_checklists import (
+    CUSTOMER_CHECKLIST_TEMPLATE_VERSION,
     DEFAULT_DESIGN_CHECKLIST,
+    DEFAULT_FINAL_SETUP_CHECKLIST,
+    DEFAULT_POST_REVIEW_CHECKLIST,
     CustomerChecklistError,
     CustomerChecklistService,
 )
@@ -34,7 +38,7 @@ def customer(db, name="Example"):
     return value
 
 
-def test_default_design_checklist_is_initialized_once(db):
+def test_default_customer_checklists_are_initialized_once(db):
     first = customer(db, "First")
     second = customer(db, "Second")
     service = CustomerChecklistService(db=db)
@@ -43,10 +47,30 @@ def test_default_design_checklist_is_initialized_once(db):
     assert service.initialize_pending_customers() == 0
     views = service.list_for_customer(customer_id=first.id)
 
-    assert len(views) == 1
-    assert views[0].title == "Design Seiten"
+    assert [view.title for view in views] == ["Design Seiten", "Nach Kundensicht", "Letzte Einrichtungen"]
     assert [item.text for item in views[0].items] == list(DEFAULT_DESIGN_CHECKLIST)
-    assert len(service.list_for_customer(customer_id=second.id)[0].items) == 9
+    assert [item.text for item in views[1].items] == list(DEFAULT_POST_REVIEW_CHECKLIST)
+    assert [item.text for item in views[2].items] == list(DEFAULT_FINAL_SETUP_CHECKLIST)
+    assert [len(view.items) for view in service.list_for_customer(customer_id=second.id)] == [9, 6, 18]
+    assert first.checklists_template_version == CUSTOMER_CHECKLIST_TEMPLATE_VERSION
+
+
+def test_existing_design_checklist_receives_only_new_template_sections(db):
+    owner = customer(db)
+    owner.checklists_initialized = True
+    owner.checklists_template_version = 0
+    design = CustomerChecklist(customer_id=owner.id, title="Design Seiten", sort_order=1)
+    db.add(design)
+    db.flush()
+    service = CustomerChecklistService(db=db)
+
+    assert service.initialize_pending_customers() == 1
+    assert [view.title for view in service.list_for_customer(customer_id=owner.id)] == [
+        "Design Seiten",
+        "Nach Kundensicht",
+        "Letzte Einrichtungen",
+    ]
+    assert service.initialize_pending_customers() == 0
 
 
 def test_customer_checklists_support_crud_toggle_and_completion(db):
@@ -87,11 +111,13 @@ def test_checklist_and_item_order_are_scoped_to_customer(db):
     service = CustomerChecklistService(db=db)
     service.initialize_customer(owner)
     service.initialize_customer(other)
-    first = service.list_for_customer(customer_id=owner.id)[0]
+    defaults = service.list_for_customer(customer_id=owner.id)
+    first = defaults[0]
     second = service.create_checklist(customer_id=owner.id, title="Launch")
 
-    service.reorder_checklists(customer_id=owner.id, ordered_ids=(second.id, first.id))
-    assert [view.id for view in service.list_for_customer(customer_id=owner.id)] == [second.id, first.id]
+    reordered = (second.id, *(view.id for view in defaults))
+    service.reorder_checklists(customer_id=owner.id, ordered_ids=reordered)
+    assert [view.id for view in service.list_for_customer(customer_id=owner.id)] == list(reordered)
 
     items = service.list_for_customer(customer_id=owner.id)[1].items
     reversed_ids = tuple(item.id for item in reversed(items))
@@ -112,8 +138,8 @@ def test_deleted_last_checklist_is_not_recreated(db):
     owner = customer(db)
     service = CustomerChecklistService(db=db)
     service.initialize_customer(owner)
-    checklist = service.list_for_customer(customer_id=owner.id)[0]
-    service.delete_checklist(customer_id=owner.id, checklist_id=checklist.id)
+    for checklist in service.list_for_customer(customer_id=owner.id):
+        service.delete_checklist(customer_id=owner.id, checklist_id=checklist.id)
 
     assert service.initialize_pending_customers() == 0
     assert service.list_for_customer(customer_id=owner.id) == ()
@@ -141,6 +167,7 @@ def test_customer_checklist_ui_contract():
     assert ".customer-checklist-panel[hidden] { display: none; }" in styles
     customer_schema = main[main.index('if "customers" in table_names:'):]
     assert '"checklists_initialized": "TINYINT(1) NOT NULL DEFAULT 0"' in customer_schema
+    assert '"checklists_template_version": "INT NOT NULL DEFAULT 0"' in customer_schema
     case_schema = main[main.index('if "hub_cases" not in table_names:'):main.index('if "hub_email_template_folders" not in table_names:')]
     assert "checklists_initialized" not in case_schema
 

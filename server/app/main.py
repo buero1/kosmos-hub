@@ -1019,6 +1019,7 @@ def _ensure_phase_one_schema() -> None:
             "zoho_modified_at": "DATETIME NULL",
             "zoho_synced_at": "DATETIME NULL",
             "checklists_initialized": "TINYINT(1) NOT NULL DEFAULT 0",
+            "checklists_template_version": "INT NOT NULL DEFAULT 0",
         }
         missing = [(name, definition) for name, definition in additions.items() if name not in columns]
         if missing:
