@@ -201,6 +201,43 @@ def test_activity_directory_routes_render_their_own_tables():
             assert create_label in html
             assert 'class="finance-directory-table activity-directory-table"' in html
             assert 'data-activity-composer-mode="directory"' in html
+            if create_kind == "call":
+                assert 'name="call_filter"' in html
+                assert '<option value="overdue" selected>Überfällige Anrufe</option>' in html
+                assert "Geplante Anrufe" in html
+                assert "Offene Anrufe" in html
+                assert "Abgeschlossene Anrufe" in html
+            else:
+                assert 'name="call_filter"' not in html
+
+
+def test_calls_route_preserves_selected_call_filter():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        user = HubUser(username="hub-admin", password_hash="hash", role="admin")
+        db.add(user)
+        db.flush()
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/calls",
+                "headers": [],
+                "query_string": b"view=all&call_filter=planned",
+                "scheme": "http",
+                "server": ("test", 80),
+                "client": ("test", 1),
+                "session": {},
+            }
+        )
+        request.state.hub_user = user
+
+        html = web.calls_page(request, db).body.decode("utf-8")
+
+        assert '<option value="all" selected>Alle erlaubten</option>' in html
+        assert '<option value="planned" selected>Geplante Anrufe</option>' in html
 
 
 def test_activity_directory_name_opens_the_matching_drawer():

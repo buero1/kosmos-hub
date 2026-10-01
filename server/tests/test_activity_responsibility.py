@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -128,6 +128,57 @@ def test_directory_filters_and_rename_keep_stable_assignment(env, kind):
     team_reader = HubCrmReadService(db=env.db, cipher=env.cipher, actor="manager")
     assert len(team_reader.activity_entries(kind, view="team")) == 2
     assert len(team_reader.activity_entries(kind, view="all")) == 2
+
+
+def test_call_directory_filters_by_due_time_and_completion(env):
+    overdue = create(
+        env,
+        "call",
+        actor="admin",
+        name="Überfälliger Anruf",
+        start_time="09:00",
+    )
+    planned = create(
+        env,
+        "call",
+        actor="admin",
+        name="Geplanter Anruf",
+        start_time="10:00",
+    )
+    completed = create(
+        env,
+        "call",
+        actor="admin",
+        name="Abgeschlossener Anruf",
+        status="completed",
+        start_time="11:00",
+    )
+    cancelled = create(
+        env,
+        "call",
+        actor="admin",
+        name="Abgesagter Anruf",
+        status="cancelled",
+        start_time="12:00",
+    )
+    reader = HubCrmReadService(db=env.db, cipher=env.cipher, actor="admin")
+    now_utc = datetime(2030, 10, 15, 7, 30, tzinfo=UTC)
+
+    assert [entry.id for entry in reader.activity_entries(
+        "call", view="all", call_filter="overdue", now_utc=now_utc
+    )] == [overdue.id]
+    assert [entry.id for entry in reader.activity_entries(
+        "call", view="all", call_filter="planned", now_utc=now_utc
+    )] == [planned.id]
+    assert {entry.id for entry in reader.activity_entries(
+        "call", view="all", call_filter="open", now_utc=now_utc
+    )} == {overdue.id, planned.id}
+    assert {entry.id for entry in reader.activity_entries(
+        "call", view="all", call_filter="completed", now_utc=now_utc
+    )} == {completed.id, cancelled.id}
+
+    with pytest.raises(HubOperationError, match="Anruffilter"):
+        reader.activity_entries("call", view="all", call_filter="invalid", now_utc=now_utc)
 
 
 @pytest.mark.parametrize("kind", ACTIVITY_MODELS)

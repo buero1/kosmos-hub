@@ -1,19 +1,29 @@
 """Read-only CRM projections shared by HTTP pages, templates and agent queries."""
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from app.models.customer_contact import CustomerContact
 from app.models.hub_case import HubCase
-from app.services.customer_directory import CustomerDirectoryService
 from app.services.customer_activities import CustomerActivityService
+from app.services.customer_directory import CustomerDirectoryService
+from app.services.hub_activity_responsibility import ActivityResponsibility
 from app.services.hub_cases import HubCaseService
 from app.services.hub_mailbox_access import HubMailboxAccess
 from app.services.hub_operation_activities import ACTIVITY_MODELS, _can_access
 from app.services.hub_operations import HubOperationError
 from app.services.hub_record_access import require_actor
-from app.services.hub_activity_responsibility import ActivityResponsibility
+
+
+CALL_DIRECTORY_FILTERS = (
+    ("overdue", "Überfällige Anrufe"),
+    ("planned", "Geplante Anrufe"),
+    ("open", "Offene Anrufe"),
+    ("completed", "Abgeschlossene Anrufe"),
+)
+DEFAULT_CALL_DIRECTORY_FILTER = "overdue"
 
 
 class HubCrmReadService:
@@ -65,9 +75,37 @@ class HubCrmReadService:
             raise HubOperationError("Die Aktivitaet ist nicht verfuegbar.")
         return row
 
-    def activity_entries(self, kind, *, view="all"):
+    def activity_entries(self, kind, *, view="all", call_filter="open", now_utc=None):
         user, access = require_actor(self, "activities", "view")
         model = ACTIVITY_MODELS.get(kind)
         if model is None:
             raise HubOperationError("Die Aktivitaetsart ist ungueltig.")
-        return ActivityResponsibility(self.db, user).filter_views(kind, CustomerActivityService(db=self.db).list_directory_entries(kind=kind), view)
+        entries = ActivityResponsibility(self.db, user).filter_views(
+            kind,
+            CustomerActivityService(db=self.db).list_directory_entries(kind=kind),
+            view,
+        )
+        if kind != "call":
+            return entries
+        if call_filter not in dict(CALL_DIRECTORY_FILTERS):
+            raise HubOperationError("Der Anruffilter ist ungueltig.")
+
+        boundary = now_utc or datetime.now(UTC)
+        if boundary.tzinfo is not None:
+            boundary = boundary.astimezone(UTC).replace(tzinfo=None)
+        open_entries = tuple(entry for entry in entries if entry.status == "planned")
+        if call_filter == "open":
+            return open_entries
+        if call_filter == "completed":
+            return tuple(entry for entry in entries if entry.status != "planned")
+        if call_filter == "overdue":
+            return tuple(
+                entry
+                for entry in open_entries
+                if entry.scheduled_at is not None and entry.scheduled_at < boundary
+            )
+        return tuple(
+            entry
+            for entry in open_entries
+            if entry.scheduled_at is not None and entry.scheduled_at >= boundary
+        )

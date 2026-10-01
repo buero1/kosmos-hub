@@ -88,6 +88,8 @@ if '--lead-homepage-option' in sys.argv:
     release_prefix = 'lead-homepage-option'
 if '--activity-relation-link' in sys.argv:
     release_prefix = 'activity-relation-link'
+if '--call-directory-filter' in sys.argv:
+    release_prefix = 'call-directory-filter'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -225,6 +227,13 @@ if '--activity-relation-link' in sys.argv:
         'app/templates/base.html',
         'app/templates/partials/activity_party_search.html',
     }
+if '--call-directory-filter' in sys.argv:
+    expected = {
+        'app/api/routes/web.py',
+        'app/services/hub_crm_readers.py',
+        'app/templates/base.html',
+        'app/templates/partials/activity_view_filter.html',
+    }
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -312,7 +321,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse', '--customer-checklist-defaults', '--customer-industry-combobox', '--customer-industry-cleanup', '--lead-industry-combobox', '--site-seo', '--lead-homepage-option', '--activity-relation-link')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse', '--customer-checklist-defaults', '--customer-industry-combobox', '--customer-industry-cleanup', '--lead-industry-combobox', '--site-seo', '--lead-homepage-option', '--activity-relation-link', '--call-directory-filter')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))

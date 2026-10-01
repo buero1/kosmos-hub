@@ -102,7 +102,11 @@ from app.services.hub_finance import (
     HubFinanceError,
     HubFinanceService,
 )
-from app.services.hub_crm_readers import HubCrmReadService
+from app.services.hub_crm_readers import (
+    CALL_DIRECTORY_FILTERS,
+    DEFAULT_CALL_DIRECTORY_FILTER,
+    HubCrmReadService,
+)
 from app.services.hub_operation_layouts import layout_view
 from app.services.hub_finance_pdf_readers import generated_status as finance_pdf_status, load_pdf as load_finance_pdf
 from app.services.hub_operations import HubArtifact, HubOperationError, HubOperationService
@@ -2324,6 +2328,12 @@ def _activity_directory_page(*, request: Request, db: Session, kind: str):
     user = _require_hub_admin(request)
     view = request.query_params.get("view", "mine")
     view = view if view in dict(ACTIVITY_VIEWS) else "mine"
+    call_filter = request.query_params.get("call_filter", DEFAULT_CALL_DIRECTORY_FILTER)
+    call_filter = (
+        call_filter
+        if kind == "call" and call_filter in dict(CALL_DIRECTORY_FILTERS)
+        else DEFAULT_CALL_DIRECTORY_FILTER
+    )
     title, create_label, _ = _ACTIVITY_DIRECTORY_PAGES[kind]
     berlin_now = datetime.now(ZoneInfo("Europe/Berlin"))
     default_start = suggested_call_start(berlin_now).replace(tzinfo=None)
@@ -2331,8 +2341,14 @@ def _activity_directory_page(*, request: Request, db: Session, kind: str):
         request,
         "activity_directory.html",
         {
-            "entries": HubCrmReadService(db=db, cipher=get_secret_cipher(), actor=user.username).activity_entries(kind, view=view),
+            "entries": HubCrmReadService(db=db, cipher=get_secret_cipher(), actor=user.username).activity_entries(
+                kind,
+                view=view,
+                call_filter=call_filter,
+            ),
             "activity_view": view,
+            "activity_call_filter": call_filter,
+            "activity_call_filters": CALL_DIRECTORY_FILTERS if kind == "call" else (),
             **ActivityResponsibility(db, user).ui_context(),
             "activity_kind": kind,
             "title": title,

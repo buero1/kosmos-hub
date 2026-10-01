@@ -5,5 +5,12 @@
       {% for key, label in activity_views|default(()) %}<option value="{{ key }}"{% if key == activity_view %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
   </label>
+  {% if activity_call_filters|default(()) %}
+    <label>Anrufstatus
+      <select name="call_filter" onchange="this.form.requestSubmit()">
+        {% for key, label in activity_call_filters %}<option value="{{ key }}"{% if key == activity_call_filter %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+  {% endif %}
   <noscript><button class="button" type="submit">Anzeigen</button></noscript>
 </form>
