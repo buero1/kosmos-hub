@@ -55,6 +55,8 @@ def test_lead_catalog_contains_reviewed_fields_options_and_repeater():
     industry = next(field for field in HUB_LEAD_FIELDS if field.key == "industry")
     assert ("Bäckereien", "Bäckereien") in industry.options
     assert len(industry.options) > 400
+    homepage = next(field for field in HUB_LEAD_FIELDS if field.key == "homepage")
+    assert ("keine_valide_website", "keine_valide_website") in homepage.options
     salutation = next(field for field in HUB_LEAD_FIELDS if field.key == "salutation")
     assert salutation.label == "Anrede"
     assert salutation.display_type == "Auswahlliste"

@@ -51,7 +51,7 @@ HUB_LEAD_FIELDS = (
     HubLeadField('modified_by', 'Geändert von', 'Modified_By', 'Einzelzeile', read_only=True, options=()),
     HubLeadField('google_calendar', 'Google Kalender', 'Google_Kalender', 'Einzelzeile', read_only=False, options=()),
     HubLeadField('google_route', 'Google-Route', 'Google_Route', 'URL', read_only=False, options=()),
-    HubLeadField('homepage', 'Homepage', 'Homepage', 'Auswahlliste', read_only=False, options=(('-None-', '-None-'), ('keine', 'keine'), ('nicht_mobiloptimiert', 'nicht_mobiloptimiert'), ('optimierungsbedarf', 'optimierungsbedarf'), ('nicht_erreichbar', 'nicht_erreichbar'), ('optimiert_nicht_relevant', 'optimiert_nicht_relevant'))),
+    HubLeadField('homepage', 'Homepage', 'Homepage', 'Auswahlliste', read_only=False, options=(('-None-', '-None-'), ('keine', 'keine'), ('keine_valide_website', 'keine_valide_website'), ('nicht_mobiloptimiert', 'nicht_mobiloptimiert'), ('optimierungsbedarf', 'optimierungsbedarf'), ('nicht_erreichbar', 'nicht_erreichbar'), ('optimiert_nicht_relevant', 'optimiert_nicht_relevant'))),
     HubLeadField('calendar_note', 'Kalendernotiz', 'Kalendernotizen', 'Multizeilen', read_only=False, options=()),
     HubLeadField('country', 'Land', 'Country', 'Einzelzeile', read_only=False, options=()),
     HubLeadField('lead_modified_at', 'Lead geändert am', 'Lead_geaendert_am', 'DatumZeit', read_only=False, options=()),
