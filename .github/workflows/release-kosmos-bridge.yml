@@ -57,6 +57,9 @@ jobs:
       - name: Check scoped plugin auto-update policy
         run: php tools/test-bridge-auto-updates.php
 
+      - name: Check revision-protected Yoast metadata
+        run: php tools/test-bridge-seo.php
+
       - name: Build plugin package and metadata
         id: package
         shell: bash

@@ -48,6 +48,13 @@ class Registry {
 			$definition['execute_callback'] = array( AutoUpdatePolicy::class, AutoUpdatePolicy::WRITE_ABILITY === $name ? 'write' : 'read' );
 			wp_register_ability( $name, $definition );
 		}
+		foreach ( SeoMetadata::definitions() as $definition ) {
+			$name = $definition['name'];
+			unset( $definition['name'] );
+			$definition['permission_callback'] = array( SeoMetadata::class, 'authorized' );
+			$definition['execute_callback'] = array( SeoMetadata::class, SeoMetadata::WRITE_ABILITY === $name ? 'write' : 'read' );
+			wp_register_ability( $name, $definition );
+		}
 
 		wp_register_ability(
 			'kosmos-bridge/get-site-info',
@@ -2505,7 +2512,7 @@ class Registry {
 	 * @return array
 	 */
 	public static function get_fallback_abilities() {
-		return array_merge( AutoUpdatePolicy::definitions(), array(
+		return array_merge( AutoUpdatePolicy::definitions(), SeoMetadata::definitions(), array(
 			array(
 				'name'          => 'kosmos-bridge/get-site-info',
 				'label'         => __( 'Get Site Info', 'kosmos-bridge' ),
@@ -2754,6 +2761,12 @@ class Registry {
 	 * @return array|null
 	 */
 	public static function execute_fallback_ability( $ability_name, $input = null ) {
+		if ( SeoMetadata::WRITE_ABILITY === $ability_name ) {
+			return SeoMetadata::write( $input );
+		}
+		if ( SeoMetadata::READ_ABILITY === $ability_name ) {
+			return SeoMetadata::read( $input );
+		}
 		if ( AutoUpdatePolicy::WRITE_ABILITY === $ability_name ) {
 			return AutoUpdatePolicy::write( $input );
 		}
