@@ -281,6 +281,44 @@ def test_read_line_pagination_and_search(env):
     assert env.service.query("finance.list", {"kind": "offers", "customer_id": str(env.customer.id), "query": "Finance test"})["total"] == 1
 
 
+@pytest.mark.parametrize("kind", FINANCE_KINDS)
+def test_finance_directory_suggestions_use_the_shared_authorized_reader(env, kind):
+    created = env.service.execute(f"finance.{kind}.create", values(env, kind))
+    query = "Website" if kind == "articles" else "Finance test"
+
+    response = web.finance_directory_suggestions(
+        request=req(env, {}),
+        db=env.db,
+        module_key=kind,
+        q=query,
+    )
+    payload = json.loads(response.body)
+
+    assert payload["suggestions"]
+    assert payload["suggestions"][0]["record_id"] == str(created.record_id)
+    assert payload["suggestions"][0]["href"] == f"/finance/{kind}/{created.record_id}"
+    assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_finance_directory_suggestions_reject_unknown_module_and_short_query(env):
+    response = web.finance_directory_suggestions(
+        request=req(env, {}),
+        db=env.db,
+        module_key="articles",
+        q="W",
+    )
+    assert json.loads(response.body) == {"suggestions": []}
+
+    with pytest.raises(HTTPException) as error:
+        web.finance_directory_suggestions(
+            request=req(env, {}),
+            db=env.db,
+            module_key="unknown",
+            q="Website",
+        )
+    assert error.value.status_code == 404
+
+
 def test_readonly_and_unknown_fields_fail_and_no_auto_email_operation(env):
     invoice = env.service.execute("finance.invoices.create", values(env, "invoices"))
     for key in ("document_field__invoice_number", "document_field__fake", "document_line__-1__name"):

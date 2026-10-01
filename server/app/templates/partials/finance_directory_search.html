@@ -1,0 +1,29 @@
+{% macro finance_directory_search(module_key, module_label) -%}
+  <div class="finance-directory-search" data-finance-directory-search data-finance-module="{{ module_key }}">
+    <label class="visually-hidden" for="finance-directory-search-{{ module_key }}">{{ module_label }} durchsuchen</label>
+    <span class="finance-directory-search-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.25"></circle><path d="m15.2 15.2 4.8 4.8"></path></svg>
+    </span>
+    <input
+      id="finance-directory-search-{{ module_key }}"
+      type="search"
+      placeholder="{{ module_label }} suchen"
+      maxlength="100"
+      autocomplete="off"
+      role="combobox"
+      aria-autocomplete="list"
+      aria-haspopup="listbox"
+      aria-expanded="false"
+      aria-controls="finance-directory-search-results-{{ module_key }}"
+      data-finance-directory-search-input
+    >
+    <div
+      id="finance-directory-search-results-{{ module_key }}"
+      class="customer-search-suggestions finance-directory-search-results"
+      role="listbox"
+      aria-label="Passende {{ module_label }}"
+      data-finance-directory-search-results
+      hidden
+    ></div>
+  </div>
+{%- endmacro %}

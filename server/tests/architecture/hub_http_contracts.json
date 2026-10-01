@@ -1793,6 +1793,18 @@
       ],
       "reader_method": "finance_entries"
     },
+    "app/api/routes/web.py:finance_directory_suggestions:GET:/finance/suggestions": {
+      "fingerprint": "9368e6e190400ad062daece30d1e19c74d42778fb93392b2fdf9254e876c8d73",
+      "state": "shared",
+      "reason": "Reviewed read-only autocomplete bound to finance.list. The shared reader enforces Finance module access and customer or lead record visibility before returning at most 25 matching records.",
+      "contracts": [
+        "finance.list"
+      ],
+      "boundary": [
+        "_finance_gateway"
+      ],
+      "reader_method": "finance_entries"
+    },
     "app/api/routes/web.py:finance_document_detail_page:GET:/finance/{module_key}/{document_id}": {
       "fingerprint": "08d312527470262ceaf4e6db3a21c1b103b32dcadd9d788f6043241a175b7786",
       "state": "shared",

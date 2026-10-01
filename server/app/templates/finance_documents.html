@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/finance_directory_search.html" import finance_directory_search %}
 {% from "partials/module_layout_menu.html" import module_layout_menu %}
 {% block title %}{{ module.label }} · Finance · kosmos-hub{% endblock %}
 {% block content %}
@@ -7,7 +8,8 @@
     {% if deleted %}<p class="notice-success">{{ module.singular }} wurde im Hub gelöscht.</p>{% endif %}
     <div class="section-heading">
       <div><p class="eyebrow">Finance</p><h2>{{ module.label }}</h2></div>
-      <div class="communication-heading-actions">
+      <div class="communication-heading-actions finance-directory-heading-actions">
+        {{ finance_directory_search(module.key, module.label) }}
         {% if invoice_page %}
           <button type="button" class="button button-secondary" data-invoice-email-review-open disabled>E-Mail senden</button>
           <button type="button" class="button button-secondary finance-invoice-pending-action" disabled title="Folgt im nächsten Schritt">Massenaktualisierung</button>

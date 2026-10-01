@@ -1460,6 +1460,31 @@ def finance_page(request: Request):
     return RedirectResponse(url="/finance/articles", status_code=303)
 
 
+@router.get("/finance/suggestions", response_class=JSONResponse)
+def finance_directory_suggestions(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    module_key: str,
+    q: str = "",
+):
+    if module_key not in ("articles", "offers", *FINANCE_DOCUMENT_MODULES):
+        raise HTTPException(status_code=404, detail="Finance module not found.")
+    query = q.strip()[:100]
+    if len(query) < 2:
+        return JSONResponse({"suggestions": []}, headers={"Cache-Control": "private, no-store"})
+    try:
+        result = _finance_gateway(request, db).query(
+            "finance.list",
+            {"kind": module_key, "query": query},
+        )
+    except HubOperationError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return JSONResponse(
+        {"suggestions": result["items"]},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.get("/finance/articles", response_class=HTMLResponse)
 def finance_articles_page(
     request: Request,
