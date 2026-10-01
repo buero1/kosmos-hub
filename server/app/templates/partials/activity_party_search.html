@@ -1,6 +1,10 @@
 <div class="customer-field-control finance-customer-search" data-finance-party-search data-activity-party-search>
   <span id="activity-party-label-{{ kind }}">Bezieht sich auf</span>
-  <div class="finance-customer-combobox">
+  <div class="activity-party-relation" data-activity-party-relation hidden>
+    <a target="_blank" rel="noopener noreferrer" data-activity-party-link></a>
+    <button class="customer-activity-entry-action" type="button" data-activity-party-change aria-label="Bezug ändern" title="Bezug ändern"><svg class="customer-activity-entry-action-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="0.45" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 18.8 6.1 14.6 15.4 5.3a1.85 1.85 0 0 1 2.62 0l.72.72a1.85 1.85 0 0 1 0 2.62l-9.33 9.33-4.55 1.1Z"/><path d="M14.2 6.5 17.6 9.9"/><path d="M6.1 14.6 9.45 17.95"/></g></svg></button>
+  </div>
+  <div class="finance-customer-combobox" data-activity-party-picker>
     <input type="search" placeholder="Kunde oder Lead suchen" autocomplete="off" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="activity-party-options-{{ kind }}" aria-labelledby="activity-party-label-{{ kind }}" data-finance-party-input>
     <input type="hidden" name="customer_id" value="" data-finance-customer data-customer-activity-calendar-customer>
     <input type="hidden" name="lead_id" value="" data-finance-lead>

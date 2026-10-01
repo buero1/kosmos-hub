@@ -111,6 +111,18 @@ def test_call_and_meeting_delete_buttons_follow_duration_field():
         assert duration_position < delete_position
 
 
+def test_calendar_activity_relation_opens_in_new_tab_and_remains_editable():
+    search = Path("app/templates/partials/activity_party_search.html").read_text(encoding="utf-8")
+    base = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    assert 'target="_blank" rel="noopener noreferrer" data-activity-party-link' in search
+    assert "data-activity-party-change" in search
+    assert 'isLead ? "/leads/" + leadId' in base
+    assert 'isCustomer ? "/customers/" + customerId' in base
+    assert "customerActivitySetCalendarRelationLink(customerCallForm" in base
+    assert "customerActivitySetCalendarRelationLink(customerMeetingForm" in base
+
+
 def test_creation_markup_escapes_employee_name():
     macros = create_templates(directory="app/templates").env.get_template("partials/activity_creation.html").module
     assert "&lt;script&gt;" in macros.fields("<script>", None)

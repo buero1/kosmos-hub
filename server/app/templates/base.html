@@ -4055,6 +4055,9 @@
       .activity-compose-relation { display: grid; min-width: 0; gap: 0.35rem; overflow-wrap: anywhere; }
       .activity-compose-relation > span:first-child { color: var(--muted); font-size: 0.84rem; }
       .activity-compose-relation > [hidden] { display: none; }
+      .activity-party-relation { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 0.65rem; }
+      .activity-party-relation[hidden], [data-activity-party-picker][hidden] { display: none; }
+      .activity-party-relation > a { min-width: 0; overflow-wrap: anywhere; }
       .activity-creation-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 0.7rem; margin: 0 0 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--border); }
       .activity-creation-fields[hidden] { display: none; }
       .activity-creation-fields dt { color: var(--muted); font-size: 0.84rem; }
@@ -7362,6 +7365,30 @@
             if (party) party.dispatchEvent(new CustomEvent("finance-party:set", { detail: {customerId: customerId || "", leadId: leadId || "", name: name || ""} }));
           }
 
+          function customerActivitySetCalendarRelationLink(form, customerId, leadId) {
+            if (!customerActivityCalendarMode) return;
+            var party = form.querySelector("[data-activity-party-search]");
+            if (!party) return;
+            var relation = party.querySelector("[data-activity-party-relation]");
+            var link = party.querySelector("[data-activity-party-link]");
+            var picker = party.querySelector("[data-activity-party-picker]");
+            var input = party.querySelector("[data-finance-party-input]");
+            if (!relation || !link || !picker || !input) return;
+            var isLead = /^[1-9]\d*$/.test(leadId || "");
+            var isCustomer = /^[1-9]\d*$/.test(customerId || "");
+            var href = isLead ? "/leads/" + leadId : (isCustomer ? "/customers/" + customerId : "");
+            relation.hidden = !href;
+            picker.hidden = Boolean(href);
+            link.textContent = href ? input.value : "";
+            if (href) link.setAttribute("href", href);
+            else link.removeAttribute("href");
+          }
+
+          function customerActivityResetCalendarRelationLink(form) {
+            if (!customerActivityCalendarMode) return;
+            customerActivitySetCalendarRelationLink(form, "", "");
+          }
+
           function customerActivitySetDirectoryRelation(form, relation, href) {
             if (!customerActivityDirectoryMode) return;
             var link = form.querySelector("[data-customer-activity-directory-relation]");
@@ -7440,6 +7467,7 @@
                 delete button.dataset.activityDeleteName;
               });
               customerActivitySetDirectoryRelation(form, "", "");
+              customerActivityResetCalendarRelationLink(form);
             });
             var isCall = kind === "call";
             var isTask = kind === "task";
@@ -7505,6 +7533,7 @@
               (opener.dataset.customerCallReminderMinutes || "").split(",").filter(Boolean)
             );
             customerActivitySetCalendarCustomer(customerCallForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId, opener.dataset.customerCalendarPartyName);
+            customerActivitySetCalendarRelationLink(customerCallForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId);
             customerActivitySetDirectoryRelation(customerCallForm, opener.dataset.customerActivityRelation, opener.dataset.customerActivityRelationHref);
             customerCallName.dataset.automatic = "false";
             customerActivityTitle.textContent = "Anruf bearbeiten";
@@ -7572,6 +7601,7 @@
               (opener.dataset.customerMeetingReminderMinutes || "").split(",").filter(Boolean)
             );
             customerActivitySetCalendarCustomer(customerMeetingForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId, opener.dataset.customerCalendarPartyName);
+            customerActivitySetCalendarRelationLink(customerMeetingForm, opener.dataset.customerCalendarCustomerId, opener.dataset.customerCalendarLeadId);
             customerActivitySetDirectoryRelation(customerMeetingForm, opener.dataset.customerActivityRelation, opener.dataset.customerActivityRelationHref);
             customerMeetingName.dataset.automatic = "false";
             customerMeetingUpdateEnd();
@@ -7774,6 +7804,18 @@
             var activity = event.detail || {};
             if (activity.kind !== "call" && activity.kind !== "task" && activity.kind !== "meeting") return;
             customerActivityOpen(activity.kind, activity);
+          });
+          customerActivityComposer.addEventListener("click", function (event) {
+            var change = event.target.closest("[data-activity-party-change]");
+            if (!change) return;
+            var party = change.closest("[data-activity-party-search]");
+            var relation = party && party.querySelector("[data-activity-party-relation]");
+            var picker = party && party.querySelector("[data-activity-party-picker]");
+            var input = party && party.querySelector("[data-finance-party-input]");
+            if (!relation || !picker || !input) return;
+            relation.hidden = true;
+            picker.hidden = false;
+            input.focus();
           });
           document.addEventListener("calendar:activity-edit", function (event) {
             var activity = event.detail || {};
