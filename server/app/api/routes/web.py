@@ -25,6 +25,7 @@ from app.services.site_backups import SiteBackupService
 from app.services.site_mcp_proxy import SiteMcpProxyError
 from app.services.site_updates import SiteUpdateService
 from app.services.site_users import SiteUserService
+from app.services.site_seo import SiteSeoError, SiteSeoService
 from app.services.user_deletion_batches import UserDeletionBatchService
 from app.services.site_admin_launch import SiteAdminLaunchService
 from app.services.maintenance_runs import MaintenanceRunService
@@ -6897,8 +6898,7 @@ def execute_selected_plugin_updates(
     )
 
 
-@router.get("/sites/{site_id}", response_class=HTMLResponse)
-def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+def _site_detail_context(site_id: int, request: Request, db: Session, **extra):
     try:
         item = website_inventory(_website_gateway(request, db), site_id)
     except HubOperationError as exc:
@@ -6913,18 +6913,94 @@ def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depe
         for entry in inventory_service.build_update_workbench([item])
         if entry.site.id == site.id
     ]
+    try:
+        website_site(_website_gateway(request, db), site_id, action="edit")
+        can_manage_seo = True
+    except HubOperationError:
+        can_manage_seo = False
+    return {
+        "site": site,
+        "update_entries": site_entries,
+        "csrf_token": get_csrf_token(request),
+        "maintenance_run_history": maintenance_run_history,
+        "user_inventory": user_inventory,
+        "removable_test_registration": _is_removable_empty_test_registration(site),
+        "can_manage_seo": can_manage_seo,
+        "seo_preview": None,
+        "seo_error": "",
+        **extra,
+    }
+
+
+@router.get("/sites/{site_id}", response_class=HTMLResponse)
+def site_detail_page(site_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     return templates.TemplateResponse(
         request,
         "site_detail.html",
-        {
-            "site": site,
-            "update_entries": site_entries,
-            "csrf_token": get_csrf_token(request),
-            "maintenance_run_history": maintenance_run_history,
-            "user_inventory": user_inventory,
-            "removable_test_registration": _is_removable_empty_test_registration(site),
-        },
+        _site_detail_context(site_id, request, db),
     )
+
+
+@router.post("/sites/{site_id}/seo/analyze", response_class=HTMLResponse)
+def analyze_site_seo(
+    site_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        preview = SiteSeoService(db=db, cipher=get_secret_cipher()).analyze(site_id=site_id, actor=user.username)
+        context = _site_detail_context(site_id, request, db, seo_preview=preview)
+    except HubOperationError as exc:
+        db.rollback()
+        context = _site_detail_context(site_id, request, db, seo_error=str(exc))
+    response = templates.TemplateResponse(request, "site_detail.html", context)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@router.post("/sites/{site_id}/seo/apply")
+async def apply_site_seo(site_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
+    form = await request.form()
+    require_csrf(request, str(form.get("csrf_token") or ""))
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if form.get("confirmed") != "yes":
+        raise HTTPException(status_code=422, detail="Bitte die ausgewaehlten SEO-Aenderungen bestaetigen.")
+    raw_ids = form.getlist("page_id")
+    if (
+        not raw_ids
+        or len(raw_ids) > 40
+        or any(not isinstance(value, str) or not value.isdecimal() for value in raw_ids)
+    ):
+        raise HTTPException(status_code=422, detail="Bitte mindestens eine gueltige Seite auswaehlen.")
+    page_ids = [int(value) for value in raw_ids]
+    edited = {str(page_id): {
+        "title": str(form.get(f"seo_title__{page_id}") or ""),
+        "description": str(form.get(f"seo_description__{page_id}") or ""),
+    } for page_id in page_ids}
+    try:
+        result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
+            "wordpress.seo.apply", {
+                "site_id": str(site_id),
+                "preview_token": str(form.get("preview_token") or ""),
+                "page_ids": json.dumps(page_ids),
+                "edited_values_json": json.dumps(edited, ensure_ascii=False),
+            },
+        )
+        db.commit()
+    except SiteSeoError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HubOperationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(result.href, status_code=303)
 
 
 def _website_gateway(request, db):
@@ -6963,6 +7039,29 @@ def cancel_wordpress_job(job_id: int, request: Request, db: Annotated[Session, D
         result = _website_gateway(request, db).execute("wordpress.jobs.cancel", {"job_id": str(job_id)})
         db.commit()
     except HubOperationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(result.href, status_code=303)
+
+
+@router.post("/wordpress/jobs/{job_id}/seo/restore")
+def restore_wordpress_seo_job(job_id: int, request: Request, db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = ""):
+    require_csrf(request, csrf_token)
+    user = getattr(request.state, "hub_user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    service = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username)
+    try:
+        job = service.query("wordpress.jobs.read", {"job_id": str(job_id)})
+        seo = job.get("result", {}).get("seo", {})
+        if job.get("status") != "succeeded" or seo.get("mode") != "apply" or not seo.get("rollback_token"):
+            raise HubOperationError("Fuer diesen Auftrag ist keine Wiederherstellung verfuegbar.")
+        result = service.execute("wordpress.seo.restore", {
+            "site_id": str(seo["site_id"]), "rollback_token": seo["rollback_token"],
+        })
+        db.commit()
+    except (HubOperationError, SiteSeoError) as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse(result.href, status_code=303)

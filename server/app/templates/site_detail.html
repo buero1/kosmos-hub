@@ -35,6 +35,115 @@
   {% set running_backup_runs = running_maintenance_runs | selectattr("kind", "in", ["updraftplus-backup", "updraftplus-backup-delete"]) | list %}
   {% set running_update_runs = running_maintenance_runs | selectattr("kind", "equalto", "direct-plugin-update") | list %}
 
+  <style>
+    .site-seo-intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: center;
+      padding: 1.15rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 62%, white), var(--panel));
+    }
+    .site-seo-intro h3,
+    .site-seo-intro p { margin: 0; }
+    .site-seo-intro p + p { margin-top: .45rem; }
+    .site-seo-preview-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem 1.2rem;
+      margin: 1rem 0;
+      color: var(--muted);
+    }
+    .site-seo-selection-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: .8rem;
+      align-items: center;
+      margin: 1rem 0 .7rem;
+    }
+    .site-seo-selection-bar label,
+    .site-seo-confirmation {
+      display: flex;
+      gap: .55rem;
+      align-items: center;
+      font-weight: 600;
+    }
+    .site-seo-list { display: grid; gap: .9rem; }
+    .site-seo-page {
+      display: grid;
+      grid-template-columns: minmax(12rem, .72fr) minmax(15rem, 1fr) minmax(19rem, 1.35fr);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      background: var(--panel);
+    }
+    .site-seo-page > div { min-width: 0; padding: 1rem; }
+    .site-seo-page > div + div { border-left: 1px solid var(--border); }
+    .site-seo-page-identity { background: color-mix(in srgb, var(--accent-soft) 24%, var(--panel)); }
+    .site-seo-page-title {
+      display: flex;
+      gap: .6rem;
+      align-items: flex-start;
+      margin-bottom: .55rem;
+    }
+    .site-seo-page-title strong { display: block; }
+    .site-seo-page-url {
+      display: block;
+      overflow-wrap: anywhere;
+      font-size: .84rem;
+    }
+    .site-seo-value-label {
+      display: block;
+      margin: 0 0 .35rem;
+      color: var(--muted);
+      font-size: .76rem;
+      font-weight: 700;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+    .site-seo-current-value { margin: 0 0 .9rem; overflow-wrap: anywhere; }
+    .site-seo-field { display: block; margin-bottom: .8rem; }
+    .site-seo-field input,
+    .site-seo-field textarea { width: 100%; }
+    .site-seo-field textarea { min-height: 6.2rem; resize: vertical; }
+    .site-seo-field-meta {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: .25rem;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .site-seo-field-meta.is-warning { color: #a14b12; font-weight: 700; }
+    .site-seo-warnings {
+      margin: .6rem 0 0;
+      padding-left: 1.1rem;
+      color: #8d4514;
+      font-size: .85rem;
+    }
+    .site-seo-submit {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 980px) {
+      .site-seo-page { grid-template-columns: 1fr; }
+      .site-seo-page > div + div { border-left: 0; border-top: 1px solid var(--border); }
+    }
+    @media (max-width: 640px) {
+      .site-seo-intro { grid-template-columns: 1fr; }
+      .site-seo-intro form .button { width: 100%; }
+      .site-seo-submit { align-items: stretch; flex-direction: column; }
+    }
+  </style>
+
   <div class="site-detail-layout">
     <aside class="site-sidebar" aria-label="Site sections">
       <p class="eyebrow">Customer site</p>
@@ -44,6 +153,7 @@
         <a href="#dashboard">Dashboard</a>
         <a href="#updates">Aktualisierungen</a>
         <a href="#users">Benutzer</a>
+        <a href="#seo">SEO</a>
         <a href="#backups">Backups</a>
         <a href="#protocol">Protokoll</a>
       </nav>
@@ -192,6 +302,102 @@
               <button class="button button-danger" type="submit">Remove test registration</button>
             </form>
           </section>
+        {% endif %}
+      </section>
+
+      <section id="seo" class="site-section" aria-labelledby="seo-heading">
+        <div class="section-heading site-section-heading">
+          <div>
+            <p class="eyebrow">Suchmaschinen</p>
+            <h2 id="seo-heading">SEO-Titel und Beschreibungen</h2>
+            <p class="subtle">Veroeffentlichte Seiten lesen, KI-Vorschlaege pruefen und erst nach ausdruecklicher Auswahl an Yoast uebergeben.</p>
+          </div>
+        </div>
+
+        <div class="site-seo-intro">
+          <div>
+            <h3>{{ site.domain }} analysieren</h3>
+            <p>WordPress liefert hoechstens 40 veroeffentlichte Seiten mit vorhandenem Yoast-Stand und begrenztem sichtbaren Text.</p>
+            <p class="subtle">Die Analyse aendert nichts auf der Website. Oeffentliche Seitentexte und nicht sensible Firmendaten werden fuer die Vorschlaege an die im Hub konfigurierte KI gesendet.</p>
+          </div>
+          {% if can_manage_seo %}
+            <form method="post" action="/sites/{{ site.id }}/seo/analyze" data-seo-analyze-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="button" type="submit" data-seo-analyze-button>{{ "Neu analysieren" if seo_preview else "Website analysieren" }}</button>
+            </form>
+          {% else %}
+            <button class="button" type="button" disabled>Keine Bearbeitungsberechtigung</button>
+          {% endif %}
+        </div>
+
+        {% if seo_error %}
+          <p class="notice-error" role="alert">{{ seo_error }}</p>
+        {% endif %}
+
+        {% if seo_preview %}
+          <div class="site-seo-preview-meta">
+            <span><strong>{{ seo_preview.rows | length }}</strong> Seiten analysiert</span>
+            <span>Sprache: {{ seo_preview.language or "-" }}</span>
+            <span>Vorschau verfaellt nach einer Stunde</span>
+          </div>
+          <form method="post" action="/sites/{{ site.id }}/seo/apply" data-seo-apply-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="preview_token" value="{{ seo_preview.preview_token }}">
+            <div class="site-seo-selection-bar">
+              <label><input type="checkbox" data-seo-select-all> Alle sichtbaren Seiten auswaehlen</label>
+              <span class="subtle" data-seo-selected-count></span>
+            </div>
+            <div class="site-seo-list">
+              {% for row in seo_preview.rows %}
+                <article class="site-seo-page" data-seo-row>
+                  <div class="site-seo-page-identity">
+                    <div class="site-seo-page-title">
+                      <input type="checkbox" name="page_id" value="{{ row.id }}" aria-label="{{ row.page_title }} auswaehlen" data-seo-selection{% if row.selected %} checked{% endif %}>
+                      <div>
+                        <strong>{{ row.page_title or "Seite ohne Titel" }}</strong>
+                        {% if row.is_front_page %}<span class="status-pill">Startseite</span>{% endif %}
+                        {% if not row.indexable %}<span class="status-pill">noindex</span>{% endif %}
+                      </div>
+                    </div>
+                    <a class="site-seo-page-url" href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.url }}</a>
+                    {% if row.warnings %}
+                      <ul class="site-seo-warnings">{% for warning in row.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+                    {% endif %}
+                  </div>
+                  <div>
+                    <span class="site-seo-value-label">Bisheriger SEO-Titel</span>
+                    <p class="site-seo-current-value">{{ row.seo_title or "Nicht gesetzt" }}</p>
+                    <span class="site-seo-value-label">Bisherige Meta-Description</span>
+                    <p class="site-seo-current-value">{{ row.seo_description or "Nicht gesetzt" }}</p>
+                  </div>
+                  <div>
+                    <label class="site-seo-field">
+                      <span class="site-seo-value-label">Neuer SEO-Titel</span>
+                      <input type="text" name="seo_title__{{ row.id }}" value="{{ row.proposed_title }}" maxlength="120" data-seo-text data-recommended-max="65">
+                      <span class="site-seo-field-meta" data-seo-count></span>
+                    </label>
+                    <label class="site-seo-field">
+                      <span class="site-seo-value-label">Neue Meta-Description</span>
+                      <textarea name="seo_description__{{ row.id }}" maxlength="320" data-seo-text data-recommended-max="170">{{ row.proposed_description }}</textarea>
+                      <span class="site-seo-field-meta" data-seo-count></span>
+                    </label>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+            <div class="site-seo-submit">
+              <label class="site-seo-confirmation">
+                <input type="checkbox" name="confirmed" value="yes" required>
+                Ausgewaehlte Werte nach WordPress uebernehmen
+              </label>
+              <button class="button" type="submit" data-seo-apply-button>Ausgewaehlte Werte uebernehmen</button>
+            </div>
+          </form>
+        {% elif not seo_error %}
+          <article class="card">
+            <h3>Noch keine Vorschau</h3>
+            <p>Mit „Website analysieren“ werden die veroeffentlichten Seiten gelesen. Vor deiner ausdruecklichen Freigabe wird nichts in WordPress gespeichert.</p>
+          </article>
         {% endif %}
       </section>
 
@@ -834,7 +1040,7 @@
 
       function activeSectionId() {
         var requestedId = window.location.hash.slice(1);
-        return knownSectionIds.indexOf(requestedId) !== -1 ? requestedId : "dashboard";
+        return knownSectionIds.indexOf(requestedId) !== -1 ? requestedId : "{{ 'seo' if seo_preview or seo_error else 'dashboard' }}";
       }
 
       function showActiveSection() {
@@ -861,6 +1067,67 @@
       });
       window.addEventListener("hashchange", showActiveSection);
       showActiveSection();
+    }());
+  </script>
+  <script>
+    (function () {
+      var form = document.querySelector("[data-seo-apply-form]");
+      var analyzeForm = document.querySelector("[data-seo-analyze-form]");
+      if (analyzeForm) {
+        analyzeForm.addEventListener("submit", function () {
+          var button = analyzeForm.querySelector("[data-seo-analyze-button]");
+          if (button) {
+            button.disabled = true;
+            button.textContent = "Website wird analysiert ...";
+          }
+        });
+      }
+      if (!form) {
+        return;
+      }
+      var selections = Array.prototype.slice.call(form.querySelectorAll("[data-seo-selection]"));
+      var selectAll = form.querySelector("[data-seo-select-all]");
+      var selectedCount = form.querySelector("[data-seo-selected-count]");
+      function updateSelection() {
+        var count = selections.filter(function (input) { return input.checked; }).length;
+        if (selectedCount) {
+          selectedCount.textContent = count + " von " + selections.length + " Seiten ausgewaehlt";
+        }
+        if (selectAll) {
+          selectAll.checked = count === selections.length && selections.length > 0;
+          selectAll.indeterminate = count > 0 && count < selections.length;
+        }
+      }
+      selections.forEach(function (input) { input.addEventListener("change", updateSelection); });
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          selections.forEach(function (input) { input.checked = selectAll.checked; });
+          updateSelection();
+        });
+      }
+      form.querySelectorAll("[data-seo-text]").forEach(function (input) {
+        var output = input.parentElement.querySelector("[data-seo-count]");
+        function updateCount() {
+          var recommended = Number(input.dataset.recommendedMax || 0);
+          output.textContent = input.value.length + " Zeichen";
+          output.classList.toggle("is-warning", recommended > 0 && input.value.length > recommended);
+        }
+        input.addEventListener("input", updateCount);
+        updateCount();
+      });
+      form.addEventListener("submit", function (event) {
+        if (!selections.some(function (input) { return input.checked; })) {
+          event.preventDefault();
+          window.alert("Bitte mindestens eine Seite auswaehlen.");
+          return;
+        }
+        var button = form.querySelector("[data-seo-apply-button]");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Auftrag wird vorbereitet ...";
+        }
+      });
+      updateSelection();
     }());
   </script>
   <script>

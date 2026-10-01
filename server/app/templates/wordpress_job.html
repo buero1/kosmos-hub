@@ -12,6 +12,21 @@
     · {{ job.result.company_profile.field_count }} ausgewählte Felder.
     <a href="/customers/{{ job.result.company_profile.customer_id }}">Zurück zum Kunden</a></p>
   {% endif %}
+  {% if job.result is defined and job.result.get('seo') %}
+    {% set seo = job.result.seo %}
+    <section class="card">
+      <h3>{{ "SEO-Werte wiederhergestellt" if seo.mode == "restore" else "SEO-Uebertragung" }}</h3>
+      <p><a href="/sites/{{ seo.site_id }}#seo">{{ seo.domain }}</a> · {{ seo.page_count }} Seiten</p>
+      <p>{{ seo.message }}</p>
+      {% if job.status == 'succeeded' and seo.mode == 'apply' and seo.rollback_token %}
+        <form method="post" action="/wordpress/jobs/{{ job.job_id }}/seo/restore">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button button-secondary" type="submit">Vorherige SEO-Werte wiederherstellen</button>
+          <p class="subtle">Die Wiederherstellung ist sieben Tage verfuegbar und wird nur ausgefuehrt, wenn die Seiten seitdem nicht erneut geaendert wurden.</p>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
   {% if job.can_cancel %}
   <form method="post" action="/wordpress/jobs/{{ job.job_id }}/cancel">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
