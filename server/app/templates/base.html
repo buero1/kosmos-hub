@@ -6872,6 +6872,7 @@
           function globalMailboxApplyAction(action) {
             globalMailboxResetAction(false);
             globalMailboxApplyDefaultSender();
+            if (action.sender_email) globalMailboxSender.value = action.sender_email;
             if (action.recipient) {
               globalMailboxSelectRecipient({
                 key: action.recipient.key,

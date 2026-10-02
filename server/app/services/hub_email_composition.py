@@ -5,11 +5,16 @@ from html import escape
 from html.parser import HTMLParser
 import re
 
+from sqlalchemy import select
+
 from app.core.config import get_settings
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.hub_mailbox_permission import HubMailboxMembership
 from app.services.customer_communications import CustomerCommunicationService
 from app.services.email_composer_settings import EmailComposerSettingsService
 from app.services.hub_mailbox import HubMailboxService
+from app.services.hub_mailbox_permissions import membership_column
 from app.services.hub_operations import HubOperationError
 from app.services.hub_record_access import require_actor, identifier
 
@@ -95,6 +100,30 @@ def mailbox_for(service, account_id=None):
     return HubMailboxService(db=service.db, cipher=service.cipher, actor=service.actor, public_base_url=get_settings().public_base_url, account_id=account_id)
 
 
+def _source_sender_email(mailbox, source):
+    """Prefer the mailbox that actually received the source message."""
+    if mailbox.scope is None:
+        return ""
+    column = membership_column(source)
+    accounts = list(mailbox.db.scalars(
+        select(HubMailboxAccount)
+        .join(HubMailboxMembership, HubMailboxMembership.mailbox_account_id == HubMailboxAccount.id)
+        .where(
+            column == source.id,
+            HubMailboxAccount.enabled.is_(True),
+            HubMailboxAccount.verified_at.is_not(None),
+        )
+        .order_by(HubMailboxAccount.email_address)
+    ))
+    payload = mailbox._payload(source.encrypted_payload_json)
+    received_by = str(payload.get("mittwald_mailbox") or "").strip().casefold()
+    accounts.sort(key=lambda account: account.email_address.strip().casefold() != received_by)
+    return next(
+        (account.email_address for account in accounts if mailbox.scope.mailboxes.can(account.id, "send")),
+        "",
+    )
+
+
 def compose_context(service, email_key, action, *, allow_fetch=True):
     require_actor(service, "emails", "view")
     if action not in {"reply", "reply_all", "forward"}:
@@ -103,23 +132,27 @@ def compose_context(service, email_key, action, *, allow_fetch=True):
     source = mailbox.scope.require(email_key)
     if email_key.startswith("scheduled-") or getattr(source, "source", "") == "hub-draft":
         raise HubOperationError("Diese E-Mail ist noch nicht versendet.")
+    sender_email = _source_sender_email(mailbox, source)
     if isinstance(source, CustomerZohoEmail):
         if action == "forward":
             prepared = mailbox.communications.get_email_forward(customer_id=source.customer_id, email_id=source.id, allow_fetch=allow_fetch)
             return {"action": action, "customer_id": source.customer_id, "recipient": None, "recipient_email": "",
                     "subject": prepared.subject, "content": prepared.content, "cc_emails": [],
-                    "reply_to_email_id": None, "forward_from_email_id": source.id}
+                    "reply_to_email_id": None, "forward_from_email_id": source.id,
+                    "sender_email": sender_email}
         prepared = mailbox.communications.get_email_reply(customer_id=source.customer_id, email_id=source.id, allow_fetch=allow_fetch)
         return {"action": action, "customer_id": source.customer_id,
                 "recipient": {"key": prepared.recipient_key, "name": prepared.recipient_name, "email": prepared.recipient_email},
                 "recipient_email": prepared.recipient_email, "subject": prepared.subject, "content": prepared.content,
                 "cc_emails": list(prepared.reply_all_cc_emails) if action == "reply_all" else [],
-                "reply_to_email_id": prepared.email_id, "forward_from_email_id": None}
+                "reply_to_email_id": prepared.email_id, "forward_from_email_id": None,
+                "sender_email": sender_email}
     payload = mailbox._payload(source.encrypted_payload_json)
     if not mailbox._unassigned_content(payload):
         raise HubOperationError("Der Nachrichtentext ist nicht lokal gespeichert.")
     context = mailbox.get_unassigned_email_compose_context(email_id=source.id, action=action)
     context["lead_id"] = payload.get("recipient_lead_id") or payload.get("lead_id")
+    context["sender_email"] = sender_email
     # Unassigned source IDs belong to the mailbox, not the customer email table.
     return context
 

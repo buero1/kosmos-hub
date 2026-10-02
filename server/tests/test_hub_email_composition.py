@@ -9,9 +9,11 @@ from app.models.customer_contact import CustomerContact
 from app.models.hub_mailbox_email import HubMailboxEmail
 from app.models.zoho_email_template import ZohoEmailTemplate
 from app.services.customer_communications import CustomerCommunicationService
+from app.services.hub_mailbox_permissions import bind_message
 from app.services.hub_operations import HubArtifact, HubOperationError, HubOperationService, agent_operations
 from app.services.hub_agent import HubAgentService
 from app.services.hub_access_control import permission_target
+from mailbox_fixture_helpers import mailbox_account
 from test_hub_agent import _add_action
 from test_hub_mailbox_operations import env, inbound, key, mailbox
 
@@ -150,6 +152,20 @@ def test_mailbox_composition_matches_ui_and_draft_remains_unsent(env, action):
     assert data["recipient_email"] == ("forward@example.test" if action == "forward" else "alice@example.test")
     assert data["cc_emails"] == ("copy@example.test" if action == "reply_all" else "")
     assert not data.get("forward_from_email_id")
+
+
+def test_reply_uses_the_mailbox_that_received_the_source_message(env):
+    websites = mailbox_account(env.db, env.cipher, "info@kosmos-websites.de")
+    source = inbound(env, sender="noreply@example.test", to=[{"email": websites.email_address}],
+        mittwald_mailbox=websites.email_address)
+    bind_message(env.db, env.cipher, source, account_id=websites.id, replace=True)
+    env.db.commit()
+
+    context = web.mailbox_unassigned_email_compose_context(
+        source.id, request=None, db=env.db, action="reply"
+    )
+
+    assert context["sender_email"] == websites.email_address
 
 
 def test_forward_copies_files_once_and_reply_never_copies_them(env):
