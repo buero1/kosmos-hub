@@ -101,25 +101,41 @@ def mailbox_for(service, account_id=None):
 
 
 def _source_sender_email(mailbox, source):
-    """Prefer the mailbox that actually received the source message."""
+    """Reply from the configured address in the source message's original To field."""
     if mailbox.scope is None:
         return ""
     column = membership_column(source)
+    member_account_ids = set(mailbox.db.scalars(
+        select(HubMailboxMembership.mailbox_account_id).where(column == source.id)
+    ))
     accounts = list(mailbox.db.scalars(
         select(HubMailboxAccount)
-        .join(HubMailboxMembership, HubMailboxMembership.mailbox_account_id == HubMailboxAccount.id)
         .where(
-            column == source.id,
             HubMailboxAccount.enabled.is_(True),
             HubMailboxAccount.verified_at.is_not(None),
         )
         .order_by(HubMailboxAccount.email_address)
     ))
+    accounts = [
+        account for account in accounts
+        if mailbox.scope.mailboxes.can(account.id, "send")
+    ]
     payload = mailbox._payload(source.encrypted_payload_json)
-    received_by = str(payload.get("mittwald_mailbox") or "").strip().casefold()
-    accounts.sort(key=lambda account: account.email_address.strip().casefold() != received_by)
+    recipients = set(mailbox.communications._email_addresses(
+        payload.get("to") or payload.get("empfaenger") or payload.get("empfänger") or payload.get("recipient")
+    ))
+    recipient_accounts = [
+        account for account in accounts
+        if account.email_address.strip().casefold() in recipients
+    ]
+    if recipient_accounts:
+        preferred = next(
+            (account for account in recipient_accounts if account.id in member_account_ids),
+            recipient_accounts[0],
+        )
+        return preferred.email_address
     return next(
-        (account.email_address for account in accounts if mailbox.scope.mailboxes.can(account.id, "send")),
+        (account.email_address for account in accounts if account.id in member_account_ids),
         "",
     )
 

@@ -68,7 +68,11 @@ class HubMailboxImapSyncService:
         summary = {"checked": 0, "imported": 0, "skipped": 0, "failed": 0}
         statement = (
             select(HubMailboxAccount)
-            .where(HubMailboxAccount.enabled.is_(True), HubMailboxAccount.verified_at.is_not(None))
+            .where(
+                HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.imap_enabled.is_(True),
+                HubMailboxAccount.verified_at.is_not(None),
+            )
             .order_by(HubMailboxAccount.id.asc())
         )
         if mailbox_account_ids:

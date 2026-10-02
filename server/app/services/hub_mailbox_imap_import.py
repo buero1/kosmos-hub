@@ -106,7 +106,11 @@ class HubMailboxImapImportService:
 
         accounts = self.db.scalars(
             select(HubMailboxAccount)
-            .where(HubMailboxAccount.enabled.is_(True), HubMailboxAccount.verified_at.is_not(None))
+            .where(
+                HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.imap_enabled.is_(True),
+                HubMailboxAccount.verified_at.is_not(None),
+            )
             .order_by(HubMailboxAccount.email_address.asc())
         ).all()
         if not accounts:

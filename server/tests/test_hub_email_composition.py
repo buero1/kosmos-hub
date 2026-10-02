@@ -154,18 +154,21 @@ def test_mailbox_composition_matches_ui_and_draft_remains_unsent(env, action):
     assert not data.get("forward_from_email_id")
 
 
-def test_reply_uses_the_mailbox_that_received_the_source_message(env):
+def test_reply_uses_original_recipient_mailbox_even_after_forwarding(env):
+    media = mailbox_account(env.db, env.cipher, "info@kosmos-medien.de")
     websites = mailbox_account(env.db, env.cipher, "info@kosmos-websites.de")
-    source = inbound(env, sender="noreply@example.test", to=[{"email": websites.email_address}],
-        mittwald_mailbox=websites.email_address)
-    bind_message(env.db, env.cipher, source, account_id=websites.id, replace=True)
-    env.db.commit()
+    for received_by in (websites, media):
+        source = inbound(env, sender="noreply@example.test", to=[{"email": websites.email_address}],
+            mittwald_mailbox=received_by.email_address)
+        bind_message(env.db, env.cipher, source, account_id=received_by.id, replace=True)
+        env.db.commit()
 
-    context = web.mailbox_unassigned_email_compose_context(
-        source.id, request=None, db=env.db, action="reply"
-    )
+        for action in ("reply", "forward"):
+            context = web.mailbox_unassigned_email_compose_context(
+                source.id, request=None, db=env.db, action=action
+            )
 
-    assert context["sender_email"] == websites.email_address
+            assert context["sender_email"] == websites.email_address
 
 
 def test_forward_copies_files_once_and_reply_never_copies_them(env):

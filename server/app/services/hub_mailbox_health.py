@@ -47,6 +47,7 @@ class HubMailboxHealthService:
             .where(
                 HubMailboxImapSyncState.folder == _INBOX_FOLDER,
                 HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.imap_enabled.is_(True),
                 HubMailboxAccount.verified_at.is_not(None),
             )
             .order_by(HubMailboxAccount.email_address.asc())

@@ -13,6 +13,7 @@ from app.models.hub_mailbox_imap_sync_failure import HubMailboxImapSyncFailure
 from app.services import maintenance_worker
 from app.services.hub_mailbox_imap_import import HubMailboxImapImportError
 from app.services.hub_mailbox_imap_sync import HubMailboxImapSyncService
+from app.services.hub_mailbox_transport import HubMailboxTransportService
 
 
 def test_incremental_sync_only_processes_uids_after_the_saved_high_water_mark():
@@ -76,6 +77,32 @@ def test_incremental_sync_can_limit_a_pass_to_the_sent_folder():
 
         assert summary.checked == 0
         assert checked_folders == ["INBOX.Sent"]
+
+
+def test_imap_disabled_account_remains_available_for_smtp_sending():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        account = HubMailboxAccount(
+            email_address="send-only@kosmos.example",
+            display_name="Send only",
+            username="send-only@kosmos.example",
+            encrypted_password=cipher.encrypt("secret"),
+            verified_at=datetime.now(UTC),
+            imap_enabled=False,
+        )
+        db.add(account)
+        db.commit()
+
+        service = HubMailboxImapSyncService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+        service._new_uids = lambda **_kwargs: pytest.fail("Disabled IMAP mailbox must not be polled")
+
+        assert service.sync_once().checked == 0
+        assert [sender.email for sender in HubMailboxTransportService(db=db, cipher=cipher).list_senders()] == [
+            account.email_address
+        ]
 
 
 def test_incremental_sync_records_a_failure_streak_and_resets_it_after_a_success():

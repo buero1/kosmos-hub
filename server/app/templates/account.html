@@ -617,12 +617,15 @@
                 <td>
                   {% if mailbox.last_error %}<span class="pill pill-missing">Verbindungstest fehlgeschlagen</span><br><span class="subtle">{{ mailbox.last_error }}</span>
                   {% elif not mailbox.verified_at %}<span class="pill pill-missing">Nicht getestet</span>
+                  {% elif not mailbox.imap_enabled %}<span class="pill">Nur Versand · IMAP-Abruf deaktiviert</span>
                   {% elif mailbox.inbox_alerted_at %}<span class="pill pill-missing">INBOX-Abruf gestört</span><br><span class="subtle">{{ mailbox.inbox_last_error or "Kein erfolgreicher Abruf seit mindestens 5 Minuten." }}</span>
                   {% else %}<span class="pill">INBOX aktiv</span>{% endif %}
+                  {% if mailbox.imap_enabled %}
                   {% if mailbox.inbox_last_success_at %}<br><span class="subtle">INBOX zuletzt erfolgreich: {{ mailbox.inbox_last_success_at | berlin_time }}</span>{% endif %}
                   {% if mailbox.inbox_consecutive_failures %}<br><span class="subtle">{{ mailbox.inbox_consecutive_failures }} Fehler in Folge</span>{% endif %}
                   {% if mailbox.sent_last_error %}<br><span class="subtle">Gesendet: {{ mailbox.sent_last_error }}</span>
                   {% elif mailbox.sent_last_success_at %}<br><span class="subtle">Gesendet zuletzt erfolgreich: {{ mailbox.sent_last_success_at | berlin_time }}</span>{% endif %}
+                  {% endif %}
                 </td>
               </tr>
             {% else %}

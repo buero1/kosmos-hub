@@ -378,7 +378,11 @@ def _enabled_hub_mailbox_account_ids() -> tuple[int, ...]:
         return tuple(
             db.scalars(
                 select(HubMailboxAccount.id)
-                .where(HubMailboxAccount.enabled.is_(True), HubMailboxAccount.verified_at.is_not(None))
+                .where(
+                    HubMailboxAccount.enabled.is_(True),
+                    HubMailboxAccount.imap_enabled.is_(True),
+                    HubMailboxAccount.verified_at.is_not(None),
+                )
                 .order_by(HubMailboxAccount.id.asc())
             )
         )
@@ -425,7 +429,7 @@ def _run_hub_mailbox_inbox_idle(mailbox_account_id: int) -> None:
 def _idle_account(mailbox_account_id: int) -> HubMailboxAccount | None:
     with SessionLocal() as db:
         account = db.get(HubMailboxAccount, mailbox_account_id)
-        if account is None or not account.enabled or account.verified_at is None:
+        if account is None or not account.enabled or not account.imap_enabled or account.verified_at is None:
             return None
         db.expunge(account)
         return account

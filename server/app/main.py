@@ -745,6 +745,17 @@ def _ensure_phase_one_schema() -> None:
     if "hub_mailbox_accounts" not in table_names:
         HubMailboxAccount.__table__.create(bind=engine, checkfirst=True)
         logger.info("Created hub_mailbox_accounts table.")
+    else:
+        mailbox_account_columns = {
+            column["name"] for column in inspector.get_columns("hub_mailbox_accounts")
+        }
+        if "imap_enabled" not in mailbox_account_columns:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "ALTER TABLE hub_mailbox_accounts "
+                    "ADD COLUMN imap_enabled BOOLEAN NOT NULL DEFAULT TRUE AFTER enabled"
+                ))
+            logger.info("Added independent IMAP receive control to mailbox accounts.")
 
     if "hub_users" in table_names:
         user_columns = {column["name"]: column for column in inspector.get_columns("hub_users")}

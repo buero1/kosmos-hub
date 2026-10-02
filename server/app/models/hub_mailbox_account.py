@@ -22,6 +22,7 @@ class HubMailboxAccount(TimestampMixin, Base):
     smtp_host: Mapped[str] = mapped_column(String(255), default="mail.agenturserver.de")
     smtp_port: Mapped[int] = mapped_column(default=465)
     enabled: Mapped[bool] = mapped_column(Boolean(), default=True)
+    imap_enabled: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True, server_default="1")
     configured_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("hub_users.id"), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

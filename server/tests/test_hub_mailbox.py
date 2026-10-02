@@ -22,11 +22,13 @@ from app.services.hub_mailbox import HubMailboxService
 
 def test_global_mailbox_composer_applies_the_saved_default_sender_on_every_open():
     template = Path("app/templates/base.html").read_text(encoding="utf-8")
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
 
     assert "if (!globalMailboxSender || globalMailboxSender.value) return;" in template
     assert "globalMailboxApplyNewEmailDefaults();\n                globalMailboxApplyDefaultSender();" in template
     assert "globalMailboxLoadOptions().then(function () {\n              globalMailboxApplyDefaultSender();" in template
     assert "if (action.sender_email) globalMailboxSender.value = action.sender_email;" in template
+    assert "applyMailboxComposerSender(action.sender_email || mailboxComposerDefaultSenderEmail" in mailbox_template
 
 
 def test_email_composers_show_twenty_message_lines():

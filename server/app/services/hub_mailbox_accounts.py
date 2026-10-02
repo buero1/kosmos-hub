@@ -42,6 +42,7 @@ class HubMailboxAccountStatus:
     smtp_host: str
     smtp_port: int
     enabled: bool
+    imap_enabled: bool
     verified_at: datetime | None
     last_tested_at: datetime | None
     last_error: str | None
@@ -203,6 +204,7 @@ class HubMailboxAccountService:
             smtp_host=account.smtp_host,
             smtp_port=account.smtp_port,
             enabled=account.enabled,
+            imap_enabled=account.imap_enabled,
             verified_at=account.verified_at,
             last_tested_at=account.last_tested_at,
             last_error=account.last_error,

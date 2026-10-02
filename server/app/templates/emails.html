@@ -927,9 +927,9 @@
         mailboxComposerContextRecordId.value = action.context_record_id || '';
         if (mailboxComposerLeadId) mailboxComposerLeadId.value = action.lead_id || '';
         if (mailboxComposerSender) {
-          mailboxComposerSender.value = action.sender_email || mailboxComposerDefaultSenderEmail || (
+          applyMailboxComposerSender(action.sender_email || mailboxComposerDefaultSenderEmail || (
             Array.from(mailboxComposerSender.options).find(function (option) { return option.value; }) || {}
-          ).value || '';
+          ).value || '');
         }
         if (mailboxComposerReplyTo) mailboxComposerReplyTo.value = action.reply_to_email_id || '';
         if (mailboxComposerForwardFrom) mailboxComposerForwardFrom.value = action.forward_from_email_id || '';
@@ -1328,9 +1328,21 @@
 
       function applyMailboxComposerDefaultSender() {
         if (!mailboxComposerSender) return;
-        mailboxComposerSender.value = mailboxComposerDefaultSenderEmail || (
+        applyMailboxComposerSender(mailboxComposerDefaultSenderEmail || (
           Array.from(mailboxComposerSender.options).find(function (option) { return option.value; }) || {}
-        ).value || '';
+        ).value || '');
+      }
+
+      function applyMailboxComposerSender(email) {
+        if (!mailboxComposerSender || !email) return false;
+        var normalized = String(email).trim().toLowerCase();
+        var option = Array.from(mailboxComposerSender.options).find(function (item) {
+          return String(item.value || '').trim().toLowerCase() === normalized;
+        });
+        if (!option) return false;
+        option.selected = true;
+        mailboxComposerSender.value = option.value;
+        return true;
       }
 
       function loadMailboxComposerTemplate() {

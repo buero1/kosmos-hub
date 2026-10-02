@@ -42,7 +42,9 @@ def test_mittwald_mailbox_account_is_verified_and_password_is_encrypted():
         assert stored.imap_host == "mail.agenturserver.de"
         assert stored.imap_port == 993
         assert stored.smtp_port == 465
+        assert stored.imap_enabled is True
         assert service.list_statuses()[0].last_error is None
+        assert service.list_statuses()[0].imap_enabled is True
         assert service.list_statuses()[0].verified_at is not None
 
 
