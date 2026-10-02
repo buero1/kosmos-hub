@@ -2,14 +2,26 @@
 {% block title %}E-Mails · kosmos-hub{% endblock %}
 {% block content %}
   <style>
-    .mailbox-header { display: flex; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
+    .mailbox-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 1rem; align-items: end; margin-bottom: 1.25rem; }
     .mailbox-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 0.55rem; }
     .mailbox-header-actions .button { margin: 0; }
     .mailbox-header h2 { margin: 0.18rem 0 0; }
-    .mailbox-account-picker { margin: 0.8rem 0 0; }
+    .mailbox-header-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 0.7rem; margin: 0.8rem 0 0; }
+    .mailbox-account-picker { margin: 0; }
     .mailbox-account-picker label { display: grid; gap: 0.25rem; margin: 0; font-size: 0.8rem; color: var(--muted); }
     .mailbox-account-picker select { width: min(24rem, 100%); max-width: 100%; margin: 0; }
-    @media (max-width: 780px) { .mailbox-header { flex-wrap: wrap; align-items: start; } .mailbox-header > div:first-child { min-width: 0; max-width: 100%; } }
+    .mailbox-search { display: grid; gap: 0.25rem; margin: 0; }
+    .mailbox-search > span { color: var(--muted); font-size: 0.8rem; }
+    .mailbox-search-controls { display: grid; grid-template-columns: auto minmax(12rem, 20rem); gap: 0; }
+    .mailbox-search-controls select, .mailbox-search-controls input { min-width: 0; margin: 0; }
+    .mailbox-search-controls select { width: auto; border-radius: var(--control-v1-radius) 0 0 var(--control-v1-radius); }
+    .mailbox-search-input { position: relative; }
+    .mailbox-search-input input { width: 100%; padding-right: 2.5rem; border-left: 0; border-radius: 0 var(--control-v1-radius) var(--control-v1-radius) 0; }
+    .mailbox-search-input input::-webkit-search-cancel-button { appearance: none; }
+    .mailbox-search-clear { position: absolute; top: 50%; right: 0.35rem; display: grid; width: 2rem; min-width: 2rem; height: 2rem; min-height: 2rem; margin: 0; padding: 0; transform: translateY(-50%); place-items: center; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; font: 1.3rem/1 sans-serif; }
+    .mailbox-search-clear:hover, .mailbox-search-clear:focus-visible { background: var(--accent-soft); color: var(--ink); }
+    .mailbox-search-clear[hidden] { display: none; }
+    @media (max-width: 780px) { .mailbox-header { flex-wrap: wrap; align-items: start; } .mailbox-header > div:first-child { min-width: 0; max-width: 100%; } .mailbox-header-controls { align-items: stretch; } .mailbox-account-picker, .mailbox-search { width: 100%; } .mailbox-account-picker select { width: 100%; } .mailbox-search-controls { grid-template-columns: minmax(8.5rem, auto) minmax(0, 1fr); } }
     .mailbox-shell { display: grid; grid-template-columns: 11.5rem minmax(18rem, 0.9fr) minmax(24rem, 1.45fr); height: var(--mailbox-shell-height, 66dvh); min-height: 20rem; overflow: hidden; padding: 0; }
     .mailbox-folders { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.8rem; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--accent-soft) 22%, var(--panel)); }
     .mailbox-folders a { display: flex; justify-content: space-between; gap: 0.45rem; padding: 0.62rem 0.7rem; border-radius: var(--control-v1-radius); color: var(--ink); font: 700 0.84rem "Trebuchet MS", sans-serif; text-decoration: none; }
@@ -144,18 +156,33 @@
     <div>
       <p class="eyebrow">Kosmos Hub</p>
       <h2>E-Mail-Zentrale</h2>
-      <form method="get" action="/emails" class="mailbox-account-picker">
-        <input type="hidden" name="folder" value="{{ folder }}" data-mailbox-account-folder>
-        <label>Konto
-          <select name="account_id" data-mailbox-account aria-label="E-Mail-Konto">
-            {% if mailbox_accounts | default([]) | length != 1 %}<option value="">Alle freigegebenen Postfächer</option>{% endif %}
-            {% for account in mailbox_accounts | default([]) %}
-              <option value="{{ account.id }}" {% if mailbox_account_id == account.id %}selected{% endif %}>{{ account.email }}{% if not account.enabled %} (inaktiv){% endif %}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <noscript><button class="button button-secondary" type="submit">Konto anzeigen</button></noscript>
-      </form>
+      <div class="mailbox-header-controls">
+        <form method="get" action="/emails" class="mailbox-account-picker">
+          <input type="hidden" name="folder" value="{{ folder }}" data-mailbox-account-folder>
+          <label>Konto
+            <select name="account_id" data-mailbox-account aria-label="E-Mail-Konto">
+              {% if mailbox_accounts | default([]) | length != 1 %}<option value="">Alle freigegebenen Postfächer</option>{% endif %}
+              {% for account in mailbox_accounts | default([]) %}
+                <option value="{{ account.id }}" {% if mailbox_account_id == account.id %}selected{% endif %}>{{ account.email }}{% if not account.enabled %} (inaktiv){% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <noscript><button class="button button-secondary" type="submit">Konto anzeigen</button></noscript>
+        </form>
+        <div class="mailbox-search" role="search" aria-label="E-Mails durchsuchen">
+          <span>E-Mails durchsuchen</span>
+          <span class="mailbox-search-controls">
+            <select data-mailbox-search-scope aria-label="Suchbereich">
+              <option value="current">Aktuelle Ordner</option>
+              <option value="all">Alle Ordner</option>
+            </select>
+            <span class="mailbox-search-input">
+              <input type="search" autocomplete="off" placeholder="E-Mails durchsuchen" aria-label="E-Mails durchsuchen" data-mailbox-search>
+              <button class="mailbox-search-clear" type="button" aria-label="Suche löschen" title="Suche löschen" data-mailbox-search-clear hidden>&times;</button>
+            </span>
+          </span>
+        </div>
+      </div>
     </div>
     <div class="mailbox-header-actions">
       <a class="button button-secondary" href="/email-templates">Vorlagen verwalten</a>
@@ -386,6 +413,11 @@
       var folderSelections = new Map();
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
+      var mailboxSearchInput = document.querySelector('[data-mailbox-search]');
+      var mailboxSearchScope = document.querySelector('[data-mailbox-search-scope]');
+      var mailboxSearchClear = document.querySelector('[data-mailbox-search-clear]');
+      var mailboxSearchTimer = 0;
+      var mailboxSearchRevision = 0;
       var invoiceFolderEnabled = {{ mailbox_invoices_enabled | default(false) | tojson }};
       var invoiceMailboxAccountIds = {{ mailbox_invoice_account_ids | default(()) | tojson }};
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', drafts: 'Entwürfe', planned: 'Geplant', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
@@ -1655,7 +1687,7 @@
         });
         link.addEventListener('contextmenu', function (event) {
           var list = link.closest('[data-mailbox-list]');
-          if (!list || (list.dataset.mailboxFolderName || '') === 'planned') return;
+          if (!list || (link.dataset.mailboxSourceFolder || list.dataset.mailboxFolderName || '') === 'planned') return;
           event.preventDefault();
           var marked = markedMailboxMessages(list);
           if (!marked.keys.has(link.dataset.mailboxKey)) {
@@ -1680,10 +1712,10 @@
 
       attachFolderListeners(document);
 
-      function mailboxMessageUrl(list, messageKey) {
+      function mailboxMessageUrl(list, messageKey, sourceFolder, sourceUnread) {
         var url = scopedMailboxUrl('/emails');
-        url.searchParams.set('folder', list.dataset.mailboxFolderName || 'inbox');
-        if (list.dataset.mailboxUnread === 'true') url.searchParams.set('unread', 'true');
+        url.searchParams.set('folder', sourceFolder || list.dataset.mailboxFolderName || 'inbox');
+        if (typeof sourceUnread === 'boolean' ? sourceUnread : list.dataset.mailboxUnread === 'true') url.searchParams.set('unread', 'true');
         url.searchParams.set('selected', messageKey);
         return url.toString();
       }
@@ -1700,7 +1732,7 @@
       }
 
       function markedMailboxMessages(list) {
-        var folder = list.dataset.mailboxFolderName || 'inbox';
+        var folder = single && single.search_folder ? single.search_folder : list.dataset.mailboxFolderName || 'inbox';
         var unread = list.dataset.mailboxUnread === 'true';
         var cacheKey = mailboxFolderKey(folder, unread);
         var marked = folderMarkedMessages.get(cacheKey);
@@ -1985,9 +2017,12 @@
 
         var link = document.createElement('a');
         link.className = 'mailbox-message-open';
-        link.href = mailboxMessageUrl(list, message.key);
+        var sourceFolder = message.search_folder || list.dataset.mailboxFolderName || 'inbox';
+        var sourceUnread = typeof message.search_unread === 'boolean' ? message.search_unread : list.dataset.mailboxUnread === 'true';
+        link.href = mailboxMessageUrl(list, message.key, sourceFolder, sourceUnread);
         link.dataset.mailboxMessage = '';
         link.dataset.mailboxKey = message.key;
+        link.dataset.mailboxSourceFolder = sourceFolder;
 
         var header = document.createElement('div');
         header.className = 'mailbox-message-row';
@@ -2008,8 +2043,8 @@
         subject.textContent = message.subject;
         subjectRow.append(subject);
         var trash = null;
-        var isTrashFolder = (list.dataset.mailboxFolderName || 'inbox') === 'trash';
-        var isPlannedFolder = (list.dataset.mailboxFolderName || 'inbox') === 'planned';
+        var isTrashFolder = sourceFolder === 'trash';
+        var isPlannedFolder = sourceFolder === 'planned';
         if (!isPlannedFolder) trash = document.createElement('button');
         if (trash) {
         trash.className = 'mailbox-message-trash';
@@ -2102,11 +2137,85 @@
           emptyMessage = document.createElement('p');
           emptyMessage.className = 'mailbox-empty';
           emptyMessage.dataset.mailboxListEmpty = '';
-          emptyMessage.textContent = 'In diesem Ordner liegen keine E-Mails.';
+          emptyMessage.textContent = list.dataset.mailboxSearching === 'true' ? 'Keine passenden E-Mails gefunden.' : 'In diesem Ordner liegen keine E-Mails.';
           canvas.after(emptyMessage);
         }
-        if (emptyMessage) emptyMessage.hidden = messages.length > 0;
+        if (emptyMessage) {
+          emptyMessage.textContent = list.dataset.mailboxSearching === 'true' ? 'Keine passenden E-Mails gefunden.' : 'In diesem Ordner liegen keine E-Mails.';
+          emptyMessage.hidden = messages.length > 0;
+        }
         renderMailboxListWindow(list);
+      }
+
+      function normalizeMailboxSearch(value) {
+        return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').toLocaleLowerCase('de');
+      }
+
+      function mailboxMessageMatches(message, query) {
+        var haystack = normalizeMailboxSearch([message.sender, message.subject, message.context].join(' '));
+        return normalizeMailboxSearch(query).split(/\s+/).filter(Boolean).every(function (term) { return haystack.includes(term); });
+      }
+
+      function mailboxSearchFolders() {
+        return Object.keys(folderTitles);
+      }
+
+      function setMailboxSearchPresentation(list, active, count) {
+        list.dataset.mailboxSearching = active ? 'true' : 'false';
+        var title = list.querySelector('[data-mailbox-list-title]');
+        if (title) title.textContent = active ? 'Suchergebnisse' + (typeof count === 'number' ? ' (' + count + ')' : '') : folderTitles[list.dataset.mailboxFolderName || 'inbox'] || 'Posteingang';
+        var toggle = list.querySelector('.mailbox-list-heading [data-mailbox-folder]');
+        if (toggle) toggle.hidden = active;
+      }
+
+      function runMailboxSearch() {
+        var list = document.querySelector('[data-mailbox-list]');
+        if (!list || !mailboxSearchInput) return;
+        var query = mailboxSearchInput.value.trim();
+        var revision = ++mailboxSearchRevision;
+        if (mailboxSearchClear) mailboxSearchClear.hidden = !query;
+        if (!query) {
+          var folder = list.dataset.mailboxFolderName || 'inbox';
+          var unread = list.dataset.mailboxUnread === 'true';
+          setMailboxSearchPresentation(list, false);
+          fetchMailboxFolder(folder, unread).then(function (messages) {
+            if (revision !== mailboxSearchRevision || mailboxSearchInput.value.trim()) return;
+            updateMailboxList(list, messages);
+          });
+          return;
+        }
+        setMailboxSearchPresentation(list, true);
+        var currentFolder = list.dataset.mailboxFolderName || 'inbox';
+        var currentUnread = list.dataset.mailboxUnread === 'true';
+        var folders = mailboxSearchScope && mailboxSearchScope.value === 'all' ? mailboxSearchFolders() : [currentFolder];
+        Promise.all(folders.map(function (folder) {
+          var unread = folders.length === 1 ? currentUnread : false;
+          return fetchMailboxFolder(folder, unread).then(function (messages) {
+            return messages.map(function (message) {
+              return Object.assign({}, message, { search_folder: folder, search_unread: unread });
+            });
+          }).catch(function () { return []; });
+        })).then(function (groups) {
+          if (revision !== mailboxSearchRevision || mailboxSearchInput.value.trim() !== query) return;
+          var seen = new Set();
+          var matches = groups.flat().filter(function (message) {
+            if (seen.has(message.key) || !mailboxMessageMatches(message, query)) return false;
+            seen.add(message.key);
+            return true;
+          }).sort(function (left, right) { return Number(right.occurred_at || 0) - Number(left.occurred_at || 0); });
+          setMailboxSearchPresentation(list, true, matches.length);
+          list.scrollTop = 0;
+          updateMailboxList(list, matches);
+        }).catch(function () {
+          if (revision !== mailboxSearchRevision) return;
+          setMailboxSearchPresentation(list, true, 0);
+          updateMailboxList(list, []);
+        });
+      }
+
+      function scheduleMailboxSearch() {
+        window.clearTimeout(mailboxSearchTimer);
+        mailboxSearchTimer = window.setTimeout(runMailboxSearch, 160);
       }
 
       function cacheMailboxFolder(list) {
@@ -2126,6 +2235,17 @@
             pane: readingPane
           });
         }
+      });
+
+      if (mailboxSearchInput) mailboxSearchInput.addEventListener('input', scheduleMailboxSearch);
+      if (mailboxSearchScope) mailboxSearchScope.addEventListener('change', function () {
+        if (mailboxSearchInput && mailboxSearchInput.value.trim()) runMailboxSearch();
+      });
+      if (mailboxSearchClear) mailboxSearchClear.addEventListener('click', function () {
+        if (!mailboxSearchInput) return;
+        mailboxSearchInput.value = '';
+        mailboxSearchInput.focus();
+        runMailboxSearch();
       });
 
       function setSelectedMessage(list, messageKey) {
@@ -2162,6 +2282,7 @@
         var savedScrollTop = folderScrollPositions.get(mailboxFolderKey(folder, unread)) || 0;
         list.scrollTop = savedScrollTop;
         renderMailboxListWindow(list);
+        if (mailboxSearchInput && mailboxSearchInput.value.trim()) runMailboxSearch();
       }
 
       function clearMailboxReadingPane() {
@@ -2396,8 +2517,8 @@
             var paneInsertedAt = performance.now();
             window.history.pushState({}, '', messageUrl);
             nextPane.scrollTop = 0;
-            var folder = list.dataset.mailboxFolderName || 'inbox';
-            var unread = list.dataset.mailboxUnread === 'true';
+            var folder = paneUrl.searchParams.get('folder') || list.dataset.mailboxFolderName || 'inbox';
+            var unread = paneUrl.searchParams.get('unread') === 'true';
             folderSelections.set(mailboxFolderKey(folder, unread), { messageKey: messageKey, pane: nextPane });
             var previews = nextPane.querySelectorAll('details[data-email-preview][open]');
             var timingPrefix = 'Vorschau: Antwort ' + formatMailboxTiming(result.responseAt - startedAt) + ' · HTML ' + formatMailboxTiming(paneInsertedAt - parseStartedAt);
@@ -2429,7 +2550,7 @@
           })
           .catch(function () {
             // Keep the server-rendered navigation as a safe fallback.
-            window.location.assign(link.href);
+            window.location.assign(messageUrl);
           });
       }
     }());

@@ -161,6 +161,20 @@ def test_mailbox_header_actions_align_the_template_link_with_new_email_button():
     assert ".mailbox-header-actions .button { margin: 0; }" in mailbox_template
 
 
+def test_mailbox_search_filters_current_or_all_folders_in_the_message_list():
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
+    list_template = Path("app/templates/emails_message_list.html").read_text(encoding="utf-8")
+
+    assert '<option value="current">Aktuelle Ordner</option>' in mailbox_template
+    assert '<option value="all">Alle Ordner</option>' in mailbox_template
+    assert 'data-mailbox-search-clear hidden' in mailbox_template
+    assert "function runMailboxSearch()" in mailbox_template
+    assert "return Object.keys(folderTitles);" in mailbox_template
+    assert "seen.has(message.key)" in mailbox_template
+    assert "message.search_folder" in mailbox_template
+    assert '"occurred_at":' in list_template
+
+
 def test_account_mailbox_groups_settings_in_zoho_style_disclosures():
     template = Path("app/templates/account.html").read_text(encoding="utf-8")
     mcp_section = template[template.index('id="account-mcp"'):template.index('id="account-desktop-notifier"')]
@@ -260,7 +274,9 @@ def test_mailbox_combines_customer_email_and_unassigned_workflow_email():
         )
         serialized_messages = re.search(r'<script type="application/json" data-mailbox-list-data>(.*?)</script>', rendered_list)
         assert serialized_messages is not None
-        assert json.loads(serialized_messages.group(1))[0]["subject"] == "Noch unbekannt"
+        message_data = json.loads(serialized_messages.group(1))
+        assert message_data[0]["subject"] == "Noch unbekannt"
+        assert message_data[0]["occurred_at"] == unassigned_email.received_at.timestamp()
 
         rendered_pane = template.get_template("emails_reading_pane.html").render(
             selected=inbox.selected,
