@@ -314,6 +314,7 @@
       <a href="/emails?folder=drafts{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="drafts"{% if folder == 'drafts' %} class="is-active"{% endif %}><span>Entwürfe</span><small>{{ mailbox.folder_counts.drafts }}</small></a>
       <a href="/emails?folder=planned{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="planned"{% if folder == 'planned' %} class="is-active"{% endif %}><span>Geplant</span><small>{{ mailbox.folder_counts.planned }}</small></a>
       <a href="/emails?folder=sent{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="sent"{% if folder == 'sent' %} class="is-active"{% endif %}><span>Gesendet</span><small>{{ mailbox.folder_counts.sent }}</small></a>
+      {% if mailbox_invoices_enabled %}<a href="/emails?folder=invoices{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="invoices"{% if folder == 'invoices' %} class="is-active"{% endif %}><span>Rechnungen</span><small>{{ mailbox.folder_counts.invoices }}</small></a>{% endif %}
       <a href="/emails?folder=unassigned{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="unassigned"{% if folder == 'unassigned' %} class="is-active"{% endif %}><span>Unbekannt</span><small>{{ mailbox.folder_counts.unassigned }}</small></a>
       <a href="/emails?folder=trash{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="trash"{% if folder == 'trash' %} class="is-active"{% endif %}><span>Papierkorb</span><small>{{ mailbox.folder_counts.trash }}</small></a>
       <a href="/emails?folder=spam{{ account_suffix }}" data-mailbox-folder data-mailbox-folder-count="spam"{% if folder == 'spam' %} class="is-active"{% endif %}><span>Spam</span><small>{{ mailbox.folder_counts.spam }}</small></a>
@@ -338,6 +339,7 @@
         <div class="mailbox-context-submenu" role="menu" aria-label="Zielordner">
           <button type="button" role="menuitem" data-mailbox-batch-action="move_inbox">Posteingang</button>
           <button type="button" role="menuitem" data-mailbox-batch-action="move_sent">Gesendet</button>
+          {% if mailbox_invoices_enabled %}<button type="button" role="menuitem" data-mailbox-batch-action="move_invoices">Rechnungen</button>{% endif %}
           <button type="button" role="menuitem" data-mailbox-batch-action="move_trash">Papierkorb</button>
           <button type="button" role="menuitem" data-mailbox-batch-action="move_spam">Spam</button>
         </div>
@@ -384,7 +386,9 @@
       var folderSelections = new Map();
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
+      var invoiceFolderEnabled = {{ mailbox_invoices_enabled | default(false) | tojson }};
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', drafts: 'Entwürfe', planned: 'Geplant', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
+      if (invoiceFolderEnabled) folderTitles.invoices = 'Rechnungen';
       var mailboxStatus = {
         folderCounts: {{ mailbox.folder_counts | tojson }},
         unreadCount: {{ unread_email_count | default(0) | tojson }}
@@ -2214,7 +2218,7 @@
         var list = document.querySelector('[data-mailbox-list]');
         if (!list) return;
         var activeFolder = list.dataset.mailboxFolderName || 'inbox';
-        var queue = ['inbox', 'drafts', 'planned', 'sent', 'unassigned', 'trash', 'spam'].filter(function (folder) { return folder !== activeFolder; });
+        var queue = ['inbox', 'drafts', 'planned', 'sent'].concat(invoiceFolderEnabled ? ['invoices'] : [], ['unassigned', 'trash', 'spam']).filter(function (folder) { return folder !== activeFolder; });
         function loadNextFolder() {
           var folder = queue.shift();
           if (!folder) return;
@@ -2305,7 +2309,9 @@
           return;
         }
         var list = document.querySelector('[data-mailbox-list]');
-        accountPicker.form.querySelector('[data-mailbox-account-folder]').value = list ? list.dataset.mailboxFolderName : 'inbox';
+        var selectedFolder = list ? list.dataset.mailboxFolderName : 'inbox';
+        if (selectedFolder === 'invoices' && accountPicker.value !== mailboxAccountId) selectedFolder = 'inbox';
+        accountPicker.form.querySelector('[data-mailbox-account-folder]').value = selectedFolder;
         accountPicker.form.requestSubmit();
       });
       document.addEventListener('visibilitychange', function () {

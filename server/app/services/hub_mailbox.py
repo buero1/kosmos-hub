@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, load_only, selectinload
 from app.core.security import SecretCipher
 from app.models.customer import Customer
 from app.models.customer_communication import CustomerZohoEmail
+from app.models.hub_mailbox_account import HubMailboxAccount
 from app.models.hub_mailbox_email import HubMailboxAttachment, HubMailboxEmail
 from app.models.hub_scheduled_email import HubScheduledEmail
 from app.services.customer_communications import (
@@ -42,20 +43,29 @@ from app.services.hub_mailbox_permissions import bind_message
 from app.services.hub_email_associations import EmailAssociationService, EmailRecordLink, index_email
 
 
-MAILBOX_FOLDERS = frozenset({"inbox", "sent", "drafts", "planned", "unassigned", "trash", "spam"})
+INVOICE_MAILBOX_ADDRESS = "info@kosmos-medien.de"
+INVOICE_MAILBOX_FOLDER = "invoices"
+_INVOICE_MAILBOX_STATE = "invoices"
+MAILBOX_FOLDERS = frozenset({"inbox", "sent", "drafts", "planned", "unassigned", INVOICE_MAILBOX_FOLDER, "trash", "spam"})
 _ACTIVE_MAILBOX_STATE = "active"
 _DRAFT_MAILBOX_STATE = "draft"
 _DRAFT_SOURCE = "hub-draft"
 _DIRECT_SEND_SOURCE = "hub-direct-send"
 TASK_EMAIL_REMINDER_SOURCE = "hub-task-reminder"
 MAILBOX_HEALTH_ALERT_SOURCE = "hub-mailbox-health-alert"
-_MAILBOX_STATE_BY_FOLDER = {"drafts": _DRAFT_MAILBOX_STATE, "trash": "trash", "spam": "spam"}
+_MAILBOX_STATE_BY_FOLDER = {
+    "drafts": _DRAFT_MAILBOX_STATE,
+    INVOICE_MAILBOX_FOLDER: _INVOICE_MAILBOX_STATE,
+    "trash": "trash",
+    "spam": "spam",
+}
 _PLANNED_MAILBOX_STATUSES = ("scheduled", "retrying", "sending", "failed")
 MAILBOX_ACTIONS = {
     "mark_read": "Als gelesen markieren",
     "mark_unread": "Als ungelesen markieren",
     "move_inbox": "In Posteingang verschieben",
     "move_sent": "In Gesendet verschieben (kein Versand)",
+    "move_invoices": "In Rechnungen verschieben",
     "move_trash": "In Papierkorb verschieben",
     "move_spam": "Als Spam markieren und Absender sperren",
     "restore": "Wiederherstellen, Spam-Absender gegebenenfalls entsperren",
@@ -155,6 +165,17 @@ class HubMailboxService:
             actor=actor,
         )
 
+    @property
+    def invoice_folder_enabled(self) -> bool:
+        """Expose the custom folder only for the explicitly selected info mailbox."""
+        account = self.db.get(HubMailboxAccount, self.account_id) if self.account_id is not None else None
+        return bool(account and account.email_address.strip().casefold() == INVOICE_MAILBOX_ADDRESS)
+
+    def folder_available(self, folder: str) -> bool:
+        return folder in MAILBOX_FOLDERS and (
+            folder != INVOICE_MAILBOX_FOLDER or self.invoice_folder_enabled
+        )
+
     def _record_links(self, payload, direction, record=None):
         return tuple(link for link in self.associations.links(payload, direction, record=record)
                      if self.scope is None or self.scope.record_visible(link.module, link.id))
@@ -196,14 +217,19 @@ class HubMailboxService:
 
     def get_unread_count(self) -> int:
         linked = select(CustomerZohoEmail.zoho_message_id, CustomerZohoEmail.id).where(
-            CustomerZohoEmail.direction == "inbound", CustomerZohoEmail.is_unread.is_(True), CustomerZohoEmail.mailbox_state == _ACTIVE_MAILBOX_STATE,
+            CustomerZohoEmail.direction == "inbound", CustomerZohoEmail.is_unread.is_(True),
+            CustomerZohoEmail.mailbox_state.in_((_ACTIVE_MAILBOX_STATE, _INVOICE_MAILBOX_STATE)),
         )
         if self.scope is not None and self.scope.customers is not None:
             linked = linked.where(CustomerZohoEmail.customer_id.in_(self.scope.customers))
         if self.scope is not None:
             linked = self.scope.mailboxes.filter_statement(linked, CustomerZohoEmail)
         linked_count = len({message_id or f"local-{email_id}" for message_id, email_id in self.db.execute(linked)})
-        filters = (HubMailboxEmail.direction == "inbound", HubMailboxEmail.is_unread.is_(True), HubMailboxEmail.mailbox_state == _ACTIVE_MAILBOX_STATE)
+        filters = (
+            HubMailboxEmail.direction == "inbound",
+            HubMailboxEmail.is_unread.is_(True),
+            HubMailboxEmail.mailbox_state.in_((_ACTIVE_MAILBOX_STATE, _INVOICE_MAILBOX_STATE)),
+        )
         if self.scope is not None and (self.scope.user.role != "admin" or self.account_id is not None):
             local_count = sum(self.scope.visible(row) for row in self.db.scalars(select(HubMailboxEmail).where(*filters)))
         else:
@@ -212,8 +238,8 @@ class HubMailboxService:
 
     def get_folder_view(self, *, folder: str, unread_only: bool, selected_key: str = "", load_selected: bool = True) -> HubMailboxView:
         """Load one folder for in-page navigation without rebuilding the other folders."""
-        if folder not in MAILBOX_FOLDERS:
-            raise ValueError("Unbekannter E-Mail-Ordner.")
+        if not self.folder_available(folder):
+            raise ValueError("Der E-Mail-Ordner ist für dieses Postfach nicht verfügbar.")
 
         if folder == "unassigned":
             messages = [
@@ -253,7 +279,7 @@ class HubMailboxService:
         selected_key: str,
     ) -> HubMailboxMessage | None:
         """Load one reading-pane message without rebuilding the complete mailbox list."""
-        if folder not in MAILBOX_FOLDERS or not selected_key:
+        if not self.folder_available(folder) or not selected_key:
             return None
         if self.scope is not None:
             try:
@@ -322,6 +348,8 @@ class HubMailboxService:
         """Apply one mailbox action to a deduplicated selection of visible messages."""
         if action not in _BATCH_ACTIONS:
             raise ValueError("Unbekannte E-Mail-Aktion.")
+        if action == "move_invoices" and not self.invoice_folder_enabled:
+            raise ValueError("Der Ordner Rechnungen ist nur für info@kosmos-medien.de verfügbar.")
         selected_keys = tuple(dict.fromkeys(key for key in keys if key))
         if not selected_keys:
             raise ValueError("Wähle mindestens eine E-Mail aus.")
@@ -398,6 +426,8 @@ class HubMailboxService:
             elif action == "move_sent":
                 email.mailbox_state = _ACTIVE_MAILBOX_STATE
                 email.direction = "outbound"
+            elif action == "move_invoices":
+                email.mailbox_state = _INVOICE_MAILBOX_STATE
             elif action == "move_trash":
                 email.mailbox_state = "trash"
             elif action == "move_spam":
@@ -1139,7 +1169,7 @@ class HubMailboxService:
         )) if restricted else self.db.scalar(
             select(func.count(HubScheduledEmail.id)).where(HubScheduledEmail.status.in_(_PLANNED_MAILBOX_STATUSES))
         ) or 0
-        return {
+        counts = {
             "inbox": sum(
                 mailbox_state == _ACTIVE_MAILBOX_STATE and direction == "inbound"
                 for mailbox_state, direction, _ in linked_keys
@@ -1159,6 +1189,12 @@ class HubMailboxService:
             ),
             "planned": planned_count,
         }
+        if self.invoice_folder_enabled:
+            counts[INVOICE_MAILBOX_FOLDER] = (
+                sum(mailbox_state == _INVOICE_MAILBOX_STATE for mailbox_state, _, _ in linked_keys)
+                + sum(mailbox_state == _INVOICE_MAILBOX_STATE for mailbox_state, _, _source, _ in unassigned_rows)
+            )
+        return counts
 
     def _email_list_header(self, email: CustomerZohoEmail) -> dict[str, object]:
         header = self._payload(email.encrypted_header_json)

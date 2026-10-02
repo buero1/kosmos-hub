@@ -32,10 +32,10 @@ def _keys(values):
 def batch_action(service, values, *, action):
     require_actor(service, "emails", "delete" if action in {"move_trash", "permanently_delete"} else "edit")
     keys = _keys(values)
-    mailbox = mailbox_for(service)
+    mailbox = mailbox_for(service, identifier(values.get("account_id", "")))
     for key in keys:
         record = mailbox.scope.require(key)
-        if getattr(record, "source", "") == "hub-draft" and action in {"move_inbox", "move_sent", "move_spam"}:
+        if getattr(record, "source", "") == "hub-draft" and action in {"move_inbox", "move_sent", "move_invoices", "move_spam"}:
             raise HubOperationError("Ungesendete Entwuerfe bleiben im Entwurfsordner oder Papierkorb.")
     changed = mailbox.apply_batch_action(keys=keys, action=action)
     return HubOperationResult("Postfach oeffnen", "/emails", 0, outputs={"changed_count": str(changed)})
@@ -66,7 +66,9 @@ def read_mail(service, values):
     key = values["email_key"]
     record = mailbox.scope.require(key)
     state = getattr(record, "mailbox_state", "")
-    folder = "planned" if key.startswith("scheduled-") else {"trash": "trash", "spam": "spam", "draft": "drafts"}.get(state, "inbox" if record.direction == "inbound" else "sent")
+    folder = "planned" if key.startswith("scheduled-") else {
+        "trash": "trash", "spam": "spam", "draft": "drafts", "invoices": "invoices",
+    }.get(state, "inbox" if record.direction == "inbound" else "sent")
     try:
         message = mailbox.get_selected_message(folder=folder, unread_only=False, selected_key=key)
     except ValueError as exc:
@@ -104,9 +106,12 @@ for _action, _label in MAILBOX_ACTIONS.items():
     register_operation(HubOperation(
         key=f"emails.mailbox.{_action}", module="emails", label=_label,
         description=f"{_label}. Nutzt dieselbe Aktion wie die Postfachauswahl.",
-        input_guide="email_keys: JSON-Liste exakter Schluessel aus emails.list/read, zum Beispiel [\"unassigned-12\"]. Keine Versandaktion. Endgueltiges Loeschen nur aus dem Papierkorb. Spam-Aktionen aendern auch die zentrale Absendersperre.",
-        preview_fields=(("email_keys", "E-Mail-Auswahl"),),
-        input_fields=lambda: (Field("email_keys", "E-Mail-Schluessel", required=True, max_length=120_000, encoding="JSON array of strings"),),
+        input_guide="email_keys: JSON-Liste exakter Schluessel aus emails.list/read, zum Beispiel [\"unassigned-12\"]. account_id: optionales Konto; für Rechnungen ist das konkrete info-Postfach Pflicht. Keine Versandaktion. Endgueltiges Loeschen nur aus dem Papierkorb. Spam-Aktionen aendern auch die zentrale Absendersperre.",
+        preview_fields=(("email_keys", "E-Mail-Auswahl"), ("account_id", "Postfachkonto")),
+        input_fields=lambda: (
+            Field("email_keys", "E-Mail-Schluessel", required=True, max_length=120_000, encoding="JSON array of strings"),
+            Field("account_id", "Optionales Konto aus emails.accounts.list"),
+        ),
         execute=partial(batch_action, action=_action), result_fields=(("changed_count", "Anzahl geaenderter gespeicherter E-Mail-Datensaetze"),),
     ))
 register_query(HubQuery("emails.list", "Lokal gespeicherte E-Mails im gewaehlten Ordner suchen. Rechtefilter vor Anzahl und Seitenbildung, 25 Treffer je Seite; keine Lesemarkierung.",

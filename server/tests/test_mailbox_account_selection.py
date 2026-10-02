@@ -2,6 +2,7 @@
 from datetime import UTC, datetime, timedelta
 from contextlib import nullcontext
 from types import SimpleNamespace
+import json
 import shutil
 import subprocess
 
@@ -42,6 +43,44 @@ def test_selected_account_filters_list_counts_and_single_message_even_for_admin(
         assert [item.key for item in view.messages] == [key(rows[i])]
         assert view.folder_counts["inbox"] == box.get_unread_count() == 1
         assert box.get_selected_message(folder="inbox", unread_only=False, selected_key=key(rows[1-i])) is None
+
+
+def test_invoice_folder_is_exclusive_to_selected_info_mailbox(env):
+    env.boxes[0].email_address = "info@kosmos-medien.de"
+    env.db.flush()
+    info_email = message(env, box=0)
+    other_email = message(env, box=1)
+    info_key = f"unassigned-{info_email.id}"
+    other_key = f"unassigned-{other_email.id}"
+    info_box = scoped(env, 0)
+    other_box = scoped(env, 1)
+
+    assert info_box.invoice_folder_enabled is True
+    assert other_box.invoice_folder_enabled is False
+    assert info_box.apply_batch_action(keys=[info_key], action="move_invoices") == 1
+    assert info_email.mailbox_state == "invoices"
+    assert [item.key for item in info_box.get_folder_view(folder="invoices", unread_only=False).messages] == [info_key]
+    assert info_box.get_folder_counts()["invoices"] == info_box.get_unread_count() == 1
+    assert info_box.get_folder_view(folder="inbox", unread_only=False).messages == ()
+
+    with pytest.raises(ValueError, match="nur für info@kosmos-medien.de"):
+        other_box.apply_batch_action(keys=[other_key], action="move_invoices")
+    with pytest.raises(ValueError, match="nicht verfügbar"):
+        other_box.get_folder_view(folder="invoices", unread_only=False)
+
+    info_box.apply_batch_action(keys=[info_key], action="move_inbox")
+    result = HubOperationService(db=env.db, cipher=env.cipher, actor="admin").execute(
+        "emails.mailbox.move_invoices",
+        {"email_keys": json.dumps([info_key]), "account_id": str(env.boxes[0].id)},
+    )
+    assert result.outputs["changed_count"] == "1"
+    assert info_email.mailbox_state == "invoices"
+
+    with pytest.raises(ValueError, match="nur für info@kosmos-medien.de"):
+        HubOperationService(db=env.db, cipher=env.cipher, actor="admin").execute(
+            "emails.mailbox.move_invoices",
+            {"email_keys": json.dumps([other_key]), "account_id": str(env.boxes[1].id)},
+        )
 
 
 def test_account_list_only_exposes_granted_boxes_and_never_credentials(env):

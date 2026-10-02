@@ -852,7 +852,7 @@
       "reader_method": "website_sites"
     },
     "app/api/routes/web.py:apply_mailbox_batch_action:POST:/emails/actions": {
-      "fingerprint": "c60ee4a3b825b3aaedd2223df5eb2f80c748f53af1593ed2f2f83a459b6997aa",
+      "fingerprint": "25d976ca37fa249ead9d0c283f3aca046df524f330f87ce09eeeac1ee0758cc0",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -860,6 +860,7 @@
         "emails.mailbox.mark_unread",
         "emails.mailbox.move_inbox",
         "emails.mailbox.move_sent",
+        "emails.mailbox.move_invoices",
         "emails.mailbox.move_trash",
         "emails.mailbox.move_spam",
         "emails.mailbox.restore",
@@ -2089,7 +2090,7 @@
       "reader_method": "get_draft_compose_context"
     },
     "app/api/routes/web.py:mailbox_folder_list:GET:/emails/list": {
-      "fingerprint": "3e20f29e5e72ff442af54e902266ba30ebce920f9f45271576c6647e3130a433",
+      "fingerprint": "1f41e131b6be2a3d97a6ecc1e1e81e0a9b073fd50db153d9bad82684b8e2a776",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2101,7 +2102,7 @@
       "reader_method": "get_folder_view"
     },
     "app/api/routes/web.py:mailbox_folder_panel:GET:/emails/folder": {
-      "fingerprint": "4ecbd1511d13ae0cebf4f2b9fffd163b62a87e7ccc86033836351f31409da795",
+      "fingerprint": "6e34944cd07d72725152ae75ee954cfd0e5e152d18b4406b28f735f909114fcc",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [
@@ -2125,7 +2126,7 @@
       "reader_method": "compose_context"
     },
     "app/api/routes/web.py:mailbox_page:GET:/emails": {
-      "fingerprint": "3f3097e983b5a560e05a04d84c8fd4f102a46ec7ac004675b16e7ee60ad075fb",
+      "fingerprint": "90f73541ff68edfde58509124e4b09ca4bcf35b047eb5678d467675af86ec6ee",
       "state": "shared",
       "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
       "contracts": [
@@ -2149,7 +2150,7 @@
       "reader_method": "scheduled_context"
     },
     "app/api/routes/web.py:mailbox_selected_pane:GET:/emails/selected": {
-      "fingerprint": "278c10212b055574dcf53396be3c9efb647a688a8c8acb038d09d98d4b8eae7c",
+      "fingerprint": "c5308587036e9d75bff5762e668b6ce2454e4341d137d38df23eef00427691bc",
       "state": "shared",
       "reason": "Reviewed binding to the listed catalog operations/readers; UI-only rendering and unrelated side panels are not additional agent capabilities.",
       "contracts": [

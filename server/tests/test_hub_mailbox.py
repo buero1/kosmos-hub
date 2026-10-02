@@ -69,6 +69,16 @@ def test_mailbox_exposes_planned_folder_and_delivery_actions():
     assert "/cancel" in reading_pane
 
 
+def test_mailbox_exposes_invoice_folder_only_for_selected_info_account():
+    mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
+    list_template = Path("app/templates/emails_message_list.html").read_text(encoding="utf-8")
+
+    assert '{% if mailbox_invoices_enabled %}<a href="/emails?folder=invoices' in mailbox_template
+    assert 'data-mailbox-batch-action="move_invoices"' in mailbox_template
+    assert "if (invoiceFolderEnabled) folderTitles.invoices = 'Rechnungen';" in mailbox_template
+    assert "folder == 'invoices' %}Rechnungen" in list_template
+
+
 def test_email_composers_offer_reviewable_ai_rewrites_for_selected_text():
     main_composer = Path("app/templates/emails.html").read_text(encoding="utf-8")
     global_composer = Path("app/templates/partials/global_mailbox_composer.html").read_text(encoding="utf-8")

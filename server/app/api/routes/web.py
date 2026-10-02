@@ -183,6 +183,11 @@ def _web_mailbox(request, db):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Das Postfach ist nicht verfuegbar.") from exc
 
+
+def _require_mailbox_folder(mailbox: HubMailboxService, folder: str) -> None:
+    if not mailbox.folder_available(folder):
+        raise HTTPException(status_code=404, detail="Der E-Mail-Ordner ist für dieses Postfach nicht verfügbar.")
+
 _GERMAN_WEEKDAY_NAMES = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 _GERMAN_MONTH_NAMES = (
     "Januar", "Februar", "März", "April", "Mai", "Juni",
@@ -3003,6 +3008,7 @@ def mailbox_page(
         account_id = accounts[0]["id"]
         mailbox_service = HubMailboxService(db=db, cipher=get_secret_cipher(), actor=_require_hub_admin(request).username,
                                             public_base_url=get_settings().public_base_url, account_id=account_id)
+    _require_mailbox_folder(mailbox_service, folder)
     visible_addresses = {row["email"] for row in accounts if account_id is None or row["id"] == account_id}
     mailbox = mailbox_service.get_view(folder=folder, unread_only=unread, selected_key=selected)
     mailbox_sync_failures = HubMailboxImapSyncService(
@@ -3030,6 +3036,7 @@ def mailbox_page(
             "mailbox": mailbox,
             "mailbox_accounts": accounts,
             "mailbox_account_id": account_id,
+            "mailbox_invoices_enabled": mailbox_service.invoice_folder_enabled,
             "mailbox_sync_failures": mailbox_sync_failures,
             "mailbox_sync_warnings": mailbox_sync_warnings,
             "linked_case": _mailbox_linked_case(db, mailbox.selected),
@@ -3496,6 +3503,7 @@ def mailbox_selected_pane(
     if folder not in MAILBOX_FOLDERS:
         raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
     mailbox_service = _web_mailbox(request, db)
+    _require_mailbox_folder(mailbox_service, folder)
     selected_message = mailbox_service.get_selected_message(
         folder=folder,
         unread_only=unread,
@@ -3795,6 +3803,7 @@ def mailbox_folder_panel(
     if folder not in MAILBOX_FOLDERS:
         raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
     mailbox_service = _web_mailbox(request, db)
+    _require_mailbox_folder(mailbox_service, folder)
     return templates.TemplateResponse(
         request,
         "emails_folder_panel.html",
@@ -3824,6 +3833,7 @@ def mailbox_folder_list(
     if folder not in MAILBOX_FOLDERS:
         raise HTTPException(status_code=422, detail="Unknown mailbox folder.")
     mailbox_service = _web_mailbox(request, db)
+    _require_mailbox_folder(mailbox_service, folder)
     mailbox = mailbox_service.get_folder_view(folder=folder, unread_only=unread, load_selected=False)
     return templates.TemplateResponse(
         request,
@@ -3863,7 +3873,10 @@ def apply_mailbox_batch_action(
     mailbox = _web_mailbox(request, db)
     try:
         result = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username).execute(
-            f"emails.mailbox.{action}", {"email_keys": json.dumps(keys or [])},
+            f"emails.mailbox.{action}", {
+                "email_keys": json.dumps(keys or []),
+                "account_id": str(mailbox.account_id or ""),
+            },
         )
         changed_count = int(result.outputs["changed_count"])
     except ValueError as exc:
