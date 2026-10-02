@@ -86,6 +86,9 @@ _COMPOSER_STYLE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9#%(),.\s/+_-]+$")
 _TEMPLATE_HREF_PLACEHOLDER_PATTERN = re.compile(
     r"^(?:\$\{\s*!?[A-Za-z][A-Za-z0-9_]*\.[^{}]+\s*\}|\{\{\s*[A-Za-z][A-Za-z0-9_]*\.[^{}]+\s*\}\})$"
 )
+_LEGACY_EMAIL_TEMPLATE_PLACEHOLDERS = (
+    (re.compile(r"\$\{\s*customer\s+website\s*\}", flags=re.IGNORECASE), "${Customer.Website}"),
+)
 _CUSTOMER_FIELD_LABEL_ALIASES = {
     "Webseite": "Website",
     "Website": "Webseite",
@@ -2183,6 +2186,9 @@ class CustomerCommunicationService:
         *,
         allow_template_href_placeholders: bool = False,
     ) -> str:
+        if allow_template_href_placeholders:
+            for pattern, replacement in _LEGACY_EMAIL_TEMPLATE_PLACEHOLDERS:
+                value = pattern.sub(lambda _match: replacement, value)
         sanitizer = _EmailComposerHtmlSanitizer(
             allow_template_href_placeholders=allow_template_href_placeholders,
         )
