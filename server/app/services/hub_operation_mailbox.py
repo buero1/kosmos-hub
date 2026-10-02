@@ -106,7 +106,7 @@ for _action, _label in MAILBOX_ACTIONS.items():
     register_operation(HubOperation(
         key=f"emails.mailbox.{_action}", module="emails", label=_label,
         description=f"{_label}. Nutzt dieselbe Aktion wie die Postfachauswahl.",
-        input_guide="email_keys: JSON-Liste exakter Schluessel aus emails.list/read, zum Beispiel [\"unassigned-12\"]. account_id: optionales Konto; für Rechnungen ist das konkrete info-Postfach Pflicht. Keine Versandaktion. Endgueltiges Loeschen nur aus dem Papierkorb. Spam-Aktionen aendern auch die zentrale Absendersperre.",
+        input_guide="email_keys: JSON-Liste exakter Schluessel aus emails.list/read, zum Beispiel [\"unassigned-12\"]. account_id: optionales Konto; für Rechnungen sind nur die beiden Info-Postfächer zulässig. Keine Versandaktion. Endgueltiges Loeschen nur aus dem Papierkorb. Spam-Aktionen aendern auch die zentrale Absendersperre.",
         preview_fields=(("email_keys", "E-Mail-Auswahl"), ("account_id", "Postfachkonto")),
         input_fields=lambda: (
             Field("email_keys", "E-Mail-Schluessel", required=True, max_length=120_000, encoding="JSON array of strings"),

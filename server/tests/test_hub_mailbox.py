@@ -76,7 +76,7 @@ def test_mailbox_exposes_invoice_folder_for_info_and_aggregate_views():
     assert '{% if mailbox_invoices_enabled %}<a href="/emails?folder=invoices' in mailbox_template
     assert '{% if mailbox_invoices_move_enabled %}<button type="button" role="menuitem" data-mailbox-batch-action="move_invoices"' in mailbox_template
     assert "if (invoiceFolderEnabled) folderTitles.invoices = 'Rechnungen';" in mailbox_template
-    assert "accountPicker.value && accountPicker.value !== invoiceMailboxAccountId" in mailbox_template
+    assert "accountPicker.value && !invoiceMailboxAccountIds.includes(accountPicker.value)" in mailbox_template
     assert "folder == 'invoices' %}Rechnungen" in list_template
 
 

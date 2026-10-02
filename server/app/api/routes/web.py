@@ -3038,7 +3038,7 @@ def mailbox_page(
             "mailbox_account_id": account_id,
             "mailbox_invoices_enabled": mailbox_service.invoice_folder_enabled,
             "mailbox_invoices_move_enabled": mailbox_service.invoice_move_enabled,
-            "mailbox_invoice_account_id": mailbox_service.invoice_account_id,
+            "mailbox_invoice_account_ids": tuple(str(value) for value in mailbox_service.invoice_account_ids),
             "mailbox_sync_failures": mailbox_sync_failures,
             "mailbox_sync_warnings": mailbox_sync_warnings,
             "linked_case": _mailbox_linked_case(db, mailbox.selected),

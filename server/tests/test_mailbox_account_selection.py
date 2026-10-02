@@ -14,6 +14,7 @@ from starlette.responses import RedirectResponse
 from test_mailbox_permissions import env, grant, message
 from app.api.routes import web
 from app.models.customer import Customer
+from app.models.hub_mailbox_account import HubMailboxAccount
 from app.services.hub_mailbox import HubMailboxService
 from app.services.hub_mailbox_permissions import MailboxPermissions
 from app.services.hub_operations import HubOperationService
@@ -45,15 +46,29 @@ def test_selected_account_filters_list_counts_and_single_message_even_for_admin(
         assert box.get_selected_message(folder="inbox", unread_only=False, selected_key=key(rows[1-i])) is None
 
 
-def test_invoice_folder_is_available_in_aggregate_but_scoped_to_info_mailbox(env):
+def test_invoice_folder_is_available_for_both_info_mailboxes_and_aggregate(env):
     env.boxes[0].email_address = "info@kosmos-medien.de"
+    env.boxes[1].email_address = "info@kosmos-websites.de"
+    other_account = HubMailboxAccount(
+        email_address="support@example.test",
+        display_name="Support",
+        username="support",
+        encrypted_password=env.cipher.encrypt("secret"),
+        enabled=True,
+        verified_at=datetime.now(UTC),
+    )
+    env.db.add(other_account)
     env.db.flush()
-    info_email = message(env, box=0)
-    other_email = message(env, box=1)
-    info_key = f"unassigned-{info_email.id}"
+    env.boxes.append(other_account)
+    media_email = message(env, box=0)
+    websites_email = message(env, box=1)
+    other_email = message(env, box=2)
+    media_key = f"unassigned-{media_email.id}"
+    websites_key = f"unassigned-{websites_email.id}"
     other_key = f"unassigned-{other_email.id}"
-    info_box = scoped(env, 0)
-    other_box = scoped(env, 1)
+    media_box = scoped(env, 0)
+    websites_box = scoped(env, 1)
+    other_box = scoped(env, 2)
     all_boxes = HubMailboxService(
         db=env.db,
         cipher=env.cipher,
@@ -61,40 +76,45 @@ def test_invoice_folder_is_available_in_aggregate_but_scoped_to_info_mailbox(env
         public_base_url="https://hub.test",
     )
 
-    assert info_box.invoice_folder_enabled is True
+    assert media_box.invoice_folder_enabled is True
+    assert websites_box.invoice_folder_enabled is True
     assert all_boxes.invoice_folder_enabled is True
     assert other_box.invoice_folder_enabled is False
-    assert info_box.apply_batch_action(keys=[info_key], action="move_invoices") == 1
-    assert info_email.mailbox_state == "invoices"
-    assert [item.key for item in info_box.get_folder_view(folder="invoices", unread_only=False).messages] == [info_key]
-    assert [item.key for item in all_boxes.get_folder_view(folder="invoices", unread_only=False).messages] == [info_key]
-    assert info_box.get_folder_counts()["invoices"] == info_box.get_unread_count() == 1
-    assert all_boxes.get_folder_counts()["invoices"] == 1
-    assert info_box.get_folder_view(folder="inbox", unread_only=False).messages == ()
+    assert media_box.apply_batch_action(keys=[media_key], action="move_invoices") == 1
+    assert websites_box.apply_batch_action(keys=[websites_key], action="move_invoices") == 1
+    assert media_email.mailbox_state == websites_email.mailbox_state == "invoices"
+    assert [item.key for item in media_box.get_folder_view(folder="invoices", unread_only=False).messages] == [media_key]
+    assert [item.key for item in websites_box.get_folder_view(folder="invoices", unread_only=False).messages] == [websites_key]
+    assert {item.key for item in all_boxes.get_folder_view(folder="invoices", unread_only=False).messages} == {media_key, websites_key}
+    assert media_box.get_folder_counts()["invoices"] == media_box.get_unread_count() == 1
+    assert websites_box.get_folder_counts()["invoices"] == websites_box.get_unread_count() == 1
+    assert all_boxes.get_folder_counts()["invoices"] == 2
+    assert media_box.get_folder_view(folder="inbox", unread_only=False).messages == ()
+    assert websites_box.get_folder_view(folder="inbox", unread_only=False).messages == ()
 
-    with pytest.raises(ValueError, match="nur für info@kosmos-medien.de"):
+    with pytest.raises(ValueError, match="nur für die Info-Postfächer"):
         other_box.apply_batch_action(keys=[other_key], action="move_invoices")
-    with pytest.raises(ValueError, match="Nur E-Mails aus info@kosmos-medien.de"):
+    with pytest.raises(ValueError, match="Nur E-Mails aus den Info-Postfächern"):
         all_boxes.apply_batch_action(keys=[other_key], action="move_invoices")
     other_email.mailbox_state = "invoices"
     env.db.flush()
-    assert [item.key for item in all_boxes.get_folder_view(folder="invoices", unread_only=False).messages] == [info_key]
-    assert all_boxes.get_folder_counts()["invoices"] == 1
+    assert {item.key for item in all_boxes.get_folder_view(folder="invoices", unread_only=False).messages} == {media_key, websites_key}
+    assert all_boxes.get_folder_counts()["invoices"] == 2
     with pytest.raises(ValueError, match="nicht verfügbar"):
         other_box.get_folder_view(folder="invoices", unread_only=False)
 
-    info_box.apply_batch_action(keys=[info_key], action="move_inbox")
+    websites_box.apply_batch_action(keys=[websites_key], action="move_inbox")
     result = HubOperationService(db=env.db, cipher=env.cipher, actor="admin").execute(
         "emails.mailbox.move_invoices",
-        {"email_keys": json.dumps([info_key]), "account_id": str(env.boxes[0].id)},
+        {"email_keys": json.dumps([websites_key]), "account_id": str(env.boxes[1].id)},
     )
     assert result.outputs["changed_count"] == "1"
-    assert info_email.mailbox_state == "invoices"
+    assert websites_email.mailbox_state == "invoices"
 
-    with pytest.raises(ValueError, match="nur für info@kosmos-medien.de"):
+    with pytest.raises(ValueError, match="nur für die Info-Postfächer"):
         HubOperationService(db=env.db, cipher=env.cipher, actor="admin").execute(
             "emails.mailbox.move_invoices",
-            {"email_keys": json.dumps([other_key]), "account_id": str(env.boxes[1].id)},
+            {"email_keys": json.dumps([other_key]), "account_id": str(env.boxes[2].id)},
         )
 
 
