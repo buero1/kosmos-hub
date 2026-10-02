@@ -2,19 +2,21 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('app/templates/emails.html', 'utf8');
-const names = ['scopedMailboxUrl', 'mailboxFolderKey', 'mailboxFolderUrl', 'mailboxMessageUrl', 'normalizeMailboxSearch', 'mailboxMessageMatches'];
+const names = ['scopedMailboxUrl', 'mailboxFolderKey', 'mailboxFolderUrl', 'mailboxMessageUrl', 'markedMailboxMessages', 'normalizeMailboxSearch', 'mailboxMessageMatches'];
 const functions = names.map(name => {
   const match = source.match(new RegExp('^([ \\t]*)function ' + name + '\\([^\\n]*\\) \\{[\\s\\S]*?^\\1\\}', 'm'));
   assert.ok(match, name);
   return match[0];
 }).join('\n');
-const context = {URL, mailboxAccountId: '3', window: {location: {origin: 'https://hub.test'}}};
+const context = {URL, mailboxAccountId: '3', folderMarkedMessages: new Map(), window: {location: {origin: 'https://hub.test'}}};
 vm.createContext(context);
 vm.runInContext(functions, context);
 for (const path of ['/emails/list', '/emails/status', '/emails/actions', '/emails/drafts', '/emails/compose/options']) {
   assert.equal(context.scopedMailboxUrl(path).searchParams.get('account_id'), '3');
 }
 const key3 = context.mailboxFolderKey('inbox', false);
+const marked = context.markedMailboxMessages({dataset: {mailboxFolderName: 'inbox', mailboxUnread: 'false', mailboxSelectedKey: ''}});
+assert.equal(marked.keys.size, 0);
 const folder = new URL(context.mailboxFolderUrl('drafts', true));
 assert.equal(folder.searchParams.get('account_id'), '3');
 assert.equal(folder.searchParams.get('unread'), 'true');

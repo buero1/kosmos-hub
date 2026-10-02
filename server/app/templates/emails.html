@@ -173,7 +173,7 @@
           <span>E-Mails durchsuchen</span>
           <span class="mailbox-search-controls">
             <select data-mailbox-search-scope aria-label="Suchbereich">
-              <option value="current">Aktuelle Ordner</option>
+              <option value="current">Aktueller Ordner</option>
               <option value="all">Alle Ordner</option>
             </select>
             <span class="mailbox-search-input">
@@ -1732,7 +1732,7 @@
       }
 
       function markedMailboxMessages(list) {
-        var folder = single && single.search_folder ? single.search_folder : list.dataset.mailboxFolderName || 'inbox';
+        var folder = list.dataset.mailboxFolderName || 'inbox';
         var unread = list.dataset.mailboxUnread === 'true';
         var cacheKey = mailboxFolderKey(folder, unread);
         var marked = folderMarkedMessages.get(cacheKey);
@@ -1794,7 +1794,7 @@
         var unreadable = messages.some(function (message) { return !message.is_unread; });
         var single = messages.length === 1 ? messages[0] : null;
         var canCompose = !!(single && single.kind === 'linked' && single.direction === 'inbound');
-        var folder = list.dataset.mailboxFolderName || 'inbox';
+        var folder = single && single.search_folder ? single.search_folder : list.dataset.mailboxFolderName || 'inbox';
         if (mailboxContextMenuHeading) {
           mailboxContextMenuHeading.textContent = messages.length + (messages.length === 1 ? ' E-Mail ausgewählt' : ' E-Mails ausgewählt');
         }

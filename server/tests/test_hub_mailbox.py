@@ -165,7 +165,7 @@ def test_mailbox_search_filters_current_or_all_folders_in_the_message_list():
     mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
     list_template = Path("app/templates/emails_message_list.html").read_text(encoding="utf-8")
 
-    assert '<option value="current">Aktuelle Ordner</option>' in mailbox_template
+    assert '<option value="current">Aktueller Ordner</option>' in mailbox_template
     assert '<option value="all">Alle Ordner</option>' in mailbox_template
     assert 'data-mailbox-search-clear hidden' in mailbox_template
     assert "function runMailboxSearch()" in mailbox_template
