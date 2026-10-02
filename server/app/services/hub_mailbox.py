@@ -39,7 +39,7 @@ from app.services.hub_mailbox_transport import (
 from app.services.hub_spam_senders import HubSpamSenderService
 from app.services.hub_mailbox_access import HubMailboxAccess
 from app.core.mailbox_actor import resolve_mailbox_actor
-from app.services.hub_mailbox_permissions import bind_message
+from app.services.hub_mailbox_permissions import MailboxPermissions, bind_message
 from app.services.hub_email_associations import EmailAssociationService, EmailRecordLink, index_email
 
 
@@ -156,6 +156,27 @@ class HubMailboxService:
             raise ValueError("Fuer die Postfachauswahl fehlt die Berechtigung.")
         self.account_id = account_id
         self.scope = HubMailboxAccess(db=db, cipher=cipher, actor=actor, account_id=account_id) if actor is not None else None
+        invoice_account = next(
+            (
+                account
+                for account in db.scalars(select(HubMailboxAccount))
+                if account.email_address.strip().casefold() == INVOICE_MAILBOX_ADDRESS
+            ),
+            None,
+        )
+        self.invoice_account_id = (
+            invoice_account.id
+            if invoice_account is not None
+            and self.scope is not None
+            and self.scope.mailboxes.can(invoice_account.id, "view")
+            and account_id in (None, invoice_account.id)
+            else None
+        )
+        self._invoice_mailboxes = (
+            MailboxPermissions(db=db, actor=actor, account_id=self.invoice_account_id)
+            if self.invoice_account_id is not None
+            else None
+        )
         self.associations = self.scope.associations if self.scope else EmailAssociationService(db=db, cipher=cipher)
         self.communications = CustomerCommunicationService(
             db=db,
@@ -167,9 +188,16 @@ class HubMailboxService:
 
     @property
     def invoice_folder_enabled(self) -> bool:
-        """Expose the custom folder only for the explicitly selected info mailbox."""
-        account = self.db.get(HubMailboxAccount, self.account_id) if self.account_id is not None else None
-        return bool(account and account.email_address.strip().casefold() == INVOICE_MAILBOX_ADDRESS)
+        """Expose the custom folder for the info mailbox and the aggregate view."""
+        return self.invoice_account_id is not None
+
+    @property
+    def invoice_move_enabled(self) -> bool:
+        return bool(
+            self.invoice_account_id is not None
+            and self.scope is not None
+            and self.scope.mailboxes.can(self.invoice_account_id, "edit")
+        )
 
     def folder_available(self, folder: str) -> bool:
         return folder in MAILBOX_FOLDERS and (
@@ -253,7 +281,14 @@ class HubMailboxService:
             messages = self._scheduled_list_messages()
         elif folder in _MAILBOX_STATE_BY_FOLDER:
             mailbox_state = _MAILBOX_STATE_BY_FOLDER[folder]
-            messages = self._linked_list_messages(mailbox_state=mailbox_state) + self._unassigned_list_messages(mailbox_state=mailbox_state)
+            mailbox_permissions = self._invoice_mailboxes if folder == INVOICE_MAILBOX_FOLDER else None
+            messages = self._linked_list_messages(
+                mailbox_state=mailbox_state,
+                mailbox_permissions=mailbox_permissions,
+            ) + self._unassigned_list_messages(
+                mailbox_state=mailbox_state,
+                mailbox_permissions=mailbox_permissions,
+            )
         else:
             direction = "inbound" if folder == "inbox" else "outbound"
             messages = self._linked_list_messages(direction=direction, mailbox_state=_ACTIVE_MAILBOX_STATE) + self._unassigned_list_messages(direction=direction, mailbox_state=_ACTIVE_MAILBOX_STATE)
@@ -302,6 +337,13 @@ class HubMailboxService:
                 )
             except (TypeError, ValueError):
                 selected_email = None
+            if (
+                selected_email is not None
+                and folder == INVOICE_MAILBOX_FOLDER
+                and self._invoice_mailboxes is not None
+                and not self._invoice_mailboxes.message_allowed(selected_email)
+            ):
+                selected_email = None
             if selected_email is not None:
                 emails = [selected_email]
                 if selected_email.zoho_message_id:
@@ -318,6 +360,13 @@ class HubMailboxService:
             except ValueError:
                 email_id = 0
             email = self.db.get(HubMailboxEmail, email_id)
+            if (
+                email is not None
+                and folder == INVOICE_MAILBOX_FOLDER
+                and self._invoice_mailboxes is not None
+                and not self._invoice_mailboxes.message_allowed(email)
+            ):
+                email = None
             if email is not None:
                 message = self._unassigned_message(email)
         elif selected_key.startswith("scheduled-"):
@@ -348,7 +397,7 @@ class HubMailboxService:
         """Apply one mailbox action to a deduplicated selection of visible messages."""
         if action not in _BATCH_ACTIONS:
             raise ValueError("Unbekannte E-Mail-Aktion.")
-        if action == "move_invoices" and not self.invoice_folder_enabled:
+        if action == "move_invoices" and not self.invoice_move_enabled:
             raise ValueError("Der Ordner Rechnungen ist nur für info@kosmos-medien.de verfügbar.")
         selected_keys = tuple(dict.fromkeys(key for key in keys if key))
         if not selected_keys:
@@ -375,6 +424,12 @@ class HubMailboxService:
                     email = None
                 if email is None:
                     continue
+                if (
+                    action == "move_invoices"
+                    and self._invoice_mailboxes is not None
+                    and not self._invoice_mailboxes.message_allowed(email, "edit")
+                ):
+                    raise ValueError("Nur E-Mails aus info@kosmos-medien.de können nach Rechnungen verschoben werden.")
                 # One Zoho message may be visible for several linked customers. Keep all copies aligned.
                 related = (
                     self.db.scalars(
@@ -384,7 +439,14 @@ class HubMailboxService:
                     else [email]
                 )
                 for related_email in related:
-                    if self.scope is None or self.scope.visible(related_email, "delete" if action in {"move_trash", "permanently_delete"} else "edit"):
+                    if (
+                        (self.scope is None or self.scope.visible(related_email, "delete" if action in {"move_trash", "permanently_delete"} else "edit"))
+                        and (
+                            action != "move_invoices"
+                            or self._invoice_mailboxes is None
+                            or self._invoice_mailboxes.message_allowed(related_email, "edit")
+                        )
+                    ):
                         linked_by_id[related_email.id] = related_email
             elif key.startswith("unassigned-"):
                 try:
@@ -399,6 +461,11 @@ class HubMailboxService:
             raise ValueError("Die ausgewählten E-Mails wurden nicht gefunden.")
 
         selected_emails = (*linked_by_id.values(), *unassigned_by_id.values())
+        if action == "move_invoices" and (
+            self._invoice_mailboxes is None
+            or any(not self._invoice_mailboxes.message_allowed(email, "edit") for email in selected_emails)
+        ):
+            raise ValueError("Nur E-Mails aus info@kosmos-medien.de können nach Rechnungen verschoben werden.")
         if action == "permanently_delete":
             if any(email.mailbox_state != "trash" for email in selected_emails):
                 raise ValueError("Nur E-Mails im Papierkorb können endgültig gelöscht werden.")
@@ -1006,6 +1073,7 @@ class HubMailboxService:
         *,
         direction: str | None = None,
         mailbox_state: str = _ACTIVE_MAILBOX_STATE,
+        mailbox_permissions: MailboxPermissions | None = None,
     ) -> list[HubMailboxListItem]:
         """Load headers for the mailbox list without constructing every email preview."""
         statement = (
@@ -1031,6 +1099,8 @@ class HubMailboxService:
             statement = statement.where(CustomerZohoEmail.customer_id.in_(self.scope.customers))
         if self.scope is not None:
             statement = self.scope.mailboxes.filter_statement(statement, CustomerZohoEmail)
+        if mailbox_permissions is not None:
+            statement = mailbox_permissions.filter_statement(statement, CustomerZohoEmail)
         if direction is not None:
             statement = statement.where(CustomerZohoEmail.direction == direction)
         rows = self.db.scalars(statement).all()
@@ -1049,6 +1119,7 @@ class HubMailboxService:
         *,
         direction: str | None = None,
         mailbox_state: str = _ACTIVE_MAILBOX_STATE,
+        mailbox_permissions: MailboxPermissions | None = None,
     ) -> list[HubMailboxListItem]:
         statement = select(HubMailboxEmail).order_by(HubMailboxEmail.received_at.desc(), HubMailboxEmail.id.desc())
         statement = statement.where(HubMailboxEmail.mailbox_state == mailbox_state)
@@ -1058,6 +1129,7 @@ class HubMailboxService:
             self._unassigned_list_message(email)
             for email in self.db.scalars(statement).all()
             if self.scope is None or self.scope.visible(email)
+            if mailbox_permissions is None or mailbox_permissions.message_allowed(email)
         ]
 
     def _scheduled_list_messages(self) -> list[HubMailboxListItem]:
@@ -1190,9 +1262,38 @@ class HubMailboxService:
             "planned": planned_count,
         }
         if self.invoice_folder_enabled:
+            invoice_linked_statement = select(
+                CustomerZohoEmail.zoho_message_id,
+                CustomerZohoEmail.id,
+            ).where(CustomerZohoEmail.mailbox_state == _INVOICE_MAILBOX_STATE)
+            if self.scope is not None and self.scope.customers is not None:
+                invoice_linked_statement = invoice_linked_statement.where(
+                    CustomerZohoEmail.customer_id.in_(self.scope.customers)
+                )
+            if self.scope is not None:
+                invoice_linked_statement = self.scope.mailboxes.filter_statement(
+                    invoice_linked_statement,
+                    CustomerZohoEmail,
+                )
+            invoice_linked_statement = self._invoice_mailboxes.filter_statement(
+                invoice_linked_statement,
+                CustomerZohoEmail,
+            )
+            invoice_linked_keys = {
+                message_id or f"local-{email_id}"
+                for message_id, email_id in self.db.execute(invoice_linked_statement)
+            }
+            invoice_unassigned_ids = set(self.db.scalars(self._invoice_mailboxes.filter_statement(
+                select(HubMailboxEmail.id),
+                HubMailboxEmail,
+            )))
+            invoice_unassigned_count = sum(
+                mailbox_state == _INVOICE_MAILBOX_STATE
+                and email_id in invoice_unassigned_ids
+                for mailbox_state, _direction, _source, email_id in unassigned_rows
+            )
             counts[INVOICE_MAILBOX_FOLDER] = (
-                sum(mailbox_state == _INVOICE_MAILBOX_STATE for mailbox_state, _, _ in linked_keys)
-                + sum(mailbox_state == _INVOICE_MAILBOX_STATE for mailbox_state, _, _source, _ in unassigned_rows)
+                len(invoice_linked_keys) + invoice_unassigned_count
             )
         return counts
 

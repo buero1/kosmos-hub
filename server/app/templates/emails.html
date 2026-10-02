@@ -339,7 +339,7 @@
         <div class="mailbox-context-submenu" role="menu" aria-label="Zielordner">
           <button type="button" role="menuitem" data-mailbox-batch-action="move_inbox">Posteingang</button>
           <button type="button" role="menuitem" data-mailbox-batch-action="move_sent">Gesendet</button>
-          {% if mailbox_invoices_enabled %}<button type="button" role="menuitem" data-mailbox-batch-action="move_invoices">Rechnungen</button>{% endif %}
+          {% if mailbox_invoices_move_enabled %}<button type="button" role="menuitem" data-mailbox-batch-action="move_invoices">Rechnungen</button>{% endif %}
           <button type="button" role="menuitem" data-mailbox-batch-action="move_trash">Papierkorb</button>
           <button type="button" role="menuitem" data-mailbox-batch-action="move_spam">Spam</button>
         </div>
@@ -387,6 +387,7 @@
       var folderScrollPositions = new Map();
       var folderMarkedMessages = new Map();
       var invoiceFolderEnabled = {{ mailbox_invoices_enabled | default(false) | tojson }};
+      var invoiceMailboxAccountId = {{ (mailbox_invoice_account_id | default(none) or '') | string | tojson }};
       var folderTitles = { inbox: 'Posteingang', sent: 'Gesendet', drafts: 'Entwürfe', planned: 'Geplant', unassigned: 'Unbekannt', trash: 'Papierkorb', spam: 'Spam' };
       if (invoiceFolderEnabled) folderTitles.invoices = 'Rechnungen';
       var mailboxStatus = {
@@ -2310,7 +2311,7 @@
         }
         var list = document.querySelector('[data-mailbox-list]');
         var selectedFolder = list ? list.dataset.mailboxFolderName : 'inbox';
-        if (selectedFolder === 'invoices' && accountPicker.value !== mailboxAccountId) selectedFolder = 'inbox';
+        if (selectedFolder === 'invoices' && accountPicker.value && accountPicker.value !== invoiceMailboxAccountId) selectedFolder = 'inbox';
         accountPicker.form.querySelector('[data-mailbox-account-folder]').value = selectedFolder;
         accountPicker.form.requestSubmit();
       });

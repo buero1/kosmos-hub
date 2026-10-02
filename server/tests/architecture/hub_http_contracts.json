@@ -2126,7 +2126,7 @@
       "reader_method": "compose_context"
     },
     "app/api/routes/web.py:mailbox_page:GET:/emails": {
-      "fingerprint": "90f73541ff68edfde58509124e4b09ca4bcf35b047eb5678d467675af86ec6ee",
+      "fingerprint": "20abb6781bad51281faf01e464b259384d92af3bf387dbae6f8c6eb8d0aeeb9a",
       "state": "shared",
       "reason": "Reviewed common domain reader and current record permissions, bounded agent projection. Binary attachment reuse uses email-attachment artifacts; agent reads never fetch Zoho, UI legacy fallback remains separate. Calendar reads do not persist completion.",
       "contracts": [

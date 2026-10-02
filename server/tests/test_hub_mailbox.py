@@ -69,13 +69,14 @@ def test_mailbox_exposes_planned_folder_and_delivery_actions():
     assert "/cancel" in reading_pane
 
 
-def test_mailbox_exposes_invoice_folder_only_for_selected_info_account():
+def test_mailbox_exposes_invoice_folder_for_info_and_aggregate_views():
     mailbox_template = Path("app/templates/emails.html").read_text(encoding="utf-8")
     list_template = Path("app/templates/emails_message_list.html").read_text(encoding="utf-8")
 
     assert '{% if mailbox_invoices_enabled %}<a href="/emails?folder=invoices' in mailbox_template
-    assert 'data-mailbox-batch-action="move_invoices"' in mailbox_template
+    assert '{% if mailbox_invoices_move_enabled %}<button type="button" role="menuitem" data-mailbox-batch-action="move_invoices"' in mailbox_template
     assert "if (invoiceFolderEnabled) folderTitles.invoices = 'Rechnungen';" in mailbox_template
+    assert "accountPicker.value && accountPicker.value !== invoiceMailboxAccountId" in mailbox_template
     assert "folder == 'invoices' %}Rechnungen" in list_template
 
 
