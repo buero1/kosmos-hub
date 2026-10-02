@@ -172,6 +172,7 @@ def test_mailbox_search_filters_current_or_all_folders_in_the_message_list():
     assert "return Object.keys(folderTitles);" in mailbox_template
     assert "seen.has(message.key)" in mailbox_template
     assert "message.search_folder" in mailbox_template
+    assert ".mailbox-search-input { position: relative; flex: 1 1 20rem; min-width: 12rem; margin-left: -1px; }" in mailbox_template
     assert '"occurred_at":' in list_template
 
 
