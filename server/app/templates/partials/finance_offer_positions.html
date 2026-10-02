@@ -33,7 +33,6 @@
     <button class="button button-secondary button-variant-2" type="button" data-finance-position-add>Neue Position hinzufügen</button>
     <dl class="finance-totals" data-finance-totals>
       <div><dt>Zwischensumme</dt><dd data-finance-total="subtotal">0,00 EUR</dd></div>
-      <div><dt>Rabatt</dt><dd data-finance-total="discount">0,00 EUR</dd></div>
       <div><dt>USt.</dt><dd data-finance-total="tax">0,00 EUR</dd></div>
       <div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-total="total">0,00 EUR</dd></div>
     </dl>
@@ -90,7 +89,6 @@
       });
       var currency = editorCurrency(editor);
       editor.querySelector('[data-finance-total="subtotal"]').textContent = formatMoney(sums.subtotal, currency);
-      editor.querySelector('[data-finance-total="discount"]').textContent = formatMoney(sums.subtotal - sums.net, currency);
       editor.querySelector('[data-finance-total="tax"]').textContent = formatMoney(sums.tax, currency);
       editor.querySelector('[data-finance-total="total"]').textContent = formatMoney(sums.net + sums.tax, currency);
     }

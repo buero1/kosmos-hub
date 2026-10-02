@@ -22,7 +22,7 @@
       </tbody>
     </table>
   </div>
-  <div class="finance-positions-footer"><button class="button button-secondary button-variant-2" type="button" data-finance-document-position-add>Neue Position hinzufügen</button><dl class="finance-totals" data-finance-document-totals><div><dt>Zwischensumme</dt><dd data-finance-document-total="subtotal">0,00 EUR</dd></div><div><dt>Rabatt</dt><dd data-finance-document-total="discount">0,00 EUR</dd></div><div><dt>USt.</dt><dd data-finance-document-total="tax">0,00 EUR</dd></div><div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-document-total="total">0,00 EUR</dd></div></dl></div>
+  <div class="finance-positions-footer"><button class="button button-secondary button-variant-2" type="button" data-finance-document-position-add>Neue Position hinzufügen</button><dl class="finance-totals" data-finance-document-totals><div><dt>Zwischensumme</dt><dd data-finance-document-total="subtotal">0,00 EUR</dd></div><div><dt>USt.</dt><dd data-finance-document-total="tax">0,00 EUR</dd></div><div class="finance-total-grand"><dt>Gesamt</dt><dd data-finance-document-total="total">0,00 EUR</dd></div></dl></div>
   <datalist id="finance-document-article-suggestions">{% for article in articles %}<option value="{{ article.name }}{% if article.sku and article.sku != '-' %} · {{ article.sku }}{% endif %}" data-article-id="{{ article.article.id }}" data-name="{{ article.name }}" data-sku="{{ article.sku }}" data-unit="{{ article.unit }}" data-price="{{ article.net_price_form | finance_decimal }}" data-tax="{{ article.tax_rate_value }}"></option>{% endfor %}</datalist>
   <template data-finance-document-position-template>
     <tr data-finance-document-position-row>
@@ -62,7 +62,6 @@
           row.querySelector('[data-finance-document-line-amount]').textContent = money(net, currency());
         });
         editor.querySelector('[data-finance-document-total="subtotal"]').textContent = money(sums.subtotal, currency());
-        editor.querySelector('[data-finance-document-total="discount"]').textContent = money(sums.subtotal - sums.net, currency());
         editor.querySelector('[data-finance-document-total="tax"]').textContent = money(sums.tax, currency());
         editor.querySelector('[data-finance-document-total="total"]').textContent = money(sums.net + sums.tax, currency());
       }
