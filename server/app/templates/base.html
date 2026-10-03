@@ -3757,25 +3757,31 @@
         min-width: min(16rem, 100%);
       }
       .finance-directory-search input {
+        --hub-control-padding-right: 5.35rem;
         width: 100%;
         min-width: 0;
-        padding-left: 2.25rem;
+      }
+      .finance-directory-search input[type="search"]::-webkit-search-cancel-button {
+        margin-right: 2.1rem;
+        cursor: pointer;
       }
       .finance-directory-search-icon {
         position: absolute;
         z-index: 1;
         top: 50%;
-        left: 0.72rem;
-        display: inline-flex;
-        width: 1rem;
-        height: 1rem;
+        right: 0.35rem;
+        display: inline-grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
         transform: translateY(-50%);
-        color: var(--muted);
+        color: #076c58;
         pointer-events: none;
       }
       .finance-directory-search-icon svg {
-        width: 100%;
-        height: 100%;
+        display: block;
+        width: 1rem;
+        height: 1rem;
         fill: none;
         stroke: currentColor;
         stroke-linecap: round;
@@ -5046,7 +5052,7 @@
       button.button,
       a.button {
         height: var(--hub-control-height, var(--control-v1-height));
-        padding: 0 var(--hub-control-padding, var(--control-v1-padding));
+        padding: 0 var(--hub-control-padding-right, var(--hub-control-padding, var(--control-v1-padding))) 0 var(--hub-control-padding-left, var(--hub-control-padding, var(--control-v1-padding)));
         border-radius: var(--hub-control-radius, var(--control-v1-radius));
         font-size: var(--hub-control-font-size, var(--control-v1-font-size));
         line-height: 1.2;
