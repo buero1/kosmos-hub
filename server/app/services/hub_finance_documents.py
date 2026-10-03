@@ -10,7 +10,7 @@ import json
 import re
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import SecretCipher
@@ -413,24 +413,24 @@ class HubFinanceDocumentService:
         if module.number_attribute:
             fast_conditions.append(getattr(model, module.number_attribute).ilike(pattern, escape="\\"))
         fast_filter = or_(*fast_conditions)
-        fast_count = self.db.scalar(
-            select(func.count(model.id))
+        fast_documents = self.db.scalars(
+            select(model)
             .outerjoin(Customer, model.customer_id == Customer.id)
+            .options(selectinload(model.customer))
             .where(*access_filters, fast_filter)
-        ) or 0
-        if fast_count:
-            documents = self.db.scalars(
-                select(model)
-                .outerjoin(Customer, model.customer_id == Customer.id)
-                .options(selectinload(model.customer), selectinload(model.lines))
-                .where(*access_filters, fast_filter)
-                .order_by(model.created_at.desc(), model.id.desc())
-                .offset(offset)
-                .limit(page_size)
-            ).all()
+        ).all()
+        if fast_documents:
+            fast_documents.sort(
+                key=lambda document: self._document_sort_key(module=module, document=document),
+                reverse=True,
+            )
+            page_documents = self._hydrate_documents(
+                module=module,
+                documents=fast_documents[offset:offset + page_size],
+            )
             return FinanceDocumentSearchPage(
-                entries=self._document_entries(module=module, documents=documents),
-                total_count=fast_count,
+                entries=self._document_entries(module=module, documents=page_documents),
+                total_count=len(fast_documents),
             )
 
         # Status, date and recurring-invoice names are encrypted. Scanning only the
@@ -460,25 +460,47 @@ class HubFinanceDocumentService:
             )).casefold()
             if needle not in searchable:
                 continue
-            matches.append(((
-                self._text(values.get(module.date_key)),
-                document.created_at.isoformat() if document.created_at else "",
-                document.id,
-            ), document))
+            matches.append((self._document_sort_key(module=module, document=document, values=values), document))
         matches.sort(key=lambda item: item[0], reverse=True)
-        page_documents = [document for _, document in matches[offset:offset + page_size]]
-        if page_documents:
-            page_ids = [document.id for document in page_documents]
-            hydrated = self.db.scalars(
-                select(model)
-                .options(selectinload(model.customer), selectinload(model.lines))
-                .where(model.id.in_(page_ids))
-            ).all()
-            by_id = {document.id: document for document in hydrated}
-            page_documents = [by_id[document_id] for document_id in page_ids]
+        page_documents = self._hydrate_documents(
+            module=module,
+            documents=[document for _, document in matches[offset:offset + page_size]],
+        )
         return FinanceDocumentSearchPage(
             entries=self._document_entries(module=module, documents=page_documents),
             total_count=len(matches),
+        )
+
+    def _hydrate_documents(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        documents: list[Any],
+    ) -> list[Any]:
+        if not documents:
+            return []
+        model = module.model
+        page_ids = [document.id for document in documents]
+        hydrated = self.db.scalars(
+            select(model)
+            .options(selectinload(model.customer), selectinload(model.lines))
+            .where(model.id.in_(page_ids))
+        ).all()
+        by_id = {document.id: document for document in hydrated}
+        return [by_id[document_id] for document_id in page_ids]
+
+    def _document_sort_key(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        document: Any,
+        values: dict[str, str] | None = None,
+    ) -> tuple[str, str, int]:
+        values = values if values is not None else self._document_values(module=module, document=document)
+        return (
+            self._text(values.get(module.date_key)),
+            document.created_at.isoformat() if document.created_at else "",
+            document.id,
         )
 
     def list_customer_documents(

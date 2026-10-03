@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -349,6 +349,31 @@ def test_invoice_directory_search_falls_back_to_encrypted_header_fields(env):
 
     assert result["total"] == 1
     assert result["items"][0]["record_id"] == str(invoice.record_id)
+
+
+def test_invoice_directory_search_sorts_by_invoice_date_before_creation_time(env):
+    records = []
+    for invoice_date, created_at in (
+        ("2023-09-25", datetime(2030, 1, 1)),
+        ("2026-09-25", datetime(2020, 1, 1)),
+        ("2025-09-25", datetime(2025, 1, 1)),
+    ):
+        result = env.service.execute("finance.invoices.create", values(env, "invoices"))
+        record = env.db.get(model_for("invoices"), result.record_id)
+        stored = json.loads(env.cipher.decrypt(record.encrypted_fields_json))
+        stored["invoice_date"] = invoice_date
+        record.encrypted_fields_json = env.cipher.encrypt(json.dumps(stored))
+        record.created_at = created_at
+        records.append(record)
+    env.db.flush()
+
+    result = env.service.query("finance.list", {"kind": "invoices", "query": "Finance test"})
+
+    assert [item["record_id"] for item in result["items"]] == [
+        str(records[1].id),
+        str(records[2].id),
+        str(records[0].id),
+    ]
 
 
 def test_readonly_and_unknown_fields_fail_and_no_auto_email_operation(env):
