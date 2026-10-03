@@ -110,6 +110,40 @@ def recurring_service_period_end(start: date, values: dict[str, str]) -> date:
     return following_start - timedelta(days=1)
 
 
+def recurring_invoice_due_date(issued_on: date, values: dict[str, str]) -> tuple[date, str]:
+    """Return the due date and supported invoice payment term for one scheduled run."""
+    count_text = values.get("payment_due_count") or ""
+    unit = values.get("payment_due_unit") or ""
+    if count_text and unit:
+        count = int(count_text)
+    else:
+        terms = values.get("payment_terms") or ""
+        if terms == "due_on_receipt":
+            count, unit = 0, "day"
+        elif terms.endswith("_days") and terms.removesuffix("_days").isdigit():
+            count, unit = int(terms.removesuffix("_days")), "day"
+        else:
+            count, unit = 0, "day"
+    if count < 0 or count > 9999:
+        raise HubFinanceDocumentError("Das Zahlungsziel ist ungültig.")
+    if unit == "day":
+        due = issued_on + timedelta(days=count)
+    elif unit == "week":
+        due = issued_on + timedelta(weeks=count)
+    elif unit == "year":
+        due = _add_service_months(issued_on, count * 12)
+    else:
+        raise HubFinanceDocumentError("Die Zeiteinheit des Zahlungsziels ist ungültig.")
+    terms = (
+        "due_on_receipt"
+        if count == 0 and unit == "day"
+        else f"{count}_days"
+        if unit == "day" and count in {7, 14, 30}
+        else ""
+    )
+    return due, terms
+
+
 @dataclass(frozen=True)
 class FinanceDocumentModule:
     key: str

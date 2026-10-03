@@ -11,6 +11,7 @@ from app.api.routes import web
 from app.main import create_app
 from app.models.hub_finance_documents import HubFinanceInvoice, HubFinanceRecurringInvoice
 from app.services.hub_finance_documents import HubFinanceDocumentError, HubFinanceDocumentService, RECURRING_INVOICE_MODULE
+from app.services.hub_finance_pdf_generation import FinanceRecurringInvoicePreview, HubFinancePdfService
 from app.services.hub_recurring_invoice_generation import HubRecurringInvoiceGenerationService
 from test_hub_finance_operations import env, values
 
@@ -142,9 +143,35 @@ def test_render_recurring_status_forms(env):
         request.state.hub_user = env.user
         page = web.finance_document_detail_page('recurring-invoices', record.id, request, env.db).body.decode()
         assert 'function syncNextDate()' in page
+        assert 'Vorschau nächste Rechnung' in page
         expected = '2026-09-25' if status == 'active' else ''
         assert f'name="document_field__next_invoice_date" value="{expected}"' in page
+        preview_url = f'/finance/recurring-invoices/{record.id}/next-invoice-preview'
+        assert (preview_url in page) is (status == 'active')
+        assert ('Derzeit ist keine nächste Rechnung geplant.' in page) is (status != 'active')
         if root:
             directory = Path(root)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / f'{status}.html').write_text(page, encoding='utf-8')
+
+
+def test_next_invoice_preview_route_is_inline_without_attachment(env, monkeypatch):
+    record = create(env)
+    monkeypatch.setattr(
+        HubFinancePdfService,
+        'recurring_invoice_preview',
+        lambda self, **kwargs: FinanceRecurringInvoicePreview(
+            content=b'%PDF-preview',
+            filename='Vorschau-Rechnung-2026-09-25.pdf',
+            scheduled_on=date(2026, 9, 25),
+        ),
+    )
+    request = Request({'type': 'http', 'method': 'GET', 'path': '', 'headers': [], 'session': {}})
+    request.state.hub_user = env.user
+
+    response = web.finance_recurring_invoice_next_preview(record.id, request, env.db)
+
+    assert response.body == b'%PDF-preview'
+    assert response.media_type == 'application/pdf'
+    assert response.headers['content-disposition'] == 'inline'
+    assert response.headers['cache-control'] == 'private, no-store'

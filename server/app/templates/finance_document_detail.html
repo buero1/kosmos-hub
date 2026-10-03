@@ -71,6 +71,18 @@
         {% if module.is_recurring and detail.document.generated_invoices %}
           <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Rechnungen</p><h3>Aus dieser Serie</h3></div></div><ul>{% for invoice in detail.document.generated_invoices[-10:] | reverse %}<li><a href="/finance/invoices/{{ invoice.id }}">{{ invoice.invoice_number }}</a> · {{ invoice.recurring_scheduled_on.strftime("%d.%m.%Y") }}</li>{% endfor %}</ul></article>
         {% endif %}
+        {% if module.is_recurring %}
+          <article class="card customer-detail-panel finance-document-pdf-panel">
+            <div class="customer-detail-panel-heading"><div><p class="eyebrow">Periodische Rechnung</p><h3>Vorschau nächste Rechnung</h3></div></div>
+            {% if detail.status == "Aktiv" and detail.document.hub_next_run_on %}
+              <iframe class="finance-document-pdf-preview" src="/finance/recurring-invoices/{{ detail.document.id }}/next-invoice-preview#view=FitH&toolbar=0&navpanes=0" title="Vorschau nächste Rechnung"></iframe>
+              <p class="subtle">Voraussichtliches Rechnungsdatum: {{ detail.document.hub_next_run_on.strftime("%d.%m.%Y") }}</p>
+              <p class="subtle">Diese Vorschau wird nur angezeigt und nicht als Rechnung oder PDF gespeichert.</p>
+            {% else %}
+              <p class="subtle">Derzeit ist keine nächste Rechnung geplant.</p>
+            {% endif %}
+          </article>
+        {% endif %}
         {% if module.key in ("orders", "invoices", "dunnings") %}{% set generated_pdf_document_type = module.key %}{% set generated_pdf_document_id = detail.document.id %}{% include "partials/finance_generated_pdf_panel.html" %}{% endif %}
         {% if module.is_invoice and detail.invoice_pdf %}
           <article class="card customer-detail-panel finance-document-pdf-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">Originalbeleg</p><h3>{{ "ZUGFeRD-PDF" if detail.invoice_pdf.is_zugferd else "Rechnungs-PDF" }}</h3></div></div><iframe class="finance-document-pdf-preview" src="/finance/invoices/{{ detail.document.id }}/pdf#view=FitH" title="Vorschau: {{ detail.invoice_pdf.filename }}"></iframe><p class="subtle">{{ detail.invoice_pdf.filename }} · {{ (detail.invoice_pdf.byte_size / 1024 / 1024) | round(1) }} MB</p></article>

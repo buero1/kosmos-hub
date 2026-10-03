@@ -19,6 +19,7 @@ from app.services.audit import write_audit_log
 from app.services.hub_finance_documents import (
     HubFinanceDocumentService,
     INVOICE_MODULE,
+    recurring_invoice_due_date,
     recurring_service_period_end,
 )
 from app.services.hub_finance_pdf_generation import HubFinancePdfService
@@ -69,33 +70,6 @@ def next_recurring_date(current: date, values: dict[str, str]) -> date:
     if result <= current:
         raise ValueError("Der nächste Rechnungstermin muss nach dem aktuellen Termin liegen.")
     return result
-
-
-def _due_date(issued_on: date, values: dict[str, str]) -> tuple[date, str]:
-    count_text = values.get("payment_due_count") or ""
-    unit = values.get("payment_due_unit") or ""
-    if count_text and unit:
-        count = int(count_text)
-    else:
-        terms = values.get("payment_terms") or ""
-        if terms == "due_on_receipt":
-            count, unit = 0, "day"
-        elif terms.endswith("_days") and terms.removesuffix("_days").isdigit():
-            count, unit = int(terms.removesuffix("_days")), "day"
-        else:
-            count, unit = 0, "day"
-    if count < 0 or count > 9999:
-        raise ValueError("Das Zahlungsziel ist ungültig.")
-    if unit == "day":
-        due = issued_on + timedelta(days=count)
-    elif unit == "week":
-        due = issued_on + timedelta(weeks=count)
-    elif unit == "year":
-        due = _add_months(issued_on, count * 12, anchor_day=issued_on.day)
-    else:
-        raise ValueError("Die Zeiteinheit des Zahlungsziels ist ungültig.")
-    terms = "due_on_receipt" if count == 0 and unit == "day" else f"{count}_days" if unit == "day" and count in {7, 14, 30} else ""
-    return due, terms
 
 
 class HubRecurringInvoiceGenerationService:
@@ -199,7 +173,7 @@ class HubRecurringInvoiceGenerationService:
         if was_created:
             if not recurring.lines:
                 raise ValueError("Die periodische Rechnung hat keine Positionen.")
-            due_on, terms = _due_date(scheduled_on, values)
+            due_on, terms = recurring_invoice_due_date(scheduled_on, values)
             submitted = {
                 "document_field__status": "draft",
                 "document_field__invoice_date": scheduled_on.isoformat(),

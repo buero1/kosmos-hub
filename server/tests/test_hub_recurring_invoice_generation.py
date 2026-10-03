@@ -11,7 +11,8 @@ from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_documents import HubFinanceInvoice, HubFinanceRecurringInvoice, HubFinanceRecurringInvoiceLine
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
-from app.services.hub_recurring_invoice_generation import HubRecurringInvoiceGenerationService, _due_date, next_recurring_date
+from app.services.hub_finance_documents import recurring_invoice_due_date
+from app.services.hub_recurring_invoice_generation import HubRecurringInvoiceGenerationService, next_recurring_date
 
 
 def _encrypt(cipher: SecretCipher, values: dict[str, str]) -> str:
@@ -89,8 +90,8 @@ def test_next_recurring_date(current, values, expected):
 
 
 def test_custom_payment_due_dates_keep_manual_invoice_due_date():
-    assert _due_date(date(2026, 9, 25), {"payment_due_count": "2", "payment_due_unit": "week"}) == (date(2026, 10, 9), "")
-    assert _due_date(date(2024, 2, 29), {"payment_due_count": "1", "payment_due_unit": "year"}) == (date(2025, 2, 28), "")
+    assert recurring_invoice_due_date(date(2026, 9, 25), {"payment_due_count": "2", "payment_due_unit": "week"}) == (date(2026, 10, 9), "")
+    assert recurring_invoice_due_date(date(2024, 2, 29), {"payment_due_count": "1", "payment_due_unit": "year"}) == (date(2025, 2, 28), "")
 
 
 def test_due_recurring_invoice_creates_one_draft_and_queues_pdf():

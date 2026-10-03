@@ -30,7 +30,14 @@ from app.services.customer_profile import resolve_customer_fields
 from app.services.email_compose_images import EmailComposeImageError, EmailComposeImageService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
-from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, ORDER_MODULE, HubFinanceDocumentService
+from app.services.hub_finance_documents import (
+    DUNNING_MODULE,
+    INVOICE_MODULE,
+    ORDER_MODULE,
+    RECURRING_INVOICE_MODULE,
+    HubFinanceDocumentService,
+    recurring_invoice_due_date,
+)
 from app.services.hub_leads import HubLeadService
 from app.services.hub_pdf_templates import HubPdfTemplateError, HubPdfTemplateService
 from app.services.hub_offer_notes import OFFER_NOTES_TOKEN, sanitize_offer_notes
@@ -110,6 +117,13 @@ class FinancePdfSnapshot:
     service_period_start: str = ""
     service_period_end: str = ""
     service_has_data: bool = False
+
+
+@dataclass(frozen=True)
+class FinanceRecurringInvoicePreview:
+    content: bytes
+    filename: str
+    scheduled_on: date
 
 
 class HubFinancePdfService:
@@ -295,6 +309,103 @@ class HubFinancePdfService:
         generated_pdf.next_retry_at = datetime.now(UTC) + timedelta(minutes=5 * generated_pdf.attempt_count) if retry else None
         self.db.commit()
 
+    def recurring_invoice_preview(self, *, recurring_invoice_id: int) -> FinanceRecurringInvoicePreview:
+        snapshot, document, scheduled_on = self._recurring_invoice_preview_snapshot(
+            recurring_invoice_id=recurring_invoice_id
+        )
+        try:
+            template_service = HubPdfTemplateService(db=self.db)
+            template = self.validate_template(
+                db=self.db,
+                document_type="invoices",
+                template_id=document.pdf_template_id,
+            )
+            revision = template_service.revision_for(template)
+            content = template_service.decoded_content(
+                document_type="invoices",
+                content_json=revision.content_json,
+            )
+            html = self._render_html(snapshot=snapshot, content=content)
+            html = EmailComposeImageService(db=self.db, cipher=self.cipher).embed_local_images(html)
+            pdf_content = self._render_pdf(html=html, snapshot=snapshot)
+        except (HubPdfTemplateError, EmailComposeImageError) as exc:
+            raise HubFinancePdfError(str(exc)) from exc
+        return FinanceRecurringInvoicePreview(
+            content=pdf_content,
+            filename=f"Vorschau-Rechnung-{scheduled_on.isoformat()}.pdf",
+            scheduled_on=scheduled_on,
+        )
+
+    def _recurring_invoice_preview_snapshot(
+        self,
+        *,
+        recurring_invoice_id: int,
+    ) -> tuple[FinancePdfSnapshot, Any, date]:
+        service = HubFinanceDocumentService(db=self.db, cipher=self.cipher)
+        detail = service.get_detail(
+            module=RECURRING_INVOICE_MODULE,
+            document_id=recurring_invoice_id,
+        )
+        if detail is None:
+            raise HubFinancePdfError("Die periodische Rechnung wurde nicht gefunden.")
+        document = detail.document
+        scheduled_on = document.hub_next_run_on
+        if scheduled_on is None:
+            raise HubFinancePdfError("Für diese Serie ist keine nächste Rechnung geplant.")
+        values = service._values(document.encrypted_fields_json)
+        if values.get("status") != "active":
+            raise HubFinancePdfError("Für diese Serie ist keine nächste Rechnung geplant.")
+        try:
+            start_date = date.fromisoformat(values.get("start_date", ""))
+            end_date = date.fromisoformat(values["end_date"]) if values.get("end_date") else None
+        except ValueError as exc:
+            raise HubFinancePdfError("Der Zeitraum der periodischen Rechnung ist ungültig.") from exc
+        if scheduled_on < start_date or (end_date is not None and scheduled_on > end_date):
+            raise HubFinancePdfError("Für diese Serie ist keine nächste Rechnung geplant.")
+        if not detail.lines:
+            raise HubFinancePdfError("Die periodische Rechnung hat keine Positionen.")
+        try:
+            due_on, payment_term = recurring_invoice_due_date(scheduled_on, values)
+        except (TypeError, ValueError) as exc:
+            raise HubFinancePdfError(str(exc)) from exc
+        payment_field = next(field for field in INVOICE_MODULE.fields if field.key == "payment_terms")
+        payment_terms = next(
+            (label for option, label in payment_field.options if option == payment_term),
+            payment_term,
+        )
+        customer_name, contact_name, customer_address, customer_fields, contact_fields = self._party_values(
+            document_type="invoices",
+            document=document,
+            detail=detail,
+        )
+        has_service_period = all(values.get(key) for key in ("service_period_start", "service_period_end"))
+        snapshot = FinancePdfSnapshot(
+            document_type="invoices",
+            identifier="VORSCHAU",
+            document_title="Rechnung",
+            document_status="Entwurf",
+            document_date=scheduled_on.isoformat(),
+            due_date=due_on.isoformat(),
+            source_invoice_number="",
+            valid_until="",
+            payment_terms=payment_terms,
+            currency=values.get("currency") or "EUR",
+            customer_name=customer_name,
+            contact_name=contact_name,
+            billing_street=customer_address[0],
+            billing_postal_code=customer_address[1],
+            billing_city=customer_address[2],
+            billing_country_code=customer_address[3],
+            lines=detail.lines,
+            totals=detail.totals,
+            customer_fields=customer_fields,
+            contact_fields=contact_fields,
+            service_period_start=values.get("service_period_start", "") if has_service_period else "",
+            service_period_end=values.get("service_period_end", "") if has_service_period else "",
+            service_has_data=has_service_period,
+        )
+        return snapshot, document, scheduled_on
+
     def _snapshot(self, *, document_type: str, document_id: int) -> FinancePdfSnapshot:
         if document_type == "offers":
             service = HubFinanceService(db=self.db, cipher=self.cipher)
@@ -329,6 +440,51 @@ class HubFinancePdfService:
             }[document_type]
             due_date = self._field_form_value(fields, "due_date") if document_type in {"invoices", "dunnings"} else ""
             valid_until = ""
+        customer_name, contact_name, customer_address, customer_fields, contact_fields = self._party_values(
+            document_type=document_type,
+            document=document,
+            detail=detail,
+        )
+        return FinancePdfSnapshot(
+            document_type=document_type,
+            identifier=detail.offer_number if document_type == "offers" else detail.identifier,
+            document_title=title or {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung"}[document_type],
+            document_status=detail.status,
+            document_date=self._field_form_value(fields, date_key),
+            due_date=due_date,
+            source_invoice_number=detail.link_label if document_type == "dunnings" else "",
+            valid_until=valid_until,
+            payment_terms=self._field_display_value(fields, "payment_terms"),
+            currency=self._field_form_value(fields, "currency") or "EUR",
+            customer_name=customer_name,
+            contact_name=contact_name,
+            billing_street=customer_address[0],
+            billing_postal_code=customer_address[1],
+            billing_city=customer_address[2],
+            billing_country_code=customer_address[3],
+            lines=detail.lines,
+            totals=detail.totals,
+            customer_fields=customer_fields,
+            contact_fields=contact_fields,
+            notes_html=detail.notes_html if document_type == "offers" else "",
+            document_fields={key: self._field_display_value(fields, key) for key in fields} if document_type == "orders" else {},
+            service_is_one_time=self._truthy(self._field_form_value(fields, "service_is_one_time")),
+            service_date=self._field_form_value(fields, "service_date"),
+            service_period_start=self._field_form_value(fields, "service_period_start"),
+            service_period_end=self._field_form_value(fields, "service_period_end"),
+            service_has_data=document_type == "invoices" and (
+                self._field_form_value(fields, "service_is_one_time") in {"true", "false"}
+                or any(self._field_form_value(fields, key) for key in ("service_date", "service_period_start", "service_period_end"))
+            ),
+        )
+
+    def _party_values(
+        self,
+        *,
+        document_type: str,
+        document: Any,
+        detail: Any,
+    ) -> tuple[str, str, tuple[str, str, str, str], dict[str, str], dict[str, str]]:
         directory = CustomerDirectoryService(db=self.db, cipher=self.cipher)
         customer_detail = directory.get_detail(customer_id=document.customer_id) if document.customer_id is not None else None
         customer_address = self._customer_address(customer_detail)
@@ -397,38 +553,7 @@ class HubFinancePdfService:
                 "mailing_postal_code": customer_address[1],
                 "mailing_city": customer_address[2],
             }
-        return FinancePdfSnapshot(
-            document_type=document_type,
-            identifier=detail.offer_number if document_type == "offers" else detail.identifier,
-            document_title=title or {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung"}[document_type],
-            document_status=detail.status,
-            document_date=self._field_form_value(fields, date_key),
-            due_date=due_date,
-            source_invoice_number=detail.link_label if document_type == "dunnings" else "",
-            valid_until=valid_until,
-            payment_terms=self._field_display_value(fields, "payment_terms"),
-            currency=self._field_form_value(fields, "currency") or "EUR",
-            customer_name=customer_name,
-            contact_name=contact_name,
-            billing_street=customer_address[0],
-            billing_postal_code=customer_address[1],
-            billing_city=customer_address[2],
-            billing_country_code=customer_address[3],
-            lines=detail.lines,
-            totals=detail.totals,
-            customer_fields=customer_fields,
-            contact_fields=contact_fields,
-            notes_html=detail.notes_html if document_type == "offers" else "",
-            document_fields={key: self._field_display_value(fields, key) for key in fields} if document_type == "orders" else {},
-            service_is_one_time=self._truthy(self._field_form_value(fields, "service_is_one_time")),
-            service_date=self._field_form_value(fields, "service_date"),
-            service_period_start=self._field_form_value(fields, "service_period_start"),
-            service_period_end=self._field_form_value(fields, "service_period_end"),
-            service_has_data=document_type == "invoices" and (
-                self._field_form_value(fields, "service_is_one_time") in {"true", "false"}
-                or any(self._field_form_value(fields, key) for key in ("service_date", "service_period_start", "service_period_end"))
-            ),
-        )
+        return customer_name, contact_name, customer_address, customer_fields, contact_fields
 
     def _render_html(
         self,

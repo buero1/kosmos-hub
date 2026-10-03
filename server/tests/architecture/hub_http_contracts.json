@@ -17,7 +17,7 @@
     "app/api/routes/site_inventory.py": "e17ba749ad7654eada8133a3f1426f470614a3e9d58233ed0fa4ebbe83fedd47",
     "app/api/routes/site_updates.py": "f91cc76b4d88acb3c18646bfed201de7bd3235e1a148402494ff339d2213c6f3",
     "app/api/routes/sites.py": "3625fd99454a3357f7b2c41c6f00f4c387e72aa6a509a43e4045f8c489b11276",
-    "app/api/routes/web.py": "47d0baf1a60433ec5f58b85e4f1951e0b7d55cc10c68eeae394a942747fe9685",
+    "app/api/routes/web.py": "ee477209464b30ea18fe83ffa90a913410a341ccc456d7b88dffa47dde31a3c4",
     "app/main.py": "a1dcd0191d643151a961e7a8b5cbba3fb1e338c3dcf4cdcf4e894f7f44f957e9",
     "app/main.py:route-wiring": "1b68f07b0a806d14fba2f800726d545df62355718d7e13cf997d7873519a81f4"
   },
@@ -1901,6 +1901,11 @@
         "load_finance_pdf"
       ],
       "reader_method": "load_pdf"
+    },
+    "app/api/routes/web.py:finance_recurring_invoice_next_preview:GET:/finance/recurring-invoices/{recurring_invoice_id}/next-invoice-preview": {
+      "fingerprint": "b1d110e6766c23a86acc5db0cbf37b25822cf06a3867f401737decc26c945da6",
+      "state": "human_only",
+      "reason": "Authenticated browser-only inline preview for the next scheduled recurring invoice. It derives an in-memory PDF from the authorized Finance record and current template without creating an invoice, generated-PDF row, file, download action or agent capability. Covered by recurring invoice preview and status rendering tests."
     },
     "app/api/routes/web.py:finance_page:GET:/finance": {
       "fingerprint": "eb07dde3761e659f32892654f9f0f64e9ecf5735ba0d5eba18b0cc7e23cd9f08",

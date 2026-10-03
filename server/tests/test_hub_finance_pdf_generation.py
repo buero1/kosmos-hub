@@ -1,6 +1,6 @@
 from io import BytesIO
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from facturx import get_facturx_xml_from_pdf
 from pypdf import PdfWriter
@@ -11,12 +11,18 @@ from app.core.security import SecretCipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
+from app.models.hub_finance_documents import HubFinanceInvoice
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.models.hub_lead import HubLead
 from app.services.email_compose_images import EmailComposeImageService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
-from app.services.hub_finance_documents import DUNNING_MODULE, INVOICE_MODULE, HubFinanceDocumentService
+from app.services.hub_finance_documents import (
+    DUNNING_MODULE,
+    INVOICE_MODULE,
+    RECURRING_INVOICE_MODULE,
+    HubFinanceDocumentService,
+)
 from app.services.hub_finance_pdf_generation import HubFinancePdfError, HubFinancePdfService
 
 
@@ -45,6 +51,26 @@ def _invoice_values() -> dict[str, str]:
         "document_line__0__unit": "Einmalig",
         "document_line__0__unit_price": "100",
         "document_line__0__discount_percent": "10",
+        "document_line__0__tax_rate": "19",
+    }
+
+
+def _recurring_values() -> dict[str, str]:
+    return {
+        "document_field__name": "Website-Betreuung",
+        "document_field__status": "active",
+        "document_field__start_date": "2026-09-25",
+        "document_field__next_invoice_date": "2026-10-25",
+        "document_field__interval_unit": "month",
+        "document_field__currency": "EUR",
+        "document_field__payment_due_count": "14",
+        "document_field__payment_due_unit": "day",
+        "document_line__0__name": "Website-Betreuung",
+        "document_line__0__description": "Monatliche Pflege",
+        "document_line__0__quantity": "1",
+        "document_line__0__unit": "Monatlich",
+        "document_line__0__unit_price": "100",
+        "document_line__0__discount_percent": "0",
         "document_line__0__tax_rate": "19",
     }
 
@@ -176,6 +202,61 @@ def test_invoice_generation_uses_default_revision_and_embeds_xsd_valid_zugferd(m
         assert b"Website-Paket" in embedded_xml
         assert b"20261001" in embedded_xml
         assert b"20261031" in embedded_xml
+
+
+def test_recurring_invoice_preview_renders_next_invoice_without_persisting(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    rendered: dict[str, object] = {}
+
+    def render_pdf(*, html, snapshot):
+        rendered["html"] = html
+        rendered["snapshot"] = snapshot
+        return b"%PDF-preview"
+
+    monkeypatch.setattr(HubFinancePdfService, "_render_pdf", staticmethod(render_pdf))
+    monkeypatch.setattr(EmailComposeImageService, "embed_local_images", lambda self, content: content)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        contact = CustomerContact(
+            customer=customer,
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Test Kontakt"}})),
+        )
+        db.add(contact)
+        db.flush()
+        recurring = HubFinanceDocumentService(db=db, cipher=cipher).create_document(
+            module=RECURRING_INVOICE_MODULE,
+            customer_id=customer.id,
+            contact_id=contact.id,
+            link_id=None,
+            submitted_values=_recurring_values(),
+        )
+        db.commit()
+        original_values = recurring.encrypted_fields_json
+
+        preview = HubFinancePdfService(db=db, cipher=cipher).recurring_invoice_preview(
+            recurring_invoice_id=recurring.id
+        )
+
+        snapshot = rendered["snapshot"]
+        assert preview.content == b"%PDF-preview"
+        assert preview.scheduled_on == date(2026, 10, 25)
+        assert snapshot.identifier == "VORSCHAU"
+        assert snapshot.document_date == "2026-10-25"
+        assert snapshot.due_date == "2026-11-08"
+        assert snapshot.payment_terms == "14 Tage"
+        assert snapshot.service_period_start == "2026-11-01"
+        assert snapshot.service_period_end == "2026-11-30"
+        assert "VORSCHAU" in rendered["html"]
+        assert "Website-Betreuung" in rendered["html"]
+        assert db.scalars(select(HubFinanceInvoice)).all() == []
+        assert db.scalars(select(HubFinanceGeneratedPdf)).all() == []
+        assert recurring.encrypted_fields_json == original_values
+        assert recurring.hub_next_run_on == date(2026, 10, 25)
 
 
 def test_generated_pdf_html_replaces_document_values_without_preview_samples():

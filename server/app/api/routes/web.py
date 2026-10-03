@@ -2156,6 +2156,30 @@ def finance_invoice_pdf_preview(invoice_id: int, request: Request, db: Annotated
     )
 
 
+@router.get("/finance/recurring-invoices/{recurring_invoice_id}/next-invoice-preview")
+def finance_recurring_invoice_next_preview(
+    recurring_invoice_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _require_hub_admin(request)
+    try:
+        preview = HubFinancePdfService(db=db, cipher=get_secret_cipher()).recurring_invoice_preview(
+            recurring_invoice_id=recurring_invoice_id
+        )
+    except (ValueError, HubFinanceDocumentError, HubFinancePdfError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(
+        content=preview.content,
+        media_type="application/pdf",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/finance/orders/{order_id}/pdf")
 def finance_order_pdf_preview(order_id: int, request: Request, db: Annotated[Session, Depends(get_db)]):
     _require_hub_admin(request)
