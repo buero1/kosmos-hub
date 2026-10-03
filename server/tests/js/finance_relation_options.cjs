@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright');
-const root = path.resolve('tmp/finance-relations-browser');
+const root = path.resolve(process.env.HUB_FINANCE_RELATIONS_ARTIFACT_DIR || 'tmp/finance-relations-browser');
 
 (async () => {
   const browser = await chromium.launch({headless: true, ...(process.platform === 'win32' ? {channel: 'msedge'} : {})});
@@ -49,6 +49,17 @@ const root = path.resolve('tmp/finance-relations-browser');
           assert.equal(payload.contact_id, String(data.contact));
         }
         await page.locator('[data-customer-edit-open]').click();
+        const fieldControls = form.locator('.customer-field-editor-grid > .customer-field-control');
+        assert.ok(await fieldControls.count(), 'The edit form must contain layout fields');
+        for (let index = 0; index < await fieldControls.count(); index += 1) {
+          assert.equal(await fieldControls.nth(index).isVisible(), true, `Finance field ${index + 1} must remain visible`);
+        }
+        if (kind === 'invoices') {
+          assert.equal(await form.locator('[data-invoice-service-field]').count(), 4);
+        }
+        if (kind === 'recurring-invoices') {
+          assert.equal(await form.locator('[data-recurring-custom-field]').isVisible(), true);
+        }
         await assertRelations();
         if (kind === 'recurring-invoices') {
           await customer.scrollIntoViewIfNeeded();

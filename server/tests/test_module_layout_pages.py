@@ -110,3 +110,20 @@ def test_global_layout_page_starts_in_drag_and_drop_mode():
     assert "data-layout-editor-start-open" in source
     assert "show_more_layout_item()" in source
     assert "if (startsOpen) { setLayoutEditing(true); }" in base_source
+
+
+def test_finance_layout_fields_are_not_hidden_by_record_values():
+    detail_source = (TEMPLATE_ROOT / "finance_document_detail.html").read_text(encoding="utf-8")
+    control_source = (TEMPLATE_ROOT / "partials" / "finance_field_control.html").read_text(encoding="utf-8")
+    invoice_script = (TEMPLATE_ROOT / "partials" / "finance_invoice_due_script.html").read_text(encoding="utf-8")
+    recurring_script = (TEMPLATE_ROOT / "partials" / "finance_recurring_interval_script.html").read_text(encoding="utf-8")
+    customer_script = (TEMPLATE_ROOT / "partials" / "finance_customer_search_script.html").read_text(encoding="utf-8")
+
+    assert "{% for field in detail.fields[:detail.show_more_index] %}" in detail_source
+    assert "{% for field in detail.fields[detail.show_more_index:] %}" in detail_source
+    assert "invoice_has_service_data" not in detail_source
+    assert 'data-recurring-custom-field{% if not value %} hidden' not in control_source
+    assert 'selected_lead_id %} hidden' not in control_source
+    assert "control.hidden = !visible" not in invoice_script
+    assert "customField.hidden" not in recurring_script
+    assert "contactControl.hidden" not in customer_script

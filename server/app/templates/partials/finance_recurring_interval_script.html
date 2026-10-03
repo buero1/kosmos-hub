@@ -26,13 +26,14 @@
       var customField = form.querySelector('[data-recurring-custom-field]');
       if (!rhythm || !customField) return;
       var controls = customField.querySelectorAll('input, select');
+      var requiredLabel = customField.querySelector('[data-recurring-custom-required]');
       function syncCustomField() {
-        var visible = rhythm.value === 'custom';
-        customField.hidden = !visible;
+        var active = rhythm.value === 'custom';
         controls.forEach(function (control) {
-          control.disabled = !visible;
-          control.required = visible;
+          control.disabled = !active;
+          control.required = active;
         });
+        if (requiredLabel) requiredLabel.hidden = !active;
       }
       rhythm.addEventListener('change', syncCustomField);
       syncCustomField();

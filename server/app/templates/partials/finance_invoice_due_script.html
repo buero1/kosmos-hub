@@ -33,11 +33,12 @@
       var requiresService = form.hasAttribute('data-invoice-service-new') || oneTime.checked || serviceInputs.some(function (input) {
         return Boolean(input.value);
       });
-      function setServiceControl(input, visible) {
+      function setServiceControl(input, active) {
         var control = input.closest('[data-invoice-service-field]');
-        if (control) control.hidden = !visible;
-        input.disabled = !visible;
-        input.required = visible && requiresService;
+        var requiredLabel = control && control.querySelector('[data-invoice-service-required]');
+        input.disabled = !active;
+        input.required = active && requiresService;
+        if (requiredLabel) requiredLabel.hidden = !input.required;
       }
       function updateServiceFields(forceRequired) {
         if (forceRequired) requiresService = true;

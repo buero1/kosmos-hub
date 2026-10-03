@@ -268,8 +268,6 @@ class FinanceDocumentDetail:
     invoice_pdf: "FinanceInvoicePdfView | None" = None
     order_pdf: "FinanceOrderPdfView | None" = None
     email_delivery: InvoiceEmailDelivery | None = None
-    invoice_has_service_data: bool = False
-    invoice_service_is_one_time: bool = False
 
 
 @dataclass(frozen=True)
@@ -436,8 +434,6 @@ class HubFinanceDocumentService:
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
             email_delivery=invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None,
-            invoice_has_service_data=module.is_invoice and any(key in values for key in _INVOICE_SERVICE_KEYS),
-            invoice_service_is_one_time=module.is_invoice and self._truthy(values.get("service_is_one_time")),
         )
 
     @staticmethod
@@ -708,12 +704,6 @@ class HubFinanceDocumentService:
             layout_key=module.layout_key,
             default_keys=tuple(field.key for field in module.fields),
         )
-        if module is RECURRING_INVOICE_MODULE and not any(key in values for key in _RECURRING_SERVICE_KEYS):
-            hidden_keys = set(_RECURRING_SERVICE_KEYS)
-            show_more_index = sum(
-                1 for key in ordered_keys[:show_more_index] if key not in hidden_keys
-            )
-            ordered_keys = tuple(key for key in ordered_keys if key not in hidden_keys)
         by_key = {field.key: field for field in module.fields}
         result = []
         for key in ordered_keys:

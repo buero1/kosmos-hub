@@ -139,7 +139,6 @@
       var empty = root.querySelector('[data-finance-party-empty]');
       var options = Array.from(root.querySelectorAll('[data-finance-party-option]'));
       var contact = form && form.querySelector('[data-finance-contact]');
-      var contactControl = contact && contact.closest('[data-finance-contact-control]');
       var visible = [];
       var activeIndex = -1;
 
@@ -155,7 +154,6 @@
       function updateContact() {
         if (!contact) return;
         var usesCustomer = Boolean(customerId.value);
-        if (contactControl) contactControl.hidden = !usesCustomer;
         contact.disabled = !usesCustomer;
         contact.required = usesCustomer;
         Array.from(contact.options).forEach(function (option) {

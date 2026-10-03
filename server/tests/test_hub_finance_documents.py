@@ -15,6 +15,7 @@ from app.models.hub_finance_documents import HubFinanceInvoice
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import (
     DUNNING_MODULE,
+    FINANCE_DOCUMENT_MODULES,
     INVOICE_MODULE,
     ORDER_FIELDS_LAYOUT_KEY,
     ORDER_MODULE,
@@ -538,6 +539,32 @@ def test_recurring_invoices_store_schedule_and_follow_the_layout_configuration()
         assert _documents(db).get_detail(module=ORDER_MODULE, document_id=order.id).fields[0].key == "customer"
 
 
+def test_all_finance_document_fields_follow_layout_even_when_values_are_empty():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as db:
+        admin = HubUser(username="layout-admin", password_hash="hashed", role="admin")
+        db.add(admin)
+        db.flush()
+        service = _documents(db)
+
+        for module in FINANCE_DOCUMENT_MODULES.values():
+            ordered = tuple(reversed(tuple(field.key for field in module.fields)))
+            layout = (*ordered[:2], ModuleLayoutService.SHOW_MORE_ITEM_KEY, *ordered[2:])
+            ModuleLayoutService(db=db).configure(
+                actor=admin,
+                layout_key=module.layout_key,
+                item_order_json=json.dumps(layout),
+                allowed_keys=ordered,
+            )
+
+            fields, show_more_index = service._field_values_with_show_more(module=module, values={})
+
+            assert tuple(field.key for field in fields) == ordered
+            assert show_more_index == 2
+
+
 def test_recurring_invoice_edit_preserves_imported_hidden_values_and_cadence():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -913,7 +940,12 @@ def test_recurring_payment_due_reads_legacy_zoho_days_without_migration():
             module=RECURRING_INVOICE_MODULE,
             values={"interval_unit": "year", "payment_terms": "7_days"},
         )
-        assert {field.key for field in legacy}.isdisjoint({"service_period_start", "service_period_end"})
+        service_periods = {
+            field.key: field.value
+            for field in legacy
+            if field.key in {"service_period_start", "service_period_end"}
+        }
+        assert service_periods == {"service_period_start": "", "service_period_end": ""}
         due = next(field for field in legacy if field.key == "payment_due")
         assert due.value == "7 Tage"
         assert due.form_value == "7:day"
