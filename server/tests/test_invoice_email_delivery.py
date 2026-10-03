@@ -144,6 +144,18 @@ def test_rendered_list_detail_and_browser_fixtures(env):
         assert "Versandstatus" in html and "Versendet am" in html
         assert "25.09.2026 11:34" in html and ">Versendet<" in html
         assert 'name="document_field__email_delivery"' not in html
+    other = invoice(env)
+    filtered = web.finance_documents_page(
+        "invoices",
+        request(f"/finance/invoices?q={record.invoice_number}"),
+        env.db,
+        q=record.invoice_number,
+    ).body.decode()
+    assert f'value="{record.invoice_number}"' in filtered
+    assert f'/finance/invoices/{record.id}' in filtered
+    assert f'/finance/invoices/{other.id}' not in filtered
+    assert "1–1 von 1" in filtered
+    assert 'data-finance-table-search="true"' in filtered
     directory = os.environ.get("HUB_INVOICE_DELIVERY_ARTIFACT_DIR")
     if directory:
         root = Path(directory)

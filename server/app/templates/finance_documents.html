@@ -9,7 +9,7 @@
     <div class="section-heading">
       <div><p class="eyebrow">Finance</p><h2>{{ module.label }}</h2></div>
       <div class="communication-heading-actions finance-directory-heading-actions">
-        {{ finance_directory_search(module.key, module.label) }}
+        {{ finance_directory_search(module.key, module.label, true, finance_search_query) }}
         {% if invoice_page %}
           <button type="button" class="button button-secondary" data-invoice-email-review-open disabled>E-Mail senden</button>
           <button type="button" class="button button-secondary finance-invoice-pending-action" disabled title="Folgt im nächsten Schritt">Massenaktualisierung</button>
@@ -42,7 +42,7 @@
                 {% if module.is_invoice %}<td data-invoice-delivery-status="{{ entry.document.id }}">{{ entry.email_delivery.label }}</td><td data-invoice-delivery-date="{{ entry.document.id }}">{{ entry.email_delivery.sent_at_display }}</td>{% endif %}
               </tr>
             {% else %}
-              <tr><td colspan="{{ 5 + (1 if invoice_page else 0) + (2 if module.is_invoice else 0) }}">Noch keine {{ module.label|lower }} vorhanden.</td></tr>
+              <tr><td colspan="{{ 5 + (1 if invoice_page else 0) + (2 if module.is_invoice else 0) }}">{% if finance_search_query %}Keine passenden {{ module.label|lower }} gefunden.{% else %}Noch keine {{ module.label|lower }} vorhanden.{% endif %}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -56,11 +56,11 @@
           <span class="finance-invoice-page-summary">{% if invoice_page.total_count %}{{ (invoice_page.page - 1) * 100 + 1 }}–{{ (invoice_page.page - 1) * 100 + entries|length }} von {{ invoice_page.total_count }}{% else %}0 Rechnungen{% endif %}</span>
           {% if invoice_page.page_count > 1 %}
             <nav class="finance-invoice-pagination" aria-label="Rechnungsseiten">
-              {% if invoice_page.page > 1 %}<a class="button button-secondary" href="?page={{ invoice_page.page - 1 }}" rel="prev">Zurück</a>{% endif %}
-              {% if invoice_page_links|first > 1 %}<a class="button button-secondary" href="?page=1">1</a>{% if invoice_page_links|first > 2 %}<span aria-hidden="true">…</span>{% endif %}{% endif %}
-              {% for number in invoice_page_links %}<a class="button {{ 'button-variant-1' if number == invoice_page.page else 'button-secondary' }}" href="?page={{ number }}" {% if number == invoice_page.page %}aria-current="page"{% endif %}>{{ number }}</a>{% endfor %}
-              {% if invoice_page_links|last < invoice_page.page_count %}{% if invoice_page_links|last < invoice_page.page_count - 1 %}<span aria-hidden="true">…</span>{% endif %}<a class="button button-secondary" href="?page={{ invoice_page.page_count }}">{{ invoice_page.page_count }}</a>{% endif %}
-              {% if invoice_page.page < invoice_page.page_count %}<a class="button button-secondary" href="?page={{ invoice_page.page + 1 }}" rel="next">Weiter</a>{% endif %}
+              {% if invoice_page.page > 1 %}<a class="button button-secondary" href="?page={{ invoice_page.page - 1 }}{% if finance_search_query_string %}&{{ finance_search_query_string }}{% endif %}" rel="prev">Zurück</a>{% endif %}
+              {% if invoice_page_links|first > 1 %}<a class="button button-secondary" href="?page=1{% if finance_search_query_string %}&{{ finance_search_query_string }}{% endif %}">1</a>{% if invoice_page_links|first > 2 %}<span aria-hidden="true">…</span>{% endif %}{% endif %}
+              {% for number in invoice_page_links %}<a class="button {{ 'button-variant-1' if number == invoice_page.page else 'button-secondary' }}" href="?page={{ number }}{% if finance_search_query_string %}&{{ finance_search_query_string }}{% endif %}" {% if number == invoice_page.page %}aria-current="page"{% endif %}>{{ number }}</a>{% endfor %}
+              {% if invoice_page_links|last < invoice_page.page_count %}{% if invoice_page_links|last < invoice_page.page_count - 1 %}<span aria-hidden="true">…</span>{% endif %}<a class="button button-secondary" href="?page={{ invoice_page.page_count }}{% if finance_search_query_string %}&{{ finance_search_query_string }}{% endif %}">{{ invoice_page.page_count }}</a>{% endif %}
+              {% if invoice_page.page < invoice_page.page_count %}<a class="button button-secondary" href="?page={{ invoice_page.page + 1 }}{% if finance_search_query_string %}&{{ finance_search_query_string }}{% endif %}" rel="next">Weiter</a>{% endif %}
             </nav>
           {% endif %}
         </div>

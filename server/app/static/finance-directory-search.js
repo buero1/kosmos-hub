@@ -6,6 +6,7 @@
     const input = field.querySelector("[data-finance-directory-search-input]");
     const results = field.querySelector("[data-finance-directory-search-results]");
     const moduleKey = field.dataset.financeModule || "";
+    const supportsTableSearch = field.dataset.financeTableSearch === "true";
     if (!input || !results || !moduleKey) return;
 
     let requestTimer;
@@ -94,16 +95,40 @@
       }, 100);
     };
 
+    const applyTableSearch = () => {
+      const url = new URL(window.location.href);
+      const query = input.value.trim();
+      url.searchParams.delete("page");
+      url.searchParams.delete("created");
+      url.searchParams.delete("deleted");
+      if (query) url.searchParams.set("q", query);
+      else url.searchParams.delete("q");
+      url.hash = "";
+      window.location.assign(url);
+    };
+
     input.addEventListener("input", loadResults);
     input.addEventListener("focus", loadResults);
     input.addEventListener("keydown", (event) => {
       if (event.key === "Escape") closeResults();
+      if (event.key === "Enter" && supportsTableSearch) {
+        event.preventDefault();
+        window.clearTimeout(requestTimer);
+        pendingRequest?.abort();
+        applyTableSearch();
+        return;
+      }
       if (event.key === "ArrowDown") {
         const first = results.querySelector("a");
         if (first) {
           event.preventDefault();
           first.focus();
         }
+      }
+    });
+    input.addEventListener("search", () => {
+      if (supportsTableSearch && !input.value.trim() && new URL(window.location.href).searchParams.has("q")) {
+        applyTableSearch();
       }
     });
     results.addEventListener("keydown", (event) => {

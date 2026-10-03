@@ -123,8 +123,8 @@ from app.services.hub_activity_catalog import ACTIVITY_KINDS, activity_fields, a
 from app.services.hub_activity_responsibility import ActivityResponsibility, ACTIVITY_VIEWS
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
 from app.services.hub_finance_operations_shared import (
-    finance_detail, finance_entries, finance_invoice_page, finance_options,
-    form_input as finance_form_input,
+    finance_detail, finance_document_search_page, finance_entries, finance_invoice_page,
+    finance_options, form_input as finance_form_input,
 )
 from app.services.hub_finance_documents import (
     ALL_FINANCE_DOCUMENT_MODULES,
@@ -134,6 +134,7 @@ from app.services.hub_finance_documents import (
     INVOICE_MODULE,
     ORDER_MODULE,
     RECURRING_INVOICE_MODULE,
+    FinanceDocumentPage,
     HubFinanceDocumentError,
     HubFinanceDocumentService,
 )
@@ -2039,19 +2040,55 @@ def finance_documents_page(
     created: bool = False,
     deleted: bool = False,
     page: int = 1,
+    q: str = "",
 ):
     _require_hub_admin(request)
     module = _finance_document_module(module_key)
     service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
-    invoice_page = finance_invoice_page(_finance_gateway(request, db), page) if module.is_invoice else None
+    gateway = _finance_gateway(request, db)
+    search_query = q.strip()[:100]
+    invoice_page = None
+    if search_query:
+        requested_page = max(1, page) if module.is_invoice else 1
+        page_size = 100 if module.is_invoice else 250
+        search_page = finance_document_search_page(
+            gateway,
+            module.key,
+            search_query,
+            offset=(requested_page - 1) * page_size,
+            page_size=page_size,
+        )
+        if module.is_invoice:
+            page_count = max(1, (search_page.total_count + page_size - 1) // page_size)
+            normalized_page = min(requested_page, page_count)
+            if normalized_page != requested_page:
+                search_page = finance_document_search_page(
+                    gateway,
+                    module.key,
+                    search_query,
+                    offset=(normalized_page - 1) * page_size,
+                    page_size=page_size,
+                )
+            invoice_page = FinanceDocumentPage(
+                entries=search_page.entries,
+                page=normalized_page,
+                page_count=page_count,
+                total_count=search_page.total_count,
+            )
+        entries = search_page.entries
+    else:
+        invoice_page = finance_invoice_page(gateway, page) if module.is_invoice else None
+        entries = invoice_page.entries if invoice_page else finance_entries(gateway, module.key)
     return templates.TemplateResponse(
         request,
         "finance_documents.html",
         {
             "module": module,
-            "entries": invoice_page.entries if invoice_page else finance_entries(_finance_gateway(request, db), module.key),
+            "entries": entries,
             "invoice_page": invoice_page,
             "invoice_page_links": range(max(1, invoice_page.page - 2), min(invoice_page.page_count, invoice_page.page + 2) + 1) if invoice_page else (),
+            "finance_search_query": search_query,
+            "finance_search_query_string": urlencode({"q": search_query}) if search_query else "",
             "created": created,
             "deleted": deleted,
             "csrf_token": get_csrf_token(request),
