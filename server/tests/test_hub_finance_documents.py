@@ -184,7 +184,12 @@ def _document_values(*, module: str, article_id: int) -> dict[str, str]:
             "document_field__contract_duration_years": "1,50",
         })
     elif module == "invoices":
-        values.update({"document_field__invoice_date": "2026-09-11", "document_field__due_date": "2026-09-25"})
+        values.update({
+            "document_field__invoice_date": "2026-09-11",
+            "document_field__due_date": "2026-09-25",
+            "document_field__service_is_one_time": "true",
+            "document_field__service_date": "2026-09-11",
+        })
     else:
         values.update({
             "document_field__name": "Homepage-Betreuung",
@@ -674,6 +679,47 @@ def test_invoice_manual_due_date_on_create_clears_payment_goal():
         values = _documents(db)._submitted_fields(module=INVOICE_MODULE, submitted_values=submitted)
         assert values["due_date"] == "2026-09-30"
         assert values["payment_terms"] == ""
+
+
+def test_invoice_service_fields_validate_single_date_and_period_without_touching_legacy_invoices():
+    with Session(create_engine("sqlite://")) as db:
+        service = _documents(db)
+        submitted = _document_values(module="invoices", article_id=1)
+        submitted["document_field__service_date"] = ""
+        with pytest.raises(HubFinanceDocumentError, match="Leistungsdatum ist erforderlich"):
+            service._submitted_fields(module=INVOICE_MODULE, submitted_values=submitted)
+
+        submitted.update({
+            "document_field__service_is_one_time": "false",
+            "document_field__service_period_start": "2026-10-31",
+            "document_field__service_period_end": "2026-10-01",
+        })
+        with pytest.raises(HubFinanceDocumentError, match="Leistungsende darf nicht vor"):
+            service._submitted_fields(module=INVOICE_MODULE, submitted_values=submitted)
+
+        submitted["document_field__service_period_end"] = "2026-10-31"
+        values = service._submitted_fields(module=INVOICE_MODULE, submitted_values=submitted)
+        assert values["service_is_one_time"] == "false"
+        assert values["service_period_start"] == "2026-10-31"
+        assert values["service_period_end"] == "2026-10-31"
+
+        legacy_submitted = dict(submitted)
+        legacy_submitted.update({
+            "document_field__service_is_one_time": "false",
+            "document_field__service_date": "",
+            "document_field__service_period_start": "",
+            "document_field__service_period_end": "",
+        })
+        legacy_values = service._submitted_fields(
+            module=INVOICE_MODULE,
+            submitted_values=legacy_submitted,
+            existing_values={
+                "invoice_date": "2026-09-11",
+                "due_date": "2026-09-25",
+                "payment_terms": "14_days",
+            },
+        )
+        assert set(legacy_values).isdisjoint({"service_is_one_time", "service_date", "service_period_start", "service_period_end"})
 
 
 @pytest.mark.parametrize(

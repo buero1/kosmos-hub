@@ -118,6 +118,12 @@ DOCUMENT_FIELDS = (
     ("Status", "Status", "Entwurf"),
     ("Date", "Datum", "12.09.2026"),
     ("DueDate", "Fällig am", "26.09.2026"),
+    ("ServiceDate", "Leistungsdatum", "15.09.2026"),
+    ("ServicePeriodStart", "Leistungsbeginn", "01.09.2026"),
+    ("ServicePeriodEnd", "Leistungsende", "30.09.2026"),
+    ("ServicePeriod", "Leistungszeitraum", "01.09.2026 - 30.09.2026"),
+    ("ServiceLabel", "Bezeichnung der Leistung", "Leistungszeitraum"),
+    ("ServiceValue", "Leistungsdatum oder -zeitraum", "01.09.2026 - 30.09.2026"),
     ("SourceInvoiceNumber", "Rechnungsnummer", "RE-004035"),
     ("ValidUntil", "Gültig bis", "26.09.2026"),
     ("PaymentTerms", "Zahlungsziel", "14 Tage"),
@@ -128,7 +134,7 @@ DOCUMENT_FIELDS = (
 _DOCUMENT_VISIBLE_FIELDS = {
     "offers": {"Number", "Title", "Status", "Date", "ValidUntil", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
     "orders": {"Number", "Title", "Status", "Date", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
-    "invoices": {"Number", "Title", "Status", "Date", "DueDate", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
+    "invoices": {"Number", "Title", "Status", "Date", "DueDate", "ServiceDate", "ServicePeriodStart", "ServicePeriodEnd", "ServicePeriod", "ServiceLabel", "ServiceValue", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
     "dunnings": {"Number", "Title", "Status", "Date", "DueDate", "SourceInvoiceNumber", "NetTotal", "TaxTotal", "GrossTotal"},
 }
 _DOCUMENT_EMAIL_CONTEXTS = {
@@ -379,6 +385,9 @@ _DOCUMENT_FIELD_TOKENS = {
         "invoice_number": "Number",
         "invoice_date": "Date",
         "due_date": "DueDate",
+        "service_date": "ServiceDate",
+        "service_period_start": "ServicePeriodStart",
+        "service_period_end": "ServicePeriodEnd",
         "payment_terms": "PaymentTerms",
     },
     "dunnings": {

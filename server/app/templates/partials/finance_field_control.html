@@ -52,8 +52,8 @@
   </div>
   {% endif %}
   {% else %}
-  <label class="customer-field-control"{% if field.key == "contact" %} data-finance-contact-control{% if allow_leads and selected_lead_id %} hidden{% endif %}{% endif %}>
-    <span>{{ field.label }}{% if field.required %} <small>erforderlich</small>{% endif %}</span>
+  <label class="customer-field-control"{% if field.key == "contact" %} data-finance-contact-control{% if allow_leads and selected_lead_id %} hidden{% endif %}{% endif %}{% if field.key in ("service_is_one_time", "service_date", "service_period_start", "service_period_end") %} data-invoice-service-field="{{ field.key }}"{% endif %}>
+    <span>{{ field.label }}{% if field.required or field.key in ("service_date", "service_period_start", "service_period_end") %} <small{% if field.key in ("service_date", "service_period_start", "service_period_end") %} data-invoice-service-required{% endif %}>erforderlich</small>{% endif %}</span>
     {% if field.read_only %}
       <input type="text" value="{{ value or 'Wird automatisch vergeben' }}" readonly>
     {% elif field.key == "contact" %}
@@ -76,11 +76,11 @@
     {% elif field.display_type == "Dezimalzahl" %}
       <input type="number" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}" min="0" step="0.01" inputmode="decimal"{% if field.required %} required{% endif %}>
     {% elif field.display_type == "Datum" %}
-      <input type="date" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+      <input type="date" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}{% if field.key in ("service_date", "service_period_start", "service_period_end") %} data-invoice-service-input="{{ field.key }}"{% endif %}>
     {% elif field.display_type == "Mehrzeilen" %}
       <textarea name="{{ field_prefix }}_field__{{ field.key }}" rows="5">{{ value }}</textarea>
     {% elif field.display_type == "Boolesch" %}
-      <label class="lead-boolean-control"><input type="checkbox" name="{{ field_prefix }}_field__{{ field.key }}" value="true"{% if value in (true, "true", "True", "1") %} checked{% endif %}> Ja</label>
+      <label class="lead-boolean-control"><input type="checkbox" name="{{ field_prefix }}_field__{{ field.key }}" value="true"{% if value in (true, "true", "True", "1") %} checked{% endif %}{% if field.key == "service_is_one_time" %} data-invoice-service-mode{% endif %}> Ja</label>
     {% else %}
       <input type="text" name="{{ field_prefix }}_field__{{ field.key }}" value="{{ value }}"{% if field.required %} required{% endif %}>
     {% endif %}

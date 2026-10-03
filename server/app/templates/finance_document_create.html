@@ -8,7 +8,7 @@
     {% if source_invoice %}{% set back_href = "/finance/invoices/" ~ source_invoice.invoice_id %}{% set back_label = "Zurück zu Rechnung " ~ source_invoice.invoice_identifier %}{% elif selected_customer %}{% set back_href = "/customers/" ~ selected_customer.id %}{% set back_label = "Zurück zu " ~ selected_customer.name %}{% else %}{% set back_href = "/finance/" ~ module.key %}{% set back_label = "Zurück zu " ~ module.label %}{% endif %}
     {% call module_detail_header(back_href, back_label, "Finance", module.singular ~ " neu anlegen", has_actions=true) %}<a class="button button-secondary button-variant-1" href="{{ back_href }}">Abbrechen</a><button class="button button-variant-1" type="submit" form="finance-document-create-form">{{ module.singular }} anlegen</button>{% endcall %}
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
-    <form id="finance-document-create-form" method="post" action="/finance/{{ module.key }}" class="communication-form finance-offer-form" data-finance-document-form>
+    <form id="finance-document-create-form" method="post" action="/finance/{{ module.key }}" class="communication-form finance-offer-form" data-finance-document-form{% if module.is_invoice %} data-invoice-service-new{% endif %}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="customer-detail-layout">
         <div class="customer-detail-main-column">

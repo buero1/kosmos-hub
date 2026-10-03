@@ -1,4 +1,6 @@
 from decimal import Decimal
+from dataclasses import replace
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -46,3 +48,29 @@ def test_invoice_machine_readable_data_keeps_currency_code():
     data = HubFinancePdfService._zugferd_data(snapshot_for("invoices"))
     assert data["BT-5"] == "EUR"
     assert data["BT-110-1"] == "EUR"
+
+
+def test_invoice_machine_readable_service_dates_distinguish_single_date_period_and_legacy():
+    base = snapshot_for("invoices")
+    single = HubFinancePdfService._zugferd_data(replace(
+        base,
+        service_has_data=True,
+        service_is_one_time=True,
+        service_date="2026-09-15",
+    ))
+    assert single["BT-72"] == date(2026, 9, 15)
+    assert "BT-73" not in single and "BT-74" not in single
+
+    period = HubFinancePdfService._zugferd_data(replace(
+        base,
+        service_has_data=True,
+        service_period_start="2026-10-01",
+        service_period_end="2026-10-31",
+    ))
+    assert period["BT-73"] == date(2026, 10, 1)
+    assert period["BT-74"] == date(2026, 10, 31)
+    assert period["BT-72"] == date(2026, 10, 31)
+
+    legacy = HubFinancePdfService._zugferd_data(base)
+    assert legacy["BT-72"] == date(2026, 9, 20)
+    assert "BT-73" not in legacy and "BT-74" not in legacy

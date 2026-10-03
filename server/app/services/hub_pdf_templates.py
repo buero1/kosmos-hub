@@ -554,11 +554,17 @@ class HubPdfTemplateService:
     def _default_content(cls, document_type: str) -> dict[str, object]:
         definition = cls._type(document_type)
         specialized = _DEFAULT_CONTENT_BY_TYPE[definition.key]
+        metadata = f"<p><strong>Datum:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Date}}<br><strong>Nummer:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Number}}</p>"
+        if document_type == "invoices":
+            metadata = metadata.replace(
+                "</p>",
+                "<br><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}</p>",
+            )
         defaults = {
             "sender": "<p><strong>${Company.Name}</strong><br>${Company.Street}<br>${Company.PostalCode} ${Company.City}</p>",
             "title": specialized["title"],
             "recipient": "<p><strong>${Customer.Name}</strong><br>${Contact.Name}<br>${Customer.BillingStreet}<br>${Customer.BillingPostalCode} ${Customer.BillingCity}</p>",
-            "metadata": f"<p><strong>Datum:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Date}}<br><strong>Nummer:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Number}}</p>",
+            "metadata": metadata,
             "intro": specialized["intro"],
             "payment": specialized["payment"],
             "footer": (

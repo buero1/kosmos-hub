@@ -105,6 +105,11 @@ class FinancePdfSnapshot:
     contact_fields: dict[str, str] = field(default_factory=dict)
     notes_html: str = ""
     document_fields: dict[str, str] = field(default_factory=dict)
+    service_is_one_time: bool = False
+    service_date: str = ""
+    service_period_start: str = ""
+    service_period_end: str = ""
+    service_has_data: bool = False
 
 
 class HubFinancePdfService:
@@ -415,6 +420,14 @@ class HubFinancePdfService:
             contact_fields=contact_fields,
             notes_html=detail.notes_html if document_type == "offers" else "",
             document_fields={key: self._field_display_value(fields, key) for key in fields} if document_type == "orders" else {},
+            service_is_one_time=self._truthy(self._field_form_value(fields, "service_is_one_time")),
+            service_date=self._field_form_value(fields, "service_date"),
+            service_period_start=self._field_form_value(fields, "service_period_start"),
+            service_period_end=self._field_form_value(fields, "service_period_end"),
+            service_has_data=document_type == "invoices" and (
+                self._field_form_value(fields, "service_is_one_time") in {"true", "false"}
+                or any(self._field_form_value(fields, key) for key in ("service_date", "service_period_start", "service_period_end"))
+            ),
         )
 
     def _render_html(
@@ -483,6 +496,12 @@ class HubFinancePdfService:
             f"${{{namespace}.NetTotal}}": self._money(snapshot.totals.subtotal_net, snapshot.currency),
             f"${{{namespace}.TaxTotal}}": self._money(snapshot.totals.tax_total, snapshot.currency),
             f"${{{namespace}.GrossTotal}}": self._money(snapshot.totals.total_gross, snapshot.currency),
+            f"${{{namespace}.ServiceDate}}": self._display_date(snapshot.service_date),
+            f"${{{namespace}.ServicePeriodStart}}": self._display_date(snapshot.service_period_start),
+            f"${{{namespace}.ServicePeriodEnd}}": self._display_date(snapshot.service_period_end),
+            f"${{{namespace}.ServicePeriod}}": self._service_period(snapshot),
+            f"${{{namespace}.ServiceLabel}}": self._service_label(snapshot),
+            f"${{{namespace}.ServiceValue}}": self._service_value(snapshot),
         })
         for placeholder in pdf_document_placeholders(snapshot.document_type):
             if placeholder.profile_key:
@@ -505,6 +524,8 @@ class HubFinancePdfService:
                 rendered_blocks[str(key)] = ""
                 continue
             rendered = str(raw.get("content_html", ""))
+            if key == "metadata" and snapshot.document_type == "invoices":
+                rendered = self._invoice_service_metadata(rendered, snapshot)
             rendered_blocks[str(key)] = _PLACEHOLDER_PATTERN.sub(
                 lambda match: notes_html if match.group(0) == OFFER_NOTES_TOKEN else escape(replacements.get(match.group(0), "") or ""),
                 rendered,
@@ -634,7 +655,6 @@ class HubFinancePdfService:
             "BT-52": snapshot.billing_city or None,
             "BT-53": snapshot.billing_postal_code or None,
             "BT-55": snapshot.billing_country_code or "DE",
-            "BT-72": invoice_date,
             "BT-106": sum((line.amount_net for line in snapshot.lines), Decimal("0")).quantize(_CENT, rounding=ROUND_HALF_UP),
             "BT-109": (snapshot.totals.subtotal_net - snapshot.totals.discount_total).quantize(_CENT, rounding=ROUND_HALF_UP),
             "BT-110": snapshot.totals.tax_total.quantize(_CENT, rounding=ROUND_HALF_UP),
@@ -646,9 +666,61 @@ class HubFinancePdfService:
         }
         if due_date:
             data["BT-9"] = due_date
+        if snapshot.service_has_data:
+            if snapshot.service_is_one_time:
+                data["BT-72"] = HubFinancePdfService._required_date(snapshot.service_date, "Leistungsdatum")
+            else:
+                data["BT-73"] = HubFinancePdfService._required_date(snapshot.service_period_start, "Leistungsbeginn")
+                data["BT-74"] = HubFinancePdfService._required_date(snapshot.service_period_end, "Leistungsende")
+                # The CII syntax used by ZUGFeRD requires a populated delivery
+                # element. For a service period, its end is the actual delivery
+                # date while BT-73/BT-74 retain the complete billing period.
+                data["BT-72"] = data["BT-74"]
+        else:
+            # Legacy invoices and invoices generated from the not-yet-migrated
+            # recurring workflow retain their former machine-readable value.
+            data["BT-72"] = invoice_date
         if snapshot.payment_terms:
             data["BT-20"] = snapshot.payment_terms
         return {key: value for key, value in data.items() if value is not None}
+
+    @staticmethod
+    def _service_label(snapshot: FinancePdfSnapshot) -> str:
+        return "Leistungsdatum" if snapshot.service_is_one_time else "Leistungszeitraum"
+
+    @classmethod
+    def _service_period(cls, snapshot: FinancePdfSnapshot) -> str:
+        start = cls._display_date(snapshot.service_period_start)
+        end = cls._display_date(snapshot.service_period_end)
+        return f"{start} - {end}" if start and end else start or end
+
+    @classmethod
+    def _service_value(cls, snapshot: FinancePdfSnapshot) -> str:
+        return cls._display_date(snapshot.service_date) if snapshot.service_is_one_time else cls._service_period(snapshot)
+
+    @staticmethod
+    def _invoice_service_metadata(content_html: str, snapshot: FinancePdfSnapshot) -> str:
+        if not snapshot.service_has_data:
+            return content_html.replace(
+                "<br><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}",
+                "",
+            )
+        if "${Invoice.ServiceValue}" in content_html:
+            return content_html
+        service_line = "<p><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}</p>"
+        if "Abbuchungsdatum" not in content_html:
+            return content_html + service_line
+        updated = content_html.replace("Abbuchungsdatum", "${Invoice.ServiceLabel}", 1)
+        label_position = updated.find("${Invoice.ServiceLabel}")
+        for token in ("${Invoice.DueDate}", "${dueDate}"):
+            value_position = updated.find(token, label_position)
+            if value_position != -1 and value_position - label_position <= 500:
+                return updated[:value_position] + "${Invoice.ServiceValue}" + updated[value_position + len(token):]
+        return updated + service_line
+
+    @staticmethod
+    def _truthy(value: object) -> bool:
+        return str(value or "").strip().casefold() in {"1", "true", "yes", "ja", "on"}
 
     def _customer_address(self, detail: CustomerDirectoryDetail | None) -> tuple[str, str, str, str]:
         if detail is None:

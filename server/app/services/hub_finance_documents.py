@@ -54,6 +54,12 @@ DUNNING_FIELDS_LAYOUT_KEY = "finance-dunning-fields"
 RECURRING_INVOICE_FIELDS_LAYOUT_KEY = "finance-recurring-invoice-fields"
 _CENT = Decimal("0.01")
 _QUANTITY_STEP = Decimal("0.01")
+_INVOICE_SERVICE_KEYS = (
+    "service_is_one_time",
+    "service_date",
+    "service_period_start",
+    "service_period_end",
+)
 
 
 class HubFinanceDocumentError(ValueError):
@@ -218,6 +224,8 @@ class FinanceDocumentDetail:
     invoice_pdf: "FinanceInvoicePdfView | None" = None
     order_pdf: "FinanceOrderPdfView | None" = None
     email_delivery: InvoiceEmailDelivery | None = None
+    invoice_has_service_data: bool = False
+    invoice_service_is_one_time: bool = False
 
 
 @dataclass(frozen=True)
@@ -384,6 +392,8 @@ class HubFinanceDocumentService:
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
             email_delivery=invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None,
+            invoice_has_service_data=module.is_invoice and any(key in values for key in _INVOICE_SERVICE_KEYS),
+            invoice_service_is_one_time=module.is_invoice and self._truthy(values.get("service_is_one_time")),
         )
 
     @staticmethod
@@ -402,6 +412,7 @@ class HubFinanceDocumentService:
         elif module is INVOICE_MODULE:
             values["document_field__invoice_date"] = today
             values["document_field__due_date"] = today
+            values["document_field__service_is_one_time"] = "false"
         elif module is DUNNING_MODULE:
             values["document_field__status"] = "payment_reminder"
             values["document_field__dunning_date"] = today
@@ -701,7 +712,9 @@ class HubFinanceDocumentService:
             elif definition.display_type == "Dezimalzahl":
                 value = HubFinanceService.format_quantity(self._money(raw_value)) if raw_value else ""
             elif definition.display_type == "Boolesch":
-                value = "Ja" if self._truthy(raw_value) else "Nein"
+                value = "" if module is INVOICE_MODULE and key == "service_is_one_time" and not raw_value else (
+                    "Ja" if self._truthy(raw_value) else "Nein"
+                )
             result.append(FinanceDocumentFieldValue(
                 key=definition.key,
                 label=definition.label,
@@ -722,6 +735,15 @@ class HubFinanceDocumentService:
         existing_values: dict[str, str] | None = None,
     ) -> dict[str, str]:
         values: dict[str, str] = {}
+        invoice_service_submitted = module is INVOICE_MODULE and any(
+            f"document_field__{key}" in submitted_values
+            for key in _INVOICE_SERVICE_KEYS
+        )
+        legacy_invoice = (
+            module is INVOICE_MODULE
+            and existing_values is not None
+            and not any(key in existing_values for key in _INVOICE_SERVICE_KEYS)
+        )
         for definition in module.fields:
             if definition.read_only or definition.key in {"customer", "contact", module.link_key} or (module.is_recurring and definition.key in {"custom_interval", "payment_due"}):
                 continue
@@ -749,6 +771,26 @@ class HubFinanceDocumentService:
             self._validate_option(definition, raw)
             values[definition.key] = raw
         if module is INVOICE_MODULE:
+            service_has_input = self._truthy(values.get("service_is_one_time")) or any(
+                values.get(key) for key in ("service_date", "service_period_start", "service_period_end")
+            )
+            validate_service = invoice_service_submitted and (existing_values is None or not legacy_invoice or service_has_input)
+            if validate_service:
+                if self._truthy(values.get("service_is_one_time")):
+                    if not values.get("service_date"):
+                        raise HubFinanceDocumentError("Leistungsdatum ist erforderlich.")
+                else:
+                    if not values.get("service_period_start"):
+                        raise HubFinanceDocumentError("Leistungsbeginn ist erforderlich.")
+                    if not values.get("service_period_end"):
+                        raise HubFinanceDocumentError("Leistungsende ist erforderlich.")
+                    if values["service_period_end"] < values["service_period_start"]:
+                        raise HubFinanceDocumentError("Leistungsende darf nicht vor dem Leistungsbeginn liegen.")
+            elif legacy_invoice:
+                # Existing invoices without service data remain untouched until a user
+                # intentionally supplies the new fields.
+                for key in _INVOICE_SERVICE_KEYS:
+                    values.pop(key, None)
             terms = values.get("payment_terms", "")
             if terms:
                 expected_due_date = self._invoice_due_date(values["invoice_date"], terms)

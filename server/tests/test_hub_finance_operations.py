@@ -63,6 +63,12 @@ def values(env, kind):
             if field.required and field.options and field.key != "status":
                 data[f"document_field__{field.key}"] = field.options[0][0]
         data["document_field__order_name"] = "Website order"
+    if kind == "invoices":
+        data.update({
+            "document_field__service_is_one_time": "false",
+            "document_field__service_period_start": "2026-10-01",
+            "document_field__service_period_end": "2026-10-31",
+        })
     if kind == "dunnings":
         invoice = env.service.execute("finance.invoices.create", values(env, "invoices"))
         data["linked_record_id"] = str(invoice.record_id)

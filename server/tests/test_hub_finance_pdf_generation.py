@@ -35,6 +35,9 @@ def _invoice_values() -> dict[str, str]:
         "document_field__due_date": "2026-09-26",
         "document_field__currency": "EUR",
         "document_field__payment_terms": "14_days",
+        "document_field__service_is_one_time": "false",
+        "document_field__service_period_start": "2026-10-01",
+        "document_field__service_period_end": "2026-10-31",
         "document_line__0__name": "Website-Paket",
         "document_line__0__sku": "WEB-1",
         "document_line__0__description": "Konzeption und Umsetzung",
@@ -171,6 +174,8 @@ def test_invoice_generation_uses_default_revision_and_embeds_xsd_valid_zugferd(m
         _, embedded_xml = get_facturx_xml_from_pdf(stored["generated"])
         assert document.invoice_number.encode() in embedded_xml
         assert b"Website-Paket" in embedded_xml
+        assert b"20261001" in embedded_xml
+        assert b"20261031" in embedded_xml
 
 
 def test_generated_pdf_html_replaces_document_values_without_preview_samples():
@@ -218,6 +223,10 @@ def test_generated_pdf_html_replaces_document_values_without_preview_samples():
         content["blocks"]["intro"]["content_html"] = (
             "<p>${Contact.Greeting}, ${Contact.FirstName}. ${Customer.Website} ${Invoice.DueDate}</p>"
         )
+        content["blocks"]["metadata"]["content_html"] = (
+            "<p><strong>Rechnungsdatum:</strong> ${Invoice.Date}<br>"
+            "<strong>Abbuchungsdatum:</strong> ${Invoice.DueDate}</p>"
+        )
         html = service._render_html(snapshot=snapshot, content=content)
 
         assert "Echter Kunde GmbH" in html
@@ -227,10 +236,11 @@ def test_generated_pdf_html_replaces_document_values_without_preview_samples():
         assert "Sehr geehrte Frau Kontakt" in html
         assert "https://kunde.example" in html
         assert "26.09.2026" in html
+        assert "Leistungszeitraum" in html
+        assert "01.10.2026 - 31.10.2026" in html
+        assert "Abbuchungsdatum" not in html
         assert "Allgemeine Geschäftsbedingungen" not in html
         assert "${" not in html
-
-
 def test_dunning_generation_uses_its_template_and_references_the_source_invoice(monkeypatch):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

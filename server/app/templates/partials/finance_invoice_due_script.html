@@ -23,6 +23,34 @@
         var expected = expectedDueDate();
         if (expected !== null && dueDate.value !== expected) terms.value = '';
       });
+
+      var oneTime = form.querySelector('[data-invoice-service-mode]');
+      var serviceDate = form.querySelector('[data-invoice-service-input="service_date"]');
+      var periodStart = form.querySelector('[data-invoice-service-input="service_period_start"]');
+      var periodEnd = form.querySelector('[data-invoice-service-input="service_period_end"]');
+      if (!oneTime || !serviceDate || !periodStart || !periodEnd) return;
+      var serviceInputs = [serviceDate, periodStart, periodEnd];
+      var requiresService = form.hasAttribute('data-invoice-service-new') || oneTime.checked || serviceInputs.some(function (input) {
+        return Boolean(input.value);
+      });
+      function setServiceControl(input, visible) {
+        var control = input.closest('[data-invoice-service-field]');
+        if (control) control.hidden = !visible;
+        input.disabled = !visible;
+        input.required = visible && requiresService;
+      }
+      function updateServiceFields(forceRequired) {
+        if (forceRequired) requiresService = true;
+        if (oneTime.checked && !serviceDate.value && invoiceDate.value) serviceDate.value = invoiceDate.value;
+        setServiceControl(serviceDate, oneTime.checked);
+        setServiceControl(periodStart, !oneTime.checked);
+        setServiceControl(periodEnd, !oneTime.checked);
+      }
+      oneTime.addEventListener('change', function () { updateServiceFields(true); });
+      serviceInputs.forEach(function (input) {
+        input.addEventListener('input', function () { updateServiceFields(true); });
+      });
+      updateServiceFields(false);
     });
   }());
 </script>

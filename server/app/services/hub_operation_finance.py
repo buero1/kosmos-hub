@@ -64,7 +64,19 @@ def mutate(service, values, *, kind, action):
 
 
 def record_result(service, kind, record):
-    token = HubFinancePdfService(db=service.db, cipher=service.cipher).queue(document_type=kind, document_id=record.id) if kind in PDF_KINDS else ""
+    should_generate_pdf = kind in PDF_KINDS
+    if kind == "invoices":
+        invoice_values = HubFinanceDocumentService(db=service.db, cipher=service.cipher)._document_values(
+            module=FINANCE_DOCUMENT_MODULES[kind],
+            document=record,
+        )
+        should_generate_pdf = any(key in invoice_values for key in (
+            "service_is_one_time", "service_date", "service_period_start", "service_period_end",
+        ))
+    token = (
+        HubFinancePdfService(db=service.db, cipher=service.cipher).queue(document_type=kind, document_id=record.id)
+        if should_generate_pdf else ""
+    )
     outputs = {"customer_id": str(getattr(record, "customer_id", None) or ""), "lead_id": str(getattr(record, "lead_id", None) or "")}
     if kind in PDF_KINDS:
         email, name = _offer_recipient(service, record)
@@ -137,6 +149,11 @@ def input_guide(kind, action):
     )
     if kind == "offers":
         guide += "Genau ein Kunde oder Lead; bei Lead muss contact_id leer sein. Beim Wechsel der Zuordnung alte Gegenverknuepfung explizit leeren. "
+    if kind == "invoices":
+        guide += (
+            "Leistungsangaben: Bei document_field__service_is_one_time=true ist document_field__service_date erforderlich. "
+            "Andernfalls sind document_field__service_period_start und document_field__service_period_end erforderlich. "
+        )
     if kind == "recurring-invoices":
         guide += "custom_interval_count/unit nur bei interval_unit=custom erforderlich; payment_due_count/unit optional zusammen. Aktiv setzt den periodischen Rechnungsplan aktiv; keine E-Mail wird dadurch versendet. Pausiert/Beendet leert next_invoice_date und stoppt die Erstellung. Beim erneuten Aktivieren muss next_invoice_date explizit gesetzt werden."
     return guide
