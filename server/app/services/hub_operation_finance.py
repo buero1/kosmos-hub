@@ -17,8 +17,9 @@ from app.services.hub_finance_documents import (
 )
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS
 from app.services.hub_finance_operations_shared import (
-    ALL_PDF_KINDS, FINANCE_KINDS, PDF_KINDS, fields_for, finance_detail, finance_entries,
-    finance_options, form_defaults, merge_form, prefix_for, require_record, stored_values,
+    ALL_PDF_KINDS, FINANCE_KINDS, PDF_KINDS, fields_for, finance_detail,
+    finance_document_search_page, finance_entries, finance_options, form_defaults, merge_form,
+    prefix_for, require_record, stored_values,
 )
 from app.services.hub_finance_pdf_generation import HubFinancePdfService
 from app.services.hub_finance_pdf_readers import load_pdf
@@ -181,6 +182,29 @@ def _offset(values, key="offset"):
 
 def read_list(service, values):
     kind = values["kind"]
+    query = values.get("query", "")
+    offset = _offset(values)
+    if query and kind in ALL_FINANCE_DOCUMENT_MODULES and not values.get("customer_id") and not values.get("lead_id"):
+        page = finance_document_search_page(service, kind, query, offset=offset)
+        items = []
+        for entry in page.entries:
+            record = entry.document
+            items.append({
+                "record_id": str(record.id),
+                "title": entry.identifier,
+                "status": entry.status,
+                "href": f"/finance/{kind}/{record.id}",
+                "party": entry.customer_name,
+                "total_gross": entry.total_gross,
+                "date": entry.document_date,
+                "customer_id": str(record.customer_id or ""),
+                "lead_id": str(getattr(record, "lead_id", None) or ""),
+            })
+        return {
+            "items": items,
+            "total": page.total_count,
+            "next_offset": str(offset + 25) if page.total_count > offset + 25 else "",
+        }
     entries = finance_entries(service, kind)
     items = []
     for entry in entries:
@@ -200,10 +224,9 @@ def read_list(service, values):
             continue
         if values.get("lead_id") and item.get("lead_id") != values["lead_id"]:
             continue
-        if values.get("query", "").casefold() not in " ".join(str(value) for value in item.values()).casefold():
+        if query.casefold() not in " ".join(str(value) for value in item.values()).casefold():
             continue
         items.append(item)
-    offset = _offset(values)
     return {"items": items[offset:offset + 25], "total": len(items), "next_offset": str(offset + 25) if len(items) > offset + 25 else ""}
 
 

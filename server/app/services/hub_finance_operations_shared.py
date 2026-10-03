@@ -98,6 +98,19 @@ def finance_invoice_page(service, page):
     )
 
 
+def finance_document_search_page(service, kind, query, *, offset=0, page_size=25):
+    user, access = require_actor(service, "finance", "view")
+    allowed = access.accessible_record_ids(user=user, module_key="customers")
+    return HubFinanceDocumentService(db=service.db, cipher=service.cipher).search_documents(
+        module=ALL_FINANCE_DOCUMENT_MODULES[kind],
+        query=query,
+        offset=offset,
+        page_size=page_size,
+        allowed_customer_ids=allowed,
+        include_orphans=user.role == "admin",
+    )
+
+
 def finance_options(service, kind, *, record_id=None):
     model_for(kind)
     user, access = require_actor(service, "finance", "view")

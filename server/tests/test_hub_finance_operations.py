@@ -171,6 +171,7 @@ def test_scope_denies_read_mutate_pdf_and_list(env, kind):
     result = env.service.execute(f"finance.{kind}.create", values(env, kind))
     limited = HubOperationService(db=env.db, cipher=env.cipher, actor="sales")
     assert limited.query("finance.list", {"kind": kind})["items"] == []
+    assert limited.query("finance.list", {"kind": kind, "query": "Finance test"})["items"] == []
     for action in ("read", "update", "delete"):
         with pytest.raises(HubOperationError):
             if action == "read":
@@ -323,6 +324,31 @@ def test_finance_directory_suggestions_reject_unknown_module_and_short_query(env
             q="Website",
         )
     assert error.value.status_code == 404
+
+
+def test_invoice_directory_search_does_not_load_the_complete_document_list(env):
+    invoice = env.service.execute("finance.invoices.create", values(env, "invoices"))
+
+    def fail_full_listing(*args, **kwargs):
+        raise AssertionError("directory search must not load every document and line")
+
+    env.monkeypatch.setattr(
+        "app.services.hub_finance_documents.HubFinanceDocumentService.list_documents",
+        fail_full_listing,
+    )
+    result = env.service.query("finance.list", {"kind": "invoices", "query": "Finance test"})
+
+    assert result["total"] == 1
+    assert result["items"][0]["record_id"] == str(invoice.record_id)
+
+
+def test_invoice_directory_search_falls_back_to_encrypted_header_fields(env):
+    invoice = env.service.execute("finance.invoices.create", values(env, "invoices"))
+
+    result = env.service.query("finance.list", {"kind": "invoices", "query": "Entwurf"})
+
+    assert result["total"] == 1
+    assert result["items"][0]["record_id"] == str(invoice.record_id)
 
 
 def test_readonly_and_unknown_fields_fail_and_no_auto_email_operation(env):

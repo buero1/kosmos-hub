@@ -10,6 +10,7 @@
 
     let requestTimer;
     let pendingRequest;
+    const cache = new Map();
 
     const closeResults = () => {
       results.replaceChildren();
@@ -58,27 +59,39 @@
     const loadResults = () => {
       const query = input.value.trim();
       window.clearTimeout(requestTimer);
+      pendingRequest?.abort();
+      pendingRequest = null;
       if (query.length < 2) {
-        pendingRequest?.abort();
         closeResults();
         return;
       }
+      const cacheKey = query.toLocaleLowerCase("de-DE");
+      if (cache.has(cacheKey)) {
+        showResults(cache.get(cacheKey));
+        return;
+      }
+      closeResults();
       requestTimer = window.setTimeout(async () => {
-        pendingRequest?.abort();
-        pendingRequest = new AbortController();
+        const controller = new AbortController();
+        pendingRequest = controller;
         const parameters = new URLSearchParams({ module_key: moduleKey, q: query });
         try {
           const response = await fetch(`/finance/suggestions?${parameters}`, {
             credentials: "same-origin",
-            signal: pendingRequest.signal,
+            signal: controller.signal,
           });
           if (!response.ok || input.value.trim() !== query) return;
           const payload = await response.json();
-          showResults(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+          const items = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+          if (cache.size >= 30) cache.delete(cache.keys().next().value);
+          cache.set(cacheKey, items);
+          showResults(items);
         } catch (error) {
           if (error.name !== "AbortError") closeResults();
+        } finally {
+          if (pendingRequest === controller) pendingRequest = null;
         }
-      }, 220);
+      }, 100);
     };
 
     input.addEventListener("input", loadResults);

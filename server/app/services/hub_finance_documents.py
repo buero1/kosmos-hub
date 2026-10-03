@@ -10,7 +10,7 @@ import json
 import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.security import SecretCipher
@@ -328,6 +328,12 @@ class FinanceDocumentPage:
 
 
 @dataclass(frozen=True)
+class FinanceDocumentSearchPage:
+    entries: tuple[FinanceDocumentEntry, ...]
+    total_count: int
+
+
+@dataclass(frozen=True)
 class FinanceDocumentDetail:
     document: Any
     module: FinanceDocumentModule
@@ -380,6 +386,101 @@ class HubFinanceDocumentService:
         ).all()
         return self._sorted_document_entries(module=module, documents=documents)
 
+    def search_documents(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        query: str,
+        offset: int = 0,
+        page_size: int = 25,
+        allowed_customer_ids: set[int] | None = None,
+        include_orphans: bool = True,
+    ) -> FinanceDocumentSearchPage:
+        """Search document headers first and hydrate positions only for the result page."""
+        needle = query.strip().casefold()
+        if not needle or page_size < 1:
+            return FinanceDocumentSearchPage(entries=(), total_count=0)
+
+        model = module.model
+        access_filters = []
+        if allowed_customer_ids is not None:
+            access_filters.append(model.customer_id.in_(allowed_customer_ids))
+        elif not include_orphans:
+            access_filters.append(model.customer_id.is_not(None))
+
+        pattern = f"%{self._like_fragment(query.strip())}%"
+        fast_conditions = [Customer.name.ilike(pattern, escape="\\")]
+        if module.number_attribute:
+            fast_conditions.append(getattr(model, module.number_attribute).ilike(pattern, escape="\\"))
+        fast_filter = or_(*fast_conditions)
+        fast_count = self.db.scalar(
+            select(func.count(model.id))
+            .outerjoin(Customer, model.customer_id == Customer.id)
+            .where(*access_filters, fast_filter)
+        ) or 0
+        if fast_count:
+            documents = self.db.scalars(
+                select(model)
+                .outerjoin(Customer, model.customer_id == Customer.id)
+                .options(selectinload(model.customer), selectinload(model.lines))
+                .where(*access_filters, fast_filter)
+                .order_by(model.created_at.desc(), model.id.desc())
+                .offset(offset)
+                .limit(page_size)
+            ).all()
+            return FinanceDocumentSearchPage(
+                entries=self._document_entries(module=module, documents=documents),
+                total_count=fast_count,
+            )
+
+        # Status, date and recurring-invoice names are encrypted. Scanning only the
+        # document headers remains inexpensive and avoids loading every line item.
+        documents = self.db.scalars(
+            select(model)
+            .options(selectinload(model.customer))
+            .where(*access_filters)
+        ).all()
+        matches: list[tuple[tuple[str, str, int], Any]] = []
+        status_field = self._field(module.fields, "status")
+        for document in documents:
+            values = self._document_values(module=module, document=document)
+            identifier = self.identifier(module=module, document=document, values=values)
+            status = self._display_option(status_field, values.get("status"))
+            document_date = self._display_date(self._text(values.get(module.date_key)))
+            customer_name = document.customer.name if document.customer else ""
+            searchable = " ".join((
+                identifier,
+                status,
+                self._text(values.get("status")),
+                customer_name,
+                document_date,
+                self._text(values.get(module.date_key)),
+                str(document.id),
+                str(document.customer_id or ""),
+            )).casefold()
+            if needle not in searchable:
+                continue
+            matches.append(((
+                self._text(values.get(module.date_key)),
+                document.created_at.isoformat() if document.created_at else "",
+                document.id,
+            ), document))
+        matches.sort(key=lambda item: item[0], reverse=True)
+        page_documents = [document for _, document in matches[offset:offset + page_size]]
+        if page_documents:
+            page_ids = [document.id for document in page_documents]
+            hydrated = self.db.scalars(
+                select(model)
+                .options(selectinload(model.customer), selectinload(model.lines))
+                .where(model.id.in_(page_ids))
+            ).all()
+            by_id = {document.id: document for document in hydrated}
+            page_documents = [by_id[document_id] for document_id in page_ids]
+        return FinanceDocumentSearchPage(
+            entries=self._document_entries(module=module, documents=page_documents),
+            total_count=len(matches),
+        )
+
     def list_customer_documents(
         self,
         *,
@@ -410,6 +511,18 @@ class HubFinanceDocumentService:
             ),
             reverse=True,
         ))
+
+    def _document_entries(
+        self,
+        *,
+        module: FinanceDocumentModule,
+        documents: list[Any],
+    ) -> tuple[FinanceDocumentEntry, ...]:
+        deliveries = invoice_email_deliveries(self.db, [doc.id for doc in documents]) if module.is_invoice else {}
+        return tuple(
+            self._entry(module=module, document=document, email_delivery=deliveries.get(document.id))
+            for document in documents
+        )
 
     def list_invoice_page(self, *, page: int, page_size: int = 100, allowed_customer_ids: set[int] | None = None, include_orphans: bool = True) -> FinanceDocumentPage:
         if page_size < 1:
@@ -1463,6 +1576,10 @@ class HubFinanceDocumentService:
     @staticmethod
     def _text(value: object) -> str:
         return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _like_fragment(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     @staticmethod
     def _field(fields: tuple[HubFinanceField, ...], key: str) -> HubFinanceField:
