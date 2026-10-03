@@ -16,7 +16,11 @@ from app.core.security import SecretCipher, get_secret_cipher
 from app.db.session import SessionLocal
 from app.models.hub_finance_documents import HubFinanceInvoice, HubFinanceRecurringInvoice
 from app.services.audit import write_audit_log
-from app.services.hub_finance_documents import HubFinanceDocumentService, INVOICE_MODULE
+from app.services.hub_finance_documents import (
+    HubFinanceDocumentService,
+    INVOICE_MODULE,
+    recurring_service_period_end,
+)
 from app.services.hub_finance_pdf_generation import HubFinancePdfService
 
 
@@ -186,6 +190,7 @@ class HubRecurringInvoiceGenerationService:
         if scheduled_on < start_date:
             raise ValueError("Der nächste Rechnungstermin liegt vor dem Startdatum.")
         next_on = next_recurring_date(scheduled_on, values)
+        has_service_period = all(values.get(key) for key in ("service_period_start", "service_period_end"))
         existing = self.db.scalar(select(HubFinanceInvoice).where(
             HubFinanceInvoice.recurring_invoice_id == recurring.id,
             HubFinanceInvoice.recurring_scheduled_on == scheduled_on,
@@ -202,6 +207,12 @@ class HubRecurringInvoiceGenerationService:
                 "document_field__currency": values.get("currency") or "EUR",
                 "document_field__payment_terms": terms,
             }
+            if has_service_period:
+                submitted.update({
+                    "document_field__service_is_one_time": "false",
+                    "document_field__service_period_start": values["service_period_start"],
+                    "document_field__service_period_end": values["service_period_end"],
+                })
             for index, line in enumerate(recurring.lines):
                 line_values = self._values(line.encrypted_fields_json)
                 submitted[f"document_line__{index}__article_id"] = str(line.article_id or "")
@@ -231,6 +242,13 @@ class HubRecurringInvoiceGenerationService:
             invoice_id = invoice.id
         else:
             invoice_id = existing.id
+        if has_service_period and self._service_period_needs_advance(
+            recurring_values=values,
+            invoice=invoice if was_created else existing,
+        ):
+            service_start = date.fromisoformat(values["service_period_end"]) + timedelta(days=1)
+            values["service_period_start"] = service_start.isoformat()
+            values["service_period_end"] = recurring_service_period_end(service_start, values).isoformat()
         recurring.hub_next_run_on = next_on
         values["next_invoice_date"] = next_on.isoformat()
         if end_date is not None and next_on > end_date:
@@ -240,6 +258,18 @@ class HubRecurringInvoiceGenerationService:
         recurring.encrypted_fields_json = self._encrypt(values)
         self.db.commit()
         return invoice_id, was_created
+
+    def _service_period_needs_advance(
+        self,
+        *,
+        recurring_values: dict[str, str],
+        invoice: HubFinanceInvoice,
+    ) -> bool:
+        invoice_values = self._values(invoice.encrypted_fields_json)
+        return all(
+            invoice_values.get(key) == recurring_values.get(key)
+            for key in ("service_period_start", "service_period_end")
+        )
 
     def _values(self, encrypted: str) -> dict[str, str]:
         values = json.loads(self.cipher.decrypt(encrypted))

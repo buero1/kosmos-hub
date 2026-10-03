@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -20,6 +21,8 @@ from app.services.hub_finance_documents import (
     RECURRING_INVOICE_MODULE,
     HubFinanceDocumentError,
     HubFinanceDocumentService,
+    recurring_service_period_end,
+    recurring_service_period_start,
 )
 from app.services.hub_pdf_templates import HubPdfTemplateService
 from app.services.module_layouts import ModuleLayoutService
@@ -31,6 +34,51 @@ def _documents(db: Session) -> HubFinanceDocumentService:
 
 def _finance(db: Session) -> HubFinanceService:
     return HubFinanceService(db=db, cipher=SecretCipher("a" * 32))
+
+
+@pytest.mark.parametrize("invoice_day", (date(2026, 9, 24), date(2026, 9, 25)))
+def test_recurring_service_period_starts_on_first_of_following_month(invoice_day):
+    assert recurring_service_period_start(invoice_day) == date(2026, 10, 1)
+
+
+@pytest.mark.parametrize(
+    ("rhythm", "expected"),
+    (("month", date(2026, 10, 31)), ("quarter", date(2026, 12, 31)), ("year", date(2027, 9, 30))),
+)
+def test_recurring_service_period_end_follows_rhythm(rhythm, expected):
+    assert recurring_service_period_end(
+        date(2026, 10, 1), {"interval_unit": rhythm, "interval_count": "1"}
+    ) == expected
+
+
+def test_new_recurring_invoice_derives_service_period_but_keeps_manual_dates():
+    engine = create_engine("sqlite://")
+    with Session(engine) as db:
+        service = _documents(db)
+        submitted = {
+            "document_field__name": "Jahresbetreuung",
+            "document_field__status": "active",
+            "document_field__start_date": "2026-09-25",
+            "document_field__interval_unit": "year",
+            "document_field__next_invoice_date": "2026-09-25",
+            "document_field__currency": "EUR",
+        }
+        derived = service._submitted_fields(
+            module=RECURRING_INVOICE_MODULE, submitted_values=submitted
+        )
+        assert derived["service_period_start"] == "2026-10-01"
+        assert derived["service_period_end"] == "2027-09-30"
+
+        manual = service._submitted_fields(
+            module=RECURRING_INVOICE_MODULE,
+            submitted_values={
+                **submitted,
+                "document_field__service_period_start": "2026-10-15",
+                "document_field__service_period_end": "2027-10-14",
+            },
+        )
+        assert manual["service_period_start"] == "2026-10-15"
+        assert manual["service_period_end"] == "2027-10-14"
 
 
 def _contact_id(db: Session, customer: Customer) -> int:
@@ -865,6 +913,7 @@ def test_recurring_payment_due_reads_legacy_zoho_days_without_migration():
             module=RECURRING_INVOICE_MODULE,
             values={"interval_unit": "year", "payment_terms": "7_days"},
         )
+        assert {field.key for field in legacy}.isdisjoint({"service_period_start", "service_period_end"})
         due = next(field for field in legacy if field.key == "payment_due")
         assert due.value == "7 Tage"
         assert due.form_value == "7:day"

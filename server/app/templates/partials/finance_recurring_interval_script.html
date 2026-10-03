@@ -37,6 +37,72 @@
       rhythm.addEventListener('change', syncCustomField);
       syncCustomField();
 
+      var serviceStart = form.querySelector('[name="document_field__service_period_start"]');
+      var serviceEnd = form.querySelector('[name="document_field__service_period_end"]');
+      var customCount = customField.querySelector('input');
+      var customUnit = customField.querySelector('select');
+      function parseDate(value) {
+        var parts = value.split('-').map(Number);
+        if (parts.length !== 3 || parts.some(function (part) { return !Number.isFinite(part); })) return null;
+        return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      }
+      function formatDate(value) {
+        return value.getUTCFullYear() + '-' + String(value.getUTCMonth() + 1).padStart(2, '0') + '-' + String(value.getUTCDate()).padStart(2, '0');
+      }
+      function addDays(value, days) {
+        var result = new Date(value.getTime());
+        result.setUTCDate(result.getUTCDate() + days);
+        return result;
+      }
+      function addMonths(value, months) {
+        var day = value.getUTCDate();
+        var result = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + months, 1));
+        var lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+        result.setUTCDate(Math.min(day, lastDay));
+        return result;
+      }
+      function calculatedServiceEnd() {
+        if (!serviceStart || !serviceStart.value) return null;
+        var start = parseDate(serviceStart.value);
+        if (!start) return null;
+        var unit = rhythm.value;
+        var count = 1;
+        if (unit === 'custom') {
+          count = Number(customCount.value);
+          unit = customUnit.value;
+        }
+        if (!Number.isInteger(count) || count < 1 || !unit) return null;
+        var followingStart;
+        if (unit === 'day') followingStart = addDays(start, count);
+        else if (unit === 'week') followingStart = addDays(start, count * 7);
+        else if (unit === 'quarter') followingStart = addMonths(start, count * 3);
+        else if (unit === 'year') followingStart = addMonths(start, count * 12);
+        else if (unit === 'month' || unit === 'month_start' || unit === 'month_end') followingStart = addMonths(start, count);
+        else return null;
+        return addDays(followingStart, -1);
+      }
+      function syncServiceEnd() {
+        if (!serviceEnd) return;
+        var calculated = calculatedServiceEnd();
+        if (calculated) serviceEnd.value = formatDate(calculated);
+      }
+      function syncServiceFromInvoice() {
+        if (!serviceStart || !nextDate || !nextDate.value) return;
+        var invoiceDate = parseDate(nextDate.value);
+        if (!invoiceDate) return;
+        serviceStart.value = formatDate(new Date(Date.UTC(invoiceDate.getUTCFullYear(), invoiceDate.getUTCMonth() + 1, 1)));
+        syncServiceEnd();
+      }
+      if (serviceStart && serviceEnd) {
+        nextDate.addEventListener('change', syncServiceFromInvoice);
+        rhythm.addEventListener('change', syncServiceEnd);
+        customCount.addEventListener('input', syncServiceEnd);
+        customUnit.addEventListener('change', syncServiceEnd);
+        serviceStart.addEventListener('change', syncServiceEnd);
+        if (!serviceStart.value) syncServiceFromInvoice();
+        else if (!serviceEnd.value) syncServiceEnd();
+      }
+
       var paymentDue = form.querySelector('[data-recurring-payment-due]');
       if (!paymentDue) return;
       var count = paymentDue.querySelector('input');

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -60,10 +61,53 @@ _INVOICE_SERVICE_KEYS = (
     "service_period_start",
     "service_period_end",
 )
+_RECURRING_SERVICE_KEYS = ("service_period_start", "service_period_end")
 
 
 class HubFinanceDocumentError(ValueError):
     """A safe validation message for the remaining Finance modules."""
+
+
+def _add_service_months(value: date, months: int) -> date:
+    month_index = value.year * 12 + value.month - 1 + months
+    year, month_zero_based = divmod(month_index, 12)
+    month = month_zero_based + 1
+    return date(year, month, min(value.day, monthrange(year, month)[1]))
+
+
+def recurring_service_period_start(invoice_date: date) -> date:
+    """Return the first day of the calendar month after an invoice date."""
+    return _add_service_months(invoice_date.replace(day=1), 1)
+
+
+def recurring_service_period_end(start: date, values: dict[str, str]) -> date:
+    """Return the inclusive period end for one configured recurring cadence."""
+    rhythm = values.get("interval_unit", "")
+    if rhythm == "custom":
+        count_text = values.get("custom_interval_count") or "0"
+        unit = values.get("custom_interval_unit", "")
+    else:
+        count_text = values.get("interval_count") or "1"
+        unit = rhythm
+    try:
+        count = int(count_text)
+    except (TypeError, ValueError) as error:
+        raise HubFinanceDocumentError("Der Rhythmus enthält keine gültige Anzahl.") from error
+    if not 1 <= count <= 9999:
+        raise HubFinanceDocumentError("Der Rhythmus enthält keine gültige Anzahl.")
+    if unit == "day":
+        following_start = start + timedelta(days=count)
+    elif unit == "week":
+        following_start = start + timedelta(weeks=count)
+    elif unit in {"month", "month_start", "month_end"}:
+        following_start = _add_service_months(start, count)
+    elif unit == "quarter":
+        following_start = _add_service_months(start, count * 3)
+    elif unit == "year":
+        following_start = _add_service_months(start, count * 12)
+    else:
+        raise HubFinanceDocumentError("Der Rhythmus der periodischen Rechnung ist ungültig.")
+    return following_start - timedelta(days=1)
 
 
 @dataclass(frozen=True)
@@ -664,6 +708,12 @@ class HubFinanceDocumentService:
             layout_key=module.layout_key,
             default_keys=tuple(field.key for field in module.fields),
         )
+        if module is RECURRING_INVOICE_MODULE and not any(key in values for key in _RECURRING_SERVICE_KEYS):
+            hidden_keys = set(_RECURRING_SERVICE_KEYS)
+            show_more_index = sum(
+                1 for key in ordered_keys[:show_more_index] if key not in hidden_keys
+            )
+            ordered_keys = tuple(key for key in ordered_keys if key not in hidden_keys)
         by_key = {field.key: field for field in module.fields}
         result = []
         for key in ordered_keys:
@@ -734,6 +784,7 @@ class HubFinanceDocumentService:
         submitted_values: dict[str, str],
         existing_values: dict[str, str] | None = None,
     ) -> dict[str, str]:
+        submitted_values = dict(submitted_values)
         values: dict[str, str] = {}
         invoice_service_submitted = module is INVOICE_MODULE and any(
             f"document_field__{key}" in submitted_values
@@ -744,12 +795,58 @@ class HubFinanceDocumentService:
             and existing_values is not None
             and not any(key in existing_values for key in _INVOICE_SERVICE_KEYS)
         )
+        recurring_service_submitted = module is RECURRING_INVOICE_MODULE and any(
+            f"document_field__{key}" in submitted_values for key in _RECURRING_SERVICE_KEYS
+        )
+        recurring_stopped = (
+            module is RECURRING_INVOICE_MODULE
+            and self._text(submitted_values.get("document_field__status")).strip() in {"paused", "ended"}
+        )
+        if module is RECURRING_INVOICE_MODULE and existing_values is None and not recurring_stopped:
+            next_invoice_text = self._text(submitted_values.get("document_field__next_invoice_date"))
+            if next_invoice_text:
+                self._validate_date(next_invoice_text, "Nächstes Rechnungsdatum")
+                start_key = "document_field__service_period_start"
+                end_key = "document_field__service_period_end"
+                if not self._text(submitted_values.get(start_key)):
+                    submitted_values[start_key] = recurring_service_period_start(
+                        date.fromisoformat(next_invoice_text)
+                    ).isoformat()
+                if not self._text(submitted_values.get(end_key)):
+                    rhythm = self._text(submitted_values.get("document_field__interval_unit"))
+                    custom_count = self._text(submitted_values.get("document_field__custom_interval_count"))
+                    custom_unit = self._text(submitted_values.get("document_field__custom_interval_unit"))
+                    if rhythm == "custom":
+                        if not custom_count or not custom_unit:
+                            raise HubFinanceDocumentError("Rhythmus Benutzerdefiniert ist erforderlich.")
+                        try:
+                            parsed_custom_count = int(custom_count)
+                        except ValueError as error:
+                            raise HubFinanceDocumentError("Rhythmus Benutzerdefiniert ist ungültig.") from error
+                        if not 1 <= parsed_custom_count <= 9999 or custom_unit not in {"day", "week", "month", "year"}:
+                            raise HubFinanceDocumentError("Rhythmus Benutzerdefiniert ist ungültig.")
+                    service_values = {
+                        "interval_unit": rhythm,
+                        "interval_count": self._text(submitted_values.get("document_field__interval_count")) or "1",
+                        "custom_interval_count": custom_count,
+                        "custom_interval_unit": custom_unit,
+                    }
+                    submitted_values[end_key] = recurring_service_period_end(
+                        date.fromisoformat(submitted_values[start_key]), service_values
+                    ).isoformat()
         for definition in module.fields:
             if definition.read_only or definition.key in {"customer", "contact", module.link_key} or (module.is_recurring and definition.key in {"custom_interval", "payment_due"}):
                 continue
             if module.is_recurring and definition.key == "next_invoice_date" and self._text(submitted_values.get("document_field__status")).strip() in {"paused", "ended"}:
                 # Ignore even stale submitted dates when the schedule is stopped.
                 values[definition.key] = ""
+                continue
+            if (
+                module is RECURRING_INVOICE_MODULE
+                and definition.key in _RECURRING_SERVICE_KEYS
+                and not recurring_service_submitted
+                and (existing_values is not None or recurring_stopped)
+            ):
                 continue
             raw = self._limited_text(submitted_values.get(f"document_field__{definition.key}"), definition.label)
             if definition.display_type == "Boolesch":
@@ -825,6 +922,15 @@ class HubFinanceDocumentService:
             else:
                 values["custom_interval_count"] = ""
                 values["custom_interval_unit"] = ""
+            if (existing_values is None and not recurring_stopped) or recurring_service_submitted:
+                if not values.get("service_period_start"):
+                    raise HubFinanceDocumentError("Nächster Leistungsbeginn ist erforderlich.")
+                if not values.get("service_period_end"):
+                    raise HubFinanceDocumentError("Nächstes Leistungsende ist erforderlich.")
+                if values["service_period_end"] < values["service_period_start"]:
+                    raise HubFinanceDocumentError(
+                        "Nächstes Leistungsende darf nicht vor dem nächsten Leistungsbeginn liegen."
+                    )
             due_count = self._limited_text(submitted_values.get("document_field__payment_due_count"), "Zahlungsziel")
             due_unit = self._limited_text(submitted_values.get("document_field__payment_due_unit"), "Zahlungsziel")
             if due_count or due_unit:

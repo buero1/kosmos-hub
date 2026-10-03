@@ -118,6 +118,8 @@ RECURRING_INVOICE_FIELDS = (
     HubFinanceField("interval_unit", "Rhythmus", "Auswahlliste", required=True, options=(("month", "Monatlich"), ("quarter", "Vierteljährlich"), ("year", "Jährlich"), ("month_end", "Monatsende"), ("month_start", "Monatsanfang"), ("custom", "Benutzerdefiniert"))),
     HubFinanceField("custom_interval", "Rhythmus Benutzerdefiniert", "Benutzerdefiniertes Intervall"),
     HubFinanceField("next_invoice_date", "Nächstes Rechnungsdatum", "Datum", required=True),
+    HubFinanceField("service_period_start", "Nächster Leistungsbeginn", "Datum", required=True),
+    HubFinanceField("service_period_end", "Nächstes Leistungsende", "Datum", required=True),
     HubFinanceField("currency", "Währung", "Auswahlliste", required=True, options=_CURRENCIES),
     HubFinanceField("payment_due", "Zahlungsziel", "Zahlungsziel"),
 )
