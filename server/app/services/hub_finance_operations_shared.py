@@ -10,6 +10,7 @@ from app.models.hub_finance_documents import HubFinanceOrder
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import (
     ALL_FINANCE_DOCUMENT_MODULES,
+    CANCELLATION_INVOICE_MODULE,
     FINANCE_DOCUMENT_MODULES,
     HubFinanceDocumentService,
 )
@@ -164,6 +165,17 @@ def form_defaults(kind, values: Mapping[str, str]):
     else:
         defaults = HubFinanceDocumentService.new_form_values(module=ALL_FINANCE_DOCUMENT_MODULES[kind])
     prefix = prefix_for(kind)
+    writable_field_keys = {
+        field.key
+        for field in fields_for(kind)
+        if not field.read_only and field.display_type != "Verknuepfung"
+    }
+    defaults = {
+        key: value
+        for key, value in defaults.items()
+        if not key.startswith(f"{prefix}_field__")
+        or key.removeprefix(f"{prefix}_field__") in writable_field_keys
+    }
     line_defaults = {key.rsplit("__", 1)[1]: value for key, value in defaults.items() if key.startswith(f"{prefix}_line__0__")}
     indices = {int(parts[1]) for key in values if len(parts := key.split("__")) == 3 and parts[0] == f"{prefix}_line" and parts[1].isdigit()}
     for index in indices:
@@ -215,7 +227,8 @@ def form_input(form, *, kind, record_id=None):
         if field.read_only or field.display_type == "Verknuepfung":
             values.pop(f"{prefix}_field__{field.key}", None)
     if kind != "articles":
-        values.update({key: str(form.get(key) or "") for key in ("customer_id", "contact_id", "pdf_template_id")})
+        party_keys = () if kind == CANCELLATION_INVOICE_MODULE.key else ("customer_id", "contact_id")
+        values.update({key: str(form.get(key) or "") for key in (*party_keys, "pdf_template_id")})
         values["lines_mode"] = "replace"
         if kind == "offers":
             values["lead_id"] = str(form.get("lead_id") or "")

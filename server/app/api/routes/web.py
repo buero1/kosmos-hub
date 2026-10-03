@@ -8128,7 +8128,11 @@ def _finance_document_create_context(
     pdf_templates = HubPdfTemplateService(db=db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings", "cancellation-invoices"} else ()
     options = finance_options(_finance_gateway(request, db), module.key)
     customers = options["customers"]
-    selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
+    selected_customer = (
+        db.get(Customer, selected_customer_id)
+        if source_invoice is not None and selected_customer_id is not None
+        else next((customer for customer in customers if customer.id == selected_customer_id), None)
+    )
     return {
         "module": module,
         "fields": _ordered_layout_fields(

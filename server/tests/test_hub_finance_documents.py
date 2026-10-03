@@ -289,7 +289,12 @@ def test_cancellation_invoice_copies_inverse_positions_and_finalizes_original_in
             link_id=None,
             submitted_values=invoice_values,
         )
+        invoice.contact = None
+        db.flush()
         draft = service.cancellation_draft_from_invoice(invoice_id=invoice.id)
+        assert draft.customer_name == "Beispiel GmbH"
+        assert draft.contact_id == contact_id
+        assert draft.contact_name == "Test Kontakt"
         cancellation = service.create_document(
             module=CANCELLATION_INVOICE_MODULE,
             customer_id=customer.id,
@@ -308,6 +313,8 @@ def test_cancellation_invoice_copies_inverse_positions_and_finalizes_original_in
             document_id=cancellation.id,
         )
         assert cancellation.cancellation_number == f"ST-{cancellation.id:06d}"
+        assert cancellation.customer_id == customer.id
+        assert cancellation.contact_id == contact_id
         assert invoice_stored["status"] == "open"
         assert cancellation_detail.link_label == invoice.invoice_number
         assert cancellation_detail.lines[0].quantity == "-2.00"

@@ -304,7 +304,9 @@ class FinanceCancellationDraft:
     invoice_id: int
     invoice_identifier: str
     customer_id: int | None
+    customer_name: str
     contact_id: int | None
+    contact_name: str
     submitted_values: dict[str, str]
 
 
@@ -740,6 +742,8 @@ class HubFinanceDocumentService:
             .options(
                 selectinload(HubFinanceInvoice.lines),
                 selectinload(HubFinanceInvoice.cancellation_invoice),
+                selectinload(HubFinanceInvoice.customer),
+                selectinload(HubFinanceInvoice.contact),
             )
             .where(HubFinanceInvoice.id == invoice_id)
             .with_for_update()
@@ -770,9 +774,10 @@ class HubFinanceDocumentService:
             "service_period_start": self._text(source_values.get("service_period_start")),
             "service_period_end": self._text(source_values.get("service_period_end")),
         })
+        contact = self._cancellation_contact(invoice)
         document = HubFinanceCancellationInvoice(
             customer=invoice.customer,
-            contact=invoice.contact,
+            contact=contact,
             invoice=invoice,
             pdf_template=self._pdf_template(
                 module=CANCELLATION_INVOICE_MODULE,
@@ -997,7 +1002,12 @@ class HubFinanceDocumentService:
     def cancellation_draft_from_invoice(self, *, invoice_id: int) -> FinanceCancellationDraft:
         invoice = self.db.scalar(
             select(HubFinanceInvoice)
-            .options(selectinload(HubFinanceInvoice.lines), selectinload(HubFinanceInvoice.cancellation_invoice))
+            .options(
+                selectinload(HubFinanceInvoice.lines),
+                selectinload(HubFinanceInvoice.cancellation_invoice),
+                selectinload(HubFinanceInvoice.customer),
+                selectinload(HubFinanceInvoice.contact),
+            )
             .where(HubFinanceInvoice.id == invoice_id)
         )
         if invoice is None:
@@ -1023,13 +1033,29 @@ class HubFinanceDocumentService:
             line_values["article_id"] = str(source_line.article_id or "")
             for key, value in line_values.items():
                 submitted[f"document_line__{index}__{key}"] = value
+        contact = self._cancellation_contact(invoice)
         return FinanceCancellationDraft(
             invoice_id=invoice.id,
             invoice_identifier=self.identifier(module=INVOICE_MODULE, document=invoice, values=invoice_values),
             customer_id=invoice.customer_id,
-            contact_id=invoice.contact_id,
+            customer_name=invoice.customer.name if invoice.customer is not None else "",
+            contact_id=contact.id if contact is not None else None,
+            contact_name=self._contact_name(contact.id) if contact is not None else "",
             submitted_values=submitted,
         )
+
+    def _cancellation_contact(self, invoice: HubFinanceInvoice) -> CustomerContact | None:
+        if invoice.contact is not None:
+            return invoice.contact
+        if invoice.customer_id is None:
+            return None
+        contacts = tuple(self.db.scalars(
+            select(CustomerContact)
+            .where(CustomerContact.customer_id == invoice.customer_id)
+            .order_by(CustomerContact.id.asc())
+            .limit(2)
+        ).all())
+        return contacts[0] if len(contacts) == 1 else None
 
     def finalize_cancellation(self, *, cancellation_id: int) -> HubFinanceCancellationInvoice:
         cancellation = self.db.scalar(

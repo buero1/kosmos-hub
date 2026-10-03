@@ -15,6 +15,7 @@ from app.core.security import get_secret_cipher
 from app.db.base import Base
 from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
+from app.models.hub_finance_documents import HubFinanceCancellationInvoice, HubFinanceInvoice
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.models.hub_pdf_template import HubPdfTemplate
 from app.models.hub_user import HubUser
@@ -114,6 +115,36 @@ def test_create_read_partial_update_and_delete(env, kind):
         assert after["lines"][0]["input_values"][f"{prefix}_line__0__unit"] == ""
     env.service.execute(f"finance.{kind}.delete", {"record_id": str(result.record_id)})
     assert env.db.get(model_for(kind), result.record_id) is None
+
+
+def test_cancellation_create_uses_source_relations_and_accepts_optional_reason(env):
+    invoice_values = {
+        **values(env, "invoices"),
+        "document_field__status": "open",
+    }
+    invoice_result = env.service.execute("finance.invoices.create", invoice_values)
+    invoice = env.db.get(HubFinanceInvoice, invoice_result.record_id)
+    invoice.contact = None
+    env.db.flush()
+
+    payload = form_input(FormData({
+        "linked_record_id": str(invoice.id),
+        "document_field__cancellation_date": "2026-10-03",
+        "document_field__cancellation_reason": "",
+    }), kind="cancellation-invoices")
+    assert "customer_id" not in payload
+    assert "contact_id" not in payload
+
+    result = env.service.execute("finance.cancellation-invoices.create", payload)
+    cancellation = env.db.get(HubFinanceCancellationInvoice, result.record_id)
+    stored_values = json.loads(env.cipher.decrypt(cancellation.encrypted_fields_json))
+    assert cancellation.customer_id == env.customer.id
+    assert cancellation.contact_id == env.contact.id
+    assert stored_values["cancellation_reason"] == ""
+
+    contract = get_operation("finance.cancellation-invoices.create").input_contract()
+    assert contract["linked_record_id"]["required"] is True
+    assert contract["document_field__cancellation_reason"]["required"] is False
 
 
 @pytest.mark.parametrize("kind", ("offers", *FINANCE_DOCUMENT_MODULES))

@@ -48,6 +48,22 @@ def mutate(service, values, *, kind, action):
     if kind == "articles":
         record = domain.create_article(submitted_values=submitted) if record is None else domain.update_article(article_id=record.id, submitted_values=submitted)
     else:
+        if kind == CANCELLATION_INVOICE_MODULE.key:
+            template_id = identifier(values["pdf_template_id"]) if "pdf_template_id" in values else getattr(record, "pdf_template_id", None)
+            previous_link = record.invoice_id if record is not None else None
+            link_id = identifier(values["linked_record_id"]) if "linked_record_id" in values else previous_link
+            if link_id:
+                require_record(service, "invoices", link_id)
+            kwargs = dict(
+                module=CANCELLATION_INVOICE_MODULE,
+                customer_id=None,
+                contact_id=None,
+                link_id=link_id,
+                pdf_template_id=template_id,
+                submitted_values=submitted,
+            )
+            record = domain.create_document(**kwargs) if record is None else domain.update_document(document_id=record.id, **kwargs)
+            return record_result(service, kind, record)
         parties = {}
         for party in (("customer", "lead") if kind == "offers" else ("customer",)):
             explicit = f"{party}_id" in values or f"{party}_name" in values
@@ -120,6 +136,8 @@ def input_fields(kind, action):
     module = ALL_FINANCE_DOCUMENT_MODULES.get(kind)
     for field in fields_for(kind):
         if field.read_only:
+            if module and field.key == module.link_key and action == "create":
+                result.append(Field("linked_record_id", field.label, required=field.required))
             continue
         if field.key in {"customer", "contact"}:
             result.append(Field(f"{field.key}_id", field.label, required=field.required and action == "create" and kind != "offers", context_type="customer" if field.key == "customer" else ""))
