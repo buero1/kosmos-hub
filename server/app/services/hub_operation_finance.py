@@ -13,6 +13,7 @@ from app.services.hub_finance_documents import (
     ALL_FINANCE_DOCUMENT_MODULES,
     CANCELLATION_INVOICE_MODULE,
     FINANCE_DOCUMENT_MODULES,
+    INVOICE_MODULE,
     HubFinanceDocumentService,
 )
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS
@@ -125,7 +126,24 @@ def generate_pdf(service, values):
     if kind not in ALL_PDF_KINDS:
         raise HubOperationError("Fuer diese Belegart wird keine PDF erzeugt.")
     record = require_record(service, kind, identifier(values.get("record_id", "")), "edit")
+    if kind == INVOICE_MODULE.key and HubFinanceDocumentService(
+        db=service.db,
+        cipher=service.cipher,
+    ).invoice_is_finalized(record):
+        raise HubOperationError("Eine festgeschriebene Rechnung kann nicht neu erzeugt werden.")
     return record_result(service, kind, record)
+
+
+def mark_invoice_sent(service, values):
+    if set(values) != {"record_id"}:
+        raise HubOperationError("Ungültige Rechnungsauswahl.")
+    require_actor(service, "finance", "edit")
+    invoice = require_record(service, "invoices", identifier(values.get("record_id", "")), "edit")
+    invoice = HubFinanceDocumentService(db=service.db, cipher=service.cipher).mark_invoice_sent(
+        invoice_id=invoice.id,
+        actor=service.actor,
+    )
+    return HubOperationResult("Rechnung öffnen", f"/finance/invoices/{invoice.id}", invoice.id)
 
 
 def input_fields(kind, action):
@@ -351,6 +369,17 @@ register_operation(HubOperation(
     input_guide="kind und record_id. Ergebnis artifact_ref kann nach PDF-Erzeugung an einen E-Mail-Entwurf angehaengt werden.",
     preview_fields=(("kind", "Belegart"), ("record_id", "Beleg-ID")), execute=generate_pdf,
     input_fields=lambda: (Field("kind", "Belegart", required=True, options=tuple((kind, _LABELS[kind]) for kind in ALL_PDF_KINDS)), Field("record_id", "Beleg-ID", required=True)), result_fields=_RESULTS,
+))
+register_operation(HubOperation(
+    key="finance.invoices.mark-sent",
+    module="finance",
+    label="Rechnung als versendet markieren",
+    description="Schreibt eine außerhalb des Hubs versendete Rechnung fest und protokolliert den Zeitpunkt.",
+    input_guide="record_id ist die Rechnung. Die Aktion kann nicht rückgängig gemacht werden.",
+    preview_fields=(("record_id", "Rechnung"),),
+    execute=mark_invoice_sent,
+    input_fields=lambda: (Field("record_id", "Rechnung", required=True),),
+    agent_enabled=False,
 ))
 register_artifact("finance.document.pdf", load_document_pdf)
 _KIND_FIELD = Field("kind", "Finance-Modul", required=True, options=tuple((kind, _LABELS[kind]) for kind in FINANCE_KINDS))

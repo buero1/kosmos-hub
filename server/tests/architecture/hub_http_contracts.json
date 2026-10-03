@@ -3232,6 +3232,11 @@
         "execute"
       ]
     },
+    "app/api/routes/web.py:mark_finance_invoice_sent:POST:/finance/invoices/{invoice_id}/mark-sent": {
+      "fingerprint": "2d0ac91f1c710c31da0238d2ae9d5e70c706d87ed8de2e4d6ba9775eb7d7e737",
+      "state": "human_only",
+      "reason": "Explicit, CSRF-protected human confirmation that an invoice was sent outside the Hub. The non-agent operation rechecks Finance edit and record access, locks the invoice, changes draft to open, and writes a durable manual dispatch event. The action is intentionally not exposed to the agent catalog because it attests to an external event. Covered by invoice delivery workflow tests."
+    },
     "app/api/routes/web.py:prepare_finance_cancellation_email:POST:/finance/cancellation-invoices/{cancellation_id}/email-compose": {
       "fingerprint": "dc47a1d6634b288f10fefa6330a4ae21b0ad76af077f751e6cb9d56eb0746c78",
       "state": "shared",

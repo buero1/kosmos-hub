@@ -33,7 +33,7 @@ from test_hub_finance_operations import env
 def prepared(env, monkeypatch, tmp_path):
     env.contact.encrypted_profile_json = env.cipher.encrypt(json.dumps({"fields": {"Name": "Test contact", "E-Mail": "test@example.test"}}))
     invoice = HubFinanceInvoice(customer_id=env.customer.id, contact_id=env.contact.id, invoice_number="RE-TEST",
-        encrypted_fields_json=env.cipher.encrypt(json.dumps({"status": "open", "invoice_date": "2026-09-25", "due_date": "2026-10-01", "currency": "EUR"})))
+        encrypted_fields_json=env.cipher.encrypt(json.dumps({"status": "draft", "invoice_date": "2026-09-25", "due_date": "2026-10-01", "currency": "EUR"})))
     env.db.add(invoice)
     env.db.flush()
     env.db.add(HubFinanceInvoicePdf(invoice_id=invoice.id, filename="RE-TEST.pdf", storage_key="a" * 48,
@@ -115,7 +115,8 @@ def test_send_exact_edited_values_one_pdf_and_update_status(prepared):
     assert summary.status == "sent" and summary.sent_at is not None
     assert p.env.db.get(HubMailboxEmail, p.context["draft_id"]) is None
     assert p.env.db.scalar(select(CustomerZohoEmail)).customer_id == p.invoice.customer_id
-    assert p.invoice.encrypted_fields_json == before
+    assert p.invoice.encrypted_fields_json != before
+    assert json.loads(p.env.cipher.decrypt(p.invoice.encrypted_fields_json))["status"] == "open"
     with pytest.raises(ValueError):
         p.env.service.execute("finance.invoices.email.send", data)
     assert len(p.sent) == 1
@@ -259,6 +260,8 @@ def test_prepare_endpoint_csrf_and_template_browser_fixtures(prepared, monkeypat
     page = web.finance_document_detail_page("invoices", p.invoice.id, request, p.env.db).body.decode()
     assert 'data-invoice-email-compose="' + str(p.invoice.id) + '"' in page
     assert page.index('data-customer-edit-open') < page.index('data-invoice-email-compose')
+    assert "Als versendet markieren" in page
+    assert 'data-invoice-history-open' in page and "Rechnung im Hub erstellt" in page
     from fastapi import HTTPException
     def deny(*args): raise HTTPException(403)
     monkeypatch.setattr(web, "require_csrf", deny)

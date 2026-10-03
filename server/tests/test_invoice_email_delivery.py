@@ -45,6 +45,7 @@ def attempt(env, record, status, sent_at=None):
 @pytest.mark.parametrize("status,label", [
     (None, "Noch nicht versendet"), ("queued", "Wartet"),
     ("sending", "Wird versendet"), ("sent", "Versendet"),
+    ("marked_sent", "Als versandt markiert"),
     ("failed", "Fehlgeschlagen"), ("uncertain", "Status unklar"),
     ("unexpected", "Status unklar"),
 ])
@@ -109,6 +110,8 @@ def test_one_bounded_query_no_payload_decryption_and_no_cross_invoice_leak(env):
     assert len(statements) == 1 and set(result) == set(ids)
     assert result[first.id].status == "sent" and result[second.id].status == "failed"
     assert invoice_email_deliveries(env.db, [second.id]) == {second.id: result[second.id]}
+    history = HubFinanceDocumentService(db=env.db, cipher=env.cipher).invoice_history(invoice=second)
+    assert any(event.title == "E-Mail-Versand fehlgeschlagen" for event in history)
 
 
 def test_list_detail_and_customer_scope(env):
@@ -125,6 +128,73 @@ def test_list_detail_and_customer_scope(env):
     env.access.assign_record(module_key="customers", record_id=env.customer.id, owner_user_id=env.sales.id, team_id=None)
     env.db.flush()
     assert finance_invoice_page(limited, 1).entries[0].email_delivery == expected
+
+
+def test_manual_sent_marker_finalizes_locks_and_records_history(env):
+    record = invoice(env)
+    service = HubFinanceDocumentService(db=env.db, cipher=env.cipher)
+
+    result = env.service.execute("finance.invoices.mark-sent", {"record_id": str(record.id)})
+    env.db.flush()
+
+    assert result.record_id == record.id
+    assert service._document_values(module=INVOICE_MODULE, document=record)["status"] == "open"
+    delivery = invoice_email_deliveries(env.db, [record.id])[record.id]
+    assert delivery.status == "marked_sent" and delivery.is_confirmed
+    history = service.invoice_history(invoice=record)
+    assert [event.title for event in history[:2]] == ["Als versendet markiert", "Rechnung im Hub erstellt"]
+    assert history[0].detail == "Ausgeführt von admin"
+
+    with pytest.raises(ValueError, match="bereits als versendet"):
+        env.service.execute("finance.invoices.mark-sent", {"record_id": str(record.id)})
+    with pytest.raises(ValueError, match="festgeschriebene Rechnung"):
+        env.service.execute("finance.invoices.update", {
+            "record_id": str(record.id),
+            "document_field__invoice_date": "2026-10-04",
+        })
+    with pytest.raises(ValueError, match="festgeschriebene Rechnung"):
+        env.service.execute("finance.invoices.delete", {"record_id": str(record.id)})
+    with pytest.raises(ValueError, match="festgeschriebene Rechnung"):
+        env.service.execute("finance.pdf.generate", {"kind": "invoices", "record_id": str(record.id)})
+
+
+def test_confirmed_legacy_delivery_is_effectively_open_without_rewriting_invoice(env):
+    record = invoice(env)
+    snapshot = record.encrypted_fields_json
+    attempt(env, record, "sent", datetime(2026, 9, 25, 9, 34))
+
+    detail = HubFinanceDocumentService(db=env.db, cipher=env.cipher).get_detail(
+        module=INVOICE_MODULE,
+        document_id=record.id,
+    )
+
+    assert detail.status == "Offen"
+    assert record.encrypted_fields_json == snapshot
+
+
+@pytest.mark.parametrize("status", ["queued", "sending"])
+def test_manual_marker_does_not_race_active_email_delivery(env, status):
+    record = invoice(env)
+    attempt(env, record, status)
+
+    with pytest.raises(ValueError, match="läuft bereits"):
+        env.service.execute("finance.invoices.mark-sent", {"record_id": str(record.id)})
+
+
+def test_history_uses_recipient_from_delivery_journal(env):
+    record = invoice(env)
+    _batch, item = attempt(env, record, "sent", datetime(2026, 9, 25, 9, 34))
+    item.encrypted_payload_json = env.cipher.encrypt(json.dumps({
+        "invoice_id": record.id,
+        "recipient_name": "Test Kunde",
+        "recipient_email": "kunde@example.test",
+    }))
+    env.db.flush()
+
+    history = HubFinanceDocumentService(db=env.db, cipher=env.cipher).invoice_history(invoice=record)
+    email_event = next(event for event in history if event.title == "Per E-Mail versendet")
+
+    assert "Test Kunde <kunde@example.test>" in email_event.detail
 
 
 def test_rendered_list_detail_and_browser_fixtures(env):

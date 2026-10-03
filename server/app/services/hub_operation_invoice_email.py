@@ -18,6 +18,7 @@ from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorag
 from app.services.finance_invoice_pdf_storage import FinanceInvoicePdfStorage, FinanceInvoicePdfStorageError
 from app.services.hub_email_composition import mailbox_for
 from app.services.hub_finance_operations_shared import require_record
+from app.services.hub_finance_documents import HubFinanceDocumentService
 from app.services.hub_invoice_email_batches import HubInvoiceEmailBatchService
 from app.services.hub_operation_email_drafts import _save_draft
 from app.services.hub_operations import HubArtifact, HubOperation, HubOperationError, HubOperationInputField as Field, HubOperationResult, HubOperationService, register_operation
@@ -166,7 +167,12 @@ def send_invoice_email(service, values):
     service.db.add(batch)
     service.db.flush()
     item = HubInvoiceEmailBatchItem(batch_id=batch.id, invoice_id=invoice.id, status="sending",
-        encrypted_payload_json=service.cipher.encrypt(json.dumps({"invoice_id": invoice.id, "draft_id": draft_id})))
+        encrypted_payload_json=service.cipher.encrypt(json.dumps({
+            "invoice_id": invoice.id,
+            "draft_id": draft_id,
+            "recipient_email": context["recipient_email"],
+            "recipient_name": context.get("recipient_name", ""),
+        }, ensure_ascii=False)))
     service.db.add(item)
     stored = mailbox._payload(draft.encrypted_payload_json)
     stored["invoice_dispatch"]["batch_id"] = batch.id
@@ -191,6 +197,7 @@ def send_invoice_email(service, values):
         item.error = None if success else "Versand fehlgeschlagen. Der Entwurf bleibt erhalten."
         batch.status = "completed"
         if success:
+            HubFinanceDocumentService(db=service.db, cipher=service.cipher).finalize_invoice(invoice_id=invoice_id)
             mailbox.discard_draft(draft_id=draft_id)
         write_audit_log(service.db, site=None, actor=service.actor, source="hub-web", action="send-invoice-email",
                         result="ok" if success else "failed", detail=f"Invoice {invoice_id}, batch {batch_id}; manual dispatch.")

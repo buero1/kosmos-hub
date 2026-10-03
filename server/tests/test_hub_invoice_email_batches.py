@@ -146,7 +146,7 @@ def test_worker_sends_once_only_after_confirmation(monkeypatch, shared_email):
         item = db.scalar(select(HubInvoiceEmailBatchItem).where(HubInvoiceEmailBatchItem.batch_id == batch_id))
         assert item.sent_at is not None
         assert abs((datetime.now(UTC) - item.sent_at.replace(tzinfo=UTC)).total_seconds()) < 60
-        assert json.loads(cipher.decrypt(db.get(HubFinanceInvoice, invoice_id).encrypted_fields_json))["status"] == "draft"
+        assert json.loads(cipher.decrypt(db.get(HubFinanceInvoice, invoice_id).encrypted_fields_json))["status"] == "open"
 
 
 @pytest.mark.parametrize("raises", [False, True])

@@ -9,14 +9,28 @@
     {% call module_detail_header("/finance/" ~ module.key, "Zurück zu " ~ module.label, module.eyebrow, detail.identifier, status=detail.status, has_actions=true) %}
       {% set cancellation_final = module.is_cancellation and detail.status != 'Entwurf' %}
       {% set invoice_cancelled = module.is_invoice and detail.document.cancellation_invoice %}
-      {% set document_locked = cancellation_final or invoice_cancelled %}
+      {% set document_locked = cancellation_final or invoice_cancelled or invoice_is_finalized %}
+      {% set can_mark_invoice_sent = module.is_invoice and not invoice_cancelled and detail.status != 'Storniert' and not detail.email_delivery.is_confirmed and detail.email_delivery.status not in ('queued', 'sending') %}
       {% if not document_locked %}<button class="button button-variant-1" type="button" data-customer-edit-open data-layout-hide-while-editing>Bearbeiten</button>{% endif %}
       {% if can_create_invoice_email %}<button class="button button-secondary button-variant-1" type="button" data-invoice-email-compose="{{ detail.document.id }}" data-layout-hide-while-editing>Per E-Mail versenden</button>{% endif %}
       {% if can_create_order_email %}<button class="button button-secondary button-variant-1" type="button" data-order-email-compose="{{ detail.document.id }}" data-layout-hide-while-editing>Per E-Mail versenden</button>{% endif %}
       {% if can_create_cancellation_email %}<button class="button button-secondary button-variant-1" type="button" data-cancellation-email-compose="{{ detail.document.id }}" data-layout-hide-while-editing>Per E-Mail versenden</button>{% endif %}
       <div class="customer-edit-heading-actions" data-customer-edit-actions hidden><button class="button button-secondary button-variant-1" type="button" data-customer-edit-cancel>Abbrechen</button><button class="button button-variant-1" type="submit" form="finance-document-fields-form">Speichern</button></div>
       <div class="customer-edit-heading-actions" data-layout-edit-actions="{{ module.layout_key }}" hidden><button class="button button-secondary button-variant-1" type="button" data-layout-edit-cancel="{{ module.layout_key }}">Abbrechen</button><button class="button button-variant-1" type="submit" form="finance-document-layout-form">Speichern</button></div>
-      {% if not cancellation_final or module.is_invoice %}<details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing><summary class="detail-actions-menu-trigger" aria-label="Weitere {{ module.singular }}aktionen">&#8942;</summary><div class="detail-actions-menu-popover">{% if module.is_invoice %}{% if not detail.document.cancellation_invoice and detail.status != 'Storniert' %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/dunnings/new?invoice_id={{ detail.document.id }}">Mahnung anlegen</a>{% endif %}{% if detail.document.cancellation_invoice %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/cancellation-invoices/{{ detail.document.cancellation_invoice.id }}">Stornorechnung öffnen</a>{% elif detail.status != 'Entwurf' and detail.status != 'Storniert' %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/cancellation-invoices/new?invoice_id={{ detail.document.id }}">Rechnung stornieren</a>{% endif %}{% endif %}{% if not document_locked %}<button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-finance-delete-open>{{ module.singular }} löschen</button>{% endif %}</div></details>{% endif %}
+      {% if not cancellation_final or module.is_invoice %}
+        <details class="detail-actions-menu" data-customer-actions-menu data-layout-hide-while-editing>
+          <summary class="detail-actions-menu-trigger" aria-label="Weitere {{ module.singular }}aktionen">&#8942;</summary>
+          <div class="detail-actions-menu-popover">
+            {% if module.is_invoice %}
+              {% if not invoice_cancelled and detail.status != 'Storniert' %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/dunnings/new?invoice_id={{ detail.document.id }}">Mahnung anlegen</a>{% endif %}
+              {% if can_mark_invoice_sent %}<button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-invoice-mark-sent-open>Als versendet markieren</button>{% endif %}
+              {% if invoice_cancelled %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/cancellation-invoices/{{ detail.document.cancellation_invoice.id }}">Stornorechnung öffnen</a>{% elif detail.status != 'Entwurf' and detail.status != 'Storniert' %}<a class="button button-secondary button-variant-1 detail-actions-menu-item" href="/finance/cancellation-invoices/new?invoice_id={{ detail.document.id }}">Rechnung stornieren</a>{% endif %}
+            {% endif %}
+            {% if not document_locked %}<button class="button button-danger button-variant-1 detail-actions-menu-item" type="button" data-finance-delete-open>{{ module.singular }} löschen</button>{% endif %}
+            {% if module.is_invoice %}<button class="button button-secondary button-variant-1 detail-actions-menu-item" type="button" data-invoice-history-open>Historie</button>{% endif %}
+          </div>
+        </details>
+      {% endif %}
     {% endcall %}
     {% if fields_state and fields_message %}<p class="notice-{{ fields_state }}">{{ fields_message }}</p>{% endif %}
     {% if (module.is_invoice or module.key == 'orders' or module.is_cancellation) and email_state and email_message %}<p class="notice-{{ email_state }}">{{ email_message }}</p>{% endif %}
@@ -101,6 +115,77 @@
     {% if module.is_recurring %}{% include "partials/finance_recurring_interval_script.html" %}{% endif %}
     {% if module.is_invoice %}{% include "partials/finance_invoice_due_script.html" %}{% endif %}
     {% if not document_locked %}<dialog class="update-confirmation-dialog" data-finance-delete-dialog aria-labelledby="finance-document-delete-heading"><form method="post" action="/finance/{{ module.key }}/{{ detail.document.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h3 id="finance-document-delete-heading">{{ module.singular }} im Hub löschen?</h3><p>{{ module.singular }} und Positionen werden nur aus dem Kosmos Hub entfernt. Ein vorhandener Zoho-Books-Datensatz bleibt unverändert.</p><div class="dialog-actions"><button class="button button-secondary" type="button" data-finance-delete-cancel>Abbrechen</button><button class="button button-danger" type="submit">{{ module.singular }} löschen</button></div></form></dialog>{% endif %}
+    {% if can_mark_invoice_sent %}
+      <dialog class="update-confirmation-dialog" data-invoice-mark-sent-dialog aria-labelledby="invoice-mark-sent-heading">
+        <form method="post" action="/finance/invoices/{{ detail.document.id }}/mark-sent">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <h3 id="invoice-mark-sent-heading">Rechnung als versendet markieren?</h3>
+          <p>Die Rechnung wird mit dem aktuellen Zeitpunkt als versendet protokolliert und festgeschrieben. Danach kann sie nicht mehr bearbeitet, neu erzeugt oder gelöscht werden.</p>
+          <div class="dialog-actions"><button class="button button-secondary" type="button" data-invoice-mark-sent-cancel>Abbrechen</button><button class="button" type="submit">Als versendet markieren</button></div>
+        </form>
+      </dialog>
+    {% endif %}
+    {% if module.is_invoice %}
+      <div class="activity-compose-layer" data-invoice-history-layer hidden>
+        <button class="activity-compose-backdrop" type="button" data-invoice-history-close aria-label="Historie schließen"></button>
+        <aside class="activity-compose-drawer invoice-history-drawer" role="dialog" aria-modal="true" aria-labelledby="invoice-history-title" aria-hidden="true" data-invoice-history-drawer tabindex="-1">
+          <div class="email-compose-header">
+            <div><p class="eyebrow">Rechnung</p><h2 id="invoice-history-title">Historie</h2><p class="subtle">{{ detail.identifier }}</p></div>
+            <button class="email-compose-close" type="button" data-invoice-history-close aria-label="Historie schließen">×</button>
+          </div>
+          <ol class="invoice-history-list">
+            {% for event in invoice_history %}
+              <li><time datetime="{{ event.occurred_at.isoformat() }}">{{ event.occurred_at_display }}</time><strong>{{ event.title }}</strong>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}</li>
+            {% endfor %}
+          </ol>
+        </aside>
+      </div>
+    {% endif %}
   </section>
-  <script>(function(){var dialog=document.querySelector('[data-finance-delete-dialog]');var opener=document.querySelector('[data-finance-delete-open]');var cancel=dialog&&dialog.querySelector('[data-finance-delete-cancel]');if(!dialog||!opener||!cancel||typeof dialog.showModal!=='function'){return;}opener.addEventListener('click',function(){dialog.showModal();});cancel.addEventListener('click',function(){dialog.close();});}());</script>
+  <script>
+    (function () {
+      function bindDialog(dialogSelector, openSelector, cancelSelector) {
+        var dialog = document.querySelector(dialogSelector);
+        var opener = document.querySelector(openSelector);
+        var cancel = dialog && dialog.querySelector(cancelSelector);
+        if (!dialog || !opener || !cancel || typeof dialog.showModal !== 'function') return;
+        opener.addEventListener('click', function () { dialog.showModal(); });
+        cancel.addEventListener('click', function () { dialog.close(); });
+      }
+      bindDialog('[data-finance-delete-dialog]', '[data-finance-delete-open]', '[data-finance-delete-cancel]');
+      bindDialog('[data-invoice-mark-sent-dialog]', '[data-invoice-mark-sent-open]', '[data-invoice-mark-sent-cancel]');
+
+      var historyLayer = document.querySelector('[data-invoice-history-layer]');
+      var historyDrawer = historyLayer && historyLayer.querySelector('[data-invoice-history-drawer]');
+      var historyOpen = document.querySelector('[data-invoice-history-open]');
+      function closeHistory() {
+        if (!historyLayer) return;
+        historyLayer.classList.remove('is-open');
+        if (historyDrawer) historyDrawer.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('activity-compose-open');
+        window.setTimeout(function () {
+          if (!historyLayer.classList.contains('is-open')) historyLayer.hidden = true;
+        }, 220);
+      }
+      if (historyLayer && historyDrawer && historyOpen) {
+        historyOpen.addEventListener('click', function () {
+          var menu = historyOpen.closest('details');
+          if (menu) menu.open = false;
+          historyLayer.hidden = false;
+          historyDrawer.setAttribute('aria-hidden', 'false');
+          document.body.classList.add('activity-compose-open');
+          window.requestAnimationFrame(function () {
+            historyLayer.classList.add('is-open');
+            historyDrawer.focus();
+          });
+        });
+        historyLayer.querySelectorAll('[data-invoice-history-close]').forEach(function (button) {
+          button.addEventListener('click', closeHistory);
+        });
+        document.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape' && historyLayer.classList.contains('is-open')) closeHistory();
+        });
+      }
+    }());
+  </script>
 {% endblock %}

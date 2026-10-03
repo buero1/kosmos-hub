@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
 import re
+from secrets import token_urlsafe
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -34,6 +35,7 @@ from app.models.hub_finance_offer import HubFinanceOffer
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.hub_finance_order_pdf import HubFinanceOrderPdf
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
+from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch, HubInvoiceEmailBatchItem
 from app.services.finance_invoice_pdf_storage import FinanceInvoicePdfStorage, FinanceInvoicePdfStorageError
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.customer_directory import CustomerDirectoryService
@@ -54,7 +56,12 @@ from app.services.hub_finance_document_field_catalog import (
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS, HubFinanceField
 from app.services.module_layouts import ModuleLayoutService
 from app.services.hub_pdf_templates import HubPdfTemplateService
-from app.services.hub_invoice_email_delivery import InvoiceEmailDelivery, invoice_email_deliveries
+from app.services.hub_invoice_email_delivery import (
+    InvoiceEmailDelivery,
+    InvoiceHistoryEntry,
+    invoice_email_deliveries,
+    invoice_history,
+)
 
 
 ORDER_FIELDS_LAYOUT_KEY = "finance-order-fields"
@@ -628,6 +635,9 @@ class HubFinanceDocumentService:
             enriched_values["modified_time"] = values.get("modified_time") or (document.updated_at.isoformat() if document.updated_at else "")
         if module.is_invoice:
             enriched_values["remaining_amount"] = self._decimal_string(self._remaining_amount(values=values, totals=totals))
+        email_delivery = invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None
+        if module.is_invoice and values.get("status") == "draft" and email_delivery.is_confirmed:
+            enriched_values["status"] = "open"
         fields, show_more_index = self._field_values_with_show_more(module=module, values=enriched_values)
         invoice_pdf = self._invoice_pdf_view(document.id) if module.is_invoice else None
         order_pdf = self._order_pdf_view(document.id) if module is ORDER_MODULE else None
@@ -635,7 +645,7 @@ class HubFinanceDocumentService:
             document=document,
             module=module,
             identifier=identifier,
-            status=self._display_option(self._field(module.fields, "status"), values.get("status")) or "-",
+            status=self._display_option(self._field(module.fields, "status"), enriched_values.get("status")) or "-",
             contact_name=contact_name,
             link_label=link_label,
             fields=fields,
@@ -645,7 +655,7 @@ class HubFinanceDocumentService:
             billing_address=self._text(values.get("billing_address")) if module.is_invoice or module.is_dunning or module.is_cancellation else "",
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
-            email_delivery=invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None,
+            email_delivery=email_delivery,
         )
 
     @staticmethod
@@ -751,7 +761,7 @@ class HubFinanceDocumentService:
         if invoice is None:
             raise HubFinanceDocumentError("Die zu stornierende Rechnung wurde nicht gefunden.")
         source_values = self._document_values(module=INVOICE_MODULE, document=invoice)
-        if source_values.get("status") == "draft":
+        if not self.invoice_is_finalized(invoice):
             raise HubFinanceDocumentError("Eine Entwurfsrechnung kann ohne Stornorechnung gelöscht oder geändert werden.")
         if source_values.get("status") == "cancelled" or invoice.cancellation_invoice is not None:
             raise HubFinanceDocumentError("Für diese Rechnung besteht bereits eine Stornorechnung.")
@@ -849,11 +859,13 @@ class HubFinanceDocumentService:
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
         linked_record = self._linked_record(module=module, link_id=link_id, customer_id=customer.id)
         existing_values = self._document_values(module=module, document=document)
-        values = self._submitted_fields(module=module, submitted_values=submitted_values, existing_values=existing_values)
         if module.is_invoice and document.cancellation_invoice is not None:
             raise HubFinanceDocumentError(
                 "Die Rechnung besitzt bereits eine Stornorechnung oder einen Stornoentwurf und kann nicht mehr geändert werden."
             )
+        if module.is_invoice and self.invoice_is_finalized(document):
+            raise HubFinanceDocumentError("Eine festgeschriebene Rechnung kann nicht mehr geändert werden.")
+        values = self._submitted_fields(module=module, submitted_values=submitted_values, existing_values=existing_values)
         if module.is_recurring:
             interval_changed = values["interval_unit"] != existing_values.get("interval_unit")
             values = {**existing_values, **values}
@@ -890,6 +902,8 @@ class HubFinanceDocumentService:
                 raise HubFinanceDocumentError("Eine erstellte Stornorechnung kann nicht gelöscht werden.")
         if module.is_invoice and document.cancellation_invoice is not None:
             raise HubFinanceDocumentError("Die Rechnung besitzt eine Stornorechnung und kann nicht gelöscht werden.")
+        if module.is_invoice and self.invoice_is_finalized(document):
+            raise HubFinanceDocumentError("Eine festgeschriebene Rechnung kann nicht gelöscht werden.")
         if module.is_invoice:
             pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == document.id))
             if pdf is not None:
@@ -1013,7 +1027,7 @@ class HubFinanceDocumentService:
         if invoice is None:
             raise HubFinanceDocumentError("Die zu stornierende Rechnung wurde nicht gefunden.")
         invoice_values = self._document_values(module=INVOICE_MODULE, document=invoice)
-        if invoice_values.get("status") == "draft":
+        if not self.invoice_is_finalized(invoice):
             raise HubFinanceDocumentError("Eine Entwurfsrechnung kann ohne Stornorechnung gelöscht oder geändert werden.")
         if invoice_values.get("status") == "cancelled" or invoice.cancellation_invoice is not None:
             raise HubFinanceDocumentError("Für diese Rechnung besteht bereits eine Stornorechnung.")
@@ -1090,6 +1104,84 @@ class HubFinanceDocumentService:
         self.db.flush()
         return cancellation
 
+    def invoice_is_finalized(
+        self,
+        invoice: HubFinanceInvoice,
+        *,
+        delivery: InvoiceEmailDelivery | None = None,
+    ) -> bool:
+        values = self._document_values(module=INVOICE_MODULE, document=invoice)
+        status = values.get("status") or "draft"
+        if status != "draft":
+            return True
+        delivery = delivery or invoice_email_deliveries(self.db, [invoice.id])[invoice.id]
+        return delivery.is_confirmed
+
+    def finalize_invoice(self, *, invoice_id: int) -> HubFinanceInvoice:
+        invoice = self.db.scalar(
+            select(HubFinanceInvoice)
+            .where(HubFinanceInvoice.id == invoice_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if invoice is None:
+            raise HubFinanceDocumentError("Die Rechnung wurde nicht gefunden.")
+        if invoice.cancellation_invoice is not None:
+            raise HubFinanceDocumentError("Eine stornierte Rechnung kann nicht als versendet festgeschrieben werden.")
+        values = self._document_values(module=INVOICE_MODULE, document=invoice)
+        if values.get("status") == "cancelled":
+            raise HubFinanceDocumentError("Eine stornierte Rechnung kann nicht als versendet festgeschrieben werden.")
+        if (values.get("status") or "draft") == "draft":
+            values["status"] = "open"
+            invoice.encrypted_fields_json = self._encrypt(values)
+        self.db.flush()
+        return invoice
+
+    def mark_invoice_sent(self, *, invoice_id: int, actor: str) -> HubFinanceInvoice:
+        invoice = self.db.scalar(
+            select(HubFinanceInvoice)
+            .where(HubFinanceInvoice.id == invoice_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if invoice is None:
+            raise HubFinanceDocumentError("Die Rechnung wurde nicht gefunden.")
+        delivery = invoice_email_deliveries(self.db, [invoice.id])[invoice.id]
+        if delivery.is_confirmed:
+            raise HubFinanceDocumentError("Die Rechnung ist bereits als versendet erfasst.")
+        if delivery.status in {"queued", "sending"}:
+            raise HubFinanceDocumentError("Der E-Mail-Versand der Rechnung läuft bereits.")
+        invoice = self.finalize_invoice(invoice_id=invoice.id)
+        batch = HubInvoiceEmailBatch(
+            review_nonce=token_urlsafe(24),
+            actor=actor[:64],
+            sender_email="",
+            template_id="manual-status",
+            status="completed",
+        )
+        self.db.add(batch)
+        self.db.flush()
+        self.db.add(HubInvoiceEmailBatchItem(
+            batch_id=batch.id,
+            invoice_id=invoice.id,
+            status="marked_sent",
+            sent_at=datetime.now(UTC),
+            encrypted_payload_json=self._encrypt({
+                "invoice_id": invoice.id,
+                "dispatch_method": "manual",
+            }),
+        ))
+        self.db.flush()
+        return invoice
+
+    def invoice_history(self, *, invoice: HubFinanceInvoice) -> tuple[InvoiceHistoryEntry, ...]:
+        return invoice_history(
+            self.db,
+            self.cipher,
+            invoice_id=invoice.id,
+            created_at=invoice.created_at,
+        )
+
     def identifier(self, *, module: FinanceDocumentModule, document: Any, values: dict[str, str] | None = None) -> str:
         values = values if values is not None else self._document_values(module=module, document=document)
         if module.number_attribute:
@@ -1098,12 +1190,15 @@ class HubFinanceDocumentService:
 
     def _entry(self, *, module: FinanceDocumentModule, document: Any, email_delivery: InvoiceEmailDelivery | None = None) -> FinanceDocumentEntry:
         values = self._document_values(module=module, document=document)
+        status = values.get("status")
+        if module.is_invoice and status == "draft" and email_delivery and email_delivery.is_confirmed:
+            status = "open"
         lines = tuple(self._line_view(line) for line in document.lines)
         currency = self._text(values.get("currency")) or "EUR"
         return FinanceDocumentEntry(
             document=document,
             identifier=self.identifier(module=module, document=document, values=values),
-            status=self._display_option(self._field(module.fields, "status"), values.get("status")) or "-",
+            status=self._display_option(self._field(module.fields, "status"), status) or "-",
             customer_name=document.customer.name if document.customer else "-",
             document_date=self._display_date(self._text(values.get(module.date_key))) or "-",
             total_gross=HubFinanceService.format_money(self._totals(lines).total_gross, currency),

@@ -4101,6 +4101,38 @@
       }
       .activity-compose-layer.is-open .activity-compose-backdrop { opacity: 1; }
       .activity-compose-layer.is-open .activity-compose-drawer { transform: translateX(0); }
+      .invoice-history-drawer { width: min(32rem, 100vw); }
+      .invoice-history-list {
+        display: grid;
+        gap: 0;
+        margin: 1.4rem 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .invoice-history-list li {
+        position: relative;
+        display: grid;
+        gap: 0.3rem;
+        margin-left: 0.45rem;
+        padding: 0 0 1.35rem 1.4rem;
+        border-left: 1px solid var(--border);
+      }
+      .invoice-history-list li::before {
+        position: absolute;
+        top: 0.32rem;
+        left: -0.36rem;
+        width: 0.62rem;
+        height: 0.62rem;
+        border: 2px solid #fffdfa;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+        content: "";
+      }
+      .invoice-history-list li:last-child { padding-bottom: 0; }
+      .invoice-history-list time { color: var(--muted); font-size: 0.82rem; }
+      .invoice-history-list strong { font-size: 1rem; }
+      .invoice-history-list p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
       .activity-compose-form { flex: 1; align-content: start; }
       .activity-compose-form[hidden] { display: none; }
       .activity-compose-relation { display: grid; min-width: 0; gap: 0.35rem; overflow-wrap: anywhere; }

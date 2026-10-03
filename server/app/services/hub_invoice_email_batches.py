@@ -300,6 +300,8 @@ def run_invoice_email_batch(batch_id: int) -> None:
                 item.status = "sent" if result.success else "failed"
                 item.sent_at = utcnow() if result.success else None
                 item.error = None if result.success else "Versand fehlgeschlagen; Details im E-Mail-Protokoll des Kunden prüfen."
+                if result.success:
+                    HubFinanceDocumentService(db=db, cipher=cipher).finalize_invoice(invoice_id=item.invoice_id)
                 write_audit_log(
                     db, site=None, actor=batch.actor, source="hub-worker", action="send-invoice-email",
                     result="ok" if result.success else "failed",

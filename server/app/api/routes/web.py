@@ -2006,6 +2006,41 @@ def prepare_finance_order_email(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/finance/invoices/{invoice_id}/mark-sent")
+def mark_finance_invoice_sent(
+    invoice_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        _finance_gateway(request, db).execute(
+            "finance.invoices.mark-sent",
+            {"record_id": str(invoice_id)},
+        )
+    except (ValueError, HubFinanceDocumentError) as exc:
+        db.rollback()
+        query = urlencode({"fields": "error", "fields_message": str(exc)})
+        return RedirectResponse(url=f"/finance/invoices/{invoice_id}?{query}", status_code=303)
+    write_audit_log(
+        db,
+        site=None,
+        actor=user.username,
+        source="hub-web",
+        action="mark-finance-invoice-sent",
+        result="ok",
+        detail=f"Marked Finance invoice {invoice_id} as sent; recipient and document data omitted.",
+    )
+    db.commit()
+    query = urlencode({
+        "fields": "success",
+        "fields_message": "Die Rechnung wurde als versendet markiert und festgeschrieben.",
+    })
+    return RedirectResponse(url=f"/finance/invoices/{invoice_id}?{query}", status_code=303)
+
+
 @router.post("/finance/cancellation-invoices/{cancellation_id}/email-compose", response_class=JSONResponse)
 def prepare_finance_cancellation_email(
     cancellation_id: int,
@@ -8200,6 +8235,10 @@ def _finance_document_detail_context(
         and current_user is not None
         and access.can(current_user, "emails", "view")
     )
+    invoice_is_finalized = bool(
+        module.is_invoice
+        and service.invoice_is_finalized(detail.document, delivery=detail.email_delivery)
+    )
     return {
         "module": module,
         "detail": detail,
@@ -8242,6 +8281,12 @@ def _finance_document_detail_context(
             can_view_dunning_emails
             and detail.document.customer_id is not None
             and access.can(current_user, "emails", "create")
+        ),
+        "invoice_is_finalized": invoice_is_finalized,
+        "invoice_history": (
+            service.invoice_history(invoice=detail.document)
+            if module.is_invoice
+            else ()
         ),
         "email_state": email if email in {"success", "warning", "error"} else "",
         "email_message": email_message[:500] if email in {"success", "warning", "error"} else "",
