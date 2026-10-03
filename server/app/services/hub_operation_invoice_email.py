@@ -77,6 +77,8 @@ def prepare_invoice_email(service, values):
     require_actor(service, "emails", "create")
     require_actor(service, "emails", "edit")
     invoice = require_record(service, "invoices", identifier(values["record_id"]))
+    if invoice.cancellation_invoice is not None:
+        raise HubOperationError("Für diese Rechnung besteht bereits eine Stornorechnung. Die Originalrechnung wird nicht versendet.")
     mailbox = mailbox_for(service)
     sender = mailbox.scope.mailboxes.default_sender(for_send=True)
     if not sender:
@@ -131,6 +133,8 @@ def send_invoice_email(service, values):
     service.db.scalar(select(HubFinanceInvoice).where(HubFinanceInvoice.id == metadata["invoice_id"])
                       .with_for_update().execution_options(populate_existing=True))
     invoice = require_record(service, "invoices", metadata["invoice_id"])
+    if invoice.cancellation_invoice is not None:
+        raise HubOperationError("Für diese Rechnung besteht bereits eine Stornorechnung. Die Originalrechnung wird nicht versendet.")
     if values.get("scheduled_at") or values.get("lead_id") or values.get("dunning_id") or values.get("reply_to_email_id") or values.get("forward_from_email_id"):
         raise HubOperationError("Diese Rechnungs-E-Mail kann nur direkt und manuell versendet werden.")
     if values.get("recipient_customer_id") not in (None, "", str(invoice.customer_id)):

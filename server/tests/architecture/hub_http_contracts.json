@@ -3232,6 +3232,18 @@
         "execute"
       ]
     },
+    "app/api/routes/web.py:prepare_finance_cancellation_email:POST:/finance/cancellation-invoices/{cancellation_id}/email-compose": {
+      "fingerprint": "dc47a1d6634b288f10fefa6330a4ae21b0ad76af077f751e6cb9d56eb0746c78",
+      "state": "shared",
+      "reason": "CSRF-protected preparation of a manual cancellation-invoice draft. Finance/customer and mailbox permissions, a finalized immutable ZUGFeRD correction PDF, original-invoice relation and attachment fingerprint are verified by the shared operation; sending remains human-only and guarded against duplicate or uncertain delivery.",
+      "contracts": [
+        "finance.cancellation-invoices.email.prepare"
+      ],
+      "boundary": [
+        "_finance_gateway",
+        "execute"
+      ]
+    },
     "app/api/routes/web.py:prepare_finance_invoice_email:POST:/finance/invoices/{invoice_id}/email-compose": {
       "fingerprint": "2225f03c9d4a28d10fafb1af9115b9f7a0841185d215ab6c8c8a1aa5f8de9eee",
       "state": "shared",

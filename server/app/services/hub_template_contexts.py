@@ -10,7 +10,8 @@ from app.models.site import Site
 from app.services.customer_activities import CALL_STATUS_OPTIONS, CALL_DIRECTION_OPTIONS, CALL_REMINDER_CHANNEL_OPTIONS
 from app.services.hub_crm_readers import HubCrmReadService
 from app.services.hub_finance import HubFinanceService
-from app.services.hub_finance_operations_shared import FINANCE_DOCUMENT_MODULES, finance_detail
+from app.services.hub_finance_documents import ALL_FINANCE_DOCUMENT_MODULES
+from app.services.hub_finance_operations_shared import finance_detail
 from app.services.hub_operation_records import customer_detail, lead_detail
 from app.services.hub_operations import HubOperationError
 from app.services.hub_record_access import identifier, require_actor
@@ -37,7 +38,7 @@ def catalog_values(definitions, values):
 def context_from_path(path):
     match = re.fullmatch(r"/(customers|leads|cases|sites)/(\d+)", path)
     if not match:
-        match = re.fullmatch(r"/finance/(offers|orders|invoices|dunnings|recurring-invoices)/(\d+)", path)
+        match = re.fullmatch(r"/finance/(offers|orders|invoices|dunnings|cancellation-invoices|recurring-invoices)/(\d+)", path)
     if match:
         return match.groups()
     match = re.fullmatch(r"/activities/(call|task|meeting)/(\d+)", path)
@@ -120,7 +121,7 @@ def record_values(service, kind, record_id):
             raise HubOperationError("Die Website ist nicht verfuegbar.")
         return {item.token[2:-1]: display(getattr(row, re.sub(r"(?<!^)(?=[A-Z])", "_", item.token[7:-1]).lower(), None))
                 for item in SITE_PLACEHOLDERS}, row.customer_id, None
-    if kind in {"offers", *FINANCE_DOCUMENT_MODULES}:
+    if kind in {"offers", *ALL_FINANCE_DOCUMENT_MODULES}:
         detail = finance_detail(service, kind, record_id)
         row = detail.offer if kind == "offers" else detail.document
         fields = {field.key: field for field in detail.fields}
@@ -130,11 +131,11 @@ def record_values(service, kind, record_id):
             namespace = DOCUMENT_NAMES[kind][0]
             tokens.update({f"{namespace}.Number": detail.offer_number if kind == "offers" else detail.identifier,
                 f"{namespace}.Status": detail.status})
-            tokens.setdefault(f"{namespace}.Title", {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung"}[kind])
+            tokens.setdefault(f"{namespace}.Title", {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung", "cancellation-invoices": "Stornorechnung"}[kind])
             currency = fields["currency"].form_value if fields.get("currency") else "EUR"
             for name, value in (("NetTotal", detail.totals.subtotal_net), ("TaxTotal", detail.totals.tax_total), ("GrossTotal", detail.totals.total_gross)):
                 tokens[f"{namespace}.{name}"] = HubFinanceService.format_money(value, currency or "EUR")
-        module = FINANCE_DOCUMENT_MODULES.get(kind)
+        module = ALL_FINANCE_DOCUMENT_MODULES.get(kind)
         linked = getattr(row, module.link_attribute, None) if module and module.link_attribute else None
         if linked is not None:
             related, parent, related_lead = record_values(service, module.link_attribute + "s", linked.id)

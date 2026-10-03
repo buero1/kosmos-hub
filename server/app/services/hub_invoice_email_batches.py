@@ -117,8 +117,8 @@ class HubInvoiceEmailBatchService:
                 pdf_kind = "imported"
             selected_pdf = pdf if pdf_kind == "generated" else original if pdf_kind == "imported" else None
             issue = ""
-            if detail.status == "Storniert":
-                issue = "Stornierte Rechnungen werden nicht versendet."
+            if detail.document.cancellation_invoice is not None:
+                issue = "Rechnungen mit einer Stornorechnung werden nicht versendet."
             elif not fields.get("due_date"):
                 issue = "Fälligkeitsdatum fehlt."
             elif not customer:

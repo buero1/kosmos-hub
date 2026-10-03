@@ -108,6 +108,29 @@ DUNNING_FIELDS = (
 )
 
 
+CANCELLATION_INVOICE_FIELDS = (
+    HubFinanceField("cancellation_number", "Stornorechnungsnummer", "Autonummer", read_only=True),
+    HubFinanceField(
+        "status",
+        "Status",
+        "Auswahlliste",
+        read_only=True,
+        options=(("draft", "Entwurf"), ("created", "Erstellt"), ("sent", "Versendet")),
+    ),
+    HubFinanceField("cancellation_date", "Stornodatum", "Datum", required=True),
+    HubFinanceField("cancellation_reason", "Stornogrund", "Mehrzeilen", required=True),
+    HubFinanceField("customer", "Kunde", "Verknuepfung", required=True, read_only=True),
+    HubFinanceField("contact", "Ansprechpartner", "Verknuepfung", required=True, read_only=True),
+    HubFinanceField("linked_invoice", "Stornierte Rechnung", "Verknuepfung", required=True, read_only=True),
+    HubFinanceField("source_invoice_date", "Ursprüngliches Rechnungsdatum", "Datum", required=True),
+    HubFinanceField("service_is_one_time", "Einmalige Leistung?", "Boolesch", read_only=True),
+    HubFinanceField("service_date", "Leistungsdatum", "Datum", read_only=True),
+    HubFinanceField("service_period_start", "Leistungsbeginn", "Datum", read_only=True),
+    HubFinanceField("service_period_end", "Leistungsende", "Datum", read_only=True),
+    HubFinanceField("currency", "Währung", "Auswahlliste", read_only=True, options=_CURRENCIES),
+)
+
+
 RECURRING_INVOICE_FIELDS = (
     HubFinanceField("name", "Bezeichnung", "Text", required=True),
     HubFinanceField("status", "Status", "Auswahlliste", required=True, options=(("active", "Aktiv"), ("paused", "Pausiert"), ("ended", "Beendet"))),

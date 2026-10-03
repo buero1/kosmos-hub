@@ -1,6 +1,6 @@
 """Discoverable PDF status, local document text and reusable file references."""
 from app.services.hub_finance_pdf_readers import generated_status, original_metadata, load_pdf
-from app.services.hub_finance_operations_shared import PDF_KINDS
+from app.services.hub_finance_operations_shared import ALL_PDF_KINDS
 from app.services.hub_agent_files import extract_agent_file
 from app.services.hub_operation_queries import _offset
 from app.services.hub_operations import HubArtifact, HubOperationError, HubOperationInputField as Field, HubQuery, register_query, register_artifact
@@ -45,7 +45,7 @@ def artifact(service, reference):
     return HubArtifact(pdf.filename or "beleg.pdf", "application/pdf", content)
 
 
-FIELDS = (Field("kind", "Belegart", required=True, options=tuple((kind, kind) for kind in PDF_KINDS)),
+FIELDS = (Field("kind", "Belegart", required=True, options=tuple((kind, kind) for kind in ALL_PDF_KINDS)),
     Field("record_id", "Beleg-ID", required=True, max_length=18),
     Field("source", "PDF-Quelle", options=(("available", "Erzeugte PDF, sonst lokales Original"), ("generated", "Erzeugte PDF"), ("original", "Lokales Original (Rechnung/Auftrag)"))))
 register_query(HubQuery("finance.pdf.status", "PDF-Status, Downloadlink und Anhangverweis mit denselben Belegrechten wie die UI. Keine Erzeugung oder externe Anfrage.", FIELDS, status))

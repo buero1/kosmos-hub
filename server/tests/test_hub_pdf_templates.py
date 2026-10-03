@@ -28,14 +28,15 @@ def test_pdf_template_service_seeds_one_versioned_default_per_finance_document_t
         revisions = db.scalars(select(HubPdfTemplateRevision)).all()
 
         assert [(item.document_type, item.is_default, item.version) for item in templates] == [
+            ("cancellation-invoices", True, 1),
             ("dunnings", True, 1),
             ("invoices", True, 1),
             ("offers", True, 1),
             ("orders", True, 1),
         ]
-        assert len(revisions) == 4
+        assert len(revisions) == 5
         assert all(len(service.editor_view(item).blocks) == 7 for item in templates)
-        assert [item.legal_terms_id is not None for item in templates] == [False, False, True, True]
+        assert [item.legal_terms_id is not None for item in templates] == [False, False, False, True, True]
 
 
 def test_pdf_template_block_update_is_sanitized_and_creates_an_immutable_revision():

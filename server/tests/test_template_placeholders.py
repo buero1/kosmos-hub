@@ -69,12 +69,13 @@ def test_email_picker_places_context_before_source_and_search():
 
 def test_email_placeholder_contexts_cover_all_hub_record_types():
     assert {item.key for item in EMAIL_TEMPLATE_CONTEXTS} == {
-        "general", "customers", "leads", "cases", "offers", "orders", "invoices", "dunnings",
+        "general", "customers", "leads", "cases", "offers", "orders", "invoices", "dunnings", "cancellation-invoices",
         "recurring-invoices", "tasks", "calls", "meetings", "sites",
     }
     by_token = {item.token: item for item in email_placeholders()}
     assert by_token["${Lead.FirstName}"].contexts == ("leads", "tasks", "calls", "meetings")
     assert by_token["${Invoice.Number}"].contexts == ("invoices", "dunnings")
+    assert by_token["${CancellationInvoice.SourceInvoiceNumber}"].contexts == ("cancellation-invoices",)
     assert by_token["${Company.Name}"].contexts == ()
 
 

@@ -14,7 +14,7 @@
           <button type="button" class="button button-secondary" data-invoice-email-review-open disabled>E-Mail senden</button>
           <button type="button" class="button button-secondary finance-invoice-pending-action" disabled title="Folgt im nächsten Schritt">Massenaktualisierung</button>
         {% endif %}
-        <a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a>
+        {% if not module.is_cancellation %}<a class="button button-variant-1" href="/finance/{{ module.key }}/new">{{ module.singular }} neu anlegen</a>{% endif %}
         {{ module_layout_menu(module.layout_key, module.singular) }}
       </div>
     </div>
@@ -23,10 +23,10 @@
         <table class="finance-directory-table{% if invoice_page %} finance-invoice-directory-table{% endif %}">
           <thead><tr>
             {% if invoice_page %}<th class="finance-invoice-select-cell"><input type="checkbox" data-invoice-select-page aria-label="Alle Rechnungen auf dieser Seite auswählen" title="Alle Rechnungen auf dieser Seite auswählen" {% if not entries %}disabled{% endif %}></th>{% endif %}
-            <th>{% if module.number_attribute %}{% if module.key == "orders" %}Auftragsnummer{% elif module.key == "invoices" %}Rechnungsnummer{% else %}Mahnungsnummer{% endif %}{% else %}Bezeichnung{% endif %}</th>
+            <th>{% if module.number_attribute %}{% if module.key == "orders" %}Auftragsnummer{% elif module.key == "invoices" %}Rechnungsnummer{% elif module.key == "cancellation-invoices" %}Stornorechnungsnummer{% else %}Mahnungsnummer{% endif %}{% else %}Bezeichnung{% endif %}</th>
             <th>Status</th>
             <th>Kunde</th>
-            <th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% elif module.key == "dunnings" %}Mahnungsdatum{% else %}Nächstes Rechnungsdatum{% endif %}</th>
+            <th>{% if module.key == "orders" %}Auftragsdatum{% elif module.key == "invoices" %}Rechnungsdatum{% elif module.key == "dunnings" %}Mahnungsdatum{% elif module.key == "cancellation-invoices" %}Stornodatum{% else %}Nächstes Rechnungsdatum{% endif %}</th>
             <th>Gesamt</th>
             {% if module.is_invoice %}<th title="Status des letzten E-Mail-Versandversuchs im Hub, keine Zustellbestätigung">Versandstatus</th><th title="Letzter erfolgreicher E-Mail-Versand im Hub">Versendet am</th>{% endif %}
           </tr></thead>

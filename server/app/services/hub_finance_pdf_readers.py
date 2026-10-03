@@ -1,7 +1,7 @@
 """Authorized local PDF status/download readers; no generation or remote fetching."""
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.hub_finance_order_pdf import HubFinanceOrderPdf
-from app.services.hub_finance_operations_shared import PDF_KINDS, require_record
+from app.services.hub_finance_operations_shared import ALL_PDF_KINDS, require_record
 from app.services.hub_finance_documents import HubFinanceDocumentService
 from app.services.hub_finance_documents import HubFinanceDocumentError
 from app.services.hub_finance_pdf_generation import HubFinancePdfService
@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 
 def pdf_record(service, kind, record_id):
-    if kind not in PDF_KINDS:
+    if kind not in ALL_PDF_KINDS:
         raise HubOperationError("Diese Belegart hat keine PDF.")
     return require_record(service, kind, record_id)
 

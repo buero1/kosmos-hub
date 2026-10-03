@@ -2157,6 +2157,7 @@ class CustomerCommunicationService:
         )).casefold()
         for namespace, context in (
             ("recurringinvoice", "recurring-invoices"),
+            ("cancellationinvoice", "cancellation-invoices"),
             ("dunning", "dunnings"),
             ("invoice", "invoices"),
             ("order", "orders"),

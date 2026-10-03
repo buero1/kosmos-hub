@@ -9,10 +9,15 @@ from sqlalchemy import select
 from app.models.hub_pdf_template import HubPdfTemplate
 
 from app.services.hub_finance import HubFinanceService
-from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES, HubFinanceDocumentService
+from app.services.hub_finance_documents import (
+    ALL_FINANCE_DOCUMENT_MODULES,
+    CANCELLATION_INVOICE_MODULE,
+    FINANCE_DOCUMENT_MODULES,
+    HubFinanceDocumentService,
+)
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS
 from app.services.hub_finance_operations_shared import (
-    FINANCE_KINDS, PDF_KINDS, fields_for, finance_detail, finance_entries,
+    ALL_PDF_KINDS, FINANCE_KINDS, PDF_KINDS, fields_for, finance_detail, finance_entries,
     finance_options, form_defaults, merge_form, prefix_for, require_record, stored_values,
 )
 from app.services.hub_finance_pdf_generation import HubFinancePdfService
@@ -36,7 +41,7 @@ def mutate(service, values, *, kind, action):
         elif kind == "offers":
             domain.delete_offer(offer_id=record.id, after_commit=service.after_commit)
         else:
-            domain.delete_document(module=FINANCE_DOCUMENT_MODULES[kind], document_id=record.id, after_commit=service.after_commit)
+            domain.delete_document(module=ALL_FINANCE_DOCUMENT_MODULES[kind], document_id=record.id, after_commit=service.after_commit)
         return HubOperationResult("Liste oeffnen", f"/finance/{kind}", record.id)
     submitted = merge_form(service, kind, values, record)
     if kind == "articles":
@@ -52,7 +57,7 @@ def mutate(service, values, *, kind, action):
         if kind == "offers":
             record = domain.create_offer(**kwargs) if record is None else domain.update_offer(offer_id=record.id, **kwargs)
         else:
-            module = FINANCE_DOCUMENT_MODULES[kind]
+            module = ALL_FINANCE_DOCUMENT_MODULES[kind]
             previous_link = getattr(record, f"{module.link_attribute}_id", None) if module.link_attribute and record else None
             link_id = identifier(values["linked_record_id"]) if "linked_record_id" in values else previous_link
             if link_id and module.link_attribute:
@@ -64,10 +69,10 @@ def mutate(service, values, *, kind, action):
 
 
 def record_result(service, kind, record):
-    should_generate_pdf = kind in PDF_KINDS
+    should_generate_pdf = kind in ALL_PDF_KINDS
     if kind == "invoices":
         invoice_values = HubFinanceDocumentService(db=service.db, cipher=service.cipher)._document_values(
-            module=FINANCE_DOCUMENT_MODULES[kind],
+            module=ALL_FINANCE_DOCUMENT_MODULES[kind],
             document=record,
         )
         should_generate_pdf = any(key in invoice_values for key in (
@@ -78,7 +83,7 @@ def record_result(service, kind, record):
         if should_generate_pdf else ""
     )
     outputs = {"customer_id": str(getattr(record, "customer_id", None) or ""), "lead_id": str(getattr(record, "lead_id", None) or "")}
-    if kind in PDF_KINDS:
+    if kind in ALL_PDF_KINDS:
         email, name = _offer_recipient(service, record)
         outputs.update(artifact_ref=artifact_reference(kind, record.id), recipient_email=email, recipient_name=name)
     return HubOperationResult("Datensatz oeffnen", f"/finance/{kind}/{record.id}", record.id, background_token=token, outputs=outputs)
@@ -90,7 +95,7 @@ def artifact_reference(kind, record_id):
 
 def load_document_pdf(service, reference):
     kind, separator, raw_id = reference.partition("/")
-    if not separator or kind not in PDF_KINDS:
+    if not separator or kind not in ALL_PDF_KINDS:
         raise HubOperationError("Dieser PDF-Anhang ist nicht verfuegbar.")
     record = require_record(service, kind, identifier(raw_id))
     pdf, content = load_pdf(service, kind, record.id, source="available", wait=True)
@@ -100,7 +105,7 @@ def load_document_pdf(service, reference):
 
 def generate_pdf(service, values):
     kind = values.get("kind", "")
-    if kind not in PDF_KINDS:
+    if kind not in ALL_PDF_KINDS:
         raise HubOperationError("Fuer diese Belegart wird keine PDF erzeugt.")
     record = require_record(service, kind, identifier(values.get("record_id", "")), "edit")
     return record_result(service, kind, record)
@@ -111,7 +116,7 @@ def input_fields(kind, action):
     if action == "delete":
         return tuple(result)
     prefix = prefix_for(kind)
-    module = FINANCE_DOCUMENT_MODULES.get(kind)
+    module = ALL_FINANCE_DOCUMENT_MODULES.get(kind)
     for field in fields_for(kind):
         if field.read_only:
             continue
@@ -226,13 +231,13 @@ def read_detail(service, values):
         result["input_values"].update(customer_id=str(record.customer_id or ""), contact_id=str(record.contact_id or ""), pdf_template_id=str(record.pdf_template_id or ""))
         if kind == "offers":
             result["input_values"]["lead_id"] = str(record.lead_id or "")
-        elif FINANCE_DOCUMENT_MODULES[kind].link_attribute:
-            result["input_values"]["linked_record_id"] = str(getattr(record, FINANCE_DOCUMENT_MODULES[kind].link_attribute + "_id") or "")
+        elif ALL_FINANCE_DOCUMENT_MODULES[kind].link_attribute:
+            result["input_values"]["linked_record_id"] = str(getattr(record, ALL_FINANCE_DOCUMENT_MODULES[kind].link_attribute + "_id") or "")
         offset = _offset(values, "line_offset")
         result["lines"] = [{"index": index, "input_values": {key: value for key, value in raw.items() if key.startswith(f"{prefix}_line__{index}__")}}
                            for index in range(offset, min(len(record.lines), offset + 20))]
         result.update(line_count=len(record.lines), next_line_offset=str(offset + 20) if len(record.lines) > offset + 20 else "", total_gross=str(detail.totals.total_gross))
-    if kind in PDF_KINDS:
+    if kind in ALL_PDF_KINDS:
         state = HubFinancePdfService(db=service.db, cipher=service.cipher).view(document_type=kind, document_id=record.id)
         imported_pdf = getattr(detail, "invoice_pdf", None) or getattr(detail, "order_pdf", None)
         result.update(artifact_ref=artifact_reference(kind, record.id), pdf_status=state.status if state else ("ready" if imported_pdf else "missing"))
@@ -247,7 +252,7 @@ def read_options(service, values):
         require_actor(service, "finance", "view")
         template_type = "invoices" if kind == "recurring-invoices" else kind
         # Unlike the form's template initializer, discovery must never write defaults.
-        templates = service.db.scalars(select(HubPdfTemplate).where(HubPdfTemplate.document_type == template_type).order_by(HubPdfTemplate.is_default.desc(), HubPdfTemplate.name, HubPdfTemplate.id)) if template_type in PDF_KINDS else ()
+        templates = service.db.scalars(select(HubPdfTemplate).where(HubPdfTemplate.document_type == template_type).order_by(HubPdfTemplate.is_default.desc(), HubPdfTemplate.name, HubPdfTemplate.id)) if template_type in ALL_PDF_KINDS else ()
         entries = [{"id": str(item.id), "name": item.name, "is_default": item.is_default} for item in templates]
     else:
         options = finance_options(service, kind, record_id=identifier(values.get("record_id", "")))
@@ -270,6 +275,7 @@ def dunning_source(service, values):
 
 
 _LABELS = {"articles": "Artikel", "offers": "Angebot", **{key: module.singular for key, module in FINANCE_DOCUMENT_MODULES.items()}}
+_LABELS[CANCELLATION_INVOICE_MODULE.key] = CANCELLATION_INVOICE_MODULE.singular
 _RESULTS = (("artifact_ref", "PDF-Verweis fuer attachment_ref eines E-Mail-Entwurfs"), ("recipient_email", "E-Mail des Ansprechpartners"), ("recipient_name", "Ansprechpartner"), ("customer_id", "Kunden-ID"), ("lead_id", "Lead-ID"))
 for _kind in FINANCE_KINDS:
     for _action, _label in (("create", "anlegen"), ("update", "bearbeiten"), ("delete", "loeschen")):
@@ -284,11 +290,26 @@ for _kind in FINANCE_KINDS:
             input_fields=partial(input_fields, _kind, _action), preview_builder=partial(preview, kind=_kind, action=_action),
             result_fields=_RESULTS if _kind in PDF_KINDS and _action != "delete" else (),
         ))
+for _action, _label in (("create", "anlegen"), ("update", "bearbeiten"), ("delete", "loeschen")):
+    register_operation(HubOperation(
+        key=f"finance.{CANCELLATION_INVOICE_MODULE.key}.{_action}",
+        module="finance",
+        label=f"{CANCELLATION_INVOICE_MODULE.singular} {_label}",
+        description=f"{CANCELLATION_INVOICE_MODULE.singular} im kontrollierten Rechnungsstorno-Workflow {_label}.",
+        input_guide=input_guide(CANCELLATION_INVOICE_MODULE.key, _action),
+        preview_fields=(),
+        execute=partial(mutate, kind=CANCELLATION_INVOICE_MODULE.key, action=_action),
+        defaults=partial(form_defaults, CANCELLATION_INVOICE_MODULE.key) if _action == "create" else None,
+        input_fields=partial(input_fields, CANCELLATION_INVOICE_MODULE.key, _action),
+        preview_builder=partial(preview, kind=CANCELLATION_INVOICE_MODULE.key, action=_action),
+        result_fields=_RESULTS if _action != "delete" else (),
+        agent_enabled=False,
+    ))
 register_operation(HubOperation(
     key="finance.pdf.generate", module="finance", label="Beleg-PDF erzeugen", description="Erzeugt die PDF eines vorhandenen Finance-Belegs, ohne E-Mail-Versand.",
     input_guide="kind und record_id. Ergebnis artifact_ref kann nach PDF-Erzeugung an einen E-Mail-Entwurf angehaengt werden.",
     preview_fields=(("kind", "Belegart"), ("record_id", "Beleg-ID")), execute=generate_pdf,
-    input_fields=lambda: (Field("kind", "Belegart", required=True, options=tuple((kind, _LABELS[kind]) for kind in PDF_KINDS)), Field("record_id", "Beleg-ID", required=True)), result_fields=_RESULTS,
+    input_fields=lambda: (Field("kind", "Belegart", required=True, options=tuple((kind, _LABELS[kind]) for kind in ALL_PDF_KINDS)), Field("record_id", "Beleg-ID", required=True)), result_fields=_RESULTS,
 ))
 register_artifact("finance.document.pdf", load_document_pdf)
 _KIND_FIELD = Field("kind", "Finance-Modul", required=True, options=tuple((kind, _LABELS[kind]) for kind in FINANCE_KINDS))

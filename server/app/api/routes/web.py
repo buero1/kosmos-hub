@@ -127,6 +127,8 @@ from app.services.hub_finance_operations_shared import (
     form_input as finance_form_input,
 )
 from app.services.hub_finance_documents import (
+    ALL_FINANCE_DOCUMENT_MODULES,
+    CANCELLATION_INVOICE_MODULE,
     DUNNING_MODULE,
     FINANCE_DOCUMENT_MODULES,
     INVOICE_MODULE,
@@ -1472,7 +1474,7 @@ def finance_directory_suggestions(
     module_key: str,
     q: str = "",
 ):
-    if module_key not in ("articles", "offers", *FINANCE_DOCUMENT_MODULES):
+    if module_key not in ("articles", "offers", *ALL_FINANCE_DOCUMENT_MODULES):
         raise HTTPException(status_code=404, detail="Finance module not found.")
     query = q.strip()[:100]
     if len(query) < 2:
@@ -1703,6 +1705,7 @@ async def create_finance_offer_page(
                 selected_lead_id=lead_id,
                 selected_contact_id=contact_id,
                 selected_pdf_template_id=pdf_template_id,
+                source_invoice_id=link_id if module in (DUNNING_MODULE, CANCELLATION_INVOICE_MODULE) else None,
                 submitted_values=submitted_values,
                 error=str(exc),
             ),
@@ -2002,6 +2005,32 @@ def prepare_finance_order_email(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/finance/cancellation-invoices/{cancellation_id}/email-compose", response_class=JSONResponse)
+def prepare_finance_cancellation_email(
+    cancellation_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    csrf_token: Annotated[str, Form()] = "",
+):
+    require_csrf(request, csrf_token)
+    user = _require_hub_admin(request)
+    try:
+        result = _finance_gateway(request, db).execute(
+            "finance.cancellation-invoices.email.prepare",
+            {"record_id": str(cancellation_id)},
+        )
+        db.commit()
+        return HubMailboxService(
+            db=db,
+            cipher=get_secret_cipher(),
+            actor=user.username,
+            public_base_url=get_settings().public_base_url,
+        ).get_draft_compose_context(draft_id=result.record_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/finance/{module_key}", response_class=HTMLResponse)
 def finance_documents_page(
     module_key: str,
@@ -2089,6 +2118,7 @@ async def create_finance_document_page(
                 selected_contact_id=contact_id,
                 selected_link_id=link_id,
                 selected_pdf_template_id=pdf_template_id,
+                source_invoice_id=link_id if module.is_cancellation else None,
                 submitted_values=submitted_values,
                 error=str(exc),
             ),
@@ -7975,7 +8005,7 @@ def _finance_offer_line_form_rows(values: dict[str, str]) -> list[dict[str, str]
 
 
 def _finance_document_module(module_key: str):
-    module = FINANCE_DOCUMENT_MODULES.get(module_key)
+    module = ALL_FINANCE_DOCUMENT_MODULES.get(module_key)
     if module is None:
         raise HTTPException(status_code=404, detail="Finance module not found.")
     return module
@@ -8034,11 +8064,17 @@ def _finance_document_create_context(
     error: str | None = None,
 ) -> dict[str, object]:
     service = HubFinanceDocumentService(db=db, cipher=get_secret_cipher())
+    if module is CANCELLATION_INVOICE_MODULE and source_invoice_id is None:
+        raise HubFinanceDocumentError("Eine Stornorechnung muss aus einer Rechnung heraus angelegt werden.")
     values = service.new_form_values(module=module)
     source_invoice = None
-    if module is DUNNING_MODULE and source_invoice_id is not None:
+    if module in (DUNNING_MODULE, CANCELLATION_INVOICE_MODULE) and source_invoice_id is not None:
         _finance_read(request, db, "invoices", source_invoice_id)
-        source_invoice = service.dunning_draft_from_invoice(invoice_id=source_invoice_id)
+        source_invoice = (
+            service.dunning_draft_from_invoice(invoice_id=source_invoice_id)
+            if module is DUNNING_MODULE
+            else service.cancellation_draft_from_invoice(invoice_id=source_invoice_id)
+        )
         selected_customer_id = source_invoice.customer_id
         selected_contact_id = source_invoice.contact_id
         selected_link_id = source_invoice.invoice_id
@@ -8052,7 +8088,7 @@ def _finance_document_create_context(
         due_unit = values.get("document_field__payment_due_unit", "")
         values["document_field__payment_due"] = f"{due_count}:{due_unit}" if due_count or due_unit else ""
     template_type = "invoices" if module.is_recurring else module.key
-    pdf_templates = HubPdfTemplateService(db=db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings"} else ()
+    pdf_templates = HubPdfTemplateService(db=db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings", "cancellation-invoices"} else ()
     options = finance_options(_finance_gateway(request, db), module.key)
     customers = options["customers"]
     selected_customer = next((customer for customer in customers if customer.id == selected_customer_id), None)
@@ -8114,7 +8150,7 @@ def _finance_document_detail_context(
     ] or _finance_document_line_form_rows(service.new_form_values(module=module))
     selected_link_id = getattr(detail.document, f"{module.link_attribute}_id", None) if module.link_attribute else None
     template_type = "invoices" if module.is_recurring else module.key
-    pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings"} else ()
+    pdf_templates = HubPdfTemplateService(db=service.db).list_templates(document_type=template_type) if template_type in {"orders", "invoices", "dunnings", "cancellation-invoices"} else ()
     options = finance_options(_finance_gateway(request, service.db), module.key, record_id=detail.document.id)
     current_user = getattr(request.state, "hub_user", None)
     access = HubAccessControlService(db=service.db)
@@ -8136,7 +8172,7 @@ def _finance_document_detail_context(
         "selected_pdf_template_id": getattr(detail.document, "pdf_template_id", None) or next((item.id for item in pdf_templates if item.is_default), None),
         "generated_pdf": HubFinancePdfService(db=service.db, cipher=get_secret_cipher()).view(
             document_type=module.key, document_id=detail.document.id
-        ) if module.key in {"orders", "invoices", "dunnings"} else None,
+        ) if module.key in {"orders", "invoices", "dunnings", "cancellation-invoices"} else None,
         "dunning_emails": (
             CustomerCommunicationService(
                 db=service.db,
@@ -8148,11 +8184,17 @@ def _finance_document_detail_context(
         ),
         "can_view_dunning_emails": can_view_dunning_emails,
         "can_create_invoice_email": bool(
-            module.is_invoice and current_user is not None
+            module.is_invoice and detail.status != "Storniert" and detail.document.cancellation_invoice is None and current_user is not None
             and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
         ),
         "can_create_order_email": bool(
             module.key == "orders" and current_user is not None
+            and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
+        ),
+        "can_create_cancellation_email": bool(
+            module.is_cancellation
+            and detail.status in {"Erstellt", "Versendet"}
+            and current_user is not None
             and all(access.can(current_user, "emails", action) for action in ("view", "create", "edit"))
         ),
         "can_create_dunning_email": bool(
@@ -8353,12 +8395,14 @@ def _contact_detail_context(
 
 
 async def _dispatch_invoice_draft(request, db, user, draft_id, attachments, *, customer_id=None):
+    from app.services.hub_operation_cancellation_invoice_email import cancellation_draft_metadata
     from app.services.hub_operation_invoice_email import SEND_FIELDS, invoice_draft_metadata
     from app.services.hub_operation_order_email import order_draft_metadata
     gateway = HubOperationService(db=db, cipher=get_secret_cipher(), actor=user.username,
         input_files=tuple(HubArtifact(filename=item.filename, content=item.content, content_type=item.content_type) for item in attachments))
-    is_order = bool(order_draft_metadata(gateway, draft_id))
-    if not is_order and not invoice_draft_metadata(gateway, draft_id):
+    is_cancellation = bool(cancellation_draft_metadata(gateway, draft_id))
+    is_order = not is_cancellation and bool(order_draft_metadata(gateway, draft_id))
+    if not is_cancellation and not is_order and not invoice_draft_metadata(gateway, draft_id):
         return None
     form = await request.form()
     values = {key: str(form.get(key, "")) for key in SEND_FIELDS}
@@ -8366,7 +8410,14 @@ async def _dispatch_invoice_draft(request, db, user, draft_id, attachments, *, c
         if values["recipient_customer_id"] not in ("", str(customer_id)):
             raise ValueError("Der Entwurf gehört zu einem anderen Kunden.")
         values["recipient_customer_id"] = str(customer_id)
-    result = gateway.execute("finance.orders.email.send" if is_order else "finance.invoices.email.send", values)
+    operation = (
+        "finance.cancellation-invoices.email.send"
+        if is_cancellation
+        else "finance.orders.email.send"
+        if is_order
+        else "finance.invoices.email.send"
+    )
+    result = gateway.execute(operation, values)
     return _email_compose_response(request, RedirectResponse(url=result.href, status_code=303))
 
 

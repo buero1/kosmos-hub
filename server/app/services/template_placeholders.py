@@ -9,6 +9,7 @@ from app.core.config import get_settings
 
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_finance_document_field_catalog import (
+    CANCELLATION_INVOICE_FIELDS,
     DUNNING_FIELDS,
     INVOICE_FIELDS,
     ORDER_FIELDS,
@@ -46,6 +47,7 @@ EMAIL_TEMPLATE_CONTEXTS = (
     EmailTemplateContext("orders", "Aufträge"),
     EmailTemplateContext("invoices", "Rechnungen"),
     EmailTemplateContext("dunnings", "Mahnungen"),
+    EmailTemplateContext("cancellation-invoices", "Stornorechnungen"),
     EmailTemplateContext("recurring-invoices", "Periodische Rechnungen"),
     EmailTemplateContext("tasks", "Aufgaben"),
     EmailTemplateContext("calls", "Anrufe"),
@@ -111,6 +113,7 @@ DOCUMENT_NAMES = {
     "orders": ("Order", "Aktueller Auftrag"),
     "invoices": ("Invoice", "Aktuelle Rechnung"),
     "dunnings": ("Dunning", "Aktuelle Mahnung"),
+    "cancellation-invoices": ("CancellationInvoice", "Aktuelle Stornorechnung"),
 }
 DOCUMENT_FIELDS = (
     ("Number", "Nummer", "RE-004035"),
@@ -125,6 +128,8 @@ DOCUMENT_FIELDS = (
     ("ServiceLabel", "Bezeichnung der Leistung", "Leistungszeitraum"),
     ("ServiceValue", "Leistungsdatum oder -zeitraum", "01.09.2026 - 30.09.2026"),
     ("SourceInvoiceNumber", "Rechnungsnummer", "RE-004035"),
+    ("SourceInvoiceDate", "Ursprüngliches Rechnungsdatum", "12.09.2026"),
+    ("Reason", "Stornogrund", "Auftrag wurde vollständig storniert."),
     ("ValidUntil", "Gültig bis", "26.09.2026"),
     ("PaymentTerms", "Zahlungsziel", "14 Tage"),
     ("NetTotal", "Nettosumme", "448,99 €"),
@@ -136,20 +141,22 @@ _DOCUMENT_VISIBLE_FIELDS = {
     "orders": {"Number", "Title", "Status", "Date", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
     "invoices": {"Number", "Title", "Status", "Date", "DueDate", "ServiceDate", "ServicePeriodStart", "ServicePeriodEnd", "ServicePeriod", "ServiceLabel", "ServiceValue", "PaymentTerms", "NetTotal", "TaxTotal", "GrossTotal"},
     "dunnings": {"Number", "Title", "Status", "Date", "DueDate", "SourceInvoiceNumber", "NetTotal", "TaxTotal", "GrossTotal"},
+    "cancellation-invoices": {"Number", "Title", "Status", "Date", "SourceInvoiceNumber", "SourceInvoiceDate", "Reason", "ServiceDate", "ServicePeriodStart", "ServicePeriodEnd", "ServicePeriod", "ServiceLabel", "ServiceValue", "NetTotal", "TaxTotal", "GrossTotal"},
 }
 _DOCUMENT_EMAIL_CONTEXTS = {
     "offers": ("offers", "orders"),
     "orders": ("orders", "invoices"),
     "invoices": ("invoices", "dunnings"),
     "dunnings": ("dunnings",),
+    "cancellation-invoices": ("cancellation-invoices",),
 }
 
 _CUSTOMER_EMAIL_CONTEXTS = (
-    "general", "customers", "cases", "offers", "orders", "invoices", "dunnings",
+    "general", "customers", "cases", "offers", "orders", "invoices", "dunnings", "cancellation-invoices",
     "recurring-invoices", "tasks", "calls", "meetings", "sites",
 )
 _CONTACT_EMAIL_CONTEXTS = (
-    "general", "customers", "cases", "offers", "orders", "invoices", "dunnings",
+    "general", "customers", "cases", "offers", "orders", "invoices", "dunnings", "cancellation-invoices",
     "recurring-invoices", "sites",
 )
 _LEAD_EMAIL_CONTEXTS = ("leads", "tasks", "calls", "meetings")
@@ -368,6 +375,7 @@ _DOCUMENT_FIELD_CATALOGS = {
     "orders": ORDER_FIELDS,
     "invoices": INVOICE_FIELDS,
     "dunnings": DUNNING_FIELDS,
+    "cancellation-invoices": CANCELLATION_INVOICE_FIELDS,
 }
 _DOCUMENT_FIELD_TOKENS = {
     "offers": {
@@ -395,6 +403,16 @@ _DOCUMENT_FIELD_TOKENS = {
         "dunning_date": "Date",
         "due_date": "DueDate",
         "linked_invoice": "SourceInvoiceNumber",
+    },
+    "cancellation-invoices": {
+        "cancellation_number": "Number",
+        "cancellation_date": "Date",
+        "cancellation_reason": "Reason",
+        "linked_invoice": "SourceInvoiceNumber",
+        "source_invoice_date": "SourceInvoiceDate",
+        "service_date": "ServiceDate",
+        "service_period_start": "ServicePeriodStart",
+        "service_period_end": "ServicePeriodEnd",
     },
 }
 
@@ -449,6 +467,7 @@ def email_placeholders() -> tuple[TemplatePlaceholder, ...]:
         *email_document_placeholders("orders"),
         *email_document_placeholders("invoices"),
         *email_document_placeholders("dunnings"),
+        *email_document_placeholders("cancellation-invoices"),
         *RECURRING_INVOICE_PLACEHOLDERS,
         *TASK_PLACEHOLDERS,
         *CALL_PLACEHOLDERS,

@@ -10,10 +10,11 @@
     {% if error %}<p class="notice-error">{{ error }}</p>{% endif %}
     <form id="finance-document-create-form" method="post" action="/finance/{{ module.key }}" class="communication-form finance-offer-form" data-finance-document-form{% if module.is_invoice %} data-invoice-service-new{% endif %}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if module.is_cancellation %}<input type="hidden" name="customer_id" value="{{ selected_customer_id or '' }}"><input type="hidden" name="contact_id" value="{{ selected_contact_id or '' }}"><input type="hidden" name="linked_record_id" value="{{ selected_link_id or '' }}">{% endif %}
       <div class="customer-detail-layout">
         <div class="customer-detail-main-column">
-          <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">{{ module.label }}</p><h3>Alle Felder</h3><p class="subtle">{{ module.singular }} und Positionen werden ausschließlich im Hub gespeichert.</p></div></div><div class="customer-field-editor-grid">{% for field in fields %}{{ finance_field_control(field, submitted_values.get("document_field__" ~ field.key, ""), customers, contacts, selected_customer_id, selected_contact_id, "document", link_options, selected_link_id) }}{% endfor %}{% if pdf_templates %}{% include "partials/finance_pdf_template_control.html" %}{% endif %}</div></article>
-          {% include "partials/finance_document_positions.html" %}
+          <article class="card customer-detail-panel"><div class="customer-detail-panel-heading"><div><p class="eyebrow">{{ module.label }}</p><h3>Alle Felder</h3><p class="subtle">{% if module.is_cancellation %}Die Belegdaten und Gegenpositionen werden aus der Originalrechnung übernommen.{% else %}{{ module.singular }} und Positionen werden ausschließlich im Hub gespeichert.{% endif %}</p></div></div><div class="customer-field-editor-grid">{% for field in fields %}{% if module.is_cancellation and field.key in ('customer', 'contact', 'linked_invoice') %}<label class="customer-field-control"><span>{{ field.label }}</span><input type="text" value="{% if field.key == 'customer' %}{{ selected_customer.name if selected_customer else '-' }}{% elif field.key == 'contact' %}{{ contacts | selectattr('id', 'equalto', selected_contact_id) | map(attribute='name') | first | default('-') }}{% else %}{{ source_invoice.invoice_identifier }}{% endif %}" readonly></label>{% else %}{{ finance_field_control(field, submitted_values.get("document_field__" ~ field.key, ""), customers, contacts, selected_customer_id, selected_contact_id, "document", link_options, selected_link_id) }}{% endif %}{% endfor %}{% if pdf_templates %}{% include "partials/finance_pdf_template_control.html" %}{% endif %}</div></article>
+          {% if module.is_cancellation %}<fieldset class="finance-cancellation-position-preview" disabled>{% include "partials/finance_document_positions.html" %}</fieldset>{% else %}{% include "partials/finance_document_positions.html" %}{% endif %}
         </div>
         {{ create_customer_link_panel("finance-document-create-form", selected_customer) }}
       </div>
@@ -23,5 +24,6 @@
     {% include "partials/create_customer_link_script.html" %}
     {% if module.is_recurring %}{% include "partials/finance_recurring_interval_script.html" %}{% endif %}
     {% if module.is_invoice %}{% include "partials/finance_invoice_due_script.html" %}{% endif %}
+    {% if module.is_cancellation %}<style>.finance-cancellation-position-preview{border:0;padding:0;margin:0}.finance-cancellation-position-preview .finance-position-preset-open-actions,.finance-cancellation-position-preview .finance-position-actions,.finance-cancellation-position-preview [data-finance-document-position-add],.finance-cancellation-position-preview .finance-position-drag-cell,.finance-cancellation-position-preview .finance-position-drag-heading{display:none}</style>{% endif %}
   </section>
 {% endblock %}

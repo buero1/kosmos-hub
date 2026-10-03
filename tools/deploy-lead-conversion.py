@@ -122,6 +122,8 @@ if '--recurring-invoice-preview' in sys.argv:
     release_prefix = 'recurring-invoice-preview'
 if '--recurring-service-reset' in sys.argv:
     release_prefix = 'recurring-service-reset'
+if '--cancellation-invoices' in sys.argv:
+    release_prefix = 'cancellation-invoices'
 before = Path('/tmp/' + release_prefix + '-before.tar')
 after = Path('/tmp/' + release_prefix + '-release.tar')
 assert hashlib.sha256(after.read_bytes()).hexdigest() == sys.argv[1]
@@ -359,6 +361,35 @@ if '--recurring-invoice-preview' in sys.argv:
     }
 if '--recurring-service-reset' in sys.argv:
     expected = {'app/templates/partials/finance_recurring_interval_script.html'}
+if '--cancellation-invoices' in sys.argv:
+    expected = {
+        'app/api/routes/web.py',
+        'app/db/base.py',
+        'app/main.py',
+        'app/models/__init__.py',
+        'app/models/hub_finance_documents.py',
+        'app/services/customer_communications.py',
+        'app/services/hub_finance_document_field_catalog.py',
+        'app/services/hub_finance_documents.py',
+        'app/services/hub_finance_operations_shared.py',
+        'app/services/hub_finance_pdf_generation.py',
+        'app/services/hub_finance_pdf_readers.py',
+        'app/services/hub_invoice_email_batches.py',
+        'app/services/hub_mailbox.py',
+        'app/services/hub_operation_cancellation_invoice_email.py',
+        'app/services/hub_operation_finance.py',
+        'app/services/hub_operation_invoice_email.py',
+        'app/services/hub_operation_pdf_reads.py',
+        'app/services/hub_pdf_templates.py',
+        'app/services/hub_template_contexts.py',
+        'app/services/module_layout_catalog.py',
+        'app/services/template_placeholders.py',
+        'app/templates/base.html',
+        'app/templates/finance_document_create.html',
+        'app/templates/finance_document_detail.html',
+        'app/templates/finance_documents.html',
+        'app/templates/partials/finance_generated_pdf_panel.html',
+    }
 if '--customer-iban-reveal' in sys.argv:
     expected = {'app/api/routes/web.py', 'app/services/hub_customer_iban.py',
                 'app/templates/customer_detail.html', 'app/static/customer-iban.js', 'app/static/customer-iban.css'}
@@ -446,7 +477,7 @@ if '--local-crm' in sys.argv:
     }
     assert set(old) - set(new) == {name for name in expected if name.startswith('app/services/zoho_')}
 assert changes == expected, changes
-if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse', '--customer-checklist-defaults', '--customer-industry-combobox', '--customer-industry-cleanup', '--lead-industry-combobox', '--site-seo', '--lead-homepage-option', '--activity-relation-link', '--call-directory-filter', '--finance-directory-search', '--mailbox-invoices', '--mailbox-invoices-aggregate', '--mailbox-invoices-websites', '--email-template-placeholder-link', '--finance-discount-summary', '--mailbox-search', '--mailbox-search-hotfix', '--mailbox-reply-sender', '--mailbox-recipient-sender', '--mailbox-health-disabled', '--invoice-service-period', '--recurring-service-period', '--finance-layout-visibility', '--recurring-invoice-preview', '--recurring-service-reset')):
+if any(flag in sys.argv for flag in ('--invoice-recipient', '--email-preview', '--local-crm', '--email-reply-urls', '--note-titles', '--recipient-access', '--sepa-webhook', '--email-send-navigation', '--sepa-diagnostics', '--sepa-field-labels', '--customer-iban-reveal', '--sepa-grant-method', '--lead-url-fields', '--lead-appointment-email', '--contact-customer', '--lead-datetime-control', '--record-email-return', '--activity-delete-position', '--customer-checklists', '--customer-checklists-fix', '--customer-checklists-collapse', '--customer-checklist-defaults', '--customer-industry-combobox', '--customer-industry-cleanup', '--lead-industry-combobox', '--site-seo', '--lead-homepage-option', '--activity-relation-link', '--call-directory-filter', '--finance-directory-search', '--mailbox-invoices', '--mailbox-invoices-aggregate', '--mailbox-invoices-websites', '--email-template-placeholder-link', '--finance-discount-summary', '--mailbox-search', '--mailbox-search-hotfix', '--mailbox-reply-sender', '--mailbox-recipient-sender', '--mailbox-health-disabled', '--invoice-service-period', '--recurring-service-period', '--finance-layout-visibility', '--recurring-invoice-preview', '--recurring-service-reset', '--cancellation-invoices')):
     runtime_files = {str(path.relative_to(root)) for path in (root / 'app').rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
     assert runtime_files == set(old), 'Unexpected runtime files: ' + str(runtime_files ^ set(old))
@@ -556,4 +587,18 @@ if '--customer-checklist-defaults' in sys.argv:
     assert pending == 0
     assert post_review >= customers
     assert final_setup >= customers
+if '--cancellation-invoices' in sys.argv:
+    from sqlalchemy import inspect
+    schema = inspect(engine)
+    assert {
+        'hub_finance_cancellation_invoices',
+        'hub_finance_cancellation_invoice_lines',
+    } <= set(schema.get_table_names())
+    cancellation_columns = {
+        column['name'] for column in schema.get_columns('hub_finance_cancellation_invoices')
+    }
+    assert {
+        'cancellation_number', 'customer_id', 'contact_id', 'invoice_id',
+        'pdf_template_id', 'encrypted_fields_json',
+    } <= cancellation_columns
 print(json.dumps({'deployed': True, 'health': 200, 'backup': str(backup)}), flush=True)

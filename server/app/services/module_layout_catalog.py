@@ -8,7 +8,7 @@ from app.services.customer_directory import CONTACT_FIELDS_LAYOUT_KEY, CUSTOMER_
 from app.services.hub_case_field_catalog import HUB_CASE_FIELDS
 from app.services.hub_cases import CASE_FIELDS_LAYOUT_KEY
 from app.services.hub_finance import ARTICLE_FIELDS_LAYOUT_KEY, OFFER_FIELDS_LAYOUT_KEY
-from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES
+from app.services.hub_finance_documents import ALL_FINANCE_DOCUMENT_MODULES
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
 from app.services.hub_lead_field_catalog import HUB_LEAD_FIELDS
 from app.services.hub_leads import LEAD_FIELDS_LAYOUT_KEY
@@ -139,7 +139,7 @@ _LAYOUTS = {
             back_label=f"Zurück zu {module.label}",
             fields=_fields(module.fields),
         )
-        for module in FINANCE_DOCUMENT_MODULES.values()
+        for module in ALL_FINANCE_DOCUMENT_MODULES.values()
     },
 }
 

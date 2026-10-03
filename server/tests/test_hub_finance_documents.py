@@ -14,6 +14,7 @@ from app.models.hub_user import HubUser
 from app.models.hub_finance_documents import HubFinanceInvoice
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import (
+    CANCELLATION_INVOICE_MODULE,
     DUNNING_MODULE,
     FINANCE_DOCUMENT_MODULES,
     INVOICE_MODULE,
@@ -253,6 +254,100 @@ def _document_values(*, module: str, article_id: int) -> dict[str, str]:
             "document_field__system_payment_complete": "false",
         })
     return values
+
+
+def test_cancellation_invoice_copies_inverse_positions_and_finalizes_original_invoice():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        contact_id = _contact_id(db, customer)
+        service = HubFinanceDocumentService(db=db, cipher=cipher)
+        invoice_values = {
+            "document_field__status": "open",
+            "document_field__invoice_date": "2026-09-25",
+            "document_field__due_date": "2026-10-09",
+            "document_field__service_is_one_time": "false",
+            "document_field__service_period_start": "2026-10-01",
+            "document_field__service_period_end": "2026-10-31",
+            "document_field__currency": "EUR",
+            "document_line__0__name": "Website-Betreuung",
+            "document_line__0__quantity": "2",
+            "document_line__0__unit": "Monatlich",
+            "document_line__0__unit_price": "100",
+            "document_line__0__discount_percent": "0",
+            "document_line__0__tax_rate": "19",
+        }
+        invoice = service.create_document(
+            module=INVOICE_MODULE,
+            customer_id=customer.id,
+            contact_id=contact_id,
+            link_id=None,
+            submitted_values=invoice_values,
+        )
+        draft = service.cancellation_draft_from_invoice(invoice_id=invoice.id)
+        cancellation = service.create_document(
+            module=CANCELLATION_INVOICE_MODULE,
+            customer_id=customer.id,
+            contact_id=contact_id,
+            link_id=invoice.id,
+            submitted_values={
+                **draft.submitted_values,
+                "document_field__cancellation_date": "2026-10-03",
+                "document_field__cancellation_reason": "Auftrag vollständig storniert.",
+            },
+        )
+
+        invoice_stored = service._document_values(module=INVOICE_MODULE, document=invoice)
+        cancellation_detail = service.get_detail(
+            module=CANCELLATION_INVOICE_MODULE,
+            document_id=cancellation.id,
+        )
+        assert cancellation.cancellation_number == f"ST-{cancellation.id:06d}"
+        assert invoice_stored["status"] == "open"
+        assert cancellation_detail.link_label == invoice.invoice_number
+        assert cancellation_detail.lines[0].quantity == "-2.00"
+        assert cancellation_detail.totals.total_gross == Decimal("-238.00")
+        with pytest.raises(HubFinanceDocumentError, match="Stornoentwurf"):
+            service.update_document(
+                module=INVOICE_MODULE,
+                document_id=invoice.id,
+                customer_id=customer.id,
+                contact_id=contact_id,
+                link_id=None,
+                submitted_values=invoice_values,
+            )
+        with pytest.raises(HubFinanceDocumentError, match="bereits"):
+            service.create_document(
+                module=CANCELLATION_INVOICE_MODULE,
+                customer_id=customer.id,
+                contact_id=contact_id,
+                link_id=invoice.id,
+                submitted_values={
+                    "document_field__cancellation_date": "2026-10-03",
+                    "document_field__cancellation_reason": "Doppelt",
+                },
+            )
+
+        service.finalize_cancellation(cancellation_id=cancellation.id)
+        assert service._document_values(module=CANCELLATION_INVOICE_MODULE, document=cancellation)["status"] == "created"
+        assert service._document_values(module=INVOICE_MODULE, document=invoice)["status"] == "cancelled"
+        with pytest.raises(HubFinanceDocumentError, match="nicht mehr geändert"):
+            service.update_document(
+                module=CANCELLATION_INVOICE_MODULE,
+                document_id=cancellation.id,
+                customer_id=customer.id,
+                contact_id=contact_id,
+                link_id=invoice.id,
+                submitted_values={
+                    "document_field__cancellation_date": "2026-10-04",
+                    "document_field__cancellation_reason": "Geändert",
+                },
+            )
 
 
 def test_orders_and_invoices_keep_positions_and_document_links_locally():

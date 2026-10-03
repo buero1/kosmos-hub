@@ -19,6 +19,8 @@ from app.models.customer import Customer
 from app.models.customer_contact import CustomerContact
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_documents import (
+    HubFinanceCancellationInvoice,
+    HubFinanceCancellationInvoiceLine,
     HubFinanceDunning,
     HubFinanceDunningLine,
     HubFinanceInvoice,
@@ -42,7 +44,13 @@ from app.services.hub_finance import (
     FinanceOfferTotals,
     HubFinanceService,
 )
-from app.services.hub_finance_document_field_catalog import DUNNING_FIELDS, INVOICE_FIELDS, ORDER_FIELDS, RECURRING_INVOICE_FIELDS
+from app.services.hub_finance_document_field_catalog import (
+    CANCELLATION_INVOICE_FIELDS,
+    DUNNING_FIELDS,
+    INVOICE_FIELDS,
+    ORDER_FIELDS,
+    RECURRING_INVOICE_FIELDS,
+)
 from app.services.hub_finance_field_catalog import FINANCE_POSITION_UNITS, HubFinanceField
 from app.services.module_layouts import ModuleLayoutService
 from app.services.hub_pdf_templates import HubPdfTemplateService
@@ -52,6 +60,7 @@ from app.services.hub_invoice_email_delivery import InvoiceEmailDelivery, invoic
 ORDER_FIELDS_LAYOUT_KEY = "finance-order-fields"
 INVOICE_FIELDS_LAYOUT_KEY = "finance-invoice-fields"
 DUNNING_FIELDS_LAYOUT_KEY = "finance-dunning-fields"
+CANCELLATION_INVOICE_FIELDS_LAYOUT_KEY = "finance-cancellation-invoice-fields"
 RECURRING_INVOICE_FIELDS_LAYOUT_KEY = "finance-recurring-invoice-fields"
 _CENT = Decimal("0.01")
 _QUANTITY_STEP = Decimal("0.01")
@@ -162,6 +171,7 @@ class FinanceDocumentModule:
     link_model: type[Any] | None = None
     is_invoice: bool = False
     is_dunning: bool = False
+    is_cancellation: bool = False
     is_recurring: bool = False
 
 
@@ -218,6 +228,24 @@ DUNNING_MODULE = FinanceDocumentModule(
     is_dunning=True,
 )
 
+CANCELLATION_INVOICE_MODULE = FinanceDocumentModule(
+    key="cancellation-invoices",
+    label="Stornorechnungen",
+    singular="Stornorechnung",
+    eyebrow="Finance · Stornorechnung",
+    fields=CANCELLATION_INVOICE_FIELDS,
+    layout_key=CANCELLATION_INVOICE_FIELDS_LAYOUT_KEY,
+    model=HubFinanceCancellationInvoice,
+    line_model=HubFinanceCancellationInvoiceLine,
+    number_attribute="cancellation_number",
+    number_prefix="ST",
+    date_key="cancellation_date",
+    link_key="linked_invoice",
+    link_attribute="invoice",
+    link_model=HubFinanceInvoice,
+    is_cancellation=True,
+)
+
 RECURRING_INVOICE_MODULE = FinanceDocumentModule(
     key="recurring-invoices",
     label="Periodische Rechnungen",
@@ -236,6 +264,10 @@ RECURRING_INVOICE_MODULE = FinanceDocumentModule(
 FINANCE_DOCUMENT_MODULES = {
     module.key: module
     for module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, RECURRING_INVOICE_MODULE)
+}
+ALL_FINANCE_DOCUMENT_MODULES = {
+    **FINANCE_DOCUMENT_MODULES,
+    CANCELLATION_INVOICE_MODULE.key: CANCELLATION_INVOICE_MODULE,
 }
 
 
@@ -260,6 +292,15 @@ class FinanceDocumentLinkOption:
 
 @dataclass(frozen=True)
 class FinanceDunningDraft:
+    invoice_id: int
+    invoice_identifier: str
+    customer_id: int | None
+    contact_id: int | None
+    submitted_values: dict[str, str]
+
+
+@dataclass(frozen=True)
+class FinanceCancellationDraft:
     invoice_id: int
     invoice_identifier: str
     customer_id: int | None
@@ -328,7 +369,7 @@ class HubFinanceDocumentService:
 
     @staticmethod
     def module(key: str) -> FinanceDocumentModule:
-        module = FINANCE_DOCUMENT_MODULES.get(key)
+        module = ALL_FINANCE_DOCUMENT_MODULES.get(key)
         if module is None:
             raise HubFinanceDocumentError("Das Finance-Modul wurde nicht gefunden.")
         return module
@@ -464,7 +505,7 @@ class HubFinanceDocumentService:
             lines=lines,
             totals=totals,
             show_more_index=show_more_index,
-            billing_address=self._text(values.get("billing_address")) if module.is_invoice or module.is_dunning else "",
+            billing_address=self._text(values.get("billing_address")) if module.is_invoice or module.is_dunning or module.is_cancellation else "",
             invoice_pdf=invoice_pdf,
             order_pdf=order_pdf,
             email_delivery=invoice_email_deliveries(self.db, [document.id])[document.id] if module.is_invoice else None,
@@ -491,6 +532,9 @@ class HubFinanceDocumentService:
             values["document_field__status"] = "payment_reminder"
             values["document_field__dunning_date"] = today
             values["document_field__due_date"] = (date.today() + timedelta(days=7)).isoformat()
+        elif module is CANCELLATION_INVOICE_MODULE:
+            values["document_field__status"] = "draft"
+            values["document_field__cancellation_date"] = today
         else:
             values.update({
                 "document_field__start_date": today,
@@ -509,6 +553,12 @@ class HubFinanceDocumentService:
         submitted_values: dict[str, str],
         pdf_template_id: int | None = None,
     ) -> Any:
+        if module.is_cancellation:
+            return self._create_cancellation_invoice(
+                invoice_id=link_id,
+                submitted_values=submitted_values,
+                pdf_template_id=pdf_template_id,
+            )
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
         linked_record = self._linked_record(module=module, link_id=link_id, customer_id=customer.id)
         values = self._submitted_fields(module=module, submitted_values=submitted_values)
@@ -526,7 +576,7 @@ class HubFinanceDocumentService:
                 "system_payment_complete": "false",
             })
         constructor: dict[str, Any] = {"customer": customer, "contact": contact, "encrypted_fields_json": self._encrypt(values)}
-        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, RECURRING_INVOICE_MODULE):
+        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, CANCELLATION_INVOICE_MODULE, RECURRING_INVOICE_MODULE):
             constructor["pdf_template"] = self._pdf_template(module=module, template_id=pdf_template_id)
         if module.link_attribute:
             constructor[module.link_attribute] = linked_record
@@ -538,6 +588,98 @@ class HubFinanceDocumentService:
         if module.number_attribute and module.number_prefix:
             setattr(document, module.number_attribute, f"{module.number_prefix}-{document.id:06d}")
         self._replace_lines(module=module, document=document, submitted_values=submitted_values)
+        self.db.flush()
+        return document
+
+    def _create_cancellation_invoice(
+        self,
+        *,
+        invoice_id: int | None,
+        submitted_values: dict[str, str],
+        pdf_template_id: int | None,
+    ) -> HubFinanceCancellationInvoice:
+        if invoice_id is None:
+            raise HubFinanceDocumentError("Stornierte Rechnung ist erforderlich.")
+        invoice = self.db.scalar(
+            select(HubFinanceInvoice)
+            .options(
+                selectinload(HubFinanceInvoice.lines),
+                selectinload(HubFinanceInvoice.cancellation_invoice),
+            )
+            .where(HubFinanceInvoice.id == invoice_id)
+            .with_for_update()
+        )
+        if invoice is None:
+            raise HubFinanceDocumentError("Die zu stornierende Rechnung wurde nicht gefunden.")
+        source_values = self._document_values(module=INVOICE_MODULE, document=invoice)
+        if source_values.get("status") == "draft":
+            raise HubFinanceDocumentError("Eine Entwurfsrechnung kann ohne Stornorechnung gelöscht oder geändert werden.")
+        if source_values.get("status") == "cancelled" or invoice.cancellation_invoice is not None:
+            raise HubFinanceDocumentError("Für diese Rechnung besteht bereits eine Stornorechnung.")
+        submitted_values = dict(submitted_values)
+        submitted_values.setdefault(
+            "document_field__source_invoice_date",
+            self._text(source_values.get("invoice_date")),
+        )
+        values = self._submitted_fields(
+            module=CANCELLATION_INVOICE_MODULE,
+            submitted_values=submitted_values,
+        )
+        values.update({
+            "status": "draft",
+            "currency": self._text(source_values.get("currency")) or "EUR",
+            "source_invoice_date": self._text(source_values.get("invoice_date")) or values.get("source_invoice_date", ""),
+            "billing_address": self._text(source_values.get("billing_address")),
+            "service_is_one_time": self._text(source_values.get("service_is_one_time")),
+            "service_date": self._text(source_values.get("service_date")),
+            "service_period_start": self._text(source_values.get("service_period_start")),
+            "service_period_end": self._text(source_values.get("service_period_end")),
+        })
+        document = HubFinanceCancellationInvoice(
+            customer=invoice.customer,
+            contact=invoice.contact,
+            invoice=invoice,
+            pdf_template=self._pdf_template(
+                module=CANCELLATION_INVOICE_MODULE,
+                template_id=pdf_template_id,
+            ),
+            encrypted_fields_json=self._encrypt(values),
+        )
+        self.db.add(document)
+        self.db.flush()
+        document.cancellation_number = f"{CANCELLATION_INVOICE_MODULE.number_prefix}-{document.id:06d}"
+        for index, source_line in enumerate(invoice.lines):
+            line_values = self._values(source_line.encrypted_fields_json)
+            quantity = -abs(self._quantity(line_values.get("quantity")))
+            line_values["quantity"] = self._decimal_string(quantity)
+            document.lines.append(HubFinanceCancellationInvoiceLine(
+                article=source_line.article,
+                position_index=index,
+                encrypted_fields_json=self._encrypt(line_values),
+            ))
+        self.db.flush()
+        return document
+
+    def _update_cancellation_invoice(
+        self,
+        *,
+        document: HubFinanceCancellationInvoice,
+        submitted_values: dict[str, str],
+        pdf_template_id: int | None,
+    ) -> HubFinanceCancellationInvoice:
+        existing_values = self._document_values(module=CANCELLATION_INVOICE_MODULE, document=document)
+        if existing_values.get("status") != "draft":
+            raise HubFinanceDocumentError("Eine erstellte Stornorechnung kann nicht mehr geändert werden.")
+        changed_values = self._submitted_fields(
+            module=CANCELLATION_INVOICE_MODULE,
+            submitted_values=submitted_values,
+            existing_values=existing_values,
+        )
+        document.encrypted_fields_json = self._encrypt({**existing_values, **changed_values})
+        document.pdf_template = self._pdf_template(
+            module=CANCELLATION_INVOICE_MODULE,
+            template_id=pdf_template_id,
+        )
         self.db.flush()
         return document
 
@@ -558,10 +700,20 @@ class HubFinanceDocumentService:
         document = self.db.scalar(query)
         if document is None:
             raise HubFinanceDocumentError(f"{module.singular} wurde nicht gefunden.")
+        if module.is_cancellation:
+            return self._update_cancellation_invoice(
+                document=document,
+                submitted_values=submitted_values,
+                pdf_template_id=pdf_template_id,
+            )
         customer, contact = self._customer_and_contact(customer_id=customer_id, contact_id=contact_id)
         linked_record = self._linked_record(module=module, link_id=link_id, customer_id=customer.id)
         existing_values = self._document_values(module=module, document=document)
         values = self._submitted_fields(module=module, submitted_values=submitted_values, existing_values=existing_values)
+        if module.is_invoice and document.cancellation_invoice is not None:
+            raise HubFinanceDocumentError(
+                "Die Rechnung besitzt bereits eine Stornorechnung oder einen Stornoentwurf und kann nicht mehr geändert werden."
+            )
         if module.is_recurring:
             interval_changed = values["interval_unit"] != existing_values.get("interval_unit")
             values = {**existing_values, **values}
@@ -577,7 +729,7 @@ class HubFinanceDocumentService:
             document.hub_next_run_on = date.fromisoformat(values["next_invoice_date"]) if values["next_invoice_date"] else None
         document.customer = customer
         document.contact = contact
-        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, RECURRING_INVOICE_MODULE):
+        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, CANCELLATION_INVOICE_MODULE, RECURRING_INVOICE_MODULE):
             document.pdf_template = self._pdf_template(module=module, template_id=pdf_template_id)
         if module.link_attribute:
             setattr(document, module.link_attribute, linked_record)
@@ -592,6 +744,12 @@ class HubFinanceDocumentService:
         document = self.db.get(module.model, document_id)
         if document is None:
             raise HubFinanceDocumentError(f"{module.singular} wurde nicht gefunden.")
+        if module.is_cancellation:
+            values = self._document_values(module=module, document=document)
+            if values.get("status") != "draft":
+                raise HubFinanceDocumentError("Eine erstellte Stornorechnung kann nicht gelöscht werden.")
+        if module.is_invoice and document.cancellation_invoice is not None:
+            raise HubFinanceDocumentError("Die Rechnung besitzt eine Stornorechnung und kann nicht gelöscht werden.")
         if module.is_invoice:
             pdf = self.db.scalar(select(HubFinanceInvoicePdf).where(HubFinanceInvoicePdf.invoice_id == document.id))
             if pdf is not None:
@@ -602,7 +760,7 @@ class HubFinanceDocumentService:
             if pdf is not None:
                 self._remove_pdf_after_commit(FinanceInvoicePdfStorage(cipher=self.cipher), pdf.storage_key, after_commit)
                 self.db.delete(pdf)
-        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE):
+        if module in (ORDER_MODULE, INVOICE_MODULE, DUNNING_MODULE, CANCELLATION_INVOICE_MODULE):
             generated_pdf = self.db.scalar(
                 select(HubFinanceGeneratedPdf).where(
                     HubFinanceGeneratedPdf.document_type == module.key,
@@ -660,6 +818,15 @@ class HubFinanceDocumentService:
             return tuple(
                 FinanceDocumentLinkOption(id=entry.document.id, label=entry.identifier, customer_id=entry.document.customer_id)
                 for entry in self.list_documents(module=INVOICE_MODULE)
+                if self._document_values(module=INVOICE_MODULE, document=entry.document).get("status") != "cancelled"
+                and entry.document.cancellation_invoice is None
+            )
+        if module is CANCELLATION_INVOICE_MODULE:
+            return tuple(
+                FinanceDocumentLinkOption(id=entry.document.id, label=entry.identifier, customer_id=entry.document.customer_id)
+                for entry in self.list_documents(module=INVOICE_MODULE)
+                if self._document_values(module=INVOICE_MODULE, document=entry.document).get("status") not in {"draft", "cancelled"}
+                and entry.document.cancellation_invoice is None
             )
         return ()
 
@@ -668,6 +835,8 @@ class HubFinanceDocumentService:
         if detail is None:
             raise HubFinanceDocumentError("Die verknüpfte Rechnung wurde nicht gefunden.")
         invoice_values = self._document_values(module=INVOICE_MODULE, document=detail.document)
+        if invoice_values.get("status") == "cancelled" or detail.document.cancellation_invoice is not None:
+            raise HubFinanceDocumentError("Eine Rechnung mit Stornorechnung kann nicht gemahnt werden.")
         submitted = self.new_form_values(module=DUNNING_MODULE)
         submitted["document_field__currency"] = self._text(invoice_values.get("currency")) or "EUR"
         for index, line in enumerate(detail.lines):
@@ -689,6 +858,76 @@ class HubFinanceDocumentService:
             contact_id=detail.document.contact_id,
             submitted_values=submitted,
         )
+
+    def cancellation_draft_from_invoice(self, *, invoice_id: int) -> FinanceCancellationDraft:
+        invoice = self.db.scalar(
+            select(HubFinanceInvoice)
+            .options(selectinload(HubFinanceInvoice.lines), selectinload(HubFinanceInvoice.cancellation_invoice))
+            .where(HubFinanceInvoice.id == invoice_id)
+        )
+        if invoice is None:
+            raise HubFinanceDocumentError("Die zu stornierende Rechnung wurde nicht gefunden.")
+        invoice_values = self._document_values(module=INVOICE_MODULE, document=invoice)
+        if invoice_values.get("status") == "draft":
+            raise HubFinanceDocumentError("Eine Entwurfsrechnung kann ohne Stornorechnung gelöscht oder geändert werden.")
+        if invoice_values.get("status") == "cancelled" or invoice.cancellation_invoice is not None:
+            raise HubFinanceDocumentError("Für diese Rechnung besteht bereits eine Stornorechnung.")
+        submitted = self.new_form_values(module=CANCELLATION_INVOICE_MODULE)
+        for key in (
+            "currency",
+            "service_is_one_time",
+            "service_date",
+            "service_period_start",
+            "service_period_end",
+        ):
+            submitted[f"document_field__{key}"] = self._text(invoice_values.get(key))
+        submitted["document_field__source_invoice_date"] = self._text(invoice_values.get("invoice_date"))
+        for index, source_line in enumerate(invoice.lines):
+            line_values = self._values(source_line.encrypted_fields_json)
+            line_values["quantity"] = self._decimal_string(-abs(self._quantity(line_values.get("quantity"))))
+            line_values["article_id"] = str(source_line.article_id or "")
+            for key, value in line_values.items():
+                submitted[f"document_line__{index}__{key}"] = value
+        return FinanceCancellationDraft(
+            invoice_id=invoice.id,
+            invoice_identifier=self.identifier(module=INVOICE_MODULE, document=invoice, values=invoice_values),
+            customer_id=invoice.customer_id,
+            contact_id=invoice.contact_id,
+            submitted_values=submitted,
+        )
+
+    def finalize_cancellation(self, *, cancellation_id: int) -> HubFinanceCancellationInvoice:
+        cancellation = self.db.scalar(
+            select(HubFinanceCancellationInvoice)
+            .options(selectinload(HubFinanceCancellationInvoice.invoice))
+            .where(HubFinanceCancellationInvoice.id == cancellation_id)
+            .with_for_update()
+        )
+        if cancellation is None:
+            raise HubFinanceDocumentError("Die Stornorechnung wurde nicht gefunden.")
+        values = self._document_values(module=CANCELLATION_INVOICE_MODULE, document=cancellation)
+        if values.get("status") in {"created", "sent"}:
+            return cancellation
+        values["status"] = "created"
+        cancellation.encrypted_fields_json = self._encrypt(values)
+        invoice_values = self._document_values(module=INVOICE_MODULE, document=cancellation.invoice)
+        invoice_values["status"] = "cancelled"
+        invoice_values["remaining_amount"] = "0"
+        cancellation.invoice.encrypted_fields_json = self._encrypt(invoice_values)
+        self.db.flush()
+        return cancellation
+
+    def mark_cancellation_sent(self, *, cancellation_id: int) -> HubFinanceCancellationInvoice:
+        cancellation = self.db.get(HubFinanceCancellationInvoice, cancellation_id)
+        if cancellation is None:
+            raise HubFinanceDocumentError("Die Stornorechnung wurde nicht gefunden.")
+        values = self._document_values(module=CANCELLATION_INVOICE_MODULE, document=cancellation)
+        if values.get("status") == "draft":
+            raise HubFinanceDocumentError("Die Stornorechnung ist noch nicht fertiggestellt.")
+        values["status"] = "sent"
+        cancellation.encrypted_fields_json = self._encrypt(values)
+        self.db.flush()
+        return cancellation
 
     def identifier(self, *, module: FinanceDocumentModule, document: Any, values: dict[str, str] | None = None) -> str:
         values = values if values is not None else self._document_values(module=module, document=document)
@@ -1071,6 +1310,10 @@ class HubFinanceDocumentService:
         lead_offer = module is ORDER_MODULE and record is not None and record.customer_id is None and record.lead_id is not None
         if record is None or (record.customer_id != customer_id and not lead_offer):
             raise HubFinanceDocumentError("Der verknüpfte Beleg gehört nicht zum ausgewählten Kunden.")
+        if module is DUNNING_MODULE:
+            invoice_values = self._document_values(module=INVOICE_MODULE, document=record)
+            if invoice_values.get("status") == "cancelled" or record.cancellation_invoice is not None:
+                raise HubFinanceDocumentError("Eine Rechnung mit Stornorechnung kann nicht gemahnt werden.")
         return record
 
     def _line_view(self, line: Any) -> FinanceOfferLineView:

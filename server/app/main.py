@@ -39,6 +39,8 @@ from app.models.hub_lead_note import HubLeadNote
 from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer, HubFinanceOfferLine
 from app.models.hub_finance_documents import (
+    HubFinanceCancellationInvoice,
+    HubFinanceCancellationInvoiceLine,
     HubFinanceDunning,
     HubFinanceDunningLine,
     HubFinanceInvoice,
@@ -335,6 +337,8 @@ def _ensure_phase_one_schema() -> None:
         HubFinanceInvoiceLine,
         HubFinanceDunning,
         HubFinanceDunningLine,
+        HubFinanceCancellationInvoice,
+        HubFinanceCancellationInvoiceLine,
         HubFinanceRecurringInvoice,
         HubFinanceRecurringInvoiceLine,
     ):

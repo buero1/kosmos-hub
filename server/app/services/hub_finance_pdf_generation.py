@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.security import SecretCipher, get_secret_cipher
 from app.db.session import SessionLocal
-from app.models.hub_finance_documents import HubFinanceDunning, HubFinanceInvoice, HubFinanceOrder
+from app.models.hub_finance_documents import (
+    HubFinanceCancellationInvoice,
+    HubFinanceDunning,
+    HubFinanceInvoice,
+    HubFinanceOrder,
+)
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
 from app.models.hub_finance_offer import HubFinanceOffer
 from app.models.hub_legal_terms import HubLegalTermsRevision
@@ -31,6 +36,7 @@ from app.services.email_compose_images import EmailComposeImageError, EmailCompo
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import (
+    CANCELLATION_INVOICE_MODULE,
     DUNNING_MODULE,
     INVOICE_MODULE,
     ORDER_MODULE,
@@ -54,6 +60,7 @@ _DOCUMENT_MODELS = {
     "orders": HubFinanceOrder,
     "invoices": HubFinanceInvoice,
     "dunnings": HubFinanceDunning,
+    "cancellation-invoices": HubFinanceCancellationInvoice,
 }
 _PDF_TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
@@ -108,6 +115,7 @@ class FinancePdfSnapshot:
     billing_country_code: str
     lines: tuple[Any, ...]
     totals: Any
+    source_invoice_date: str = ""
     customer_fields: dict[str, str] = field(default_factory=dict)
     contact_fields: dict[str, str] = field(default_factory=dict)
     notes_html: str = ""
@@ -138,6 +146,17 @@ class HubFinancePdfService:
         document = self.db.get(model, document_id)
         if document is None:
             raise HubFinancePdfError("Der Beleg wurde nicht gefunden.")
+        if document_type == "cancellation-invoices":
+            values = HubFinanceDocumentService(db=self.db, cipher=self.cipher)._document_values(
+                module=CANCELLATION_INVOICE_MODULE,
+                document=document,
+            )
+            if values.get("status") != "draft":
+                raise HubFinancePdfError("Eine erstellte Stornorechnung kann nicht neu erzeugt werden.")
+        if document_type == "invoices" and document.cancellation_invoice is not None:
+            raise HubFinancePdfError(
+                "Die Rechnung besitzt bereits eine Stornorechnung oder einen Stornoentwurf und kann nicht neu erzeugt werden."
+            )
         template_service = HubPdfTemplateService(db=self.db)
         template = self._template_for(document=document, document_type=document_type, service=template_service)
         revision = template_service.revision_for(template)
@@ -165,10 +184,11 @@ class HubFinancePdfService:
         generated_pdf.template_version = template.version
         generated_pdf.status = "queued"
         generated_pdf.generation_token = generation_token
-        generated_pdf.is_zugferd = document_type == "invoices"
-        generated_pdf.zugferd_version = "2.5.2" if document_type == "invoices" else None
-        generated_pdf.zugferd_profile = "EN 16931" if document_type == "invoices" else None
-        generated_pdf.validation_status = "pending" if document_type == "invoices" else "not-applicable"
+        is_zugferd = document_type in {"invoices", "cancellation-invoices"}
+        generated_pdf.is_zugferd = is_zugferd
+        generated_pdf.zugferd_version = "2.5.2" if is_zugferd else None
+        generated_pdf.zugferd_profile = "EN 16931" if is_zugferd else None
+        generated_pdf.validation_status = "pending" if is_zugferd else "not-applicable"
         generated_pdf.error_message = None
         generated_pdf.requested_at = now
         generated_pdf.generation_started_at = None
@@ -269,7 +289,7 @@ class HubFinancePdfService:
         html = EmailComposeImageService(db=self.db, cipher=self.cipher).embed_local_images(html)
         pdf_content = self._render_pdf(html=html, snapshot=snapshot)
         validation_status = "not-applicable"
-        if generated_pdf.document_type == "invoices":
+        if generated_pdf.document_type in {"invoices", "cancellation-invoices"}:
             pdf_content = self._add_zugferd(pdf_content=pdf_content, snapshot=snapshot)
             validation_status = "xsd-valid-draft"
 
@@ -291,6 +311,10 @@ class HubFinancePdfService:
         latest.error_message = None
         latest.generated_at = datetime.now(UTC)
         latest.next_retry_at = None
+        if generated_pdf.document_type == "cancellation-invoices":
+            HubFinanceDocumentService(db=self.db, cipher=self.cipher).finalize_cancellation(
+                cancellation_id=generated_pdf.document_id,
+            )
         self.db.commit()
         if old_storage_key and old_storage_key != storage_key:
             storage.remove(old_storage_key)
@@ -387,6 +411,7 @@ class HubFinancePdfService:
             document_date=scheduled_on.isoformat(),
             due_date=due_on.isoformat(),
             source_invoice_number="",
+            source_invoice_date="",
             valid_until="",
             payment_terms=payment_terms,
             currency=values.get("currency") or "EUR",
@@ -407,6 +432,7 @@ class HubFinancePdfService:
         return snapshot, document, scheduled_on
 
     def _snapshot(self, *, document_type: str, document_id: int) -> FinancePdfSnapshot:
+        document_values: dict[str, str] = {}
         if document_type == "offers":
             service = HubFinanceService(db=self.db, cipher=self.cipher)
             detail = service.get_offer_detail(offer_id=document_id)
@@ -423,6 +449,7 @@ class HubFinancePdfService:
                 "orders": ORDER_MODULE,
                 "invoices": INVOICE_MODULE,
                 "dunnings": DUNNING_MODULE,
+                "cancellation-invoices": CANCELLATION_INVOICE_MODULE,
             }.get(document_type)
             if module is None:
                 raise HubFinancePdfError("Für diese Belegart kann keine PDF erzeugt werden.")
@@ -432,11 +459,13 @@ class HubFinancePdfService:
                 raise HubFinancePdfError("Der Beleg wurde nicht gefunden.")
             fields = {field.key: field for field in detail.fields}
             document = detail.document
+            document_values = service._document_values(module=module, document=document)
             date_key = module.date_key
             title = {
                 "orders": self._field_form_value(fields, "order_name"),
                 "invoices": "Rechnung",
                 "dunnings": "Mahnung",
+                "cancellation-invoices": "Stornorechnung",
             }[document_type]
             due_date = self._field_form_value(fields, "due_date") if document_type in {"invoices", "dunnings"} else ""
             valid_until = ""
@@ -448,14 +477,15 @@ class HubFinancePdfService:
         return FinancePdfSnapshot(
             document_type=document_type,
             identifier=detail.offer_number if document_type == "offers" else detail.identifier,
-            document_title=title or {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung"}[document_type],
+            document_title=title or {"offers": "Angebot", "orders": "Auftrag", "invoices": "Rechnung", "dunnings": "Mahnung", "cancellation-invoices": "Stornorechnung"}[document_type],
             document_status=detail.status,
             document_date=self._field_form_value(fields, date_key),
             due_date=due_date,
-            source_invoice_number=detail.link_label if document_type == "dunnings" else "",
+            source_invoice_number=detail.link_label if document_type in {"dunnings", "cancellation-invoices"} else "",
+            source_invoice_date=document_values.get("source_invoice_date", "") if document_type == "cancellation-invoices" else "",
             valid_until=valid_until,
             payment_terms=self._field_display_value(fields, "payment_terms"),
-            currency=self._field_form_value(fields, "currency") or "EUR",
+            currency=(document_values.get("currency", "") if document_type == "cancellation-invoices" else self._field_form_value(fields, "currency")) or "EUR",
             customer_name=customer_name,
             contact_name=contact_name,
             billing_street=customer_address[0],
@@ -468,13 +498,13 @@ class HubFinancePdfService:
             contact_fields=contact_fields,
             notes_html=detail.notes_html if document_type == "offers" else "",
             document_fields={key: self._field_display_value(fields, key) for key in fields} if document_type == "orders" else {},
-            service_is_one_time=self._truthy(self._field_form_value(fields, "service_is_one_time")),
-            service_date=self._field_form_value(fields, "service_date"),
-            service_period_start=self._field_form_value(fields, "service_period_start"),
-            service_period_end=self._field_form_value(fields, "service_period_end"),
-            service_has_data=document_type == "invoices" and (
-                self._field_form_value(fields, "service_is_one_time") in {"true", "false"}
-                or any(self._field_form_value(fields, key) for key in ("service_date", "service_period_start", "service_period_end"))
+            service_is_one_time=self._truthy(document_values.get("service_is_one_time") if document_type == "cancellation-invoices" else self._field_form_value(fields, "service_is_one_time")),
+            service_date=document_values.get("service_date", "") if document_type == "cancellation-invoices" else self._field_form_value(fields, "service_date"),
+            service_period_start=document_values.get("service_period_start", "") if document_type == "cancellation-invoices" else self._field_form_value(fields, "service_period_start"),
+            service_period_end=document_values.get("service_period_end", "") if document_type == "cancellation-invoices" else self._field_form_value(fields, "service_period_end"),
+            service_has_data=document_type in {"invoices", "cancellation-invoices"} and (
+                (document_values.get("service_is_one_time") if document_type == "cancellation-invoices" else self._field_form_value(fields, "service_is_one_time")) in {"true", "false"}
+                or any((document_values.get(key, "") if document_type == "cancellation-invoices" else self._field_form_value(fields, key)) for key in ("service_date", "service_period_start", "service_period_end"))
             ),
         )
 
@@ -491,7 +521,7 @@ class HubFinancePdfService:
         lead_detail = None
         if document_type == "offers" and getattr(document, "lead_id", None) is not None:
             lead_detail = HubLeadService(db=self.db, cipher=self.cipher).get_detail(lead_id=document.lead_id)
-        if document_type in {"invoices", "dunnings"} and getattr(detail, "billing_address", ""):
+        if document_type in {"invoices", "dunnings", "cancellation-invoices"} and getattr(detail, "billing_address", ""):
             customer_address = self._address_with_snapshot_fallback(
                 customer_address,
                 detail.billing_address,
@@ -616,6 +646,7 @@ class HubFinancePdfService:
             f"${{{namespace}.Date}}": self._display_date(snapshot.document_date),
             f"${{{namespace}.DueDate}}": self._display_date(snapshot.due_date),
             f"${{{namespace}.SourceInvoiceNumber}}": snapshot.source_invoice_number,
+            f"${{{namespace}.SourceInvoiceDate}}": self._display_date(snapshot.source_invoice_date),
             f"${{{namespace}.ValidUntil}}": self._display_date(snapshot.valid_until),
             f"${{{namespace}.PaymentTerms}}": snapshot.payment_terms,
             f"${{{namespace}.NetTotal}}": self._money(snapshot.totals.subtotal_net, snapshot.currency),
@@ -649,7 +680,7 @@ class HubFinancePdfService:
                 rendered_blocks[str(key)] = ""
                 continue
             rendered = str(raw.get("content_html", ""))
-            if key == "metadata" and snapshot.document_type == "invoices":
+            if key == "metadata" and snapshot.document_type in {"invoices", "cancellation-invoices"}:
                 rendered = self._invoice_service_metadata(rendered, snapshot)
             rendered_blocks[str(key)] = _PLACEHOLDER_PATTERN.sub(
                 lambda match: notes_html if match.group(0) == OFFER_NOTES_TOKEN else escape(replacements.get(match.group(0), "") or ""),
@@ -683,7 +714,7 @@ class HubFinancePdfService:
             from weasyprint import HTML
         except (ImportError, OSError) as exc:
             raise HubFinancePdfError("Der PDF-Renderer ist auf dem Server nicht vollständig installiert.") from exc
-        variant = "pdf/a-3u" if snapshot.document_type == "invoices" else "pdf/a-2u"
+        variant = "pdf/a-3u" if snapshot.document_type in {"invoices", "cancellation-invoices"} else "pdf/a-2u"
         result = HTML(string=html).write_pdf(
             pdf_variant=variant,
             pdf_identifier=True,
@@ -718,8 +749,8 @@ class HubFinancePdfService:
             afrelationship="data",
             pdf_metadata={
                 "author": get_settings().finance_company_name,
-                "title": f"Rechnung {snapshot.identifier}",
-                "subject": "ZUGFeRD-Rechnung (technischer Entwurf)",
+                "title": f"{snapshot.document_title} {snapshot.identifier}",
+                "subject": f"ZUGFeRD-{snapshot.document_title} (technischer Entwurf)",
                 "keywords": "ZUGFeRD, Factur-X, EN 16931",
             },
         )
@@ -767,7 +798,7 @@ class HubFinancePdfService:
         data: dict[str, object] = {
             "BT-1": snapshot.identifier,
             "BT-2": invoice_date,
-            "BT-3": "380",
+            "BT-3": "384" if snapshot.document_type == "cancellation-invoices" else "380",
             "BT-5": snapshot.currency,
             "BT-27": settings.finance_company_name,
             "BT-31": settings.finance_company_tax_id,
@@ -791,6 +822,16 @@ class HubFinancePdfService:
         }
         if due_date:
             data["BT-9"] = due_date
+        if snapshot.document_type == "cancellation-invoices":
+            if not snapshot.source_invoice_number or not snapshot.source_invoice_date:
+                raise HubFinancePdfError("Die Stornorechnung benötigt Nummer und Datum der ursprünglichen Rechnung.")
+            data["BG-3"] = [{
+                "BT-25": snapshot.source_invoice_number,
+                "BT-26": HubFinancePdfService._required_date(
+                    snapshot.source_invoice_date,
+                    "Ursprüngliches Rechnungsdatum",
+                ),
+            }]
         if snapshot.service_has_data:
             if snapshot.service_is_one_time:
                 data["BT-72"] = HubFinancePdfService._required_date(snapshot.service_date, "Leistungsdatum")
@@ -825,22 +866,22 @@ class HubFinancePdfService:
 
     @staticmethod
     def _invoice_service_metadata(content_html: str, snapshot: FinancePdfSnapshot) -> str:
+        namespace = DOCUMENT_NAMES[snapshot.document_type][0]
+        label_token = f"${{{namespace}.ServiceLabel}}"
+        value_token = f"${{{namespace}.ServiceValue}}"
         if not snapshot.service_has_data:
-            return content_html.replace(
-                "<br><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}",
-                "",
-            )
-        if "${Invoice.ServiceValue}" in content_html:
+            return content_html.replace(f"<br><strong>{label_token}:</strong> {value_token}", "")
+        if value_token in content_html:
             return content_html
-        service_line = "<p><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}</p>"
+        service_line = f"<p><strong>{label_token}:</strong> {value_token}</p>"
         if "Abbuchungsdatum" not in content_html:
             return content_html + service_line
-        updated = content_html.replace("Abbuchungsdatum", "${Invoice.ServiceLabel}", 1)
-        label_position = updated.find("${Invoice.ServiceLabel}")
-        for token in ("${Invoice.DueDate}", "${dueDate}"):
+        updated = content_html.replace("Abbuchungsdatum", label_token, 1)
+        label_position = updated.find(label_token)
+        for token in (f"${{{namespace}.DueDate}}", "${dueDate}"):
             value_position = updated.find(token, label_position)
             if value_position != -1 and value_position - label_position <= 500:
-                return updated[:value_position] + "${Invoice.ServiceValue}" + updated[value_position + len(token):]
+                return updated[:value_position] + value_token + updated[value_position + len(token):]
         return updated + service_line
 
     @staticmethod

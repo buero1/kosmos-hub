@@ -29,6 +29,7 @@ def test_global_layout_catalog_covers_every_module_with_unique_fields():
         "finance-offer-fields",
         "finance-order-fields",
         "finance-invoice-fields",
+        "finance-cancellation-invoice-fields",
         "finance-dunning-fields",
         "finance-recurring-invoice-fields",
     }

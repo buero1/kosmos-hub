@@ -71,7 +71,12 @@ from app.models.zoho_books_recurring_invoice_import import (
 from app.models.hub_finance_invoice_pdf import HubFinanceInvoicePdf
 from app.models.hub_finance_order_pdf import HubFinanceOrderPdf
 from app.models.hub_finance_generated_pdf import HubFinanceGeneratedPdf
-from app.models.hub_finance_documents import HubFinanceDunning, HubFinanceDunningLine
+from app.models.hub_finance_documents import (
+    HubFinanceCancellationInvoice,
+    HubFinanceCancellationInvoiceLine,
+    HubFinanceDunning,
+    HubFinanceDunningLine,
+)
 from app.models.hub_invoice_email_batch import HubInvoiceEmailBatch, HubInvoiceEmailBatchItem
 from app.models.hub_finance_position_preset import HubFinancePositionPreset
 from app.models.hub_legal_terms import HubLegalTerms, HubLegalTermsRevision
@@ -157,6 +162,8 @@ __all__ = [
     "HubFinanceGeneratedPdf",
     "HubFinanceDunning",
     "HubFinanceDunningLine",
+    "HubFinanceCancellationInvoice",
+    "HubFinanceCancellationInvoiceLine",
     "HubInvoiceEmailBatch",
     "HubInvoiceEmailBatchItem",
     "HubFinanceOrderPdf",

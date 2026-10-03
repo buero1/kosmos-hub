@@ -8,7 +8,11 @@ from app.models.hub_finance_article import HubFinanceArticle
 from app.models.hub_finance_offer import HubFinanceOffer
 from app.models.hub_finance_documents import HubFinanceOrder
 from app.services.hub_finance import HubFinanceService
-from app.services.hub_finance_documents import FINANCE_DOCUMENT_MODULES, HubFinanceDocumentService
+from app.services.hub_finance_documents import (
+    ALL_FINANCE_DOCUMENT_MODULES,
+    FINANCE_DOCUMENT_MODULES,
+    HubFinanceDocumentService,
+)
 from app.services.hub_finance_field_catalog import ARTICLE_FIELDS, OFFER_FIELDS
 from app.services.hub_operations import HubOperationError
 from app.services.hub_record_access import require_actor
@@ -16,6 +20,7 @@ from app.services.hub_record_access import require_actor
 
 FINANCE_KINDS = ("articles", "offers", *FINANCE_DOCUMENT_MODULES)
 PDF_KINDS = ("offers", "orders", "invoices", "dunnings")
+ALL_PDF_KINDS = (*PDF_KINDS, "cancellation-invoices")
 LINE_KEYS = ("article_id", "name", "sku", "description", "quantity", "unit", "unit_price", "discount_percent", "tax_rate", "delete")
 
 
@@ -24,8 +29,8 @@ def model_for(kind):
         return HubFinanceArticle
     if kind == "offers":
         return HubFinanceOffer
-    if kind in FINANCE_DOCUMENT_MODULES:
-        return FINANCE_DOCUMENT_MODULES[kind].model
+    if kind in ALL_FINANCE_DOCUMENT_MODULES:
+        return ALL_FINANCE_DOCUMENT_MODULES[kind].model
     raise HubOperationError("Dieses Finance-Modul ist nicht verfuegbar.")
 
 
@@ -34,7 +39,7 @@ def fields_for(kind):
         return ARTICLE_FIELDS
     if kind == "offers":
         return OFFER_FIELDS
-    return FINANCE_DOCUMENT_MODULES[kind].fields
+    return ALL_FINANCE_DOCUMENT_MODULES[kind].fields
 
 
 def prefix_for(kind):
@@ -69,7 +74,7 @@ def finance_detail(service, kind, record_id):
     if kind == "offers":
         return HubFinanceService(db=service.db, cipher=service.cipher).get_offer_detail(offer_id=record_id)
     return HubFinanceDocumentService(db=service.db, cipher=service.cipher).get_detail(
-        module=FINANCE_DOCUMENT_MODULES[kind], document_id=record_id,
+        module=ALL_FINANCE_DOCUMENT_MODULES[kind], document_id=record_id,
     )
 
 
@@ -81,7 +86,7 @@ def finance_entries(service, kind):
     if kind == "offers":
         entries = HubFinanceService(db=service.db, cipher=service.cipher).list_offers()
         return tuple(entry for entry in entries if parent_visible(entry.offer, user, access))
-    entries = HubFinanceDocumentService(db=service.db, cipher=service.cipher).list_documents(module=FINANCE_DOCUMENT_MODULES[kind])
+    entries = HubFinanceDocumentService(db=service.db, cipher=service.cipher).list_documents(module=ALL_FINANCE_DOCUMENT_MODULES[kind])
     return tuple(entry for entry in entries if parent_visible(entry.document, user, access))
 
 
@@ -109,9 +114,9 @@ def finance_options(service, kind, *, record_id=None):
     leads = tuple(item for item in domain.list_linkable_leads()
                   if access.can_access_record(user=user, module_key="leads", record_id=item.id)) if kind == "offers" else ()
     links = ()
-    if kind in FINANCE_DOCUMENT_MODULES:
+    if kind in ALL_FINANCE_DOCUMENT_MODULES:
         links = tuple(item for item in HubFinanceDocumentService(db=service.db, cipher=service.cipher).link_options(
-            module=FINANCE_DOCUMENT_MODULES[kind],
+            module=ALL_FINANCE_DOCUMENT_MODULES[kind],
         ) if item.customer_id in allowed_customers)
         if kind == "orders":
             from app.services.hub_finance_documents import FinanceDocumentLinkOption
@@ -123,7 +128,7 @@ def finance_options(service, kind, *, record_id=None):
 def stored_values(service, kind, record):
     prefix = prefix_for(kind)
     domain = HubFinanceService(db=service.db, cipher=service.cipher) if kind in {"articles", "offers"} else HubFinanceDocumentService(db=service.db, cipher=service.cipher)
-    raw = domain._values(record.encrypted_fields_json) if kind in {"articles", "offers"} else domain._document_values(module=FINANCE_DOCUMENT_MODULES[kind], document=record)
+    raw = domain._values(record.encrypted_fields_json) if kind in {"articles", "offers"} else domain._document_values(module=ALL_FINANCE_DOCUMENT_MODULES[kind], document=record)
     if kind == "offers":
         raw["notes"] = domain.offer_notes(raw)
     result = {f"{prefix}_field__{key}": str(value) for key, value in raw.items()}
@@ -144,7 +149,7 @@ def form_defaults(kind, values: Mapping[str, str]):
     if kind == "offers":
         defaults = HubFinanceService.new_offer_values(offer_date=values.get("offer_field__offer_date"))
     else:
-        defaults = HubFinanceDocumentService.new_form_values(module=FINANCE_DOCUMENT_MODULES[kind])
+        defaults = HubFinanceDocumentService.new_form_values(module=ALL_FINANCE_DOCUMENT_MODULES[kind])
     prefix = prefix_for(kind)
     line_defaults = {key.rsplit("__", 1)[1]: value for key, value in defaults.items() if key.startswith(f"{prefix}_line__0__")}
     indices = {int(parts[1]) for key in values if len(parts := key.split("__")) == 3 and parts[0] == f"{prefix}_line" and parts[1].isdigit()}
@@ -166,7 +171,7 @@ def merge_form(service, kind, values, record=None):
         controls.update({"customer_id", "customer_name", "contact_id", "pdf_template_id", "lines_mode"})
     if kind == "offers":
         controls.update({"lead_id", "lead_name"})
-    elif kind in FINANCE_DOCUMENT_MODULES and FINANCE_DOCUMENT_MODULES[kind].link_key:
+    elif kind in ALL_FINANCE_DOCUMENT_MODULES and ALL_FINANCE_DOCUMENT_MODULES[kind].link_key:
         controls.add("linked_record_id")
     for key in values:
         if key not in controls and not key.startswith((f"{prefix}_field__", f"{prefix}_line__")):
@@ -201,7 +206,7 @@ def form_input(form, *, kind, record_id=None):
         values["lines_mode"] = "replace"
         if kind == "offers":
             values["lead_id"] = str(form.get("lead_id") or "")
-        elif FINANCE_DOCUMENT_MODULES[kind].link_key:
+        elif ALL_FINANCE_DOCUMENT_MODULES[kind].link_key:
             values["linked_record_id"] = str(form.get("linked_record_id") or "")
     if record_id is not None:
         values["record_id"] = str(record_id)

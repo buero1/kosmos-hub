@@ -79,6 +79,7 @@ PDF_TEMPLATE_TYPES = (
     PdfTemplateType("orders", "Aufträge", "Auftrag", "Standardauftrag"),
     PdfTemplateType("invoices", "Rechnungen", "Rechnung", "Standardrechnung"),
     PdfTemplateType("dunnings", "Mahnungen", "Mahnung", "Standardmahnung"),
+    PdfTemplateType("cancellation-invoices", "Stornorechnungen", "Stornorechnung", "Standardstornorechnung"),
 )
 _TYPE_BY_KEY = {definition.key: definition for definition in PDF_TEMPLATE_TYPES}
 
@@ -120,7 +121,7 @@ _LEGACY_PDF_TEMPLATE_PLACEHOLDERS = (
 )
 _PLACEHOLDER_SAMPLE = {
     placeholder.token: placeholder.sample
-    for placeholder in (*_LEGACY_PDF_TEMPLATE_PLACEHOLDERS, *(item for kind in ("offers", "orders", "invoices", "dunnings") for item in pdf_placeholders(kind)))
+    for placeholder in (*_LEGACY_PDF_TEMPLATE_PLACEHOLDERS, *(item for kind in ("offers", "orders", "invoices", "dunnings", "cancellation-invoices") for item in pdf_placeholders(kind)))
 }
 
 PDF_LINE_SOURCES = (
@@ -156,6 +157,11 @@ _DEFAULT_CONTENT_BY_TYPE = {
         "title": "<h1>Mahnung ${Dunning.Number}</h1>",
         "intro": "<p>${Contact.Greeting},</p><p>zu unserer Rechnung ${Dunning.SourceInvoiceNumber} konnten wir bislang keinen vollständigen Zahlungseingang feststellen.</p>",
         "payment": "<p><strong>Neue Zahlungsfrist:</strong> ${Dunning.DueDate}<br><strong>Offener Gesamtbetrag:</strong> ${Dunning.GrossTotal}</p>",
+    },
+    "cancellation-invoices": {
+        "title": "<h1>Stornorechnung ${CancellationInvoice.Number}</h1>",
+        "intro": "<p>${Contact.Greeting},</p><p>hiermit stornieren wir unsere Rechnung ${CancellationInvoice.SourceInvoiceNumber} vom ${CancellationInvoice.SourceInvoiceDate} vollständig.</p><p><strong>Stornogrund:</strong> ${CancellationInvoice.Reason}</p>",
+        "payment": "<p>Der Gesamtbetrag dieser Stornorechnung beträgt ${CancellationInvoice.GrossTotal}.</p>",
     },
 }
 
@@ -555,10 +561,11 @@ class HubPdfTemplateService:
         definition = cls._type(document_type)
         specialized = _DEFAULT_CONTENT_BY_TYPE[definition.key]
         metadata = f"<p><strong>Datum:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Date}}<br><strong>Nummer:</strong> ${{{DOCUMENT_NAMES[definition.key][0]}.Number}}</p>"
-        if document_type == "invoices":
+        if document_type in {"invoices", "cancellation-invoices"}:
+            namespace = DOCUMENT_NAMES[document_type][0]
             metadata = metadata.replace(
                 "</p>",
-                "<br><strong>${Invoice.ServiceLabel}:</strong> ${Invoice.ServiceValue}</p>",
+                f"<br><strong>${{{namespace}.ServiceLabel}}:</strong> ${{{namespace}.ServiceValue}}</p>",
             )
         defaults = {
             "sender": "<p><strong>${Company.Name}</strong><br>${Company.Street}<br>${Company.PostalCode} ${Company.City}</p>",
@@ -591,7 +598,7 @@ class HubPdfTemplateService:
 
     @staticmethod
     def _default_columns(document_type: str) -> list[dict[str, object]]:
-        invoice = document_type in {"invoices", "dunnings"}
+        invoice = document_type in {"invoices", "dunnings", "cancellation-invoices"}
         widths = {
             "position": 6,
             "article_name": 34 if invoice else 42,

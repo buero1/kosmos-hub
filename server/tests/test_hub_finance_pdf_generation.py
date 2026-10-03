@@ -18,6 +18,7 @@ from app.services.email_compose_images import EmailComposeImageService
 from app.services.finance_generated_pdf_storage import FinanceGeneratedPdfStorage
 from app.services.hub_finance import HubFinanceService
 from app.services.hub_finance_documents import (
+    CANCELLATION_INVOICE_MODULE,
     DUNNING_MODULE,
     INVOICE_MODULE,
     RECURRING_INVOICE_MODULE,
@@ -202,6 +203,61 @@ def test_invoice_generation_uses_default_revision_and_embeds_xsd_valid_zugferd(m
         assert b"Website-Paket" in embedded_xml
         assert b"20261001" in embedded_xml
         assert b"20261031" in embedded_xml
+
+
+def test_cancellation_generation_embeds_original_reference_and_finalizes_invoice(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+    stored: dict[str, bytes] = {}
+
+    monkeypatch.setattr(HubFinancePdfService, "_render_pdf", staticmethod(lambda *, html, snapshot: _blank_pdf()))
+    monkeypatch.setattr(EmailComposeImageService, "embed_local_images", lambda self, content: content)
+    monkeypatch.setattr(FinanceGeneratedPdfStorage, "store", lambda self, content: stored.setdefault("cancellation", content) and "cancellation")
+    monkeypatch.setattr(FinanceGeneratedPdfStorage, "load", lambda self, storage_key: stored[storage_key])
+
+    with Session(engine) as db:
+        customer = Customer(name="Beispiel GmbH")
+        db.add(customer)
+        db.flush()
+        contact = CustomerContact(
+            customer=customer,
+            encrypted_profile_json=cipher.encrypt(json.dumps({"fields": {"Name": "Test Kontakt"}})),
+        )
+        db.add(contact)
+        db.flush()
+        values = _invoice_values()
+        values["document_field__status"] = "open"
+        invoice = HubFinanceDocumentService(db=db, cipher=cipher).create_document(
+            module=INVOICE_MODULE,
+            customer_id=customer.id,
+            contact_id=contact.id,
+            link_id=None,
+            submitted_values=values,
+        )
+        service = HubFinanceDocumentService(db=db, cipher=cipher)
+        cancellation = service.create_document(
+            module=CANCELLATION_INVOICE_MODULE,
+            customer_id=customer.id,
+            contact_id=contact.id,
+            link_id=invoice.id,
+            submitted_values={
+                "document_field__cancellation_date": "2026-10-03",
+                "document_field__cancellation_reason": "Vollständige Stornierung.",
+            },
+        )
+        pdf_service = HubFinancePdfService(db=db, cipher=cipher)
+        token = pdf_service.queue(document_type="cancellation-invoices", document_id=cancellation.id)
+        db.commit()
+
+        pdf_service.generate(generation_token=token)
+
+        _, embedded_xml = get_facturx_xml_from_pdf(stored["cancellation"])
+        assert b">384<" in embedded_xml
+        assert invoice.invoice_number.encode() in embedded_xml
+        assert b"20260912" in embedded_xml
+        assert service._document_values(module=CANCELLATION_INVOICE_MODULE, document=cancellation)["status"] == "created"
+        assert service._document_values(module=INVOICE_MODULE, document=invoice)["status"] == "cancelled"
 
 
 def test_recurring_invoice_preview_renders_next_invoice_without_persisting(monkeypatch):

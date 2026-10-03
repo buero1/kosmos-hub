@@ -69,6 +69,11 @@ class HubFinanceInvoice(TimestampMixin, Base):
     recurring_invoice = relationship("HubFinanceRecurringInvoice", back_populates="generated_invoices")
     pdf_template = relationship("HubPdfTemplate")
     dunnings = relationship("HubFinanceDunning", back_populates="invoice", order_by="HubFinanceDunning.created_at")
+    cancellation_invoice = relationship(
+        "HubFinanceCancellationInvoice",
+        back_populates="invoice",
+        uselist=False,
+    )
     lines = relationship("HubFinanceInvoiceLine", back_populates="invoice", cascade="all, delete-orphan", order_by="HubFinanceInvoiceLine.position_index")
 
 
@@ -113,6 +118,46 @@ class HubFinanceDunningLine(TimestampMixin, Base):
     encrypted_fields_json: Mapped[str] = mapped_column(Text(), nullable=False)
 
     dunning = relationship("HubFinanceDunning", back_populates="lines")
+    article = relationship("HubFinanceArticle")
+
+
+class HubFinanceCancellationInvoice(TimestampMixin, Base):
+    __tablename__ = "hub_finance_cancellation_invoices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cancellation_number: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
+    contact_id: Mapped[int | None] = mapped_column(ForeignKey("customer_contacts.id", ondelete="SET NULL"), nullable=True, index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("hub_finance_invoices.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    pdf_template_id: Mapped[int | None] = mapped_column(ForeignKey("hub_pdf_templates.id", ondelete="SET NULL"), nullable=True, index=True)
+    encrypted_fields_json: Mapped[str] = mapped_column(Text(), nullable=False)
+
+    customer = relationship("Customer")
+    contact = relationship("CustomerContact")
+    invoice = relationship("HubFinanceInvoice", back_populates="cancellation_invoice")
+    pdf_template = relationship("HubPdfTemplate")
+    lines = relationship(
+        "HubFinanceCancellationInvoiceLine",
+        back_populates="cancellation_invoice",
+        cascade="all, delete-orphan",
+        order_by="HubFinanceCancellationInvoiceLine.position_index",
+    )
+
+
+class HubFinanceCancellationInvoiceLine(TimestampMixin, Base):
+    __tablename__ = "hub_finance_cancellation_invoice_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cancellation_invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("hub_finance_cancellation_invoices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    article_id: Mapped[int | None] = mapped_column(ForeignKey("hub_finance_articles.id", ondelete="SET NULL"), nullable=True, index=True)
+    position_index: Mapped[int] = mapped_column(Integer(), nullable=False)
+    encrypted_fields_json: Mapped[str] = mapped_column(Text(), nullable=False)
+
+    cancellation_invoice = relationship("HubFinanceCancellationInvoice", back_populates="lines")
     article = relationship("HubFinanceArticle")
 
 

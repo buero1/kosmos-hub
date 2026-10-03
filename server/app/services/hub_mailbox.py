@@ -578,6 +578,14 @@ class HubMailboxService:
         if existing_payload.get("invoice_dispatch"):
             from app.services.hub_operation_invoice_email import require_editable_invoice_draft
             require_editable_invoice_draft(self.db, existing_payload["invoice_dispatch"])
+        if existing_payload.get("cancellation_dispatch"):
+            from app.services.hub_operation_cancellation_invoice_email import require_editable_cancellation_draft
+            metadata = existing_payload["cancellation_dispatch"]
+            require_editable_cancellation_draft(metadata)
+            if recipient_customer_id not in (None, metadata["customer_id"]) or recipient_lead_id is not None:
+                raise ValueError("Der Stornorechnungsentwurf gehört zu einem anderen Kunden.")
+            recipient_customer_id = metadata["customer_id"]
+            context_module, context_record_id = "cancellation-invoices", str(metadata["cancellation_id"])
         existing_attachments = existing_payload.get("attachments")
         payload_attachments = list(existing_attachments) if isinstance(existing_attachments, list) else []
         if retained_attachment_ids is not None:
@@ -657,6 +665,8 @@ class HubMailboxService:
             payload["invoice_dispatch"] = existing_payload["invoice_dispatch"]
         if existing_payload.get("order_dispatch"):
             payload["order_dispatch"] = existing_payload["order_dispatch"]
+        if existing_payload.get("cancellation_dispatch"):
+            payload["cancellation_dispatch"] = existing_payload["cancellation_dispatch"]
         draft.is_unread = False
         draft.mailbox_state = _DRAFT_MAILBOX_STATE
         draft.encrypted_payload_json = self.cipher.encrypt(json.dumps(payload, ensure_ascii=False))
@@ -872,6 +882,7 @@ class HubMailboxService:
             "draft_id": draft.id,
             "invoice_id": (payload.get("invoice_dispatch") or {}).get("invoice_id"),
             "order_id": (payload.get("order_dispatch") or {}).get("order_id"),
+            "cancellation_invoice_id": (payload.get("cancellation_dispatch") or {}).get("cancellation_id"),
             "sender_email": self._text(payload.get("sender")) or "",
             "recipient": recipient,
             "recipient_email": recipient_email,
