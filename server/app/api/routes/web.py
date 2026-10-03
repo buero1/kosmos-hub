@@ -3023,6 +3023,7 @@ def mailbox_page(
             .where(
                 HubMailboxImapSyncState.folder == "INBOX",
                 HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.imap_enabled.is_(True),
                 HubMailboxAccount.verified_at.is_not(None),
                 HubMailboxAccount.email_address.in_(visible_addresses),
             )

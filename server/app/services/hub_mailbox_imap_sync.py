@@ -163,7 +163,11 @@ class HubMailboxImapSyncService:
         rows = self.db.execute(
             select(HubMailboxImapSyncFailure, HubMailboxAccount.email_address)
             .join(HubMailboxAccount)
-            .where(HubMailboxImapSyncFailure.resolved_at.is_(None))
+            .where(
+                HubMailboxImapSyncFailure.resolved_at.is_(None),
+                HubMailboxAccount.enabled.is_(True),
+                HubMailboxAccount.imap_enabled.is_(True),
+            )
             .order_by(HubMailboxImapSyncFailure.last_failed_at.desc())
             .limit(100)
         ).all()

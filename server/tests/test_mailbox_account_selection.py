@@ -15,6 +15,7 @@ from test_mailbox_permissions import env, grant, message
 from app.api.routes import web
 from app.models.customer import Customer
 from app.models.hub_mailbox_account import HubMailboxAccount
+from app.models.hub_mailbox_imap_sync_state import HubMailboxImapSyncState
 from app.services.hub_mailbox import HubMailboxService
 from app.services.hub_mailbox_permissions import MailboxPermissions
 from app.services.hub_operations import HubOperationService
@@ -205,6 +206,34 @@ def test_success_redirect_retains_account_but_error_stays_inline():
     assert b"account_id=3" in response.body
     error = web._email_compose_response(request, RedirectResponse("/emails?folder=sent"), error="Rejected")
     assert error.status_code == 400 and b"redirect_url" not in error.body
+
+
+def test_mailbox_page_hides_health_warning_for_send_only_account(env, monkeypatch):
+    account = env.boxes[1]
+    account.imap_enabled = False
+    env.db.add(HubMailboxImapSyncState(
+        mailbox_account_id=account.id,
+        folder="INBOX",
+        last_success_at=datetime.now(UTC) - timedelta(minutes=10),
+    ))
+    env.db.commit()
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/emails",
+        "headers": [],
+        "query_string": b"",
+        "session": {},
+        "state": {"hub_user": env.admin},
+    })
+    monkeypatch.setattr(web, "get_secret_cipher", lambda: env.cipher)
+    monkeypatch.setattr(web, "templates", SimpleNamespace(
+        TemplateResponse=lambda _request, _name, context: context,
+    ))
+
+    context = web.mailbox_page(request=request, db=env.db)
+
+    assert context["mailbox_sync_warnings"] == ()
 
 
 def test_frontend_account_navigation_and_cache_isolation():

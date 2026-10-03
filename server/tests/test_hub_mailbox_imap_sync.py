@@ -105,6 +105,36 @@ def test_imap_disabled_account_remains_available_for_smtp_sending():
         ]
 
 
+def test_imap_disabled_account_hides_historical_sync_failures():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    cipher = SecretCipher("a" * 32)
+
+    with Session(engine) as db:
+        account = HubMailboxAccount(
+            email_address="send-only@kosmos.example",
+            display_name="Send only",
+            username="send-only@kosmos.example",
+            encrypted_password=cipher.encrypt("secret"),
+            verified_at=datetime.now(UTC),
+            imap_enabled=False,
+        )
+        db.add(account)
+        db.flush()
+        db.add(HubMailboxImapSyncFailure(
+            mailbox_account_id=account.id,
+            folder="INBOX",
+            imap_uid="123",
+            error="Historical import error",
+            last_failed_at=datetime.now(UTC),
+        ))
+        db.commit()
+
+        service = HubMailboxImapSyncService(db=db, cipher=cipher, public_base_url="https://hub.example.test")
+
+        assert service.list_failed_messages() == ()
+
+
 def test_incremental_sync_records_a_failure_streak_and_resets_it_after_a_success():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
