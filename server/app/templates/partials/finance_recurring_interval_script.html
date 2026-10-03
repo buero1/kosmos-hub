@@ -94,14 +94,24 @@
         serviceStart.value = formatDate(new Date(Date.UTC(invoiceDate.getUTCFullYear(), invoiceDate.getUTCMonth() + 1, 1)));
         syncServiceEnd();
       }
+      function syncMissingServicePeriod() {
+        if (!serviceStart || !serviceEnd) return;
+        if (!serviceStart.value) syncServiceFromInvoice();
+        else if (!serviceEnd.value) syncServiceEnd();
+      }
       if (serviceStart && serviceEnd) {
         nextDate.addEventListener('change', syncServiceFromInvoice);
         rhythm.addEventListener('change', syncServiceEnd);
         customCount.addEventListener('input', syncServiceEnd);
         customUnit.addEventListener('change', syncServiceEnd);
         serviceStart.addEventListener('change', syncServiceEnd);
-        if (!serviceStart.value) syncServiceFromInvoice();
-        else if (!serviceEnd.value) syncServiceEnd();
+        syncMissingServicePeriod();
+        form.addEventListener('reset', function () {
+          window.queueMicrotask(function () {
+            syncCustomField();
+            syncMissingServicePeriod();
+          });
+        });
       }
 
       var paymentDue = form.querySelector('[data-recurring-payment-due]');
@@ -115,6 +125,7 @@
       }
       count.addEventListener('input', syncPaymentDue);
       unit.addEventListener('change', syncPaymentDue);
+      form.addEventListener('reset', function () { window.queueMicrotask(syncPaymentDue); });
       syncPaymentDue();
     });
   }());

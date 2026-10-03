@@ -137,6 +137,12 @@ def test_render_recurring_status_forms(env):
     root = os.environ.get('HUB_RECURRING_STATUS_ARTIFACT_DIR')
     for status in ['active', 'paused', 'ended']:
         record = create(env, status=status)
+        if status == 'active':
+            legacy_values = raw(env, record)
+            legacy_values.pop('service_period_start', None)
+            legacy_values.pop('service_period_end', None)
+            record.encrypted_fields_json = env.cipher.encrypt(json.dumps(legacy_values))
+            env.db.commit()
         request = Request({'type': 'http', 'method': 'GET', 'path': f'/finance/recurring-invoices/{record.id}',
             'query_string': b'', 'headers': [], 'scheme': 'http', 'server': ('hub.test', 80), 'session': {},
             'app': app, 'router': app.router})
@@ -146,6 +152,9 @@ def test_render_recurring_status_forms(env):
         assert 'Vorschau nächste Rechnung' in page
         expected = '2026-09-25' if status == 'active' else ''
         assert f'name="document_field__next_invoice_date" value="{expected}"' in page
+        if status == 'active':
+            assert 'name="document_field__service_period_start" value=""' in page
+            assert 'name="document_field__service_period_end" value=""' in page
         preview_url = f'/finance/recurring-invoices/{record.id}/next-invoice-preview'
         assert (preview_url in page) is (status == 'active')
         assert ('Derzeit ist keine nächste Rechnung geplant.' in page) is (status != 'active')
