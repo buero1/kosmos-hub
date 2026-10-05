@@ -197,6 +197,30 @@ def test_human_routes_and_catalog_share_crud(env, kind):
     assert response.status_code == 303 and "deleted=true" in response.headers["location"]
 
 
+def test_offer_create_validation_renders_specific_error_and_preserves_values(env):
+    data = values(env, "offers")
+    data["offer_line__0__unit_price"] = ""
+    env.monkeypatch.setattr(
+        web.templates,
+        "TemplateResponse",
+        lambda request, name, context, status_code=200: SimpleNamespace(
+            status_code=status_code,
+            template=name,
+            context=context,
+        ),
+    )
+
+    response = asyncio.run(
+        web.create_finance_offer_page(req(env, data), BackgroundTasks(), env.db)
+    )
+
+    assert response.status_code == 400
+    assert response.template == "finance_offer_create.html"
+    assert response.context["error"] == "Position: Einzelpreis netto ist erforderlich."
+    assert response.context["submitted_values"]["offer_line__0__name"] == "Website"
+    assert response.context["submitted_values"]["offer_line__0__unit_price"] == ""
+
+
 @pytest.mark.parametrize("kind", ("offers", *FINANCE_DOCUMENT_MODULES))
 def test_scope_denies_read_mutate_pdf_and_list(env, kind):
     result = env.service.execute(f"finance.{kind}.create", values(env, kind))

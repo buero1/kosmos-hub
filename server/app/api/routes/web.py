@@ -1706,7 +1706,6 @@ async def create_finance_offer_page(
                 selected_lead_id=lead_id,
                 selected_contact_id=contact_id,
                 selected_pdf_template_id=pdf_template_id,
-                source_invoice_id=link_id if module in (DUNNING_MODULE, CANCELLATION_INVOICE_MODULE) else None,
                 submitted_values=submitted_values,
                 error=str(exc),
             ),
